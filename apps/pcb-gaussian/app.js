@@ -6,7 +6,19 @@ const SAADC_INPUT_RANGE_V = 3.0;
 const SAADC_FULL_SCALE_RAW = 16383;
 const DAC_MAX_CODE = 4095;
 const POT_MAX_CODE = 255;
+const ADC_TIA_COUNT = 8;
+const MAX_DEVICES_PER_TIA = 4;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
+const TIA_DEVICE_MAP = [
+  [5, 6, 7, 8],
+  [1, 2, 3, 4],
+  [5, 6, 7, 8],
+  [1, 2, 3, 4],
+  [9, 10, 11, 12],
+  [13, 14, 15, 16],
+  [9, 10, 11, 12],
+  [13, 14, 15, 16],
+];
 const DAC_CAL_STORAGE_KEY = "pcbGaussian.dacCalibration.v1";
 const DAC_CAL_VOLTAGES = [-15, -10, -5, 0, 5, 10, 15];
 const DEFAULT_DAC_CAL = {
@@ -32,7 +44,7 @@ const DEFAULT_DAC_CAL = {
 const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.v1";
 const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
 const PROGRAM_REPLY_TIMEOUT_MS = 1500;
-const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261"];
+const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653"];
 const MU_CAL_POINTS = [
   { code: 0, voltage: -1.0 },
   { code: 60, voltage: 4.92 },
@@ -232,7 +244,12 @@ const state = {
   dacCodes: { D1: 0, D2: 0 },
   dacCal: loadDacCalibration(),
   paramCal: loadParamCalibration(),
-  tiaStates: Array.from({ length: 4 }, (_, i) => ({ enabled: i === 0, adc: `AIN${i}`, jumper: "" })),
+  tiaStates: Array.from({ length: ADC_TIA_COUNT }, (_, i) => ({
+    enabled: i === 0,
+    adc: `AIN${i}`,
+    devices: Array.from({ length: MAX_DEVICES_PER_TIA }, () => ""),
+    jumper: "",
+  })),
   measurements: [],
   commandLog: [],
   pendingReplies: [],
@@ -884,10 +901,14 @@ function renderTiaConfig() {
   state.tiaStates.forEach((tia, i) => {
     const row = document.createElement("div");
     row.className = "tia-row";
+    const allowedDevices = TIA_DEVICE_MAP[i] || [];
+    const selectedDevices = new Set((tia.devices || allowedDevices.map(String)).map(String).filter(Boolean));
     row.innerHTML = `
       <label class="checkbox"><input id="tia${i}Enabled" type="checkbox" ${tia.enabled ? "checked" : ""}/> TIA${i + 1}</label>
-      <select id="tia${i}Adc">${["AIN0", "AIN1", "AIN2", "AIN3"].map(v => `<option ${tia.adc === v ? "selected" : ""}>${v}</option>`).join("")}</select>
-      <input id="tia${i}Jumper" placeholder="jumper source memo" value="${tia.jumper}" />
+      <select id="tia${i}Adc">${Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `AIN${idx}`).map(v => `<option ${tia.adc === v ? "selected" : ""}>${v}</option>`).join("")}</select>
+      ${allowedDevices.map(device =>
+        `<label class="tia-device-chip"><input id="tia${i}Device${device}" class="tia-device-input" type="checkbox" value="${device}" ${selectedDevices.has(String(device)) ? "checked" : ""}/> D${device}</label>`
+      ).join("")}
     `;
     $("tiaConfig").appendChild(row);
   });
@@ -897,14 +918,22 @@ function syncTiaStates() {
   state.tiaStates.forEach((tia, i) => {
     tia.enabled = $(`tia${i}Enabled`).checked;
     tia.adc = $(`tia${i}Adc`).value;
-    tia.jumper = $(`tia${i}Jumper`).value;
+    tia.devices = (TIA_DEVICE_MAP[i] || [])
+      .map(device => String(device))
+      .filter(device => $(`tia${i}Device${device}`)?.checked);
+    tia.jumper = connectedDevicesSummary(tia);
   });
+}
+
+function connectedDevicesSummary(tia) {
+  const devices = (tia.devices || []).map(value => String(value || "").trim()).filter(Boolean);
+  return devices.join("+");
 }
 
 function parseAdcReply(text) {
   const parts = text.replaceAll(":", ",").split(",").map(part => part.trim());
-  if (parts[0]?.toUpperCase() === "ADC" && parts.length >= 5 && parts[1].toUpperCase() !== "ERR") {
-    const values = parts.slice(1, 5).map(Number);
+  if (parts[0]?.toUpperCase() === "ADC" && parts.length >= 2 && parts[1].toUpperCase() !== "ERR") {
+    const values = parts.slice(1, 1 + ADC_TIA_COUNT).map(Number);
     if (values.every(Number.isFinite)) recordAdcValues(values, text);
   }
 }
@@ -912,7 +941,7 @@ function parseAdcReply(text) {
 function selectedTias() {
   syncTiaStates();
   const enabled = state.tiaStates.map((tia, idx) => tia.enabled ? idx + 1 : null).filter(Boolean);
-  return enabled.length ? enabled : [1, 2, 3, 4];
+  return enabled.length ? enabled : Array.from({ length: ADC_TIA_COUNT }, (_, idx) => idx + 1);
 }
 
 function recordAdcValues(values, source) {
@@ -922,6 +951,7 @@ function recordAdcValues(values, source) {
   const tias = context?.selectedTias || selectedTias();
   for (const idx of tias) {
     const tia = state.tiaStates[idx - 1];
+    const connected = connectedDevicesSummary(tia);
     const raw = values[idx - 1] ?? "";
     const voltage = raw === "" ? "" : adcRawToVoltage(raw);
     const current = voltage === "" ? "" : adcVoltageToCurrentUa(voltage);
@@ -934,7 +964,8 @@ function recordAdcValues(values, source) {
       raw,
       voltage: voltage === "" ? "" : voltage.toFixed(6),
       current: current === "" ? "" : current.toFixed(6),
-      jumper: tia.jumper,
+      jumper: connected,
+      devices: connected,
       source,
     });
   }
@@ -950,13 +981,14 @@ function addSweepAdcPoint(values, context) {
     const voltage = adcRawToVoltage(raw);
     const current = adcVoltageToCurrentUa(voltage);
     const tia = state.tiaStates[idx - 1];
+    const connected = connectedDevicesSummary(tia);
     const label = `TIA${idx}`;
     tias[label] = {
       raw,
       voltage,
       current,
       adc: tia.adc,
-      jumper: tia.jumper,
+      jumper: connected,
     };
     if (!state.activeSweep.tiaLabels.includes(label)) state.activeSweep.tiaLabels.push(label);
   }
@@ -975,6 +1007,7 @@ function recordMeasurement(dac, code, vhigh, source) {
   const tias = selectedTias();
   for (const idx of tias) {
     const tia = state.tiaStates[idx - 1];
+    const connected = connectedDevicesSummary(tia);
     addMeasurement({
       time: nowTime(),
       dac,
@@ -984,7 +1017,8 @@ function recordMeasurement(dac, code, vhigh, source) {
       raw: "",
       voltage: "",
       current: "",
-      jumper: tia.jumper,
+      jumper: connected,
+      devices: connected,
       source,
     });
   }
@@ -1188,8 +1222,8 @@ function download(name, content, type) {
 }
 
 function downloadCsv() {
-  const fields = ["time", "dac", "code", "vhigh", "tia", "raw", "voltage", "current", "jumper", "source"];
-  const csv = [fields.join(","), ...state.measurements.map(row => fields.map(field => csvEscape(row[field])).join(","))].join("\n");
+  const fields = ["time", "dac", "code", "vhigh", "tia", "raw", "voltage", "current", "devices", "source"];
+  const csv = [fields.join(","), ...state.measurements.map(row => fields.map(field => csvEscape(field === "devices" ? (row.devices ?? row.jumper) : row[field])).join(","))].join("\n");
   download(`pcb_gaussian_measurements_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
 }
 
@@ -1203,7 +1237,7 @@ function downloadSweepCsv() {
   const fields = [
     "sweep_id", "point", "time", "x_dac", "x_code", "x_vhigh",
     "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
-    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_adc`, `${label}_jumper`]),
+    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_adc`, `${label}_devices`]),
   ];
   const rows = sweep.points.map(point => {
     const x = point.dac[sweep.xDac];

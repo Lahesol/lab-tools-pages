@@ -330,7 +330,7 @@ tr:hover td { background: #fbf5ed; }
 }
 .tia-row {
   display: grid;
-  grid-template-columns: 82px 110px 1fr;
+  grid-template-columns: 82px 94px repeat(4, minmax(64px, 1fr));
   gap: 10px;
   align-items: center;
   padding: 10px;
@@ -339,6 +339,23 @@ tr:hover td { background: #fbf5ed; }
   background: #fbfdfc;
 }
 .tia-row .checkbox { font-size: 13px; }
+.tia-device-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--primary);
+  font-size: 12px;
+}
+.tia-device-chip input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
 
 .activity-log {
   margin-top: 16px;
