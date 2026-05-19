@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PCB Gaussian Web Control</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">PCB Gaussian Control</p>
+        <h1>16-channel Gaussian Array Console</h1>
+      </div>
+      <div class="connection-card">
+        <div class="status-dot" id="statusDot"></div>
+        <div>
+          <strong id="connectionState">Disconnected</strong>
+          <span id="serialSupport">Web Serial check pending</span>
+        </div>
+        <label>
+          Baud
+          <input id="baudRate" type="number" value="115200" min="9600" step="9600" />
+        </label>
+        <button id="connectButton" class="primary">Connect</button>
+        <button id="disconnectButton">Disconnect</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel overview">
+        <div class="metric">
+          <span>DAC range</span>
+          <strong>-15 to 15 V</strong>
+        </div>
+        <div class="metric">
+          <span>DAC model</span>
+          <strong>local cal</strong>
+        </div>
+        <div class="metric">
+          <span>MAX5488</span>
+          <strong>16 ch</strong>
+        </div>
+        <div class="metric">
+          <span>TIA Rf</span>
+          <strong>1 MΩ</strong>
+        </div>
+      </section>
+
+      <section class="tabs">
+        <button class="tab active" data-tab="dac">DAC</button>
+        <button class="tab" data-tab="calibration">Calibration</button>
+        <button class="tab" data-tab="switch">Switch</button>
+        <button class="tab" data-tab="digipot">MAX5488</button>
+        <button class="tab" data-tab="adc">TIA / ADC</button>
+      </section>
+
+      <section id="tab-dac" class="tab-panel active">
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">fixed output</p>
+                <h2>DAC control</h2>
+              </div>
+              <button id="initButton">INIT MAX5488</button>
+            </div>
+            <div class="form-grid">
+              <label>
+                DAC
+                <select id="dacSelect">
+                  <option>D1</option>
+                  <option>D2</option>
+                </select>
+              </label>
+              <label>
+                12-bit code
+                <input id="dacCode" type="number" min="0" max="4095" value="0" />
+              </label>
+              <label>
+                Target kind
+                <select id="dacTargetKind">
+                  <option>Vhigh mV</option>
+                  <option>DAC out mV</option>
+                </select>
+              </label>
+              <label>
+                Target mV
+                <input id="dacTargetMv" type="number" value="1000" step="10" />
+              </label>
+            </div>
+            <div class="readout">
+              <span>DAC out <strong id="dacOutReadout">0.0000 V</strong></span>
+              <span>Calibrated output <strong id="vhighReadout">0.0000 V</strong></span>
+              <span>Target result <strong id="targetResult">-</strong></span>
+            </div>
+            <div class="button-row">
+              <button id="calculateDacButton">Calculate code</button>
+              <button id="setDacButton" class="primary">Set fixed output</button>
+              <button id="setTargetButton">Set target</button>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">range sweep</p>
+                <h2>DAC1 / DAC2 sweep</h2>
+              </div>
+              <label class="checkbox">
+                <input id="sampleEachPoint" type="checkbox" checked />
+                ADC each point
+              </label>
+            </div>
+            <div class="sweep-table">
+              <div class="sweep-head">Use</div>
+              <div class="sweep-head">DAC</div>
+              <div class="sweep-head">Unit</div>
+              <div class="sweep-head">Start</div>
+              <div class="sweep-head">Stop</div>
+              <div class="sweep-head">Step</div>
+
+              <input id="sweepD1Enable" type="checkbox" checked />
+              <strong>D1</strong>
+              <select id="sweepD1Mode"><option>Vhigh mV</option><option>DAC out mV</option><option>Code</option></select>
+              <input id="sweepD1Start" type="number" value="-14800" />
+              <input id="sweepD1Stop" type="number" value="14800" />
+              <input id="sweepD1Step" type="number" value="500" />
+
+              <input id="sweepD2Enable" type="checkbox" />
+              <strong>D2</strong>
+              <select id="sweepD2Mode"><option>Vhigh mV</option><option>DAC out mV</option><option>Code</option></select>
+              <input id="sweepD2Start" type="number" value="-14800" />
+              <input id="sweepD2Stop" type="number" value="14800" />
+              <input id="sweepD2Step" type="number" value="500" />
+            </div>
+            <div class="button-row">
+              <label class="inline-field">Dwell ms <input id="sweepDwell" type="number" value="50" min="0" /></label>
+              <label class="inline-field">Plot X <select id="plotXAxis"><option>D1</option><option>D2</option></select></label>
+              <label class="inline-field">Y <select id="plotYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
+              <button id="startSweepButton" class="primary">Start sweep</button>
+              <button id="stopSweepButton">Stop</button>
+              <button id="downloadSweepCsvButton" disabled>Download sweep CSV</button>
+            </div>
+            <p class="hint" id="sweepStatus">Sweep idle</p>
+          </article>
+        </div>
+        <article class="panel plot-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">last sweep</p>
+              <h2>ADC plot</h2>
+            </div>
+            <p class="hint" id="plotStatus">No sweep data yet.</p>
+          </div>
+          <canvas id="sweepPlotCanvas" height="360"></canvas>
+          <div id="plotLegend" class="plot-legend"></div>
+        </article>
+        <article class="panel activity-log">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">serial monitor</p>
+              <h2>Activity log</h2>
+            </div>
+            <div class="button-row compact log-controls">
+              <button class="ping-control">PING</button>
+              <button class="clear-log-control">Clear</button>
+              <button class="download-log-control">Download TXT</button>
+            </div>
+          </div>
+          <textarea class="log-view" readonly spellcheck="false"></textarea>
+          <div class="manual-send">
+            <input class="manual-command" placeholder="Manual command, e.g. D1,1972" />
+            <button class="manual-send-control primary">Send</button>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-calibration" class="tab-panel">
+        <div class="grid two">
+          <article class="panel table-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">DAC output calibration</p>
+                <h2>-15 V to 15 V code map</h2>
+              </div>
+              <div class="button-row compact">
+                <button id="resetDacCalButton">Reset defaults</button>
+                <button id="saveDacCalButton" class="primary">Save local cal</button>
+              </div>
+            </div>
+            <div class="table-wrap cal-table-wrap">
+              <table class="cal-table">
+                <thead>
+                  <tr><th>Output</th><th>D1 code</th><th>D1 send</th><th>D2 code</th><th>D2 send</th></tr>
+                </thead>
+                <tbody id="dacCalTable"></tbody>
+              </table>
+            </div>
+            <p class="hint status-line" id="dacCalStatus">Calibration not checked.</p>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">MAX5488 output calibration</p>
+                <h2>A / mu code map</h2>
+              </div>
+              <div class="button-row compact">
+                <button id="resetParamCalButton">Reset defaults</button>
+                <button id="saveParamCalButton" class="primary">Save A/mu cal</button>
+              </div>
+            </div>
+            <div class="table-wrap cal-table-wrap">
+              <table class="cal-table">
+                <thead>
+                  <tr><th>Code</th><th>Send</th><th>A output V</th><th>mu output V</th></tr>
+                </thead>
+                <tbody id="paramCalTable"></tbody>
+              </table>
+            </div>
+            <p class="hint status-line" id="paramCalStatus">Calibration not checked.</p>
+          </article>
+        </div>
+        <article class="panel activity-log">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">serial monitor</p>
+              <h2>Activity log</h2>
+            </div>
+            <div class="button-row compact log-controls">
+              <button class="ping-control">PING</button>
+              <button class="clear-log-control">Clear</button>
+              <button class="download-log-control">Download TXT</button>
+            </div>
+          </div>
+          <textarea class="log-view" readonly spellcheck="false"></textarea>
+          <div class="manual-send">
+            <input class="manual-command" placeholder="Manual command, e.g. D1,1972" />
+            <button class="manual-send-control primary">Send</button>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-switch" class="tab-panel">
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">MAX4581</p>
+                <h2>Switch test</h2>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>Device <input id="switchDevice" type="number" min="1" max="16" value="1" /></label>
+              <label>Wiper <select id="switchWiper"><option value="A">mu</option><option value="M">A</option></select></label>
+              <label>Code <input id="switchCode" type="number" min="0" max="255" value="0" /></label>
+            </div>
+            <button id="switchWriteButton" class="primary wide">Write selected channel</button>
+            <p class="hint">MAX4581은 firmware 내부에서 programming 동안만 enable된 뒤 release됩니다.</p>
+          </article>
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">routing</p>
+                <h2>Selected channel info</h2>
+              </div>
+            </div>
+            <pre id="switchInfo" class="info-box"></pre>
+          </article>
+        </div>
+        <article class="panel activity-log">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">serial monitor</p>
+              <h2>Activity log</h2>
+            </div>
+            <div class="button-row compact log-controls">
+              <button class="ping-control">PING</button>
+              <button class="clear-log-control">Clear</button>
+              <button class="download-log-control">Download TXT</button>
+            </div>
+          </div>
+          <textarea class="log-view" readonly spellcheck="false"></textarea>
+          <div class="manual-send">
+            <input class="manual-command" placeholder="Manual command, e.g. A1,128" />
+            <button class="manual-send-control primary">Send</button>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-digipot" class="tab-panel">
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">REF193 = 3.0 V</p>
+                <h2>MAX5488 A / mu</h2>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>Device <input id="potDevice" type="number" min="1" max="16" value="1" /></label>
+              <label>mu code <input id="aCode" type="number" min="0" max="255" value="0" /></label>
+              <label>mu target V <input id="aTarget" type="number" value="0" step="0.05" /></label>
+              <label>A code <input id="muCode" type="number" min="0" max="255" value="0" /></label>
+              <label>A target V <input id="muTarget" type="number" value="0" step="0.05" /></label>
+            </div>
+            <div class="readout stacked" id="potReadout"></div>
+            <div class="button-row">
+              <button id="setACodeButton">Set mu code</button>
+              <button id="setAVoltageButton">Set mu voltage</button>
+              <button id="setMuCodeButton">Set A code</button>
+              <button id="setMuVoltageButton">Set A voltage</button>
+              <button id="applyPotButton" class="primary">Apply A + mu</button>
+            </div>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">local state</p>
+                <h2>Device table</h2>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Dev</th><th>Mux</th><th>A</th><th>A out</th><th>mu</th><th>mu out</th></tr></thead>
+                <tbody id="deviceTable"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+        <article class="panel activity-log">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">serial monitor</p>
+              <h2>Activity log</h2>
+            </div>
+            <div class="button-row compact log-controls">
+              <button class="ping-control">PING</button>
+              <button class="clear-log-control">Clear</button>
+              <button class="download-log-control">Download TXT</button>
+            </div>
+          </div>
+          <textarea class="log-view" readonly spellcheck="false"></textarea>
+          <div class="manual-send">
+            <input class="manual-command" placeholder="Manual command, e.g. M1,90" />
+            <button class="manual-send-control primary">Send</button>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-adc" class="tab-panel">
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">manual jumper map</p>
+                <h2>TIA selection</h2>
+              </div>
+            </div>
+            <div id="tiaConfig" class="tia-grid"></div>
+            <div class="button-row">
+              <label class="inline-field">ADC command <input id="adcCommand" value="ADC" /></label>
+              <button id="adcButton" class="primary">Send ADC command</button>
+            </div>
+          </article>
+          <article class="panel table-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">measurements</p>
+                <h2>ADC / sweep rows</h2>
+              </div>
+              <button id="downloadCsvButton">Download CSV</button>
+            </div>
+            <div class="table-wrap tall">
+              <table>
+                <thead><tr><th>Time</th><th>DAC</th><th>Code</th><th>Vhigh</th><th>TIA</th><th>Raw</th><th>V_AIN</th><th>I_uA</th><th>Jumper</th></tr></thead>
+                <tbody id="measurementTable"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+        <article class="panel activity-log">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">serial monitor</p>
+              <h2>Activity log</h2>
+            </div>
+            <div class="button-row compact log-controls">
+              <button class="ping-control">PING</button>
+              <button class="clear-log-control">Clear</button>
+              <button class="download-log-control">Download TXT</button>
+            </div>
+          </div>
+          <textarea class="log-view" readonly spellcheck="false"></textarea>
+          <div class="manual-send">
+            <input class="manual-command" placeholder="Manual command, e.g. ADC" />
+            <button class="manual-send-control primary">Send</button>
+          </div>
+        </article>
+      </section>
+
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>6 Color Light Control</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>6 Color Light Control</h1>
+        <p id="deviceName" class="subtle">BLE NUS</p>
+      </div>
+      <div class="connection">
+        <span id="connectionDot" class="dot"></span>
+        <span id="connectionText">Disconnected</span>
+        <button id="connectButton" class="primary-button" type="button">
+          <span class="button-icon">⌁</span>
+          Connect
+        </button>
+      </div>
+    </header>
+
+    <section class="command-bar">
+      <button id="getButton" type="button">GET</button>
+      <button id="allOnButton" type="button">ALL ON</button>
+      <button id="allOffButton" type="button">ALL OFF</button>
+      <button id="allMaxButton" type="button">ALL 100%</button>
+      <div class="manual-command">
+        <input id="manualInput" type="text" autocomplete="off" spellcheck="false" placeholder="SET,R,1,800">
+        <button id="sendManualButton" type="button">SEND</button>
+      </div>
+    </section>
+
+    <section id="channelGrid" class="channel-grid" aria-label="Channel controls"></section>
+
+    <section class="terminal">
+      <div class="terminal-head">
+        <span>BLE Log</span>
+        <button id="clearLogButton" type="button">Clear</button>
+      </div>
+      <pre id="logOutput"></pre>
+    </section>
+  </main>
+
+  <template id="channelTemplate">
+    <article class="channel-card">
+      <div class="channel-head">
+        <div class="color-chip"></div>
+        <div>
+          <h2 class="channel-name"></h2>
+          <p class="channel-state"></p>
+        </div>
+      </div>
+
+      <div class="control-row">
+        <span>Light</span>
+        <button class="toggle-button onoff-button" type="button" aria-pressed="true"></button>
+      </div>
+
+      <div class="control-row">
+        <span>PWM</span>
+        <button class="toggle-button pwm-button" type="button" aria-pressed="true"></button>
+      </div>
+
+      <label class="slider-block">
+        <span>Dimming <output class="duty-output"></output></span>
+        <input class="duty-slider" type="range" min="0" max="1000" step="10">
+      </label>
+
+      <div class="quick-actions">
+        <button class="quick-button" type="button" data-duty="0">0</button>
+        <button class="quick-button" type="button" data-duty="250">25</button>
+        <button class="quick-button" type="button" data-duty="500">50</button>
+        <button class="quick-button" type="button" data-duty="750">75</button>
+        <button class="quick-button" type="button" data-duty="1000">100</button>
+      </div>
+    </article>
+  </template>
+
+  <script src="./app.js"></script>
+</body>
+</html>

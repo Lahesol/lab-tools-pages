@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Lab Portal</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="portal-shell">
+    <header class="portal-header">
+      <div>
+        <p class="eyebrow">Local Tools</p>
+        <h1>Lab Portal</h1>
+      </div>
+      <div class="header-actions">
+        <input id="searchInput" type="search" placeholder="Search apps">
+        <button id="reloadButton" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <section id="appGrid" class="app-grid" aria-label="Applications"></section>
+
+    <section class="info-panel">
+      <h2>How To Add</h2>
+      <p>
+        Add a new entry to <code>apps.json</code>. Keep each app running on its own
+        local port, then link it here or proxy it under one HTTPS domain later.
+      </p>
+    </section>
+  </main>
+
+  <template id="appTemplate">
+    <article class="app-card">
+      <div class="app-icon"></div>
+      <div class="app-body">
+        <div class="app-title-row">
+          <h2 class="app-name"></h2>
+          <span class="app-status"></span>
+        </div>
+        <p class="app-description"></p>
+        <div class="app-meta"></div>
+        <div class="app-actions">
+          <a class="open-link" target="_blank" rel="noreferrer">Open</a>
+          <button class="copy-button" type="button">Copy URL</button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script src="./app.js"></script>
+</body>
+</html>

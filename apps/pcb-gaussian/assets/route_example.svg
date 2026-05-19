@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980">
+  <defs>
+    <style>
+      .bg { fill: #f6f9f8; }
+      .panel { fill: #ffffff; stroke: #d9e4e2; stroke-width: 2; }
+      .block { fill: #ffffff; stroke: #b8c7c5; stroke-width: 2.2; }
+      .block-dark { fill: #17323a; stroke: #17323a; }
+      .block-blue { fill: #2d5c64; stroke: #2d5c64; }
+      .block-green { fill: #2a9d8f; stroke: #2a9d8f; }
+      .block-orange { fill: #f4a261; stroke: #f4a261; }
+      .block-red { fill: #d1495b; stroke: #d1495b; }
+      .block-soft { fill: #eaf3f2; stroke: #b8c7c5; }
+      .title { font-family: Malgun Gothic, Segoe UI, Arial, sans-serif; font-size: 42px; font-weight: 800; fill: #17323a; }
+      .subtitle { font-family: Malgun Gothic, Segoe UI, Arial, sans-serif; font-size: 22px; fill: #66737a; }
+      .label { font-family: Malgun Gothic, Segoe UI, Arial, sans-serif; font-size: 24px; font-weight: 800; fill: #172126; }
+      .label-white { font-family: Malgun Gothic, Segoe UI, Arial, sans-serif; font-size: 24px; font-weight: 800; fill: #ffffff; }
+      .small { font-family: Malgun Gothic, Segoe UI, Arial, sans-serif; font-size: 18px; fill: #66737a; }
+      .small-white { font-family: Malgun Gothic, Segoe UI, Arial, sans-serif; font-size: 17px; fill: #ecf5f3; }
+      .pin { font-family: Consolas, Cascadia Mono, monospace; font-size: 17px; fill: #172126; }
+      .route-program { fill: none; stroke: #d1495b; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-program); }
+      .route-dac { fill: none; stroke: #f4a261; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-dac); }
+      .route-adc { fill: none; stroke: #2a9d8f; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-adc); }
+      .route-uart { fill: none; stroke: #2d5c64; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-uart); }
+      .faint { opacity: 0.32; }
+      .legend-line { stroke-width: 8; stroke-linecap: round; }
+    </style>
+    <marker id="arrow-program" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#d1495b"/>
+    </marker>
+    <marker id="arrow-dac" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#f4a261"/>
+    </marker>
+    <marker id="arrow-adc" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#2a9d8f"/>
+    </marker>
+    <marker id="arrow-uart" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 0 1 L 11 6 L 0 11 z" fill="#2d5c64"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="980"/>
+  <text class="title" x="72" y="82">Route View 예시: 프로그램 시 신호 흐름 강조</text>
+  <text class="subtitle" x="74" y="122">실제 회로도 위에 같은 색의 SVG overlay를 얹기 위한 block-level draft</text>
+
+  <rect class="panel" x="60" y="160" width="1480" height="660" rx="18"/>
+
+  <!-- Main blocks -->
+  <rect class="block-blue" x="100" y="260" width="190" height="110" rx="14"/>
+  <text class="label-white" x="132" y="304">Web GUI</text>
+  <text class="small-white" x="126" y="334">Web Serial</text>
+  <text class="small-white" x="126" y="358">command/log</text>
+
+  <rect class="block-dark" x="390" y="240" width="210" height="150" rx="14"/>
+  <text class="label-white" x="430" y="288">nRF52832</text>
+  <text class="small-white" x="430" y="322">UART parser</text>
+  <text class="small-white" x="430" y="346">SPI + GPIO + SAADC</text>
+  <text class="small-white" x="430" y="370">TX P0.24 / RX P0.23</text>
+
+  <rect class="block-orange" x="720" y="190" width="190" height="105" rx="14"/>
+  <text class="label-white" x="760" y="232">AD5322</text>
+  <text class="small-white" x="750" y="262">DAC1 / DAC2</text>
+
+  <rect class="block-soft" x="1010" y="184" width="220" height="118" rx="14"/>
+  <text class="label" x="1045" y="228">DAC Amp</text>
+  <text class="small" x="1042" y="258">REF194 4.5 V</text>
+  <text class="small" x="1042" y="280">gain = 4.5x</text>
+
+  <rect class="block-green" x="1320" y="190" width="170" height="105" rx="14"/>
+  <text class="label-white" x="1368" y="232">G1</text>
+  <text class="small-white" x="1350" y="262">Vhigh path</text>
+
+  <rect class="block-blue" x="715" y="410" width="205" height="126" rx="14"/>
+  <text class="label-white" x="760" y="454">MAX4581</text>
+  <text class="small-white" x="742" y="485">SA/SB/SC address</text>
+  <text class="small-white" x="742" y="510">SE or SE1 enable low</text>
+
+  <rect class="block-red" x="1030" y="400" width="230" height="146" rx="14"/>
+  <text class="label-white" x="1070" y="444">MAX5488 x16</text>
+  <text class="small-white" x="1060" y="476">selected CS only</text>
+  <text class="small-white" x="1060" y="501">A / mu wiper write</text>
+  <text class="small-white" x="1060" y="526">REF193 3.0 V</text>
+
+  <rect class="block-soft" x="1320" y="400" width="170" height="146" rx="14"/>
+  <text class="label" x="1360" y="448">Amp</text>
+  <text class="small" x="1344" y="480">A = -6x</text>
+  <text class="small" x="1344" y="506">mu = -2x</text>
+
+  <rect class="block-soft" x="770" y="650" width="220" height="110" rx="14"/>
+  <text class="label" x="808" y="694">Device array</text>
+  <text class="small" x="810" y="724">16 Gaussian curves</text>
+
+  <rect class="block-green" x="1080" y="650" width="170" height="110" rx="14"/>
+  <text class="label-white" x="1124" y="694">TIA</text>
+  <text class="small-white" x="1110" y="724">Rf = 1 MΩ</text>
+
+  <rect class="block-blue" x="1330" y="650" width="160" height="110" rx="14"/>
+  <text class="label-white" x="1370" y="694">SAADC</text>
+  <text class="small-white" x="1366" y="724">AIN0-3</text>
+
+  <!-- Faint background connections -->
+  <path class="route-uart faint" d="M 290 315 C 330 315, 350 315, 390 315"/>
+  <path class="route-dac faint" d="M 600 286 C 650 260, 675 242, 720 242"/>
+  <path class="route-dac faint" d="M 910 242 C 955 242, 970 242, 1010 242"/>
+  <path class="route-dac faint" d="M 1230 242 C 1265 242, 1285 242, 1320 242"/>
+  <path class="route-program faint" d="M 600 338 C 650 390, 675 450, 715 473"/>
+  <path class="route-program faint" d="M 920 473 C 960 473, 990 473, 1030 473"/>
+  <path class="route-program faint" d="M 1260 473 C 1285 473, 1300 473, 1320 473"/>
+  <path class="route-adc faint" d="M 990 705 C 1025 705, 1045 705, 1080 705"/>
+  <path class="route-adc faint" d="M 1250 705 C 1285 705, 1305 705, 1330 705"/>
+  <path class="route-uart faint" d="M 1330 760 C 1050 880, 650 870, 500 390"/>
+
+  <!-- Highlighted example route: A5,128 programming -->
+  <path class="route-uart" d="M 290 315 C 330 315, 350 315, 390 315"/>
+  <path class="route-program" d="M 600 338 C 650 390, 675 450, 715 473"/>
+  <path class="route-program" d="M 920 473 C 960 473, 990 473, 1030 473"/>
+  <path class="route-program" d="M 1260 473 C 1285 473, 1300 473, 1320 473"/>
+
+  <!-- Other selectable routes shown as thinner active examples -->
+  <path class="route-dac" d="M 600 286 C 650 260, 675 242, 720 242"/>
+  <path class="route-dac" d="M 910 242 C 955 242, 970 242, 1010 242"/>
+  <path class="route-dac" d="M 1230 242 C 1265 242, 1285 242, 1320 242"/>
+
+  <path class="route-adc" d="M 990 705 C 1025 705, 1045 705, 1080 705"/>
+  <path class="route-adc" d="M 1250 705 C 1285 705, 1305 705, 1330 705"/>
+
+  <!-- Pin and route notes -->
+  <rect class="panel" x="92" y="410" width="500" height="262" rx="14"/>
+  <text class="label" x="124" y="454">Example command: A5,128</text>
+  <text class="small" x="126" y="490">1. Web GUI sends UART line</text>
+  <text class="small" x="126" y="522">2. nRF parses device=5, wiper=A, code=128</text>
+  <text class="small" x="126" y="554">3. SPI command is prepared for MAX5488</text>
+  <text class="small" x="126" y="586">4. MAX4581 selects CS_5 only during write</text>
+  <text class="small" x="126" y="618">5. A wiper changes, A amp output updates</text>
+  <text class="pin" x="126" y="650">A_out ≈ -6 × (3.0 V × 128 / 255)</text>
+
+  <!-- Legend -->
+  <rect class="panel" x="60" y="848" width="1480" height="82" rx="16"/>
+  <line class="legend-line" x1="98" y1="890" x2="178" y2="890" stroke="#2d5c64"/>
+  <text class="small" x="195" y="897">UART command/log</text>
+  <line class="legend-line" x1="398" y1="890" x2="478" y2="890" stroke="#d1495b"/>
+  <text class="small" x="495" y="897">MAX4581/MAX5488 programming route</text>
+  <line class="legend-line" x1="840" y1="890" x2="920" y2="890" stroke="#f4a261"/>
+  <text class="small" x="938" y="897">DAC/G1/Vhigh route</text>
+  <line class="legend-line" x1="1192" y1="890" x2="1272" y2="890" stroke="#2a9d8f"/>
+  <text class="small" x="1290" y="897">TIA/ADC read route</text>
+</svg>
