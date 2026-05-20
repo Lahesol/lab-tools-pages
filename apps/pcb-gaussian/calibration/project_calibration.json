@@ -1,52 +1,52 @@
 ﻿{
   "schema": "pcb-gaussian-calibration-v1",
-  "note": "Project calibration snapshot from current GUI defaults. Browser-local calibrated values are stored separately in localStorage by origin.",
+  "note": "Recovered calibration snapshot from the user's working calibration screenshot. Browser-local calibrated values are stored separately in localStorage by origin.",
   "localStorageKeys": {
     "dac": "pcbGaussian.dacCalibration.v1",
     "parameters": "pcbGaussian.parameterCalibration.v1"
   },
   "dacCal": {
     "D1": [
-      { "voltage": -15, "code": 191 },
-      { "voltage": -10, "code": 785 },
+      { "voltage": -15, "code": 187 },
+      { "voltage": -10, "code": 782 },
       { "voltage": -5, "code": 1378 },
       { "voltage": 0, "code": 1972 },
-      { "voltage": 5, "code": 2221 },
-      { "voltage": 10, "code": 2471 },
-      { "voltage": 15, "code": 2720 }
+      { "voltage": 5, "code": 2564 },
+      { "voltage": 10, "code": 3156 },
+      { "voltage": 15, "code": 3750 }
     ],
     "D2": [
-      { "voltage": -15, "code": 180 },
-      { "voltage": -10, "code": 773 },
+      { "voltage": -15, "code": 177 },
+      { "voltage": -10, "code": 770 },
       { "voltage": -5, "code": 1365 },
       { "voltage": 0, "code": 1958 },
-      { "voltage": 5, "code": 2550 },
-      { "voltage": 10, "code": 3142 },
-      { "voltage": 15, "code": 3734 }
+      { "voltage": 5, "code": 2551 },
+      { "voltage": 10, "code": 3144 },
+      { "voltage": 15, "code": 3740 }
     ]
   },
   "paramCal": {
     "A": [
-      { "code": 0, "voltage": -1.0 },
-      { "code": 30, "voltage": 1.96 },
-      { "code": 60, "voltage": 4.92 },
-      { "code": 90, "voltage": 6.88 },
-      { "code": 120, "voltage": 8.8366666667 },
-      { "code": 150, "voltage": 10.7933333333 },
-      { "code": 180, "voltage": 12.75 },
-      { "code": 210, "voltage": 14.7066666667 },
-      { "code": 255, "voltage": 17.6416666667 }
+      { "code": 0, "voltage": -0.0420 },
+      { "code": 30, "voltage": -2.0230 },
+      { "code": 60, "voltage": -3.9870 },
+      { "code": 90, "voltage": -5.9400 },
+      { "code": 120, "voltage": -7.8900 },
+      { "code": 150, "voltage": -9.8500 },
+      { "code": 180, "voltage": -11.8300 },
+      { "code": 210, "voltage": -13.8200 },
+      { "code": 255, "voltage": -16.8700 }
     ],
     "mu": [
-      { "code": 0, "voltage": 0.0 },
-      { "code": 30, "voltage": -2.1176470588 },
-      { "code": 60, "voltage": -4.2352941176 },
-      { "code": 90, "voltage": -6.3529411765 },
-      { "code": 120, "voltage": -8.4705882353 },
-      { "code": 150, "voltage": -10.5882352941 },
-      { "code": 180, "voltage": -12.7058823529 },
-      { "code": 210, "voltage": -14.8235294118 },
-      { "code": 255, "voltage": -18.0 }
+      { "code": 0, "voltage": -0.0160 },
+      { "code": 30, "voltage": -0.7150 },
+      { "code": 60, "voltage": -1.4100 },
+      { "code": 90, "voltage": -2.1000 },
+      { "code": 120, "voltage": -2.7900 },
+      { "code": 150, "voltage": -3.4900 },
+      { "code": 180, "voltage": -4.1700 },
+      { "code": 210, "voltage": -4.8900 },
+      { "code": 255, "voltage": -5.9800 }
     ]
   }
 }

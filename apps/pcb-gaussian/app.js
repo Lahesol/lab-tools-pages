@@ -23,33 +23,49 @@ const DAC_CAL_STORAGE_KEY = "pcbGaussian.dacCalibration.v1";
 const DAC_CAL_VOLTAGES = [-15, -10, -5, 0, 5, 10, 15];
 const DEFAULT_DAC_CAL = {
   D1: [
-    { voltage: -15, code: 191 },
-    { voltage: -10, code: 785 },
+    { voltage: -15, code: 187 },
+    { voltage: -10, code: 782 },
     { voltage: -5, code: 1378 },
     { voltage: 0, code: 1972 },
-    { voltage: 5, code: 2221 },
-    { voltage: 10, code: 2471 },
-    { voltage: 15, code: 2720 },
+    { voltage: 5, code: 2564 },
+    { voltage: 10, code: 3156 },
+    { voltage: 15, code: 3750 },
   ],
   D2: [
-    { voltage: -15, code: 180 },
-    { voltage: -10, code: 773 },
+    { voltage: -15, code: 177 },
+    { voltage: -10, code: 770 },
     { voltage: -5, code: 1365 },
     { voltage: 0, code: 1958 },
-    { voltage: 5, code: 2550 },
-    { voltage: 10, code: 3142 },
-    { voltage: 15, code: 3734 },
+    { voltage: 5, code: 2551 },
+    { voltage: 10, code: 3144 },
+    { voltage: 15, code: 3740 },
   ],
 };
 const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.v1";
 const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
 const PROGRAM_REPLY_TIMEOUT_MS = 1500;
 const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653"];
+const A_CAL_POINTS = [
+  { code: 0, voltage: -0.0420 },
+  { code: 30, voltage: -2.0230 },
+  { code: 60, voltage: -3.9870 },
+  { code: 90, voltage: -5.9400 },
+  { code: 120, voltage: -7.8900 },
+  { code: 150, voltage: -9.8500 },
+  { code: 180, voltage: -11.8300 },
+  { code: 210, voltage: -13.8200 },
+  { code: 255, voltage: -16.8700 },
+];
 const MU_CAL_POINTS = [
-  { code: 0, voltage: -1.0 },
-  { code: 60, voltage: 4.92 },
-  { code: 90, voltage: 6.88 },
-  { code: 180, voltage: 12.75 },
+  { code: 0, voltage: -0.0160 },
+  { code: 30, voltage: -0.7150 },
+  { code: 60, voltage: -1.4100 },
+  { code: 90, voltage: -2.1000 },
+  { code: 120, voltage: -2.7900 },
+  { code: 150, voltage: -3.4900 },
+  { code: 180, voltage: -4.1700 },
+  { code: 210, voltage: -4.8900 },
+  { code: 255, voltage: -5.9800 },
 ];
 
 const $ = id => document.getElementById(id);
@@ -159,10 +175,10 @@ function piecewiseVoltageToCode(points, voltage) {
   return clamp(Math.round(interpolate(safeV, prev.voltage, prev.code, last.voltage, last.code)), 0, POT_MAX_CODE);
 }
 function defaultLogicalAVoltage(code) {
-  return piecewiseCodeToVoltage(MU_CAL_POINTS, code);
+  return piecewiseCodeToVoltage(A_CAL_POINTS, code);
 }
 function defaultLogicalMuVoltage(code) {
-  return A_GAIN * potCodeToVWiper(code);
+  return piecewiseCodeToVoltage(MU_CAL_POINTS, code);
 }
 function cloneParamCalibration() {
   return {
