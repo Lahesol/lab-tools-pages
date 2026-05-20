@@ -1,0 +1,160 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PPG_TRNG Control Console</title>
+    <link rel="stylesheet" href="./styles.css?v=26d469e16d97" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>PPG_TRNG Control Console</h1>
+          <p>Web Serial DAC control and live ADC monitor</p>
+        </div>
+        <div class="status-strip" aria-live="polite">
+          <span id="serialSupport" class="status-dot">Checking</span>
+          <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="side-panel">
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Connection</h2>
+            </div>
+            <label class="field-label" for="baudRate">Baud rate</label>
+            <div class="connect-row">
+              <select id="baudRate">
+                <option value="115200" selected>115200</option>
+                <option value="230400">230400</option>
+                <option value="460800">460800</option>
+                <option value="921600">921600</option>
+              </select>
+              <button id="connectButton" class="button primary" type="button">Connect</button>
+            </div>
+            <button id="demoButton" class="button secondary wide" type="button">Demo stream</button>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>DAC</h2>
+              <output id="dacValueLabel" for="dacSlider dacInput">2056</output>
+            </div>
+            <input id="dacSlider" type="range" min="0" max="4095" step="1" value="2056" />
+            <div class="dac-grid">
+              <button class="button ghost" data-step="-100" type="button">-100</button>
+              <button class="button ghost" data-step="-10" type="button">-10</button>
+              <input id="dacInput" inputmode="numeric" min="0" max="4095" step="1" type="number" value="2056" />
+              <button class="button ghost" data-step="10" type="button">+10</button>
+              <button class="button ghost" data-step="100" type="button">+100</button>
+            </div>
+            <div class="command-row">
+              <button id="sendDacButton" class="button primary wide" type="button">Send DAC</button>
+              <label class="switch">
+                <input id="liveSend" type="checkbox" />
+                <span>Live</span>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Commands</h2>
+            </div>
+            <div class="quick-grid">
+              <button class="button secondary" data-command="9999" type="button" title="Toggle firmware bit mode">9999</button>
+              <button class="button secondary warn" data-command="0000" type="button" title="DAC sweep, then reset">0000</button>
+              <button class="button secondary" data-command="8888" type="button" title="Toggle LEDs">8888</button>
+              <button class="button secondary" data-command="7777" type="button" title="Toggle LED blink while sampling">7777</button>
+            </div>
+          </section>
+
+          <section class="panel log-panel">
+            <div class="panel-heading">
+              <h2>Log</h2>
+              <button id="clearLogButton" class="text-button" type="button">Clear</button>
+            </div>
+            <div id="log" class="log" role="log" aria-live="polite"></div>
+          </section>
+        </aside>
+
+        <section class="main-panel">
+          <div class="metric-grid" aria-live="polite">
+            <div class="metric">
+              <span>Latest</span>
+              <strong id="latestValue">--</strong>
+            </div>
+            <div class="metric">
+              <span>Min</span>
+              <strong id="minValue">--</strong>
+            </div>
+            <div class="metric">
+              <span>Max</span>
+              <strong id="maxValue">--</strong>
+            </div>
+            <div class="metric">
+              <span>Avg</span>
+              <strong id="avgValue">--</strong>
+            </div>
+            <div class="metric">
+              <span>Rate</span>
+              <strong id="rateValue">--</strong>
+            </div>
+            <div class="metric">
+              <span>Samples</span>
+              <strong id="sampleCount">0</strong>
+            </div>
+          </div>
+
+          <section class="plot-panel">
+            <div class="plot-toolbar">
+              <div>
+                <h2>ADC Plot</h2>
+                <p id="plotCaption">Waiting for samples</p>
+              </div>
+              <div class="toolbar-actions">
+                <label class="compact-field" for="windowSize">
+                  <span>Window</span>
+                  <select id="windowSize">
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                    <option value="2000" selected>2000</option>
+                    <option value="5000">5000</option>
+                    <option value="10000">10000</option>
+                  </select>
+                </label>
+                <label class="switch">
+                  <input id="autoScale" type="checkbox" checked />
+                  <span>Auto</span>
+                </label>
+                <button id="pauseButton" class="button secondary" type="button">Pause</button>
+                <button id="clearSamplesButton" class="button secondary" type="button">Clear</button>
+                <button id="exportButton" class="button secondary" type="button">CSV</button>
+              </div>
+            </div>
+
+            <div id="manualScale" class="scale-row" hidden>
+              <label class="compact-field" for="yMin">
+                <span>Y min</span>
+                <input id="yMin" type="number" value="0" />
+              </label>
+              <label class="compact-field" for="yMax">
+                <span>Y max</span>
+                <input id="yMax" type="number" value="16384" />
+              </label>
+            </div>
+
+            <div class="canvas-wrap">
+              <canvas id="plotCanvas" aria-label="ADC value plot"></canvas>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js?v=e747f6892d02" defer></script>
+  </body>
+</html>

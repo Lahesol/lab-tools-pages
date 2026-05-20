@@ -1,18 +1,26 @@
-[
-  {
-    "name": "6 Color Light Control",
-    "description": "BLE NUS GUI for the TPS923610 and TMUX7219 six-color light board.",
-    "url": "apps/6color/",
-    "group": "Optics",
-    "status": "Ready",
-    "accent": "#0b7f78"
-  },
-  {
-    "name": "PCB Gaussian Web Control",
-    "description": "Web Serial GUI for the PCB Gaussian firmware UART protocol.",
-    "url": "apps/pcb-gaussian/",
-    "group": "PCB",
-    "status": "Ready",
-    "accent": "#4f6d9a"
-  }
+﻿[
+    {
+        "name":  "6 Color Light Control",
+        "description":  "BLE NUS GUI for the TPS923610 and TMUX7219 six-color light board.",
+        "url":  "apps/6color/",
+        "group":  "Optics",
+        "status":  "Ready",
+        "accent":  "#0b7f78"
+    },
+    {
+        "name":  "PCB Gaussian Web Control",
+        "description":  "Web Serial GUI for the PCB Gaussian firmware UART protocol.",
+        "url":  "apps/pcb-gaussian/",
+        "group":  "PCB",
+        "status":  "Ready",
+        "accent":  "#4f6d9a"
+    },
+    {
+        "name":  "PPG TRNG Control Console",
+        "description":  "Web Serial DAC control and live ADC plot for the PPG_TRNG nRF52 firmware.",
+        "url":  "apps/ppg-trng/",
+        "group":  "Optics",
+        "status":  "Ready",
+        "accent":  "#087f72"
+    }
 ]

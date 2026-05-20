@@ -9,15 +9,16 @@ const POT_MAX_CODE = 255;
 const ADC_TIA_COUNT = 8;
 const MAX_DEVICES_PER_TIA = 4;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
+// Bench notes use 0-based TIA/device numbers. GUI and firmware commands use 1-based device labels.
 const TIA_DEVICE_MAP = [
-  [5, 6, 7, 8],
-  [1, 2, 3, 4],
-  [5, 6, 7, 8],
-  [1, 2, 3, 4],
-  [9, 10, 11, 12],
-  [13, 14, 15, 16],
-  [9, 10, 11, 12],
-  [13, 14, 15, 16],
+  [5, 6, 7, 8],     // TIA0: hardware dev4-dev7
+  [1, 2, 3, 4],     // TIA1: hardware dev0-dev3
+  [5, 6, 7, 8],     // TIA2: hardware dev4-dev7
+  [1, 2, 3, 4],     // TIA3: hardware dev0-dev3
+  [9, 10, 11, 12],  // TIA4: hardware dev8-dev11
+  [13, 14, 15, 16], // TIA5: hardware dev12-dev15
+  [9, 10, 11, 12],  // TIA6: hardware dev8-dev11
+  [13, 14, 15, 16], // TIA7: hardware dev12-dev15
 ];
 const DAC_CAL_STORAGE_KEY = "pcbGaussian.dacCalibration.v1";
 const DAC_CAL_VOLTAGES = [-15, -10, -5, 0, 5, 10, 15];
@@ -45,6 +46,25 @@ const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.v1";
 const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
 const PROGRAM_REPLY_TIMEOUT_MS = 1500;
 const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653"];
+const ADC_LABELS = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `ADC${idx}`);
+const PLOT_CONFIGS = {
+  D1: {
+    title: "DAC1",
+    canvasId: "sweepPlotCanvasD1",
+    legendId: "plotD1Legend",
+    statusId: "plotD1Status",
+    filterId: "plotD1AdcFilters",
+    defaultAdcs: [4, 5, 6, 7],
+  },
+  D2: {
+    title: "DAC2",
+    canvasId: "sweepPlotCanvasD2",
+    legendId: "plotD2Legend",
+    statusId: "plotD2Status",
+    filterId: "plotD2AdcFilters",
+    defaultAdcs: [0, 1, 2, 3],
+  },
+};
 const A_CAL_POINTS = [
   { code: 0, voltage: -0.0420 },
   { code: 30, voltage: -2.0230 },
@@ -287,6 +307,10 @@ const state = {
   sweepCounter: 0,
   plotFramePending: false,
   sweepRunning: false,
+  plotAdcSelection: {
+    D1: PLOT_CONFIGS.D1.defaultAdcs.slice(),
+    D2: PLOT_CONFIGS.D2.defaultAdcs.slice(),
+  },
 };
 
 function logLine(text, direction = "") {
@@ -768,19 +792,26 @@ function dacSnapshot() {
   };
 }
 
+function setPlotStatus(dac, text) {
+  const status = $(PLOT_CONFIGS[dac]?.statusId);
+  if (status) status.textContent = text;
+}
+
+function setAllPlotStatus(text) {
+  for (const dac of ["D1", "D2"]) setPlotStatus(dac, text);
+}
+
 function startSweepCapture() {
-  const xDac = $("plotXAxis").value;
   state.activeSweep = {
     id: ++state.sweepCounter,
     startedAt: new Date().toISOString(),
-    xDac,
     points: [],
-    tiaLabels: [],
+    adcLabels: ADC_LABELS.slice(),
   };
   state.pendingAdcContext = null;
   state.lastSweep = null;
   $("downloadSweepCsvButton").disabled = true;
-  $("plotStatus").textContent = `Live sweep ${state.activeSweep.id}: waiting for ADC data, X=${xDac}.`;
+  setAllPlotStatus(`Live sweep ${state.activeSweep.id}: waiting for ADC data.`);
   renderSweepPlot();
 }
 
@@ -792,13 +823,13 @@ function finishSweepCapture() {
     state.pendingAdcContext = null;
     renderSweepPlot();
     $("downloadSweepCsvButton").disabled = false;
-    $("plotStatus").textContent = `Sweep ${state.lastSweep.id}: ${state.lastSweep.points.length} ADC point(s), X=${state.lastSweep.xDac}.`;
+    setAllPlotStatus(`Sweep ${state.lastSweep.id}: ${state.lastSweep.points.length} ADC point(s).`);
   } else {
     state.activeSweep = null;
     state.pendingAdcContext = null;
     renderSweepPlot();
     $("downloadSweepCsvButton").disabled = true;
-    $("plotStatus").textContent = "No ADC samples were captured in the last sweep.";
+    setAllPlotStatus("No ADC samples were captured in the last sweep.");
   }
 }
 
@@ -857,7 +888,6 @@ async function startSweep() {
       state.pendingAdcContext = {
         sweepId: state.activeSweep?.id,
         pointIndex: index,
-        xDac: state.activeSweep?.xDac || $("plotXAxis").value,
         dac: dacSnapshot(),
         selectedTias: selectedTias(),
       };
@@ -966,6 +996,7 @@ function renderTiaConfig() {
     row.className = "tia-row";
     const allowedDevices = TIA_DEVICE_MAP[i] || [];
     const selectedDevices = new Set((tia.devices || allowedDevices.map(String)).map(String).filter(Boolean));
+
     row.innerHTML = `
       <label class="checkbox"><input id="tia${i}Enabled" type="checkbox" ${tia.enabled ? "checked" : ""}/> TIA${i + 1}</label>
       <select id="tia${i}Adc">${Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `AIN${idx}`).map(v => `<option ${tia.adc === v ? "selected" : ""}>${v}</option>`).join("")}</select>
@@ -993,6 +1024,7 @@ function connectedDevicesSummary(tia) {
   return devices.join("+");
 }
 
+
 function parseAdcReply(text) {
   const parts = text.replaceAll(":", ",").split(",").map(part => part.trim());
   if (parts[0]?.toUpperCase() === "ADC" && parts.length >= 2 && parts[1].toUpperCase() !== "ERR") {
@@ -1009,8 +1041,14 @@ function selectedTias() {
 
 function recordAdcValues(values, source) {
   const context = state.pendingAdcContext;
-  const dac = context?.xDac || $("dacSelect").value;
-  const code = context?.dac?.[dac]?.code ?? state.dacCodes[dac] ?? clamp(Math.round(Number($("dacCode").value) || 0), 0, DAC_MAX_CODE);
+  const snapshot = context?.dac || dacSnapshot();
+  const fallbackDac = $("dacSelect").value;
+  const fallbackCode = state.dacCodes[fallbackDac] ?? clamp(Math.round(Number($("dacCode").value) || 0), 0, DAC_MAX_CODE);
+  const displayDac = context ? "D1+D2" : fallbackDac;
+  const displayCode = context ? `${snapshot.D1?.code ?? ""}/${snapshot.D2?.code ?? ""}` : fallbackCode;
+  const displayVhigh = context
+    ? `${Number(snapshot.D1?.vhigh ?? 0).toFixed(5)}/${Number(snapshot.D2?.vhigh ?? 0).toFixed(5)}`
+    : dacCodeToVhigh(fallbackDac, fallbackCode).toFixed(5);
   const tias = context?.selectedTias || selectedTias();
   for (const idx of tias) {
     const tia = state.tiaStates[idx - 1];
@@ -1020,9 +1058,9 @@ function recordAdcValues(values, source) {
     const current = voltage === "" ? "" : adcVoltageToCurrentUa(voltage);
     addMeasurement({
       time: nowTime(),
-      dac,
-      code,
-      vhigh: dacCodeToVhigh(dac, code).toFixed(5),
+      dac: displayDac,
+      code: displayCode,
+      vhigh: displayVhigh,
       tia: `TIA${idx}/${tia.adc}`,
       raw,
       voltage: voltage === "" ? "" : voltage.toFixed(6),
@@ -1034,38 +1072,40 @@ function recordAdcValues(values, source) {
   }
   addSweepAdcPoint(values, context);
 }
-
 function addSweepAdcPoint(values, context) {
   if (!state.activeSweep || !context || context.sweepId !== state.activeSweep.id) return;
+  const adcs = {};
   const tias = {};
-  for (const idx of context.selectedTias || []) {
-    const raw = values[idx - 1];
+  for (let adcIdx = 0; adcIdx < ADC_TIA_COUNT; adcIdx++) {
+    const raw = values[adcIdx];
     if (!Number.isFinite(raw)) continue;
     const voltage = adcRawToVoltage(raw);
     const current = adcVoltageToCurrentUa(voltage);
-    const tia = state.tiaStates[idx - 1];
+    const tia = state.tiaStates[adcIdx];
     const connected = connectedDevicesSummary(tia);
-    const label = `TIA${idx}`;
-    tias[label] = {
+    const adcLabel = `ADC${adcIdx}`;
+    const tiaLabel = `TIA${adcIdx + 1}`;
+    const sample = {
       raw,
       voltage,
       current,
       adc: tia.adc,
+      tia: tiaLabel,
       jumper: connected,
     };
-    if (!state.activeSweep.tiaLabels.includes(label)) state.activeSweep.tiaLabels.push(label);
+    adcs[adcLabel] = sample;
+    tias[tiaLabel] = sample;
   }
   state.activeSweep.points.push({
     point: context.pointIndex,
     time: nowTime(),
-    xDac: state.activeSweep.xDac,
     dac: context.dac,
+    adcs,
     tias,
   });
-  $("plotStatus").textContent = `Live sweep ${state.activeSweep.id}: ${state.activeSweep.points.length} ADC point(s), X=${state.activeSweep.xDac}.`;
+  setAllPlotStatus(`Live sweep ${state.activeSweep.id}: ${state.activeSweep.points.length} ADC point(s).`);
   scheduleSweepPlotRender();
 }
-
 function recordMeasurement(dac, code, vhigh, source) {
   const tias = selectedTias();
   for (const idx of tias) {
@@ -1095,7 +1135,7 @@ function addMeasurement(row) {
 }
 
 function sweepXValue(point, xDac) {
-  return point.dac?.[xDac]?.vhigh ?? 0;
+  return Number(point.dac?.[xDac]?.vhigh ?? 0);
 }
 
 function sweepYValue(sample, mode) {
@@ -1114,12 +1154,47 @@ function plotSweepSource() {
   return state.activeSweep?.points.length ? state.activeSweep : state.lastSweep;
 }
 
-function drawEmptyPlot(message) {
-  const canvas = $("sweepPlotCanvas");
+function selectedPlotAdcs(dac) {
+  const inputs = Array.from(document.querySelectorAll(`.plot-adc-input[data-dac="${dac}"]`));
+  if (inputs.length) {
+    const checked = inputs
+      .filter(input => input.checked)
+      .map(input => Number(input.value))
+      .filter(Number.isFinite);
+    state.plotAdcSelection[dac] = checked;
+    return checked;
+  }
+  return state.plotAdcSelection[dac] ?? PLOT_CONFIGS[dac].defaultAdcs;
+}
+
+function renderPlotAdcFilters() {
+  for (const dac of ["D1", "D2"]) {
+    const config = PLOT_CONFIGS[dac];
+    const host = $(config.filterId);
+    if (!host) continue;
+    const selected = new Set(state.plotAdcSelection[dac] || config.defaultAdcs);
+    host.innerHTML = ADC_LABELS.map((label, idx) => `
+      <label class="adc-filter-chip">
+        <input class="plot-adc-input" data-dac="${dac}" type="checkbox" value="${idx}" ${selected.has(idx) ? "checked" : ""} />
+        ${label}<span>TIA${idx + 1}</span>
+      </label>
+    `).join("");
+  }
+  document.querySelectorAll(".plot-adc-input").forEach(input => {
+    input.addEventListener("change", () => {
+      selectedPlotAdcs(input.dataset.dac);
+      renderSweepPlot();
+    });
+  });
+}
+
+function drawEmptyPlot(dac, message) {
+  const config = PLOT_CONFIGS[dac];
+  const canvas = $(config.canvasId);
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
-  const width = Math.max(640, Math.round(rect.width || 1000));
-  const height = 360;
+  const width = Math.max(460, Math.round(rect.width || 720));
+  const height = 320;
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
@@ -1133,33 +1208,37 @@ function drawEmptyPlot(message) {
   ctx.font = "14px Segoe UI, Arial";
   ctx.textAlign = "center";
   ctx.fillText(message, width / 2, height / 2);
-  $("plotLegend").innerHTML = "";
+  const legend = $(config.legendId);
+  if (legend) legend.innerHTML = "";
 }
 
-function renderSweepPlot() {
+function renderDacSweepPlot(xDac) {
+  const config = PLOT_CONFIGS[xDac];
   const sweep = plotSweepSource();
   if (!sweep || !sweep.points.length) {
-    drawEmptyPlot("Run a sweep with ADC each point enabled.");
+    drawEmptyPlot(xDac, "Run a sweep with ADC each point enabled.");
+    setPlotStatus(xDac, "No sweep data yet.");
     return;
   }
 
-  const canvas = $("sweepPlotCanvas");
+  const canvas = $(config.canvasId);
   if (!canvas) return;
-  const xDac = sweep.xDac;
   const yMode = $("plotYMode")?.value || "current";
+  const adcIndices = selectedPlotAdcs(xDac);
+  const labels = adcIndices.map(idx => `ADC${idx}`);
   const points = sweep.points.slice().sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
-  const labels = sweep.tiaLabels.slice().sort((a, b) => Number(a.replace("TIA", "")) - Number(b.replace("TIA", "")));
   const samples = [];
 
   for (const point of points) {
     for (const label of labels) {
-      const sample = point.tias[label];
+      const sample = point.adcs?.[label] || point.tias?.[`TIA${Number(label.replace("ADC", "")) + 1}`];
       if (sample) samples.push({ x: sweepXValue(point, xDac), y: sweepYValue(sample, yMode) });
     }
   }
 
   if (!samples.length) {
-    drawEmptyPlot("No ADC values were captured for the selected TIA set.");
+    drawEmptyPlot(xDac, `No ADC values selected for ${xDac}.`);
+    setPlotStatus(xDac, `Sweep ${sweep.id}: no selected ADC samples.`);
     return;
   }
 
@@ -1174,8 +1253,8 @@ function renderSweepPlot() {
   maxY += yPad;
 
   const rect = canvas.getBoundingClientRect();
-  const width = Math.max(640, Math.round(rect.width || 1000));
-  const height = 360;
+  const width = Math.max(460, Math.round(rect.width || 720));
+  const height = 320;
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
@@ -1186,7 +1265,7 @@ function renderSweepPlot() {
   ctx.fillStyle = "#f8fbfa";
   ctx.fillRect(0, 0, width, height);
 
-  const margin = { left: 72, right: 22, top: 22, bottom: 56 };
+  const margin = { left: 64, right: 20, top: 20, bottom: 52 };
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
   const sx = x => margin.left + (x - minX) / (maxX - minX) * plotW;
@@ -1236,12 +1315,12 @@ function renderSweepPlot() {
   ctx.textAlign = "center";
   ctx.fillText(yAxisLabel(yMode), 0, 0);
   ctx.restore();
-  ctx.fillText(`${xDac} output (V)`, margin.left + plotW / 2, height - 26);
+  ctx.fillText(`${xDac} output (V)`, margin.left + plotW / 2, height - 24);
 
   labels.forEach((label, seriesIndex) => {
-    const color = PLOT_COLORS[seriesIndex % PLOT_COLORS.length];
+    const color = PLOT_COLORS[Number(label.replace("ADC", "")) % PLOT_COLORS.length];
     const series = points
-      .map(point => ({ x: sweepXValue(point, xDac), sample: point.tias[label] }))
+      .map(point => ({ x: sweepXValue(point, xDac), sample: point.adcs?.[label] }))
       .filter(item => item.sample)
       .map(item => ({ x: item.x, y: sweepYValue(item.sample, yMode) }));
     if (!series.length) return;
@@ -1263,12 +1342,18 @@ function renderSweepPlot() {
     }
   });
 
-  $("plotLegend").innerHTML = labels.map((label, idx) => {
-    const color = PLOT_COLORS[idx % PLOT_COLORS.length];
-    return `<span><i style="background:${color}"></i>${label}</span>`;
+  $(config.legendId).innerHTML = labels.map(label => {
+    const adcIdx = Number(label.replace("ADC", ""));
+    const color = PLOT_COLORS[adcIdx % PLOT_COLORS.length];
+    return `<span><i style="background:${color}"></i>${label} / TIA${adcIdx + 1}</span>`;
   }).join("");
+  setPlotStatus(xDac, `Sweep ${sweep.id}: ${sweep.points.length} point(s), ${labels.join("/")}.`);
 }
 
+function renderSweepPlot() {
+  renderDacSweepPlot("D1");
+  renderDacSweepPlot("D2");
+}
 function csvEscape(value) {
   const text = String(value ?? "");
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -1296,36 +1381,31 @@ function downloadSweepCsv() {
     alert("No completed sweep ADC data to download.");
     return;
   }
-  const labels = sweep.tiaLabels.slice().sort((a, b) => Number(a.replace("TIA", "")) - Number(b.replace("TIA", "")));
+  const labels = ADC_LABELS.slice();
   const fields = [
-    "sweep_id", "point", "time", "x_dac", "x_code", "x_vhigh",
+    "sweep_id", "point", "time",
     "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
-    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_adc`, `${label}_devices`]),
+    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
   ];
   const rows = sweep.points.map(point => {
-    const x = point.dac[sweep.xDac];
     const base = [
       sweep.id,
       point.point,
       point.time,
-      sweep.xDac,
-      x?.code ?? "",
-      x?.vhigh ?? "",
       point.dac.D1?.code ?? "",
       point.dac.D1?.vhigh ?? "",
       point.dac.D2?.code ?? "",
       point.dac.D2?.vhigh ?? "",
     ];
-    const tiaValues = labels.flatMap(label => {
-      const sample = point.tias[label];
-      return sample ? [sample.raw, sample.voltage, sample.current, sample.adc, sample.jumper] : ["", "", "", "", ""];
+    const adcValues = labels.flatMap(label => {
+      const sample = point.adcs?.[label];
+      return sample ? [sample.raw, sample.voltage, sample.current, sample.tia, sample.jumper] : ["", "", "", "", ""];
     });
-    return [...base, ...tiaValues];
+    return [...base, ...adcValues];
   });
   const csv = [fields.join(","), ...rows.map(row => row.map(csvEscape).join(","))].join("\n");
-  download(`pcb_gaussian_sweep_${sweep.id}_${sweep.xDac}_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
+  download(`pcb_gaussian_sweep_${sweep.id}_dual_plot_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
 }
-
 function downloadLog() {
   download(`pcb_gaussian_session_${Date.now()}.txt`, state.commandLog.join("\n"), "text/plain;charset=utf-8");
 }
@@ -1372,12 +1452,6 @@ function bindEvents() {
   $("startSweepButton").addEventListener("click", startSweep);
   $("stopSweepButton").addEventListener("click", stopSweep);
   $("plotYMode").addEventListener("change", renderSweepPlot);
-  $("plotXAxis").addEventListener("change", () => {
-    if (state.lastSweep && !state.sweepRunning) {
-      state.lastSweep.xDac = $("plotXAxis").value;
-      renderSweepPlot();
-    }
-  });
   $("downloadSweepCsvButton").addEventListener("click", downloadSweepCsv);
   $("saveDacCalButton").addEventListener("click", saveDacCalibrationFromInputs);
   $("loadProjectDacCalButton").addEventListener("click", loadProjectDacCalibration);
@@ -1420,6 +1494,7 @@ function init() {
   updatePotReadout();
   renderDeviceTable();
   renderTiaConfig();
+  renderPlotAdcFilters();
   renderSweepPlot();
   logLine("Web GUI ready");
 }

@@ -42,11 +42,13 @@ powershell -ExecutionPolicy Bypass -File .\trust_https_cert_current_user.ps1
 - Uses the browser Web Serial API, so Chrome or Edge is recommended.
 - LAN Web Serial requires a secure context. `localhost` works over HTTP, but
   IP-address access needs HTTPS with a trusted certificate.
-- Commands match the Python GUI protocol: `D1,<code>`, `D2,<code>`, `A<device>,<code>`, `M<device>,<code>`, `INIT`, `ADC`, `PING`.
+- Commands match the firmware UART protocol: `D1,<code>`, `D2,<code>`, `A<device>,<code>`, `M<device>,<code>`, `INIT`, `ADC`, `PING`.
+- `ADC` is expected to return 8 values: `ADC,v0,v1,v2,v3,v4,v5,v6,v7`.
 - Calibrated DAC output model:
-  - D1: code 215 = -14.8 V, 1972 = 0 V, 2710 = 14.8 V.
-  - D2: code 204 = -14.8 V, 1958 = 0 V, 3710 = 14.8 V.
-- Calibrated mu output model uses measured points:
-  code 0 = -1.0 V, 60 = 4.92 V, 90 = 6.88 V, 180 = 12.75 V.
+  - D1: code 187 = -15 V, 1972 = 0 V, 3750 = 15 V.
+  - D2: code 177 = -15 V, 1958 = 0 V, 3740 = 15 V.
+- Plot defaults:
+  - DAC1 X-axis plot shows ADC4-ADC7 by default.
+  - DAC2 X-axis plot shows ADC0-ADC3 by default.
 - MAX4581 is not controlled directly by the GUI. It is enabled only inside firmware during MAX5488 programming.
 - Logs are accumulated in browser memory and can be downloaded as CSV/TXT.

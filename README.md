@@ -8,5 +8,6 @@ Open index.html through GitHub Pages, not directly from the filesystem.
 
 - 6 Color Light Control: pps/6color/
 - PCB Gaussian Web Control: pps/pcb-gaussian/
+- PPG TRNG Control Console: pps/ppg-trng/
 
 Generated from server-ops/scripts/build-github-pages.ps1.
