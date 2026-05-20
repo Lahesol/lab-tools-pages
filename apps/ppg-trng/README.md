@@ -20,8 +20,17 @@ Open `http://localhost:4173` in a Chromium-based browser, then press `Connect` a
 - LED toggle: `8888\r`
 - LED blink toggle while sampling: `7777\r`
 - ADC receive format: UART text numeric stream, for example `7568\n;`
+- Random bit receive format in `9999` mode: `0` and `1` text stream
 
 The inspected firmware uses UART RX `31`, TX `30`, and `115200` baud.
+
+## Signal Filtering
+
+The plot can display raw ADC data or browser-side filtered data without changing the firmware stream. Available filters are moving average, one-pole low-pass, one-pole high-pass, and high-pass plus low-pass band-pass. CSV export includes both raw and filtered values when a filter is active.
+
+## Random Bit Mode
+
+Pressing `9999` toggles the local random bit mode indicator and sends the firmware command. While bit mode is active, incoming `0` and `1` characters are stored separately from ADC samples and rendered as a bitmap. The bitmap panel tracks bit count, ones, zeros, and ones ratio, and can export the buffered bits as CSV.
 
 ## Portal Build
 

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=26d469e16d97" />
+    <link rel="stylesheet" href="./styles.css?v=849db27e9f2e" />
   </head>
   <body>
     <div class="app-shell">
@@ -63,9 +63,10 @@
           <section class="panel">
             <div class="panel-heading">
               <h2>Commands</h2>
+              <span id="bitModeStatus" class="mode-pill is-muted">Bit mode off</span>
             </div>
             <div class="quick-grid">
-              <button class="button secondary" data-command="9999" type="button" title="Toggle firmware bit mode">9999</button>
+              <button id="bitModeButton" class="button secondary" data-command="9999" type="button" title="Toggle random bit mode">9999</button>
               <button class="button secondary warn" data-command="0000" type="button" title="DAC sweep, then reset">0000</button>
               <button class="button secondary" data-command="8888" type="button" title="Toggle LEDs">8888</button>
               <button class="button secondary" data-command="7777" type="button" title="Toggle LED blink while sampling">7777</button>
@@ -136,6 +137,32 @@
               </div>
             </div>
 
+            <div class="filter-row">
+              <label class="compact-field" for="filterMode">
+                <span>Filter</span>
+                <select id="filterMode">
+                  <option value="raw" selected>Raw</option>
+                  <option value="moving-average">Moving avg</option>
+                  <option value="low-pass">Low-pass</option>
+                  <option value="high-pass">High-pass</option>
+                  <option value="band-pass">Band-pass</option>
+                </select>
+              </label>
+              <label id="filterWindowField" class="compact-field" for="filterWindow" hidden>
+                <span>Samples</span>
+                <input id="filterWindow" type="number" min="2" max="501" step="1" value="9" />
+              </label>
+              <label id="highCutoffField" class="compact-field" for="highCutoff" hidden>
+                <span>HP Hz</span>
+                <input id="highCutoff" type="number" min="0.01" step="0.1" value="0.5" />
+              </label>
+              <label id="lowCutoffField" class="compact-field" for="lowCutoff" hidden>
+                <span>LP Hz</span>
+                <input id="lowCutoff" type="number" min="0.01" step="0.1" value="8" />
+              </label>
+              <span id="filterSummary" class="filter-summary">Raw ADC</span>
+            </div>
+
             <div id="manualScale" class="scale-row" hidden>
               <label class="compact-field" for="yMin">
                 <span>Y min</span>
@@ -151,10 +178,52 @@
               <canvas id="plotCanvas" aria-label="ADC value plot"></canvas>
             </div>
           </section>
+
+          <section id="bitPanel" class="bit-panel" hidden>
+            <div class="plot-toolbar">
+              <div>
+                <h2>Random Bit Bitmap</h2>
+                <p id="bitCaption">Waiting for bits</p>
+              </div>
+              <div class="toolbar-actions">
+                <label class="compact-field" for="bitColumns">
+                  <span>Columns</span>
+                  <select id="bitColumns">
+                    <option value="64">64</option>
+                    <option value="128" selected>128</option>
+                    <option value="256">256</option>
+                  </select>
+                </label>
+                <button id="clearBitsButton" class="button secondary" type="button">Clear</button>
+                <button id="exportBitsButton" class="button secondary" type="button">CSV</button>
+              </div>
+            </div>
+            <div class="bit-stats" aria-live="polite">
+              <div class="bit-stat">
+                <span>Bits</span>
+                <strong id="bitCount">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Ones</span>
+                <strong id="oneCount">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Zeros</span>
+                <strong id="zeroCount">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>One ratio</span>
+                <strong id="onesRatio">--</strong>
+              </div>
+            </div>
+            <div class="bit-canvas-wrap">
+              <canvas id="bitCanvas" aria-label="Random bit bitmap"></canvas>
+            </div>
+          </section>
         </section>
       </main>
     </div>
 
-    <script src="./app.js?v=e747f6892d02" defer></script>
+    <script src="./app.js?v=01f1758281a3" defer></script>
   </body>
 </html>

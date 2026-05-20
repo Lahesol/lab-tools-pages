@@ -9,6 +9,8 @@ const els = {
   dacValueLabel: document.querySelector("#dacValueLabel"),
   sendDacButton: document.querySelector("#sendDacButton"),
   liveSend: document.querySelector("#liveSend"),
+  bitModeButton: document.querySelector("#bitModeButton"),
+  bitModeStatus: document.querySelector("#bitModeStatus"),
   log: document.querySelector("#log"),
   clearLogButton: document.querySelector("#clearLogButton"),
   latestValue: document.querySelector("#latestValue"),
@@ -22,12 +24,31 @@ const els = {
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
   yMax: document.querySelector("#yMax"),
+  filterMode: document.querySelector("#filterMode"),
+  filterWindow: document.querySelector("#filterWindow"),
+  filterWindowField: document.querySelector("#filterWindowField"),
+  highCutoff: document.querySelector("#highCutoff"),
+  highCutoffField: document.querySelector("#highCutoffField"),
+  lowCutoff: document.querySelector("#lowCutoff"),
+  lowCutoffField: document.querySelector("#lowCutoffField"),
+  filterSummary: document.querySelector("#filterSummary"),
   pauseButton: document.querySelector("#pauseButton"),
   clearSamplesButton: document.querySelector("#clearSamplesButton"),
   exportButton: document.querySelector("#exportButton"),
   plotCaption: document.querySelector("#plotCaption"),
   plotCanvas: document.querySelector("#plotCanvas"),
   canvasWrap: document.querySelector(".canvas-wrap"),
+  bitPanel: document.querySelector("#bitPanel"),
+  bitCaption: document.querySelector("#bitCaption"),
+  bitColumns: document.querySelector("#bitColumns"),
+  clearBitsButton: document.querySelector("#clearBitsButton"),
+  exportBitsButton: document.querySelector("#exportBitsButton"),
+  bitCount: document.querySelector("#bitCount"),
+  oneCount: document.querySelector("#oneCount"),
+  zeroCount: document.querySelector("#zeroCount"),
+  onesRatio: document.querySelector("#onesRatio"),
+  bitCanvas: document.querySelector("#bitCanvas"),
+  bitCanvasWrap: document.querySelector(".bit-canvas-wrap"),
 };
 
 const state = {
@@ -39,6 +60,10 @@ const state = {
   samples: [],
   totalSamples: 0,
   latest: null,
+  bitMode: false,
+  bits: [],
+  totalBits: 0,
+  maxBits: 32768,
   paused: false,
   demoTimer: null,
   demoPhase: 0,
@@ -48,11 +73,20 @@ const state = {
   lastStatsAt: 0,
   needsDraw: true,
   lastDrawAt: 0,
+  needsBitDraw: true,
+  lastBitDrawAt: 0,
 };
 
 const encoder = new TextEncoder();
 const plot = {
   ctx: els.plotCanvas.getContext("2d"),
+  width: 0,
+  height: 0,
+  dpr: 1,
+};
+
+const bitMap = {
+  ctx: els.bitCanvas.getContext("2d"),
   width: 0,
   height: 0,
   dpr: 1,
@@ -204,7 +238,18 @@ function ingestText(text) {
     delimiterIndex = state.parseBuffer.search(/[;\n]/);
   }
 
+  if (state.bitMode && /^[01\s,]+$/.test(state.parseBuffer) && /[01]/.test(state.parseBuffer)) {
+    parseBitSegment(state.parseBuffer);
+    state.parseBuffer = "";
+    return;
+  }
+
   if (state.parseBuffer.length > 96) {
+    if (state.bitMode) {
+      parseBitSegment(state.parseBuffer);
+      state.parseBuffer = "";
+      return;
+    }
     const matches = state.parseBuffer.match(/[-+]?\d+(?:\.\d+)?/g) || [];
     matches.slice(0, -1).forEach((value) => addSample(Number(value)));
     state.parseBuffer = matches.at(-1) || "";
@@ -213,10 +258,22 @@ function ingestText(text) {
 
 function parseSegment(segment) {
   if (!segment) return;
+  if (state.bitMode) {
+    parseBitSegment(segment);
+    return;
+  }
+
   const match = segment.match(/[-+]?\d+(?:\.\d+)?/);
   if (!match) return;
   const value = Number(match[0]);
   if (Number.isFinite(value)) addSample(value);
+}
+
+function parseBitSegment(segment) {
+  const compact = segment.replace(/[\s,]+/g, "");
+  if (!compact || /[^01]/.test(compact)) return false;
+  addBits([...compact].map((bit) => Number(bit)));
+  return true;
 }
 
 function addSample(value) {
@@ -239,8 +296,23 @@ function addSample(value) {
   state.needsDraw = true;
 }
 
+function addBits(bits) {
+  if (state.paused || !bits.length) return;
+
+  state.bits.push(...bits);
+  state.totalBits += bits.length;
+
+  if (state.bits.length > state.maxBits) {
+    state.bits.splice(0, state.bits.length - state.maxBits);
+  }
+
+  updateBitStats();
+  state.needsBitDraw = true;
+}
+
 function updateStats() {
-  const values = state.samples.map((sample) => sample.value);
+  const displaySamples = getDisplaySamples();
+  const values = displaySamples.map((sample) => sample.value);
   if (!values.length) {
     els.latestValue.textContent = "--";
     els.minValue.textContent = "--";
@@ -248,25 +320,61 @@ function updateStats() {
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
     els.sampleCount.textContent = String(state.totalSamples);
-    els.plotCaption.textContent = "Waiting for samples";
+    els.plotCaption.textContent = `Waiting for samples | ${getFilterDescription()}`;
     return;
   }
 
   const min = Math.min(...values);
   const max = Math.max(...values);
   const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const first = state.samples[0];
-  const last = state.samples[state.samples.length - 1];
+  const first = displaySamples[0];
+  const last = displaySamples[displaySamples.length - 1];
   const elapsed = Math.max(0.001, (last.t - first.t) / 1000);
-  const rate = state.samples.length > 1 ? (state.samples.length - 1) / elapsed : 0;
+  const rate = displaySamples.length > 1 ? (displaySamples.length - 1) / elapsed : 0;
 
-  els.latestValue.textContent = formatNumber(state.latest);
+  els.latestValue.textContent = formatNumber(values.at(-1));
   els.minValue.textContent = formatNumber(min);
   els.maxValue.textContent = formatNumber(max);
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
   els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view`;
+  els.plotCaption.textContent = `${values.length} samples in view | ${getFilterDescription()}`;
+}
+
+function setBitMode(enabled) {
+  state.bitMode = enabled;
+  state.parseBuffer = "";
+  updateBitModeUi();
+  addLog("SYS", `Random bit mode ${enabled ? "enabled" : "disabled"}`);
+
+  if (enabled) {
+    state.needsBitDraw = true;
+    window.requestAnimationFrame(resizeBitCanvas);
+  }
+}
+
+function updateBitModeUi() {
+  els.bitModeButton.classList.toggle("is-active", state.bitMode);
+  els.bitModeStatus.textContent = state.bitMode ? "Bit mode on" : "Bit mode off";
+  els.bitModeStatus.classList.toggle("is-muted", !state.bitMode);
+  els.bitPanel.hidden = !state.bitMode && state.bits.length === 0;
+}
+
+function updateBitStats() {
+  const ones = state.bits.reduce((sum, bit) => sum + bit, 0);
+  const zeros = state.bits.length - ones;
+  const ratio = state.bits.length ? ones / state.bits.length : null;
+
+  els.bitCount.textContent = String(state.totalBits);
+  els.oneCount.textContent = String(ones);
+  els.zeroCount.textContent = String(zeros);
+  els.onesRatio.textContent = ratio === null ? "--" : ratio.toFixed(4);
+  els.bitCaption.textContent = state.bits.length
+    ? `${state.bits.length} bits buffered`
+    : state.bitMode
+      ? "Waiting for bits"
+      : "Bit mode idle";
+  updateBitModeUi();
 }
 
 function formatNumber(value) {
@@ -274,6 +382,132 @@ function formatNumber(value) {
   if (Math.abs(value) >= 100) return value.toFixed(0);
   if (Math.abs(value) >= 10) return value.toFixed(1);
   return value.toFixed(3);
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function clampPositive(value, fallback) {
+  const number = Number.parseFloat(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return number;
+}
+
+function getFilterSettings() {
+  const mode = els.filterMode.value;
+  const windowSize = clampInteger(els.filterWindow.value, 2, 501, 9);
+  const highCutoff = clampPositive(els.highCutoff.value, 0.5);
+  let lowCutoff = clampPositive(els.lowCutoff.value, 8);
+
+  if (mode === "band-pass" && lowCutoff <= highCutoff) {
+    lowCutoff = highCutoff + 0.01;
+  }
+
+  return { mode, windowSize, highCutoff, lowCutoff };
+}
+
+function formatHz(value) {
+  if (!Number.isFinite(value)) return "--";
+  return value.toFixed(value >= 10 ? 1 : 2).replace(/\.?0+$/, "");
+}
+
+function getFilterDescription(settings = getFilterSettings()) {
+  if (settings.mode === "moving-average") return `Moving avg ${settings.windowSize} samples`;
+  if (settings.mode === "low-pass") return `LP ${formatHz(settings.lowCutoff)} Hz`;
+  if (settings.mode === "high-pass") return `HP ${formatHz(settings.highCutoff)} Hz`;
+  if (settings.mode === "band-pass") {
+    return `BP ${formatHz(settings.highCutoff)}-${formatHz(settings.lowCutoff)} Hz`;
+  }
+  return "Raw ADC";
+}
+
+function updateFilterUi() {
+  const mode = els.filterMode.value;
+  els.filterWindowField.hidden = mode !== "moving-average";
+  els.highCutoffField.hidden = mode !== "high-pass" && mode !== "band-pass";
+  els.lowCutoffField.hidden = mode !== "low-pass" && mode !== "band-pass";
+  els.filterSummary.textContent = getFilterDescription();
+}
+
+function getDisplaySamples() {
+  const settings = getFilterSettings();
+  if (settings.mode === "raw") return state.samples;
+
+  const filteredValues = applyFilter(state.samples, settings);
+  return state.samples.map((sample, index) => ({
+    t: sample.t,
+    rawValue: sample.value,
+    value: filteredValues[index],
+  }));
+}
+
+function applyFilter(samples, settings) {
+  const values = samples.map((sample) => sample.value);
+  if (values.length < 2) return values;
+
+  if (settings.mode === "moving-average") {
+    return applyMovingAverage(values, settings.windowSize);
+  }
+  if (settings.mode === "low-pass") {
+    return applyLowPass(samples, values, settings.lowCutoff);
+  }
+  if (settings.mode === "high-pass") {
+    return applyHighPass(samples, values, settings.highCutoff);
+  }
+  if (settings.mode === "band-pass") {
+    const highPassed = applyHighPass(samples, values, settings.highCutoff);
+    return applyLowPass(samples, highPassed, settings.lowCutoff);
+  }
+  return values;
+}
+
+function applyMovingAverage(values, windowSize) {
+  const filtered = [];
+  let sum = 0;
+  for (let index = 0; index < values.length; index += 1) {
+    sum += values[index];
+    if (index >= windowSize) sum -= values[index - windowSize];
+    filtered.push(sum / Math.min(index + 1, windowSize));
+  }
+  return filtered;
+}
+
+function applyLowPass(samples, values, cutoffHz) {
+  const filtered = [values[0]];
+  const rc = 1 / (2 * Math.PI * cutoffHz);
+  let previous = values[0];
+
+  for (let index = 1; index < values.length; index += 1) {
+    const dt = getDeltaSeconds(samples, index);
+    const alpha = dt / (rc + dt);
+    previous += alpha * (values[index] - previous);
+    filtered.push(previous);
+  }
+  return filtered;
+}
+
+function applyHighPass(samples, values, cutoffHz) {
+  const filtered = [0];
+  const rc = 1 / (2 * Math.PI * cutoffHz);
+  let previousOutput = 0;
+  let previousInput = values[0];
+
+  for (let index = 1; index < values.length; index += 1) {
+    const dt = getDeltaSeconds(samples, index);
+    const alpha = rc / (rc + dt);
+    previousOutput = alpha * (previousOutput + values[index] - previousInput);
+    previousInput = values[index];
+    filtered.push(previousOutput);
+  }
+  return filtered;
+}
+
+function getDeltaSeconds(samples, index) {
+  const dt = (samples[index].t - samples[index - 1].t) / 1000;
+  return Number.isFinite(dt) && dt > 0 ? dt : 0.001;
 }
 
 async function sendCommand(value) {
@@ -311,6 +545,11 @@ async function sendCommand(value) {
   }
 }
 
+async function toggleBitModeCommand() {
+  await sendCommand("9999");
+  setBitMode(!state.bitMode);
+}
+
 function clearSamples() {
   state.samples = [];
   state.totalSamples = 0;
@@ -327,10 +566,17 @@ function exportCsv() {
   }
 
   const start = state.samples[0].t;
-  const rows = ["time_ms,value"];
-  for (const sample of state.samples) {
-    rows.push(`${(sample.t - start).toFixed(3)},${sample.value}`);
-  }
+  const settings = getFilterSettings();
+  const displaySamples = getDisplaySamples();
+  const rows = settings.mode === "raw" ? ["time_ms,value"] : ["time_ms,raw_value,filtered_value"];
+  displaySamples.forEach((sample, index) => {
+    const time = (sample.t - start).toFixed(3);
+    if (settings.mode === "raw") {
+      rows.push(`${time},${sample.value}`);
+    } else {
+      rows.push(`${time},${state.samples[index].value},${sample.value}`);
+    }
+  });
 
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -339,7 +585,36 @@ function exportCsv() {
   link.download = `ppg_adc_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  addLog("SYS", `Exported ${state.samples.length} samples`);
+  addLog("SYS", `Exported ${displaySamples.length} samples`);
+}
+
+function clearBits() {
+  state.bits = [];
+  state.totalBits = 0;
+  updateBitStats();
+  state.needsBitDraw = true;
+  drawBitMap();
+}
+
+function exportBitsCsv() {
+  if (!state.bits.length) {
+    addLog("SYS", "No bits to export");
+    return;
+  }
+
+  const rows = ["index,bit"];
+  state.bits.forEach((bit, index) => {
+    rows.push(`${index},${bit}`);
+  });
+
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `ppg_bits_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${state.bits.length} bits`);
 }
 
 function toggleDemo() {
@@ -352,6 +627,12 @@ function toggleDemo() {
   }
 
   state.demoTimer = window.setInterval(() => {
+    if (state.bitMode) {
+      const batch = Array.from({ length: 12 }, () => (Math.random() > 0.5 ? 1 : 0));
+      addBits(batch);
+      return;
+    }
+
     const dac = clampDac(els.dacInput.value);
     state.demoPhase += 0.18;
     const baseline = 7200 + (dac - 2056) * 0.42;
@@ -373,6 +654,20 @@ function resizeCanvas() {
   plot.ctx.setTransform(plot.dpr, 0, 0, plot.dpr, 0, 0);
   state.needsDraw = true;
   drawPlot();
+}
+
+function resizeBitCanvas() {
+  if (els.bitPanel.hidden) return;
+
+  const rect = els.bitCanvas.getBoundingClientRect();
+  bitMap.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  bitMap.width = Math.floor(rect.width);
+  bitMap.height = Math.floor(rect.height);
+  els.bitCanvas.width = Math.floor(bitMap.width * bitMap.dpr);
+  els.bitCanvas.height = Math.floor(bitMap.height * bitMap.dpr);
+  bitMap.ctx.setTransform(bitMap.dpr, 0, 0, bitMap.dpr, 0, 0);
+  state.needsBitDraw = true;
+  drawBitMap();
 }
 
 function getYRange(values) {
@@ -411,10 +706,12 @@ function drawPlot() {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
 
-  const values = state.samples.map((sample) => sample.value);
+  const displaySamples = getDisplaySamples();
+  const values = displaySamples.map((sample) => sample.value);
   const { min, max } = getYRange(values);
 
   drawGrid(ctx, margin, chartW, chartH, min, max);
+  drawZeroLine(ctx, margin, chartW, chartH, min, max);
 
   if (values.length < 2) {
     ctx.fillStyle = "#66746f";
@@ -450,6 +747,21 @@ function drawPlot() {
   ctx.restore();
 }
 
+function drawZeroLine(ctx, margin, chartW, chartH, min, max) {
+  if (min >= 0 || max <= 0) return;
+
+  const y = margin.top + (1 - (0 - min) / (max - min)) * chartH;
+  ctx.save();
+  ctx.strokeStyle = "#f0a43a";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.moveTo(margin.left, y);
+  ctx.lineTo(margin.left + chartW, y);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawGrid(ctx, margin, chartW, chartH, min, max) {
   ctx.strokeStyle = "#e5ebe8";
   ctx.lineWidth = 1;
@@ -480,12 +792,69 @@ function drawGrid(ctx, margin, chartW, chartH, min, max) {
   ctx.strokeRect(margin.left, margin.top, chartW, chartH);
 }
 
+function drawBitMap() {
+  if (els.bitPanel.hidden) return;
+
+  const ctx = bitMap.ctx;
+  const width = bitMap.width;
+  const height = bitMap.height;
+  if (!width || !height) return;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  const columns = clampInteger(els.bitColumns.value, 32, 256, 128);
+  const cell = Math.max(2, Math.floor(width / columns));
+  const rows = Math.max(1, Math.floor(height / cell));
+  const capacity = columns * rows;
+  const visibleBits = state.bits.slice(-capacity);
+
+  if (!visibleBits.length) {
+    ctx.fillStyle = "#66746f";
+    ctx.font = "700 13px Segoe UI, sans-serif";
+    ctx.fillText("No random bits", 14, 28);
+    return;
+  }
+
+  visibleBits.forEach((bit, index) => {
+    const x = (index % columns) * cell;
+    const y = Math.floor(index / columns) * cell;
+    ctx.fillStyle = bit ? "#17201d" : "#ffffff";
+    ctx.fillRect(x, y, cell, cell);
+  });
+
+  if (cell >= 5) {
+    ctx.strokeStyle = "rgba(216, 224, 220, 0.65)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= columns; x += 1) {
+      const px = x * cell + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, Math.min(height, rows * cell));
+      ctx.stroke();
+    }
+    for (let y = 0; y <= rows; y += 1) {
+      const py = y * cell + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, py);
+      ctx.lineTo(Math.min(width, columns * cell), py);
+      ctx.stroke();
+    }
+  }
+}
+
 function animationLoop() {
   const now = performance.now();
   if (state.needsDraw && now - state.lastDrawAt > 33) {
     drawPlot();
     state.lastDrawAt = now;
     state.needsDraw = false;
+  }
+  if (state.needsBitDraw && now - state.lastBitDrawAt > 33) {
+    drawBitMap();
+    state.lastBitDrawAt = now;
+    state.needsBitDraw = false;
   }
   requestAnimationFrame(animationLoop);
 }
@@ -509,7 +878,13 @@ function bindEvents() {
   });
 
   document.querySelectorAll("[data-command]").forEach((button) => {
-    button.addEventListener("click", () => sendCommand(button.dataset.command));
+    button.addEventListener("click", () => {
+      if (button.dataset.command === "9999") {
+        toggleBitModeCommand();
+        return;
+      }
+      sendCommand(button.dataset.command);
+    });
   });
 
   els.clearLogButton.addEventListener("click", () => {
@@ -538,6 +913,19 @@ function bindEvents() {
     state.needsDraw = true;
   });
 
+  [els.filterMode, els.filterWindow, els.highCutoff, els.lowCutoff].forEach((control) => {
+    control.addEventListener("input", () => {
+      updateFilterUi();
+      updateStats();
+      state.needsDraw = true;
+    });
+    control.addEventListener("change", () => {
+      updateFilterUi();
+      updateStats();
+      state.needsDraw = true;
+    });
+  });
+
   els.pauseButton.addEventListener("click", () => {
     state.paused = !state.paused;
     els.pauseButton.textContent = state.paused ? "Resume" : "Pause";
@@ -547,6 +935,12 @@ function bindEvents() {
 
   els.clearSamplesButton.addEventListener("click", clearSamples);
   els.exportButton.addEventListener("click", exportCsv);
+  els.clearBitsButton.addEventListener("click", clearBits);
+  els.exportBitsButton.addEventListener("click", exportBitsCsv);
+  els.bitColumns.addEventListener("change", () => {
+    state.needsBitDraw = true;
+    resizeBitCanvas();
+  });
   window.addEventListener("beforeunload", () => {
     state.keepReading = false;
   });
@@ -560,8 +954,11 @@ function init() {
   bindEvents();
   setDacValue(2056, "init");
   setConnectedUi(false);
+  updateFilterUi();
+  updateBitStats();
   resizeCanvas();
   new ResizeObserver(resizeCanvas).observe(els.canvasWrap || els.plotCanvas);
+  new ResizeObserver(resizeBitCanvas).observe(els.bitCanvasWrap || els.bitCanvas);
   updateStats();
   animationLoop();
 }
