@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=849db27e9f2e" />
+    <link rel="stylesheet" href="./styles.css?v=a4571006e0c1" />
   </head>
   <body>
     <div class="app-shell">
@@ -25,15 +25,22 @@
             <div class="panel-heading">
               <h2>Connection</h2>
             </div>
-            <label class="field-label" for="baudRate">Baud rate</label>
+            <label class="field-label" for="transportMode">Transport</label>
             <div class="connect-row">
+              <select id="transportMode">
+                <option value="serial" selected>USB Serial</option>
+                <option value="bluetooth">Bluetooth LE</option>
+              </select>
+              <button id="connectButton" class="button primary" type="button">Connect</button>
+            </div>
+            <div id="serialOptions" class="serial-options">
+              <label class="field-label" for="baudRate">Baud rate</label>
               <select id="baudRate">
                 <option value="115200" selected>115200</option>
                 <option value="230400">230400</option>
                 <option value="460800">460800</option>
                 <option value="921600">921600</option>
               </select>
-              <button id="connectButton" class="button primary" type="button">Connect</button>
             </div>
             <button id="demoButton" class="button secondary wide" type="button">Demo stream</button>
           </section>
@@ -182,7 +189,7 @@
           <section id="bitPanel" class="bit-panel" hidden>
             <div class="plot-toolbar">
               <div>
-                <h2>Random Bit Bitmap</h2>
+                <h2>Bit Bitmap</h2>
                 <p id="bitCaption">Waiting for bits</p>
               </div>
               <div class="toolbar-actions">
@@ -200,7 +207,7 @@
             </div>
             <div class="bit-stats" aria-live="polite">
               <div class="bit-stat">
-                <span>Bits</span>
+                <span>Plane bits</span>
                 <strong id="bitCount">0</strong>
               </div>
               <div class="bit-stat">
@@ -224,6 +231,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=01f1758281a3" defer></script>
+    <script src="./app.js?v=0dcff1f840cb" defer></script>
   </body>
 </html>

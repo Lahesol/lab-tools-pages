@@ -1,6 +1,8 @@
 const els = {
   serialSupport: document.querySelector("#serialSupport"),
   connectionStatus: document.querySelector("#connectionStatus"),
+  transportMode: document.querySelector("#transportMode"),
+  serialOptions: document.querySelector("#serialOptions"),
   baudRate: document.querySelector("#baudRate"),
   connectButton: document.querySelector("#connectButton"),
   demoButton: document.querySelector("#demoButton"),
@@ -52,11 +54,17 @@ const els = {
 };
 
 const state = {
+  transport: "none",
   port: null,
   reader: null,
+  bleDevice: null,
+  bleServer: null,
+  bleWriteCharacteristic: null,
+  bleNotifyCharacteristic: null,
   keepReading: false,
   decoder: new TextDecoder(),
   parseBuffer: "",
+  binaryBuffer: [],
   samples: [],
   totalSamples: 0,
   latest: null,
@@ -64,6 +72,15 @@ const state = {
   bits: [],
   totalBits: 0,
   maxBits: 32768,
+  bitPlane: [],
+  bitPlaneIndex: 0,
+  bitPlaneFilled: 0,
+  bitPlaneCapacity: 0,
+  bitPlaneCycles: 0,
+  bitSource: "idle",
+  noiseBaseline: null,
+  noiseWarmup: 0,
+  noisePairBit: null,
   paused: false,
   demoTimer: null,
   demoPhase: 0,
@@ -78,6 +95,12 @@ const state = {
 };
 
 const encoder = new TextEncoder();
+const NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_RX_WRITE_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_TX_NOTIFY_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const NOISE_BASELINE_ALPHA = 0.02;
+const NOISE_WARMUP_SAMPLES = 12;
+
 const plot = {
   ctx: els.plotCanvas.getContext("2d"),
   width: 0,
@@ -137,10 +160,77 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function getSelectedTransportName() {
+  return els.transportMode.value === "bluetooth" ? "Bluetooth LE" : "USB Serial";
+}
+
+function getActiveTransportName() {
+  if (state.transport === "bluetooth") return "Bluetooth LE";
+  if (state.transport === "serial") return "USB Serial";
+  return getSelectedTransportName();
+}
+
+function isConnected() {
+  if (state.transport === "serial") return Boolean(state.port);
+  if (state.transport === "bluetooth") return Boolean(state.bleDevice?.gatt?.connected);
+  return false;
+}
+
+function updateTransportControls() {
+  const isSerial = els.transportMode.value === "serial";
+  const connected = isConnected();
+  els.serialOptions.hidden = !isSerial;
+  els.transportMode.disabled = connected;
+  els.baudRate.disabled = connected || !isSerial;
+  updateTransportSupport();
+}
+
+function updateTransportSupport() {
+  const hasSerial = "serial" in navigator;
+  const hasBluetooth = "bluetooth" in navigator;
+  const mode = els.transportMode.value;
+
+  if (mode === "bluetooth") {
+    els.serialSupport.textContent = hasBluetooth ? "Web Bluetooth ready" : "Web Bluetooth unavailable";
+    els.serialSupport.classList.toggle("is-bad", !hasBluetooth);
+    els.serialSupport.classList.toggle("is-muted", !hasBluetooth);
+    return;
+  }
+
+  els.serialSupport.textContent = hasSerial ? "Web Serial ready" : "Web Serial unavailable";
+  els.serialSupport.classList.toggle("is-bad", !hasSerial);
+  els.serialSupport.classList.toggle("is-muted", !hasSerial);
+}
+
+function resetReceiveState() {
+  state.decoder = new TextDecoder();
+  state.parseBuffer = "";
+  state.binaryBuffer = [];
+}
+
 function setConnectedUi(connected) {
   els.connectButton.textContent = connected ? "Disconnect" : "Connect";
-  els.baudRate.disabled = connected;
-  setConnectionStatus(connected ? "Connected" : "Disconnected", connected ? "ok" : "muted");
+  updateTransportControls();
+  setConnectionStatus(
+    connected ? `${getActiveTransportName()} connected` : "Disconnected",
+    connected ? "ok" : "muted",
+  );
+}
+
+async function connectSelectedTransport() {
+  if (els.transportMode.value === "bluetooth") {
+    await connectBluetooth();
+    return;
+  }
+  await connectSerial();
+}
+
+async function disconnectActiveTransport() {
+  if (state.transport === "bluetooth" || state.bleDevice) {
+    await disconnectBluetooth();
+    return;
+  }
+  await disconnectSerial();
 }
 
 async function connectSerial() {
@@ -162,12 +252,20 @@ async function connectSerial() {
     });
 
     state.keepReading = true;
-    state.decoder = new TextDecoder();
+    state.transport = "serial";
+    resetReceiveState();
     setConnectedUi(true);
     addLog("SYS", `Serial opened at ${baudRate}`);
     readLoop();
   } catch (error) {
     addLog("ERR", error.message || error, true);
+    try {
+      if (state.port) await state.port.close();
+    } catch {
+      // Ignore cleanup errors after a failed open.
+    }
+    state.transport = "none";
+    state.port = null;
     setConnectedUi(false);
   }
 }
@@ -194,9 +292,102 @@ async function disconnectSerial() {
   } catch (error) {
     addLog("ERR", error.message || error, true);
   } finally {
+    state.transport = "none";
     state.port = null;
     setConnectedUi(false);
   }
+}
+
+async function connectBluetooth() {
+  if (!("bluetooth" in navigator)) {
+    addLog("ERR", "Web Bluetooth is not available in this browser", true);
+    setConnectionStatus("No Web Bluetooth", "bad");
+    return;
+  }
+
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [NUS_SERVICE_UUID],
+    });
+
+    state.bleDevice = device;
+    device.addEventListener("gattserverdisconnected", handleBluetoothDisconnected);
+
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+    const writeCharacteristic = await service.getCharacteristic(NUS_RX_WRITE_UUID);
+    const notifyCharacteristic = await service.getCharacteristic(NUS_TX_NOTIFY_UUID);
+
+    await notifyCharacteristic.startNotifications();
+    notifyCharacteristic.addEventListener("characteristicvaluechanged", handleBluetoothNotification);
+
+    state.bleServer = server;
+    state.bleWriteCharacteristic = writeCharacteristic;
+    state.bleNotifyCharacteristic = notifyCharacteristic;
+    state.transport = "bluetooth";
+    resetReceiveState();
+    setConnectedUi(true);
+    addLog("SYS", `Bluetooth connected to ${device.name || "NUS device"}`);
+  } catch (error) {
+    addLog("ERR", error.message || error, true);
+    await disconnectBluetooth({ silent: true });
+    setConnectedUi(false);
+  }
+}
+
+async function disconnectBluetooth(options = {}) {
+  window.clearTimeout(state.liveSendTimer);
+  state.liveSendTimer = null;
+
+  try {
+    await state.writeQueue.catch(() => {});
+    if (state.bleNotifyCharacteristic) {
+      state.bleNotifyCharacteristic.removeEventListener(
+        "characteristicvaluechanged",
+        handleBluetoothNotification,
+      );
+      try {
+        await state.bleNotifyCharacteristic.stopNotifications();
+      } catch (error) {
+        if (!options.silent) addLog("ERR", error.message || error, true);
+      }
+    }
+
+    if (state.bleDevice) {
+      state.bleDevice.removeEventListener("gattserverdisconnected", handleBluetoothDisconnected);
+      if (state.bleDevice.gatt?.connected) {
+        state.bleDevice.gatt.disconnect();
+      }
+    }
+
+    if (!options.silent) addLog("SYS", "Bluetooth closed");
+  } catch (error) {
+    if (!options.silent) addLog("ERR", error.message || error, true);
+  } finally {
+    state.bleDevice = null;
+    state.bleServer = null;
+    state.bleWriteCharacteristic = null;
+    state.bleNotifyCharacteristic = null;
+    state.transport = "none";
+    setConnectedUi(false);
+  }
+}
+
+function handleBluetoothDisconnected() {
+  state.bleDevice = null;
+  state.bleServer = null;
+  state.bleWriteCharacteristic = null;
+  state.bleNotifyCharacteristic = null;
+  state.transport = "none";
+  setConnectedUi(false);
+  addLog("SYS", "Bluetooth disconnected");
+}
+
+function handleBluetoothNotification(event) {
+  const value = event.target.value;
+  const bytes = new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  ingestBytes(bytes, "bluetooth");
 }
 
 async function readLoop() {
@@ -222,9 +413,48 @@ async function readLoop() {
   }
 }
 
-function ingestBytes(bytes) {
+function ingestBytes(bytes, source = "serial") {
+  if (source === "bluetooth" && !isTextPayload(bytes)) {
+    ingestBinarySamples(bytes);
+    return;
+  }
+
   const text = state.decoder.decode(bytes, { stream: true });
   ingestText(text);
+}
+
+function isTextPayload(bytes) {
+  const usefulBytes = [...bytes].filter((byte) => byte !== 0);
+  if (!usefulBytes.length) return false;
+
+  return usefulBytes.every((byte) => (
+    byte === 9 ||
+    byte === 10 ||
+    byte === 13 ||
+    byte === 32 ||
+    byte === 43 ||
+    byte === 44 ||
+    byte === 45 ||
+    byte === 46 ||
+    byte === 59 ||
+    (byte >= 48 && byte <= 57)
+  ));
+}
+
+function ingestBinarySamples(bytes) {
+  state.binaryBuffer.push(...bytes);
+
+  while (state.binaryBuffer.length >= 2) {
+    const low = state.binaryBuffer.shift();
+    const high = state.binaryBuffer.shift();
+    const value = low | (high << 8);
+
+    if (state.bitMode) {
+      addBits([value ? 1 : 0]);
+    } else {
+      addSample(value);
+    }
+  }
 }
 
 function ingestText(text) {
@@ -293,21 +523,62 @@ function addSample(value) {
     state.lastStatsAt = now;
     updateStats();
   }
+  extractNoiseBit(value);
   state.needsDraw = true;
 }
 
-function addBits(bits) {
+function extractNoiseBit(value) {
+  if (state.bitMode || !Number.isFinite(value)) return;
+
+  if (state.noiseBaseline === null) {
+    state.noiseBaseline = value;
+    state.noiseWarmup = 1;
+    return;
+  }
+
+  const residual = value - state.noiseBaseline;
+  state.noiseBaseline += NOISE_BASELINE_ALPHA * residual;
+  state.noiseWarmup += 1;
+
+  if (state.noiseWarmup < NOISE_WARMUP_SAMPLES || residual === 0) return;
+
+  const rawBit = residual > 0 ? 1 : 0;
+  if (state.noisePairBit === null) {
+    state.noisePairBit = rawBit;
+    return;
+  }
+
+  const previousBit = state.noisePairBit;
+  state.noisePairBit = null;
+
+  if (previousBit === rawBit) return;
+  addBits([previousBit === 0 && rawBit === 1 ? 0 : 1], "noise");
+}
+
+function resetNoiseExtractor() {
+  state.noiseBaseline = null;
+  state.noiseWarmup = 0;
+  state.noisePairBit = null;
+}
+
+function addBits(bits, source = state.bitMode ? "mode" : "noise") {
   if (state.paused || !bits.length) return;
 
-  state.bits.push(...bits);
-  state.totalBits += bits.length;
+  const normalizedBits = bits.map((bit) => (bit ? 1 : 0));
+  state.bits.push(...normalizedBits);
+  state.totalBits += normalizedBits.length;
+  state.bitSource = source;
 
   if (state.bits.length > state.maxBits) {
     state.bits.splice(0, state.bits.length - state.maxBits);
   }
 
+  updateBitModeUi();
+  ensureBitPlaneCapacity();
+  normalizedBits.forEach(writeBitToPlane);
   updateBitStats();
   state.needsBitDraw = true;
+  window.requestAnimationFrame(resizeBitCanvas);
 }
 
 function updateStats() {
@@ -344,6 +615,7 @@ function updateStats() {
 function setBitMode(enabled) {
   state.bitMode = enabled;
   state.parseBuffer = "";
+  resetNoiseExtractor();
   updateBitModeUi();
   addLog("SYS", `Random bit mode ${enabled ? "enabled" : "disabled"}`);
 
@@ -361,20 +633,72 @@ function updateBitModeUi() {
 }
 
 function updateBitStats() {
-  const ones = state.bits.reduce((sum, bit) => sum + bit, 0);
-  const zeros = state.bits.length - ones;
-  const ratio = state.bits.length ? ones / state.bits.length : null;
+  const planeBits = state.bitPlane.filter((bit) => bit === 0 || bit === 1);
+  const ones = planeBits.reduce((sum, bit) => sum + bit, 0);
+  const zeros = planeBits.length - ones;
+  const ratio = planeBits.length ? ones / planeBits.length : null;
+  const capacity = state.bitPlaneCapacity || getBitPlaneGeometry().capacity;
+  const source = state.bitMode ? "9999 mode" : "ADC noise";
 
-  els.bitCount.textContent = String(state.totalBits);
+  els.bitCount.textContent = `${state.bitPlaneFilled}/${capacity}`;
   els.oneCount.textContent = String(ones);
   els.zeroCount.textContent = String(zeros);
   els.onesRatio.textContent = ratio === null ? "--" : ratio.toFixed(4);
-  els.bitCaption.textContent = state.bits.length
-    ? `${state.bits.length} bits buffered`
+  els.bitCaption.textContent = planeBits.length
+    ? `${source} | plane ${state.bitPlaneCycles + 1} | total ${state.totalBits}`
     : state.bitMode
       ? "Waiting for bits"
-      : "Bit mode idle";
+      : "Waiting for ADC noise bits";
   updateBitModeUi();
+}
+
+function getBitColumns() {
+  return clampInteger(els.bitColumns.value, 32, 256, 128);
+}
+
+function getBitPlaneGeometry() {
+  const columns = getBitColumns();
+  const rect = els.bitCanvas.getBoundingClientRect();
+  const width = bitMap.width || Math.floor(rect.width);
+  const height = bitMap.height || Math.floor(rect.height);
+
+  if (!width || !height) {
+    return { columns, rows: 64, cell: 2, capacity: columns * 64 };
+  }
+
+  const cell = Math.max(2, Math.floor(width / columns));
+  const rows = Math.max(1, Math.floor(height / cell));
+  return { columns, rows, cell, capacity: columns * rows };
+}
+
+function ensureBitPlaneCapacity() {
+  const { capacity } = getBitPlaneGeometry();
+  if (capacity <= 0 || state.bitPlaneCapacity === capacity) return;
+
+  state.bitPlane = new Array(capacity).fill(null);
+  state.bitPlaneIndex = 0;
+  state.bitPlaneFilled = 0;
+  state.bitPlaneCapacity = capacity;
+  state.bitPlaneCycles = 0;
+}
+
+function writeBitToPlane(bit) {
+  ensureBitPlaneCapacity();
+  if (!state.bitPlaneCapacity) return;
+
+  if (state.bitPlaneIndex === 0 && state.bitPlaneFilled === state.bitPlaneCapacity) {
+    state.bitPlane.fill(null);
+    state.bitPlaneFilled = 0;
+    state.bitPlaneCycles += 1;
+  }
+
+  state.bitPlane[state.bitPlaneIndex] = bit ? 1 : 0;
+  state.bitPlaneIndex += 1;
+  state.bitPlaneFilled = Math.min(state.bitPlaneFilled + 1, state.bitPlaneCapacity);
+
+  if (state.bitPlaneIndex >= state.bitPlaneCapacity) {
+    state.bitPlaneIndex = 0;
+  }
 }
 
 function formatNumber(value) {
@@ -513,8 +837,9 @@ function getDeltaSeconds(samples, index) {
 async function sendCommand(value) {
   const command = String(value).trim();
   if (!command) return;
+  const payload = encoder.encode(`${command}\r`);
 
-  if (state.port?.writable) {
+  if (state.transport === "serial" && state.port?.writable) {
     state.writeQueue = state.writeQueue
       .catch(() => {})
       .then(async () => {
@@ -525,7 +850,7 @@ async function sendCommand(value) {
             return;
           }
           writer = state.port.writable.getWriter();
-          await writer.write(encoder.encode(`${command}\r`));
+          await writer.write(payload);
           addLog("TX", command);
         } catch (error) {
           addLog("ERR", error.message || error, true);
@@ -540,9 +865,40 @@ async function sendCommand(value) {
         }
       });
     await state.writeQueue;
+  } else if (state.transport === "bluetooth" && state.bleWriteCharacteristic) {
+    state.writeQueue = state.writeQueue
+      .catch(() => {})
+      .then(async () => {
+        try {
+          if (!state.bleWriteCharacteristic || !state.bleDevice?.gatt?.connected) {
+            addLog("TX", `${command} (not connected)`);
+            return;
+          }
+          await writeBluetoothPayload(payload);
+          addLog("TX", `${command} (BLE)`);
+        } catch (error) {
+          addLog("ERR", error.message || error, true);
+        }
+      });
+    await state.writeQueue;
   } else {
     addLog("TX", `${command} (not connected)`);
   }
+}
+
+async function writeBluetoothPayload(payload) {
+  const characteristic = state.bleWriteCharacteristic;
+  if (!characteristic) throw new Error("Bluetooth write characteristic is not ready");
+
+  if (characteristic.properties.writeWithoutResponse && characteristic.writeValueWithoutResponse) {
+    await characteristic.writeValueWithoutResponse(payload);
+    return;
+  }
+  if (characteristic.writeValueWithResponse) {
+    await characteristic.writeValueWithResponse(payload);
+    return;
+  }
+  await characteristic.writeValue(payload);
 }
 
 async function toggleBitModeCommand() {
@@ -554,6 +910,7 @@ function clearSamples() {
   state.samples = [];
   state.totalSamples = 0;
   state.latest = null;
+  resetNoiseExtractor();
   updateStats();
   state.needsDraw = true;
   drawPlot();
@@ -591,6 +948,11 @@ function exportCsv() {
 function clearBits() {
   state.bits = [];
   state.totalBits = 0;
+  state.bitPlane = new Array(state.bitPlaneCapacity || getBitPlaneGeometry().capacity).fill(null);
+  state.bitPlaneIndex = 0;
+  state.bitPlaneFilled = 0;
+  state.bitPlaneCycles = 0;
+  state.bitSource = state.bitMode ? "mode" : "noise";
   updateBitStats();
   state.needsBitDraw = true;
   drawBitMap();
@@ -666,6 +1028,7 @@ function resizeBitCanvas() {
   els.bitCanvas.width = Math.floor(bitMap.width * bitMap.dpr);
   els.bitCanvas.height = Math.floor(bitMap.height * bitMap.dpr);
   bitMap.ctx.setTransform(bitMap.dpr, 0, 0, bitMap.dpr, 0, 0);
+  ensureBitPlaneCapacity();
   state.needsBitDraw = true;
   drawBitMap();
 }
@@ -804,25 +1167,32 @@ function drawBitMap() {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
 
-  const columns = clampInteger(els.bitColumns.value, 32, 256, 128);
-  const cell = Math.max(2, Math.floor(width / columns));
-  const rows = Math.max(1, Math.floor(height / cell));
-  const capacity = columns * rows;
-  const visibleBits = state.bits.slice(-capacity);
+  ensureBitPlaneCapacity();
+  const { columns, rows, cell } = getBitPlaneGeometry();
+  const visibleBits = state.bitPlane;
 
-  if (!visibleBits.length) {
+  if (!state.bitPlaneFilled) {
     ctx.fillStyle = "#66746f";
     ctx.font = "700 13px Segoe UI, sans-serif";
-    ctx.fillText("No random bits", 14, 28);
+    ctx.fillText(state.bitMode ? "No random bits" : "No ADC noise bits", 14, 28);
     return;
   }
 
   visibleBits.forEach((bit, index) => {
+    if (bit !== 0 && bit !== 1) return;
     const x = (index % columns) * cell;
     const y = Math.floor(index / columns) * cell;
     ctx.fillStyle = bit ? "#17201d" : "#ffffff";
     ctx.fillRect(x, y, cell, cell);
   });
+
+  if (state.bitPlaneIndex < state.bitPlaneCapacity) {
+    const x = (state.bitPlaneIndex % columns) * cell;
+    const y = Math.floor(state.bitPlaneIndex / columns) * cell;
+    ctx.strokeStyle = "#f0a43a";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, Math.max(1, cell - 2), Math.max(1, cell - 2));
+  }
 
   if (cell >= 5) {
     ctx.strokeStyle = "rgba(216, 224, 220, 0.65)";
@@ -861,9 +1231,10 @@ function animationLoop() {
 
 function bindEvents() {
   els.connectButton.addEventListener("click", () => {
-    if (state.port) disconnectSerial();
-    else connectSerial();
+    if (isConnected()) disconnectActiveTransport();
+    else connectSelectedTransport();
   });
+  els.transportMode.addEventListener("change", updateTransportControls);
 
   els.demoButton.addEventListener("click", toggleDemo);
   els.dacSlider.addEventListener("input", (event) => setDacValue(event.target.value));
@@ -943,16 +1314,16 @@ function bindEvents() {
   });
   window.addEventListener("beforeunload", () => {
     state.keepReading = false;
+    if (state.bleDevice?.gatt?.connected) {
+      state.bleDevice.gatt.disconnect();
+    }
   });
 }
 
 function init() {
-  const hasSerial = "serial" in navigator;
-  els.serialSupport.textContent = hasSerial ? "Web Serial ready" : "Web Serial unavailable";
-  els.serialSupport.classList.toggle("is-bad", !hasSerial);
-  els.serialSupport.classList.toggle("is-muted", !hasSerial);
   bindEvents();
   setDacValue(2056, "init");
+  updateTransportControls();
   setConnectedUi(false);
   updateFilterUi();
   updateBitStats();

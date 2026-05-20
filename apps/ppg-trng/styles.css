@@ -178,6 +178,18 @@ output {
   margin-bottom: 10px;
 }
 
+.serial-options {
+  margin-bottom: 10px;
+}
+
+.serial-options .field-label {
+  margin-top: 2px;
+}
+
+.serial-options select {
+  width: 100%;
+}
+
 select,
 input[type="number"] {
   min-width: 0;
