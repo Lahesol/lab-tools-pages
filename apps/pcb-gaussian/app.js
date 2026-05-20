@@ -92,7 +92,13 @@ function loadDacCalibration() {
   }
 }
 function persistDacCalibration() {
-  localStorage.setItem(DAC_CAL_STORAGE_KEY, JSON.stringify(state.dacCal));
+  try {
+    localStorage.setItem(DAC_CAL_STORAGE_KEY, JSON.stringify(state.dacCal));
+    return true;
+  } catch (error) {
+    logLine(`[storage error] DAC calibration not saved: ${error.message}`);
+    return false;
+  }
 }
 function getDacCalPoints(dac) {
   return (state.dacCal?.[dac] || DEFAULT_DAC_CAL[dac] || DEFAULT_DAC_CAL.D1)
@@ -186,7 +192,13 @@ function loadParamCalibration() {
   }
 }
 function persistParamCalibration() {
-  localStorage.setItem(PARAM_CAL_STORAGE_KEY, JSON.stringify(state.paramCal));
+  try {
+    localStorage.setItem(PARAM_CAL_STORAGE_KEY, JSON.stringify(state.paramCal));
+    return true;
+  } catch (error) {
+    logLine(`[storage error] A / mu calibration not saved: ${error.message}`);
+    return false;
+  }
 }
 function getParamCalPoints(param) {
   return (state.paramCal?.[param] || cloneParamCalibration()[param])
@@ -293,7 +305,7 @@ async function connectSerial() {
     return;
   }
   if (!("serial" in navigator)) {
-    alert("이 브라우저는 Web Serial API를 지원하지 않습니다. Chrome 또는 Edge를 사용하세요.");
+    alert("??브라?��???Web Serial API�?지?�하지 ?�습?�다. Chrome ?�는 Edge�??�용?�세??");
     return;
   }
   try {
@@ -529,10 +541,27 @@ function saveDacCalibrationFromInputs() {
     return;
   }
   state.dacCal = next;
-  persistDacCalibration();
+  const saved = persistDacCalibration();
   updateDacReadout();
-  setDacCalStatus("DAC calibration saved locally.", "ok");
-  logLine("DAC calibration saved locally");
+  if (saved) {
+    setDacCalStatus("DAC calibration saved locally.", "ok");
+    logLine("DAC calibration saved locally");
+  } else {
+    setDacCalStatus("DAC calibration could not be saved in this browser.", "warn");
+  }
+}
+
+function loadProjectDacCalibration() {
+  state.dacCal = cloneDacCalibration();
+  const saved = persistDacCalibration();
+  renderDacCalibration();
+  updateDacReadout();
+  if (saved) {
+    setDacCalStatus("Project DAC calibration loaded and saved locally.", "ok");
+    logLine("Project DAC calibration loaded and saved locally");
+  } else {
+    setDacCalStatus("Project DAC calibration loaded, but local save failed.", "warn");
+  }
 }
 
 function resetDacCalibration() {
@@ -648,11 +677,29 @@ function saveParamCalibrationFromInputs() {
     return;
   }
   state.paramCal = next;
-  persistParamCalibration();
+  const saved = persistParamCalibration();
   updatePotReadout();
   renderDeviceTable();
-  setParamCalStatus("A / mu calibration saved locally.", "ok");
-  logLine("A / mu calibration saved locally");
+  if (saved) {
+    setParamCalStatus("A / mu calibration saved locally.", "ok");
+    logLine("A / mu calibration saved locally");
+  } else {
+    setParamCalStatus("A / mu calibration could not be saved in this browser.", "warn");
+  }
+}
+
+function loadProjectParamCalibration() {
+  state.paramCal = cloneParamCalibration();
+  const saved = persistParamCalibration();
+  renderParamCalibration();
+  updatePotReadout();
+  renderDeviceTable();
+  if (saved) {
+    setParamCalStatus("Project A / mu calibration loaded and saved locally.", "ok");
+    logLine("Project A / mu calibration loaded and saved locally");
+  } else {
+    setParamCalStatus("Project A / mu calibration loaded, but local save failed.", "warn");
+  }
 }
 
 function resetParamCalibration() {
@@ -1317,8 +1364,10 @@ function bindEvents() {
   });
   $("downloadSweepCsvButton").addEventListener("click", downloadSweepCsv);
   $("saveDacCalButton").addEventListener("click", saveDacCalibrationFromInputs);
+  $("loadProjectDacCalButton").addEventListener("click", loadProjectDacCalibration);
   $("resetDacCalButton").addEventListener("click", resetDacCalibration);
   $("saveParamCalButton").addEventListener("click", saveParamCalibrationFromInputs);
+  $("loadProjectParamCalButton").addEventListener("click", loadProjectParamCalibration);
   $("resetParamCalButton").addEventListener("click", resetParamCalibration);
 
   $("switchDevice").addEventListener("input", updateSwitchInfo);
