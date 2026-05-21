@@ -779,7 +779,7 @@ function normalizeState(raw) {
     course.weekType = course.weekType || inferWeekType(course);
   });
   const courseIds = new Set(raw.courses.map((course) => course.id));
-  raw.professors = raw.professors.filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id));
+  raw.professors = raw.professors.filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id) && !isExcludedProfessor(professor));
   raw.professors.forEach((professor) => {
     professor.canTeach = parseList(professor.canTeach)
       .map((courseRef) => raw.courses.find((course) => course.id === courseRef || course.name === courseRef)?.id || courseRef)
@@ -869,6 +869,7 @@ function refreshProfessorsForSelectedDepartment() {
     const defaultProfessor = defaultById.get(template.id) || defaultByName.get(nameKey);
     const professorId = template.id || existing?.id || defaultProfessor?.id;
     if (!professorId || EXTERNAL_PROFESSOR_IDS.has(professorId)) return;
+    if (isExcludedProfessor(template)) return;
 
     const preserved = clone(existing || defaultProfessor || {});
     const seedCanTeach = [...parseList(preserved.canTeach), ...parseList(defaultProfessor?.canTeach), ...parseList(template.canTeach)];
@@ -885,6 +886,7 @@ function refreshProfessorsForSelectedDepartment() {
         canTeach: [],
         sourceDepartment: template.sourceDepartment || state.selectedDepartment,
         sourceUrl: template.sourceUrl || "",
+        phone: template.phone || preserved.phone || "",
         departmentOrder
       };
     current.id = professorId;
@@ -894,6 +896,7 @@ function refreshProfessorsForSelectedDepartment() {
     current.minCredits = toNumber(current.minCredits, toNumber(template.minCredits, 9));
     current.maxCredits = toNumber(current.maxCredits, toNumber(template.maxCredits, 18));
     current.availability = current.availability || template.availability || defaultProfessorAvailability();
+    current.phone = template.phone || current.phone || "";
     current.canTeach = uniqueList([
       ...parseList(current.canTeach).filter((courseId) => scopedCourseIds.has(courseId)),
       ...seedCanTeach.filter((courseId) => scopedCourseIds.has(courseId)),
@@ -919,6 +922,7 @@ function refreshProfessorsForSelectedDepartment() {
           maxCredits: record.maxCredits,
           availability: record.availability,
           canTeach: record.canTeach,
+          phone: record.phone,
           sourceDepartment: state.selectedDepartment,
           sourceUrl
         },
@@ -950,6 +954,7 @@ function refreshProfessorsForSelectedDepartment() {
           maxCredits: record.maxCredits,
           availability: record.availability,
           canTeach: record.canTeach,
+          phone: record.phone,
           sourceDepartment,
           sourceUrl
         },
@@ -959,13 +964,13 @@ function refreshProfessorsForSelectedDepartment() {
     });
   } else {
     defaultData.professors
-      .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
+      .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id) && !isExcludedProfessor(professor))
       .forEach((professor) => {
         upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
       });
 
     state.professors
-      .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
+      .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id) && !isExcludedProfessor(professor))
       .forEach((professor) => {
         upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
       });
@@ -1017,7 +1022,7 @@ function hasDepartmentProfessorDb() {
 
 function departmentProfessorRecordsForSelectedDepartment() {
   const department = departmentProfessorDb.departments?.[state.selectedDepartment];
-  return Array.isArray(department?.professors) ? department.professors : [];
+  return Array.isArray(department?.professors) ? department.professors.filter(isDepartmentProfessorCandidate) : [];
 }
 
 function departmentProfessorSourceForSelectedDepartment() {
@@ -1029,8 +1034,39 @@ function sharedLowerDivisionProfessorRecordsForSelectedDepartment() {
   return LOWER_DIVISION_SHARED_DEPARTMENTS.filter((departmentName) => departmentName !== state.selectedDepartment).flatMap((departmentName) => {
     const department = departmentProfessorDb.departments?.[departmentName];
     const professors = Array.isArray(department?.professors) ? department.professors : [];
-    return professors.map((record) => ({ record, sourceDepartment: departmentName, sourceUrl: department.source || "" }));
+    return professors.filter(isDepartmentProfessorCandidate).map((record) => ({ record, sourceDepartment: departmentName, sourceUrl: department.source || "" }));
   });
+}
+
+function isDepartmentProfessorCandidate(professor) {
+  return !isExcludedProfessor(professor) && hasOfficialPhone(professor) && professorHasPreviousSemesterTeaching(professor);
+}
+
+function isExcludedProfessor(professor) {
+  const text = `${professor?.type || ""} ${professor?.position || ""}`.replace(/\s+/g, "");
+  return text.includes("연구") || text.includes("명예") || !hasOfficialPhone(professor);
+}
+
+function hasOfficialPhone(professor) {
+  if (!professor || !Object.prototype.hasOwnProperty.call(professor, "phone")) return true;
+  return /\d/.test(String(professor.phone || ""));
+}
+
+function professorHasPreviousSemesterTeaching(professor) {
+  const previous = previousSemesterForSelection();
+  if (!previous) return true;
+  const records = historicalTimetables.records || [];
+  const previousRecords = records.filter((record) => toNumber(record.year, 0) === previous.year && toNumber(record.term, 0) === previous.term);
+  if (!previousRecords.length) return true;
+  const nameKey = normalizeProfessorName(professor?.name);
+  return previousRecords.some((record) => normalizeProfessorName(record.professor) === nameKey);
+}
+
+function previousSemesterForSelection() {
+  const year = semesterYear(state.semester);
+  const term = semesterTerm(state.semester);
+  if (!year || !term) return null;
+  return term === 1 ? { year: year - 1, term: 2 } : { year, term: 1 };
 }
 
 function historyCourseMatches(record, scopedCourses) {
@@ -1396,7 +1432,7 @@ function renderLoadRow(item) {
 function renderDataPanel(validation) {
   const hints = {
     courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 학점/분배는 직접 수정하거나 지난 시간표 이력을 한 번에 적용할 수 있습니다.",
-    professors: "교수 목록은 공식 학과 교수진 DB를 우선 사용합니다. 지난 시간표는 DB에 있는 교수의 담당 가능 과목을 보강하는 용도로만 반영합니다.",
+    professors: "교수 목록은 공식 교수진 페이지에 전화번호가 있고 직전 학기 강의 이력이 있는 인원만 우선 사용합니다. 지난 시간표는 담당 가능 과목 보강에도 반영합니다.",
     rooms: "이전 학기 시간표와 보유 시설을 참고해 사용할 강의실만 체크하고, 분류와 정원을 입력합니다. 최적화는 체크된 강의실만 후보로 사용합니다.",
     assignments: "배정 결과는 최적화 실행 후 갱신됩니다. 충돌 행은 제약조건 패널에서 원인을 확인할 수 있습니다.",
     reference: "전 학기 시간표는 교수 후보, 강의실 사용 패턴, 분반 표기 참고용입니다. 새 학기 개설 과목 판정에는 사용하지 않습니다."
@@ -1487,7 +1523,7 @@ function renderProfessorsTable() {
         <td><input class="table-input short" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="id" value="${escapeAttr(professor.id)}" /></td>
         <td><input class="table-input medium" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="name" value="${escapeAttr(professor.name)}" /></td>
         <td><span class="pill">${escapeHtml(professor.sourceDepartment || state.selectedDepartment)}</span></td>
-        <td>${selectHtml("professors", professor.id, "type", professor.type, [["전임", "전임"], ["신임전임", "신임전임"], ["겸임", "겸임"], ["초빙", "초빙"], ["강사", "강사"], ["명예", "명예"], ["연구", "연구"]])}</td>
+        <td>${selectHtml("professors", professor.id, "type", professor.type, [["전임", "전임"], ["신임전임", "신임전임"], ["겸임", "겸임"], ["초빙", "초빙"], ["강사", "강사"]])}</td>
         <td class="numeric"><input class="table-input short" type="number" step="0.5" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="minCredits" value="${escapeAttr(professor.minCredits)}" /></td>
         <td class="numeric"><input class="table-input short" type="number" step="0.5" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="maxCredits" value="${escapeAttr(professor.maxCredits)}" /></td>
         <td><input class="table-input" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="availability" value="${escapeAttr(professor.availability || "")}" /></td>

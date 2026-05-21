@@ -1,77 +1,44 @@
 {
   "generatedAt": "2026-05-21",
-  "method": "Department professor database built from official Gachon department faculty pages. Honorary professors are kept out of default scheduling candidates. Timetable history is used only to infer teachable courses for professors already listed in this database.",
+  "method": "Department professor database built from official Gachon department faculty pages. Default scheduling candidates keep only professors who have an official phone number on the faculty page and taught in the previous semester. Honorary and research professors are excluded. Timetable history is used only to infer teachable courses for professors already listed in this database.",
   "departments": {
     "전자공학과": {
       "source": "https://www.gachon.ac.kr/elec/5795/subview.do",
       "professors": [
-        { "id": "P_KYJ", "name": "김영준", "position": "부교수", "type": "전임" },
-        { "id": "P_KJW", "name": "김장원", "position": "교수", "type": "전임" },
-        { "id": "P_NSS", "name": "남성식", "position": "부교수", "type": "전임" },
-        { "id": "P_MKS", "name": "민경식", "position": "조교수", "type": "전임" },
-        { "id": "P_PJC", "name": "박정철", "position": "교수", "type": "전임" },
-        { "id": "P_SMK", "name": "상민규", "position": "조교수", "type": "전임" },
-        { "id": "P_SHM", "name": "손혁민", "position": "교수", "type": "전임" },
-        { "id": "P_LTB", "name": "이태봉", "position": "교수", "type": "전임" },
-        { "id": "P_JJP", "name": "정재필", "position": "교수", "type": "전임" },
-        { "id": "P_CSB", "name": "조성보", "position": "교수", "type": "전임" },
-        { "id": "P_CES", "name": "조의식", "position": "교수", "type": "전임" },
-        { "id": "P_CHJ", "name": "최호종", "position": "교수", "type": "전임" },
-        { "id": "P_HHS", "name": "한형석", "position": "교수", "type": "전임" },
-        { "id": "P_AWAN", "name": "AWAN WAHAJ ABBAS", "position": "조교수", "type": "전임" },
-        { "id": "P_ALEMAYEHU", "name": "Alemayehu Kidanemariam Yimam", "position": "조교수", "type": "전임" },
-        { "id": "P_KUMCHAM", "name": "KUMCHAM PRASAD", "position": "조교수", "type": "전임" },
-        { "id": "P_KANDASWAMY", "name": "Kandaswamy Theyagarajan", "position": "조교수", "type": "전임" },
-        { "id": "P_LEGIA", "name": "LE GIA PHAN", "position": "조교수", "type": "전임" },
-        { "id": "P_PANNEER", "name": "PANNEER SELVAM SATHISH", "position": "조교수", "type": "전임" },
-        { "id": "P_SAIKRITHIKA", "name": "SAIKRITHIKA SAIRAMAN", "position": "조교수", "type": "전임" },
-        { "id": "P_SHAH", "name": "SHAH SYED ADIL ALI", "position": "조교수", "type": "전임" },
-        { "id": "P_THANJAVUR", "name": "THANJAVUR NAVEEN", "position": "조교수", "type": "전임" },
-        { "id": "P_TIEU", "name": "TIEU MY VAN", "position": "조교수", "type": "전임" },
-        { "id": "P_YELLATUR", "name": "YELLATUR CHANDRA SEKHAR", "position": "조교수", "type": "전임" },
-        { "id": "P_KMJ", "name": "김미진", "position": "겸임교수", "type": "겸임" },
-        { "id": "P_SSG", "name": "송성근", "position": "초빙교수", "type": "초빙" },
-        { "id": "P_JGH", "name": "전광호", "position": "겸임교수", "type": "겸임" }
+        { "id": "P_KYJ", "name": "김영준", "position": "부교수", "type": "전임", "phone": "031-750-8851" },
+        { "id": "P_KJW", "name": "김장원", "position": "교수", "type": "전임", "phone": "031-750-5588" },
+        { "id": "P_NSS", "name": "남성식", "position": "부교수", "type": "전임", "phone": "031-750-5801" },
+        { "id": "P_MKS", "name": "민경식", "position": "조교수", "type": "전임", "phone": "031-750-5812" },
+        { "id": "P_PJC", "name": "박정철", "position": "교수", "type": "전임", "phone": "031-750-5815" },
+        { "id": "P_SMK", "name": "상민규", "position": "조교수", "type": "전임", "phone": "031-750-5317" },
+        { "id": "P_SHM", "name": "손혁민", "position": "교수", "type": "전임", "phone": "031-750-5697" },
+        { "id": "P_LTB", "name": "이태봉", "position": "교수", "type": "전임", "phone": "031-750-5816" },
+        { "id": "P_JJP", "name": "정재필", "position": "교수", "type": "전임", "phone": "031-750-5318" },
+        { "id": "P_CES", "name": "조의식", "position": "교수", "type": "전임", "phone": "031-750-5297" },
+        { "id": "P_CHJ", "name": "최호종", "position": "교수", "type": "전임", "phone": "031-750-5591" },
+        { "id": "P_HHS", "name": "한형석", "position": "교수", "type": "전임", "phone": "031-750-5561" },
+        { "id": "P_JGH", "name": "전광호", "position": "겸임교수", "type": "겸임", "phone": "031-750-5324" }
       ]
     },
     "반도체공학과": {
       "source": "https://www.gachon.ac.kr/semi/8054/subview.do",
       "professors": [
-        { "id": "P_KJH", "name": "김재훈", "position": "조교수", "type": "전임" },
-        { "id": "P_KHS", "name": "김형석", "position": "조교수", "type": "전임" },
-        { "id": "P_PMG", "name": "박민규", "position": "조교수", "type": "전임" },
-        { "id": "P_EKT", "name": "엄기태", "position": "조교수", "type": "전임" },
-        { "id": "P_YHJ", "name": "윤홍준", "position": "조교수", "type": "전임" },
-        { "id": "P_LSY", "name": "이상렬", "position": "교수", "type": "전임" },
-        { "id": "P_LSG", "name": "이수길", "position": "조교수", "type": "전임" },
-        { "id": "P_JGT", "name": "진강태", "position": "조교수", "type": "전임" },
-        { "id": "P_CDH", "name": "최두호", "position": "부교수", "type": "전임" },
-        { "id": "P_HMJ", "name": "한문종", "position": "조교수", "type": "전임" },
-        { "id": "P_ANIBRATA", "name": "ANIBRATA MONDAL", "position": "조교수", "type": "전임" },
-        { "id": "P_ASMA", "name": "ASMA ZAKA", "position": "조교수", "type": "전임" },
-        { "id": "P_GHAFOOR", "name": "GHAFOOR FAISAL", "position": "조교수", "type": "전임" },
-        { "id": "P_HUSSAIN", "name": "HUSSAIN BASHARAT", "position": "조교수", "type": "전임" },
-        { "id": "P_IQBAL", "name": "IQBAL SHAHZAD", "position": "조교수", "type": "전임" },
-        { "id": "P_KHAN", "name": "KHAN SOBIA ALI", "position": "조교수", "type": "전임" },
-        { "id": "P_MARIA", "name": "MARIA MUKHTAR", "position": "조교수", "type": "전임" },
-        { "id": "P_PANDEY", "name": "PANDEY RAJIV KUMAR", "position": "조교수", "type": "전임" },
-        { "id": "P_SAMREEN", "name": "SAMREEN RASHID", "position": "조교수", "type": "전임" },
-        { "id": "P_SANDEEP", "name": "SANDEEP KUMAR MAURYA", "position": "조교수", "type": "전임" },
-        { "id": "P_SULTAN", "name": "SULTAN MUHAMMAD JUNAID", "position": "조교수", "type": "전임" },
-        { "id": "P_SUSHANT", "name": "SUSHANT BABGONDA PATIL", "position": "조교수", "type": "전임" },
-        { "id": "P_USHA", "name": "USHA KRISHNAN SUNDARAM", "position": "조교수", "type": "전임" },
-        { "id": "P_VIVEKANANDAN", "name": "Vivekanandan J", "position": "조교수", "type": "전임" }
+        { "id": "P_KJH", "name": "김재훈", "position": "조교수", "type": "전임", "phone": "031-750-5522" },
+        { "id": "P_PMG", "name": "박민규", "position": "조교수", "type": "전임", "phone": "031-750-5524" },
+        { "id": "P_EKT", "name": "엄기태", "position": "조교수", "type": "전임", "phone": "031-750-5817" },
+        { "id": "P_LSY", "name": "이상렬", "position": "교수", "type": "전임", "phone": "031-750-5341" },
+        { "id": "P_LSG", "name": "이수길", "position": "조교수", "type": "전임", "phone": "031-750-5564" },
+        { "id": "P_JGT", "name": "진강태", "position": "조교수", "type": "전임", "phone": "031-750-5521" },
+        { "id": "P_CDH", "name": "최두호", "position": "부교수", "type": "전임", "phone": "031-750-5523" },
+        { "id": "P_HMJ", "name": "한문종", "position": "조교수", "type": "전임", "phone": "031-750-5505" }
       ]
     },
     "시스템반도체학과": {
       "source": "https://www.gachon.ac.kr/ssd/9861/subview.do",
       "professors": [
-        { "id": "P_KCH", "name": "계찬호", "position": "조교수", "type": "전임" },
-        { "id": "P_KTK", "name": "김태경", "position": "부교수", "type": "전임" },
-        { "id": "P_YJG", "name": "윤재광", "position": "조교수", "type": "전임" },
-        { "id": "P_LJY", "name": "이주열", "position": "조교수", "type": "전임" },
-        { "id": "P_JHS", "name": "전희석", "position": "교수", "type": "전임" },
-        { "id": "P_KMG", "name": "곽민곤", "position": "겸임교수", "type": "겸임" }
+        { "id": "P_KCH", "name": "계찬호", "position": "조교수", "type": "전임", "phone": "031-750-5286" },
+        { "id": "P_KTK", "name": "김태경", "position": "부교수", "type": "전임", "phone": "031-750-5696" },
+        { "id": "P_LJY", "name": "이주열", "position": "조교수", "type": "전임", "phone": "031-750-5698" }
       ]
     }
   }
