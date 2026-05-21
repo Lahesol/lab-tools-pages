@@ -2,6 +2,38 @@ const DAYS = ["월", "화", "수", "목", "금"];
 const DAY_NAMES = { 월: "월요일", 화: "화요일", 수: "수요일", 목: "목요일", 금: "금요일" };
 const PERIODS = Array.from({ length: 14 }, (_, index) => index + 1);
 const STORAGE_KEY = "sisu-timetable-state-v2";
+const TARGET_DEPARTMENT_NAMES = new Set(["전자공학과", "반도체공학과", "시스템반도체학과"]);
+const EXTERNAL_COURSE_NAMES = new Set(["수학1", "물리학및실험1", "화학및실험1"]);
+const EXTERNAL_PROFESSOR_IDS = new Set(["P_MATH", "P_PHY", "P_PHY2", "P_CHEM", "P_CHEM2"]);
+const FIRST_SEMESTER_SEED_IDS = new Set([
+  "EE101",
+  "EE102",
+  "EE103",
+  "EE104",
+  "EE105",
+  "EE201",
+  "EE202",
+  "EE203",
+  "EE204",
+  "EE205",
+  "EE301",
+  "EE302",
+  "EE303",
+  "EE304",
+  "EE305",
+  "EE306",
+  "EE401",
+  "EE402",
+  "EE403",
+  "EE404",
+  "SC101",
+  "SC201",
+  "SC301",
+  "SC401",
+  "SYS101",
+  "SYS201",
+  "SYS301"
+]);
 
 const defaultData = {
   semester: "26-2학기",
@@ -226,70 +258,70 @@ defaultData.viewMode = "yearMatrix";
 defaultData.departments = [
   { id: "전자공학과", college: "반도체대학", quotas: { 1: 120, 2: 120, 3: 110, 4: 100 } },
   { id: "반도체공학과", college: "반도체대학", quotas: { 1: 80, 2: 80, 3: 70, 4: 60 } },
-  { id: "시스템반도체학과", college: "반도체대학", quotas: { 1: 60, 2: 55, 3: 50, 4: 45 } },
-  { id: "반도체·디스플레이학과", college: "반도체대학", quotas: { 1: 60, 2: 55, 3: 50, 4: 45 } },
-  { id: "반도체설계학과", college: "반도체대학", quotas: { 1: 60, 2: 55, 3: 50, 4: 45 } }
+  { id: "시스템반도체학과", college: "반도체대학", quotas: { 1: 60, 2: 55, 3: 50, 4: 45 } }
 ];
 
 defaultData.courses = [
-  { id: "EE101", department: "전자공학과", name: "C프로그래밍", year: 1, curriculumYear: 2026, category: "전공필수", type: "computer", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_KMJ", "P_KDS", "P_JGH"], fixed: "", enabled: true },
-  { id: "EE102", department: "전자공학과", name: "수학1", year: 1, curriculumYear: 2026, category: "계열교양", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_MATH"], fixed: "", enabled: true },
-  { id: "EE103", department: "전자공학과", name: "물리학및실험1", year: 1, curriculumYear: 2026, category: "계열교양", type: "lab", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "lab", eligible: ["P_PHY", "P_PHY2"], fixed: "", enabled: true },
-  { id: "EE104", department: "전자공학과", name: "화학및실험1", year: 1, curriculumYear: 2026, category: "계열교양", type: "lab", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "lab", eligible: ["P_CHEM", "P_CHEM2"], fixed: "", enabled: true },
-  { id: "EE105", department: "전자공학과", name: "가천인세미나", year: 1, curriculumYear: 2026, category: "교양필수", type: "seminar", credits: 1, pattern: [1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_KMJ", "P_KJW", "P_HHS"], fixed: "", enabled: true },
-  { id: "EE201", department: "전자공학과", name: "공업수학1", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_SHM", "P_NSS", "P_HHS"], fixed: "", enabled: true },
-  { id: "EE202", department: "전자공학과", name: "디지털논리회로", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_JJP", "P_KJW", "P_PJS"], fixed: "", enabled: true },
-  { id: "EE203", department: "전자공학과", name: "회로이론1", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_LTB", "P_LWJ", "P_SMK", "P_PJS"], fixed: "", enabled: true },
-  { id: "EE204", department: "전자공학과", name: "전자기학1", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_CSB", "P_CHJ"], fixed: "", enabled: true },
-  { id: "EE205", department: "전자공학과", name: "물리전자공학", year: 2, curriculumYear: 2025, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_CES"], fixed: "", enabled: true },
-  { id: "EE301", department: "전자공학과", name: "기계학습과 AI", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_MKS"], fixed: "", enabled: true },
-  { id: "EE302", department: "전자공학과", name: "디지털회로실험", year: 3, curriculumYear: 2024, category: "전공필수", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_KYJ", "P_HHS", "P_KJW", "P_JJP"], fixed: "", enabled: true },
-  { id: "EE303", department: "전자공학과", name: "전자회로1", year: 3, curriculumYear: 2024, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_KYJ", "P_SMK", "P_CHJ"], fixed: "", enabled: true },
-  { id: "EE304", department: "전자공학과", name: "반도체공학", year: 3, curriculumYear: 2024, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_SMK"], fixed: "", enabled: true },
-  { id: "EE305", department: "전자공학과", name: "제어공학", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_LTB", "P_JGH"], fixed: "", enabled: true },
-  { id: "EE306", department: "전자공학과", name: "통신이론", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_MKS", "P_NSS", "P_SHM"], fixed: "", enabled: true },
-  { id: "EE401", department: "전자공학과", name: "캡스톤디자인1", year: 4, curriculumYear: 2023, category: "전공필수", type: "project", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 0, roomType: "lab", eligible: ["P_PJC", "P_JJP", "P_KJW", "P_HHS", "P_SHM"], fixed: "", enabled: true },
-  { id: "EE402", department: "전자공학과", name: "전자디스플레이공학", year: 4, curriculumYear: 2023, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_CES", "P_KSJ"], fixed: "", enabled: true },
-  { id: "EE403", department: "전자공학과", name: "디지털통신", year: 4, curriculumYear: 2023, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_NSS"], fixed: "", enabled: true },
-  { id: "EE404", department: "전자공학과", name: "전자공학심화실험", year: 4, curriculumYear: 2023, category: "전공필수", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_KJW", "P_HHS", "P_CES", "P_MKS"], fixed: "", enabled: true },
-  { id: "SC101", department: "반도체공학과", name: "반도체공학개론", year: 1, curriculumYear: 2026, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_SMK"], fixed: "", enabled: true },
-  { id: "SC201", department: "반도체공학과", name: "반도체소자", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_CES"], fixed: "", enabled: true },
-  { id: "SC301", department: "반도체공학과", name: "반도체공정", year: 3, curriculumYear: 2024, category: "전공필수", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_SMK", "P_CES"], fixed: "", enabled: true },
-  { id: "SC401", department: "반도체공학과", name: "반도체캡스톤디자인", year: 4, curriculumYear: 2023, category: "전공필수", type: "project", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 0, roomType: "lab", eligible: ["P_PJC", "P_SMK"], fixed: "", enabled: true },
-  { id: "SYS101", department: "시스템반도체학과", name: "디지털논리설계", year: 1, curriculumYear: 2026, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_JJP", "P_KJW"], fixed: "", enabled: true },
-  { id: "SYS201", department: "시스템반도체학과", name: "컴퓨터구조", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_MKS", "P_JGH"], fixed: "", enabled: true },
-  { id: "SYS301", department: "시스템반도체학과", name: "SoC설계실습", year: 3, curriculumYear: 2024, category: "전공필수", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_KYJ", "P_MKS"], fixed: "", enabled: true },
-  { id: "DISP101", department: "반도체·디스플레이학과", name: "디스플레이공학개론", year: 1, curriculumYear: 2026, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_CES", "P_KSJ"], fixed: "", enabled: true },
-  { id: "DISP301", department: "반도체·디스플레이학과", name: "광전자공학", year: 3, curriculumYear: 2024, category: "전공필수", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_CES", "P_CHJ"], fixed: "", enabled: true },
-  { id: "DSN101", department: "반도체설계학과", name: "회로설계입문", year: 1, curriculumYear: 2026, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_LTB", "P_SMK"], fixed: "", enabled: true },
-  { id: "DSN301", department: "반도체설계학과", name: "집적회로설계실습", year: 3, curriculumYear: 2024, category: "전공필수", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_SMK", "P_KYJ"], fixed: "", enabled: true }
+  { id: "EE112", department: "전자공학과", term: 2, name: "기초공학설계", year: 1, curriculumYear: 2026, category: "전공필수", type: "project", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "lab", eligible: ["P_KMJ", "P_KJW", "P_HHS", "P_JGH"], fixed: "", enabled: true },
+  { id: "EE212", department: "전자공학과", term: 2, name: "기초회로실험2", year: 2, curriculumYear: 2025, category: "전공선택", type: "lab", credits: 2, pattern: [2], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_LTB", "P_LWJ", "P_SMK", "P_PJS"], fixed: "", enabled: true },
+  { id: "EE213", department: "전자공학과", term: 2, name: "공업수학2", year: 2, curriculumYear: 2025, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_SHM", "P_NSS", "P_HHS"], fixed: "", enabled: true },
+  { id: "EE214", department: "전자공학과", term: 2, name: "회로이론2", year: 2, curriculumYear: 2025, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_LTB", "P_LWJ", "P_SMK", "P_PJS"], fixed: "", enabled: true },
+  { id: "EE215", department: "전자공학과", term: 2, name: "전자기학2", year: 2, curriculumYear: 2025, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_CSB", "P_CHJ"], fixed: "", enabled: true },
+  { id: "EE216", department: "전자공학과", term: 2, name: "신호및시스템", year: 2, curriculumYear: 2025, category: "전공선택", type: "theory", credits: 2, pattern: [2], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_MKS", "P_NSS", "P_SHM"], fixed: "", enabled: true },
+  { id: "EE312", department: "전자공학과", term: 2, name: "전자회로2", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_KYJ", "P_SMK", "P_CHJ"], fixed: "", enabled: true },
+  { id: "EE313", department: "전자공학과", term: 2, name: "마이크로프로세서", year: 3, curriculumYear: 2024, category: "전공선택", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_JJP", "P_KYJ", "P_MKS"], fixed: "", enabled: true },
+  { id: "EE314", department: "전자공학과", term: 2, name: "전자회로실험", year: 3, curriculumYear: 2024, category: "전공필수", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_KYJ", "P_HHS", "P_KJW", "P_JJP"], fixed: "", enabled: true },
+  { id: "EE315", department: "전자공학과", term: 2, name: "P-실무프로젝트", year: 3, curriculumYear: 2024, category: "전공필수", type: "project", weekType: "pPractice4", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 0, roomType: "lab", eligible: ["P_PJC", "P_JJP", "P_KJW", "P_HHS", "P_SHM"], fixed: "", enabled: true },
+  { id: "EE412", department: "전자공학과", term: 2, name: "캡스톤디자인2", year: 4, curriculumYear: 2023, category: "전공필수", type: "project", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 0, roomType: "lab", eligible: ["P_PJC", "P_JJP", "P_KJW", "P_HHS", "P_SHM"], fixed: "", enabled: true },
+  { id: "EE413", department: "전자공학과", term: 2, name: "이동통신시스템", year: 4, curriculumYear: 2023, category: "전공선택", type: "theory", credits: 2, pattern: [2], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_NSS", "P_MKS"], fixed: "", enabled: true },
+  { id: "EE414", department: "전자공학과", term: 2, name: "임베디드시스템", year: 4, curriculumYear: 2023, category: "전공선택", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_JGH", "P_KYJ", "P_MKS"], fixed: "", enabled: true },
+  { id: "SC112", department: "반도체공학과", term: 2, name: "기초공학설계", year: 1, curriculumYear: 2026, category: "전공필수", type: "project", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "lab", eligible: ["P_PJC", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC212", department: "반도체공학과", term: 2, name: "기초회로실험", year: 2, curriculumYear: 2025, category: "전공필수", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_LTB", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC213", department: "반도체공학과", term: 2, name: "회로이론2", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_LTB", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC214", department: "반도체공학과", term: 2, name: "전자기학2", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_CSB", "P_CHJ"], fixed: "", enabled: true },
+  { id: "SC215", department: "반도체공학과", term: 2, name: "반도체물성", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_CES"], fixed: "", enabled: true },
+  { id: "SC216", department: "반도체공학과", term: 2, name: "신호및시스템", year: 2, curriculumYear: 2025, category: "전공필수", type: "theory", credits: 2, pattern: [2], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_NSS", "P_SHM"], fixed: "", enabled: true },
+  { id: "SC312", department: "반도체공학과", term: 2, name: "진공공정실험", year: 3, curriculumYear: 2024, category: "전공선택", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_SMK", "P_CES"], fixed: "", enabled: true },
+  { id: "SC313", department: "반도체공학과", term: 2, name: "전자회로실험", year: 3, curriculumYear: 2024, category: "전공선택", type: "lab", credits: 2, pattern: [2], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_KYJ", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC314", department: "반도체공학과", term: 2, name: "이온도핑확산공정", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC315", department: "반도체공학과", term: 2, name: "패터닝및에칭공정", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_CES", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC316", department: "반도체공학과", term: 2, name: "반도체메모리소자", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_CES"], fixed: "", enabled: true },
+  { id: "SC317", department: "반도체공학과", term: 2, name: "광전자공학", year: 3, curriculumYear: 2024, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_CES", "P_KSJ"], fixed: "", enabled: true },
+  { id: "SC412", department: "반도체공학과", term: 2, name: "P-프로젝트2", year: 4, curriculumYear: 2023, category: "전공필수", type: "project", weekType: "pPractice4", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 0, roomType: "lab", eligible: ["P_PJC", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC413", department: "반도체공학과", term: 2, name: "MEMS및나노공정", year: 4, curriculumYear: 2023, category: "전공선택", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_PJC", "P_CES"], fixed: "", enabled: true },
+  { id: "SC414", department: "반도체공학과", term: 2, name: "반도체공학전산모사", year: 4, curriculumYear: 2023, category: "전공선택", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_CES", "P_SMK"], fixed: "", enabled: true },
+  { id: "SC415", department: "반도체공학과", term: 2, name: "소자시뮬레이션실험", year: 4, curriculumYear: 2023, category: "전공선택", type: "lab", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 3, roomType: "lab", eligible: ["P_PJC", "P_SMK"], fixed: "", enabled: true },
+  { id: "SYS312", department: "시스템반도체학과", term: 2, name: "시스템프로그래밍", year: 3, curriculumYear: 2024, category: "전공필수", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_JGH", "P_MKS"], fixed: "", enabled: true },
+  { id: "SYS313", department: "시스템반도체학과", term: 2, name: "컴퓨터구조", year: 3, curriculumYear: 2024, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_MKS", "P_JGH"], fixed: "", enabled: true },
+  { id: "SYS314", department: "시스템반도체학과", term: 2, name: "전자회로2", year: 3, curriculumYear: 2024, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_KYJ", "P_SMK"], fixed: "", enabled: true },
+  { id: "SYS315", department: "시스템반도체학과", term: 2, name: "기계학습", year: 3, curriculumYear: 2024, category: "전공필수", type: "theory", credits: 3, pattern: [2, 1], expectedStudents: 0, maxSeats: 60, tolerance: 10, roomType: "lecture", eligible: ["P_MKS"], fixed: "", enabled: true },
+  { id: "SYS316", department: "시스템반도체학과", term: 2, name: "P-프로젝트1", year: 3, curriculumYear: 2024, category: "전공필수", type: "project", weekType: "pPractice4", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 30, tolerance: 0, roomType: "lab", eligible: ["P_JJP", "P_KJW", "P_MKS"], fixed: "", enabled: true },
+  { id: "SYS412", department: "시스템반도체학과", term: 2, name: "AI SoC설계", year: 4, curriculumYear: 2023, category: "전공필수", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_MKS", "P_KYJ"], fixed: "", enabled: true },
+  { id: "SYS413", department: "시스템반도체학과", term: 2, name: "디지털집적회로설계2", year: 4, curriculumYear: 2023, category: "전공필수", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_JJP", "P_KYJ"], fixed: "", enabled: true },
+  { id: "SYS414", department: "시스템반도체학과", term: 2, name: "아날로그집적회로설계2", year: 4, curriculumYear: 2023, category: "전공필수", type: "computer", credits: 3, pattern: [3], expectedStudents: 0, maxSeats: 40, tolerance: 3, roomType: "computer", eligible: ["P_SMK", "P_CES"], fixed: "", enabled: true },
+  { id: "SYS415", department: "시스템반도체학과", term: 2, name: "P-프로젝트3", year: 4, curriculumYear: 2023, category: "전공필수", type: "project", weekType: "pPractice4", credits: 6, pattern: [3, 3], expectedStudents: 0, maxSeats: 30, tolerance: 0, roomType: "lab", eligible: ["P_JJP", "P_MKS"], fixed: "", enabled: true }
 ];
 
 defaultData.professors = [
-  { id: "P_KMJ", name: "김미진", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-8,목1-8,금1-8", canTeach: ["EE101", "EE105"] },
-  { id: "P_SHM", name: "손혁민", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,수1-6,목1-10,금1-6", canTeach: ["EE201", "EE306", "EE401"] },
-  { id: "P_NSS", name: "남성식", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,금1-8", canTeach: ["EE201", "EE306", "EE403"] },
-  { id: "P_JJP", name: "정재필", type: "전임", minCredits: 9, maxCredits: 18, availability: "월5-10,화5-10,목5-10", canTeach: ["EE202", "EE302", "EE401", "SYS101"] },
-  { id: "P_KJW", name: "김장원", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10", canTeach: ["EE105", "EE202", "EE302", "EE401", "EE404", "SYS101"] },
-  { id: "P_CHJ", name: "최호종", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-8,화1-8,수1-8,금1-8", canTeach: ["EE204", "EE303", "DISP301"] },
-  { id: "P_MKS", name: "민경식", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10", canTeach: ["EE301", "EE306", "EE404", "SYS201", "SYS301"] },
-  { id: "P_KYJ", name: "김영준", type: "전임", minCredits: 9, maxCredits: 18, availability: "월2-10,화1-10,수1-10,금1-10", canTeach: ["EE302", "EE303", "SYS301", "DSN301"] },
-  { id: "P_HHS", name: "한형석", type: "전임", minCredits: 9, maxCredits: 18, availability: "화1-10,수1-10,목1-10,금1-10", canTeach: ["EE105", "EE201", "EE302", "EE401", "EE404"] },
-  { id: "P_CES", name: "조의식", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-8,화1-8,수1-8,금1-8", canTeach: ["EE205", "EE402", "EE404", "SC201", "SC301", "DISP101", "DISP301"] },
-  { id: "P_KSJ", name: "권상직", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,수1-10,목1-10,금1-10", canTeach: ["EE402", "DISP101"] },
-  { id: "P_LTB", name: "이태봉", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,목1-10,금1-10", canTeach: ["EE203", "EE305", "DSN101"] },
-  { id: "P_PJC", name: "박정철", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,목1-10,금1-10", canTeach: ["EE205", "EE304", "EE401", "SC101", "SC201", "SC401"] },
-  { id: "P_LWJ", name: "이원재", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10,금1-10", canTeach: ["EE203"] },
-  { id: "P_SMK", name: "상민규", type: "전임", minCredits: 9, maxCredits: 18, availability: "화4-10,수4-10,목4-10,금4-10", canTeach: ["EE203", "EE303", "EE304", "SC101", "SC301", "SC401", "DSN101", "DSN301"] },
-  { id: "P_CSB", name: "조성보", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10", canTeach: ["EE204"] },
-  { id: "P_PJS", name: "박진성", type: "강사", minCredits: 0, maxCredits: 4.9, availability: "화1-10,목1-10", canTeach: ["EE202", "EE203"] },
-  { id: "P_JGH", name: "전광호", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-6,금1-6", canTeach: ["EE101", "EE305", "SYS201"] },
-  { id: "P_KDS", name: "강동수", type: "강사", minCredits: 0, maxCredits: 4.9, availability: "화5-10,목5-10,금5-10", canTeach: ["EE101"] },
-  { id: "P_MATH", name: "수학계열교양", type: "겸임", minCredits: 0, maxCredits: 9, availability: "월1-10,화1-10,수1-10,목1-10,금1-10", canTeach: ["EE102"] },
-  { id: "P_PHY", name: "물리계열교양", type: "겸임", minCredits: 0, maxCredits: 9, availability: "월1-10,화1-10,수1-10,목1-10,금1-10", canTeach: ["EE103"] },
-  { id: "P_PHY2", name: "물리실험교양", type: "겸임", minCredits: 0, maxCredits: 9, availability: "월1-10,화1-10,수1-10,목1-10,금1-10", canTeach: ["EE103"] },
-  { id: "P_CHEM", name: "화학계열교양", type: "겸임", minCredits: 0, maxCredits: 9, availability: "월1-10,화1-10,수1-10,목1-10,금1-10", canTeach: ["EE104"] },
-  { id: "P_CHEM2", name: "화학실험교양", type: "겸임", minCredits: 0, maxCredits: 9, availability: "월1-10,화1-10,수1-10,목1-10,금1-10", canTeach: ["EE104"] }
+  { id: "P_KMJ", name: "김미진", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-8,목1-8,금1-8", canTeach: ["EE112"] },
+  { id: "P_SHM", name: "손혁민", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,수1-6,목1-10,금1-6", canTeach: ["EE213", "EE216", "EE315", "EE412", "SC216"] },
+  { id: "P_NSS", name: "남성식", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,금1-8", canTeach: ["EE213", "EE216", "EE413", "SC216"] },
+  { id: "P_JJP", name: "정재필", type: "전임", minCredits: 9, maxCredits: 18, availability: "월5-10,화5-10,목5-10", canTeach: ["EE313", "EE314", "EE315", "EE412", "SYS316", "SYS413"] },
+  { id: "P_KJW", name: "김장원", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10", canTeach: ["EE112", "EE314", "EE315", "EE412", "SYS316"] },
+  { id: "P_CHJ", name: "최호종", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-8,화1-8,수1-8,금1-8", canTeach: ["EE215", "EE312", "SC214"] },
+  { id: "P_MKS", name: "민경식", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10", canTeach: ["EE216", "EE313", "EE414", "SYS312", "SYS313", "SYS315", "SYS412", "SYS415"] },
+  { id: "P_KYJ", name: "김영준", type: "전임", minCredits: 9, maxCredits: 18, availability: "월2-10,화1-10,수1-10,금1-10", canTeach: ["EE312", "EE313", "EE314", "EE414", "SC313", "SYS314", "SYS412", "SYS413"] },
+  { id: "P_HHS", name: "한형석", type: "전임", minCredits: 9, maxCredits: 18, availability: "화1-10,수1-10,목1-10,금1-10", canTeach: ["EE112", "EE212", "EE213", "EE314", "EE315", "EE412"] },
+  { id: "P_CES", name: "조의식", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-8,화1-8,수1-8,금1-8", canTeach: ["SC215", "SC312", "SC315", "SC316", "SC317", "SC413", "SC414", "SYS414"] },
+  { id: "P_KSJ", name: "권상직", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,수1-10,목1-10,금1-10", canTeach: ["SC317"] },
+  { id: "P_LTB", name: "이태봉", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,목1-10,금1-10", canTeach: ["EE212", "EE214", "SC212", "SC213"] },
+  { id: "P_PJC", name: "박정철", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,목1-10,금1-10", canTeach: ["EE315", "EE412", "SC112", "SC215", "SC316", "SC412", "SC413", "SC415"] },
+  { id: "P_LWJ", name: "이원재", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10,금1-10", canTeach: ["EE212", "EE214"] },
+  { id: "P_SMK", name: "상민규", type: "전임", minCredits: 9, maxCredits: 18, availability: "화4-10,수4-10,목4-10,금4-10", canTeach: ["EE212", "EE214", "EE312", "SC112", "SC212", "SC213", "SC215", "SC312", "SC314", "SC315", "SC412", "SC414", "SC415", "SYS314", "SYS414"] },
+  { id: "P_CSB", name: "조성보", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-10", canTeach: ["EE215", "SC214"] },
+  { id: "P_PJS", name: "박진성", type: "강사", minCredits: 0, maxCredits: 4.9, availability: "화1-10,목1-10", canTeach: ["EE212", "EE214"] },
+  { id: "P_JGH", name: "전광호", type: "전임", minCredits: 9, maxCredits: 18, availability: "월1-10,화1-10,수1-10,목1-6,금1-6", canTeach: ["EE112", "EE414", "SYS312", "SYS313"] },
+  { id: "P_KDS", name: "강동수", type: "강사", minCredits: 0, maxCredits: 4.9, availability: "화5-10,목5-10,금5-10", canTeach: ["EE112"] }
 ];
 
 defaultData.rooms = [
@@ -368,6 +400,8 @@ function bindEvents() {
 
   els.semester.addEventListener("change", () => {
     state.semester = els.semester.value.trim() || "미지정 학기";
+    state.schedule = [];
+    runOptimization({ iterations: 8, silent: true });
     saveState();
     renderAll();
   });
@@ -427,30 +461,44 @@ function loadState() {
 
 function normalizeState(raw) {
   raw.constraints = { ...clone(defaultData.constraints), ...(raw.constraints || {}) };
-  raw.departments = Array.isArray(raw.departments) ? raw.departments : clone(defaultData.departments);
+  raw.departments = filterTargetDepartments(Array.isArray(raw.departments) ? raw.departments : clone(defaultData.departments));
+  if (!raw.departments.length) raw.departments = clone(defaultData.departments);
   raw.selectedDepartment = raw.selectedDepartment || raw.departments[0]?.id || defaultData.selectedDepartment;
   if (!raw.departments.some((department) => department.id === raw.selectedDepartment)) {
     raw.selectedDepartment = raw.departments[0]?.id || defaultData.selectedDepartment;
   }
   raw.viewMode = raw.viewMode || "yearMatrix";
-  raw.courses = Array.isArray(raw.courses) ? raw.courses : clone(defaultData.courses);
+  raw.courses = filterTargetCourses(Array.isArray(raw.courses) ? raw.courses : clone(defaultData.courses));
   raw.professors = Array.isArray(raw.professors) ? raw.professors : clone(defaultData.professors);
   raw.rooms = Array.isArray(raw.rooms) ? raw.rooms : clone(defaultData.rooms);
   raw.schedule = Array.isArray(raw.schedule) ? raw.schedule : [];
   raw.activeTab = raw.activeTab || "courses";
   raw.semester = raw.semester || "미지정 학기";
+  raw.courses = filterTargetCourses(raw.courses).filter((course) => !isExternalCourse(course));
+  mergeDefaultTermCourses(raw);
+  mergeDefaultTermProfessors(raw);
   raw.courses.forEach((course) => {
     course.pattern = parsePattern(course.pattern);
     course.eligible = parseList(course.eligible);
     course.enabled = course.enabled !== false;
+    course.term = normalizeTerm(course.term, course);
     course.weekType = course.weekType || inferWeekType(course);
   });
+  const courseIds = new Set(raw.courses.map((course) => course.id));
+  raw.professors = raw.professors.filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id));
   raw.professors.forEach((professor) => {
-    professor.canTeach = parseList(professor.canTeach);
+    professor.canTeach = parseList(professor.canTeach)
+      .map((courseRef) => raw.courses.find((course) => course.id === courseRef || course.name === courseRef)?.id || courseRef)
+      .filter((courseId, index, list) => courseIds.has(courseId) && list.indexOf(courseId) === index);
   });
   raw.rooms.forEach((room) => {
     room.enabled = room.enabled !== false;
     room.capacity = toNumber(room.capacity, 0);
+  });
+  const selectedTerm = semesterTerm(raw.semester);
+  raw.schedule = raw.schedule.filter((assignment) => {
+    const course = raw.courses.find((item) => item.id === assignment.courseId);
+    return course && courseMatchesTerm(course, selectedTerm);
   });
   return raw;
 }
@@ -461,6 +509,75 @@ function saveState() {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function filterTargetDepartments(departments) {
+  return departments.filter((department) => TARGET_DEPARTMENT_NAMES.has(department.id));
+}
+
+function filterTargetCourses(courses) {
+  return courses.filter((course) => !course.department || TARGET_DEPARTMENT_NAMES.has(course.department));
+}
+
+function mergeDefaultTermCourses(raw) {
+  const selectedTerm = semesterTerm(raw.semester);
+  if (!selectedTerm) return;
+  const existingIds = new Set(raw.courses.map((course) => course.id));
+  defaultData.courses
+    .filter((course) => courseMatchesTerm(course, selectedTerm))
+    .forEach((course) => {
+      if (!existingIds.has(course.id)) {
+        raw.courses.push(clone(course));
+        existingIds.add(course.id);
+      }
+    });
+}
+
+function mergeDefaultTermProfessors(raw) {
+  const selectedTerm = semesterTerm(raw.semester);
+  const courseIds = new Set(raw.courses.filter((course) => courseMatchesTerm(course, selectedTerm)).map((course) => course.id));
+  const existingById = new Map(raw.professors.map((professor) => [professor.id, professor]));
+  defaultData.professors
+    .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
+    .forEach((professor) => {
+      const defaultCanTeach = parseList(professor.canTeach).filter((courseId) => courseIds.has(courseId));
+      if (!existingById.has(professor.id)) {
+        raw.professors.push({ ...clone(professor), canTeach: defaultCanTeach });
+        return;
+      }
+      const current = existingById.get(professor.id);
+      const merged = [...parseList(current.canTeach), ...defaultCanTeach];
+      current.canTeach = merged.filter((courseId, index) => merged.indexOf(courseId) === index);
+    });
+}
+
+function isExternalCourse(course) {
+  return EXTERNAL_COURSE_NAMES.has(String(course?.name || "").trim());
+}
+
+function normalizeTerm(value, course) {
+  const explicit = Number(value);
+  if (explicit === 1 || explicit === 2) return explicit;
+  return inferCourseTerm(course);
+}
+
+function inferCourseTerm(course) {
+  if (FIRST_SEMESTER_SEED_IDS.has(course?.id)) return 1;
+  const name = String(course?.name || "");
+  if (/(공업수학|회로이론|전자기학|전자회로|캡스톤디자인|College English|수학|물리학및실험|화학및실험)1$/.test(name)) return 1;
+  if (/(공업수학|회로이론|전자기학|전자회로|캡스톤디자인|College English|수학|물리학및실험|화학및실험)2$/.test(name)) return 2;
+  return 2;
+}
+
+function semesterTerm(text) {
+  const value = String(text || "");
+  const match = value.match(/([12])\s*학기/) || value.match(/-([12])/) || value.match(/\b([12])\b/);
+  return match ? Number(match[1]) : 0;
+}
+
+function courseMatchesTerm(course, term) {
+  if (!term) return true;
+  return normalizeTerm(course?.term, course) === term;
 }
 
 function updateConstraint(key, value) {
@@ -695,9 +812,9 @@ function renderLoadRow(item) {
 
 function renderDataPanel(validation) {
   const hints = {
-    courses: "과목별 예상 학생 수, 강의 유형, 운영주차를 바꾸면 분반 수와 P실무 보완 제약이 다시 계산됩니다.",
-    professors: "가능 시간은 예: 월1-8,화3-10 형식으로 입력합니다. 미입력 시 전체 가능으로 처리합니다.",
-    rooms: "사용할 수 있는 강의실만 체크하고, 분류와 정원을 입력합니다. 최적화는 체크된 강의실만 후보로 사용합니다.",
+    courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 과목별 예상 학생 수, 강의 유형, 운영주차를 바꾸면 분반 수와 P실무 보완 제약이 다시 계산됩니다.",
+    professors: "이전 학기 시간표는 교수 후보와 가능 강의실을 파악하는 참고자료입니다. 담당 가능 과목은 현재 학과·학기 과목명 드롭다운으로 추가합니다.",
+    rooms: "이전 학기 시간표와 보유 시설을 참고해 사용할 강의실만 체크하고, 분류와 정원을 입력합니다. 최적화는 체크된 강의실만 후보로 사용합니다.",
     assignments: "배정 결과는 최적화 실행 후 갱신됩니다. 충돌 행은 제약조건 패널에서 원인을 확인할 수 있습니다."
   };
   els.dataHint.textContent = hints[state.activeTab] || "";
@@ -709,7 +826,7 @@ function renderDataPanel(validation) {
 
 function renderCoursesTable() {
   const rows = state.courses
-    .filter(courseInSelectedDepartment)
+    .filter(courseInCurrentScope)
     .map((course) => {
       const sections = recommendedSections(course);
       const cancel = cancellationStatus(course);
@@ -757,7 +874,7 @@ function renderProfessorsTable() {
         <td class="numeric"><input class="table-input short" type="number" step="0.5" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="minCredits" value="${escapeAttr(professor.minCredits)}" /></td>
         <td class="numeric"><input class="table-input short" type="number" step="0.5" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="maxCredits" value="${escapeAttr(professor.maxCredits)}" /></td>
         <td><input class="table-input" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="availability" value="${escapeAttr(professor.availability || "")}" /></td>
-        <td><input class="table-input" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="canTeach" value="${escapeAttr(professor.canTeach.join(","))}" /></td>
+        <td>${coursePickerHtml(professor)}</td>
         <td><button class="row-button" data-remove="professors" data-id="${escapeAttr(professor.id)}">삭제</button></td>
       </tr>
     `)
@@ -768,6 +885,62 @@ function renderProfessorsTable() {
       <tbody>${rows}</tbody>
     </table>
   `;
+}
+
+function coursePickerHtml(professor) {
+  const selectedIds = normalizeCourseRefs(professor.canTeach);
+  const visibleSelectedIds = selectedIds.filter((courseId) => {
+    const course = findById(state.courses, courseId);
+    return course && courseInCurrentScope(course);
+  });
+  const selectedSet = new Set(selectedIds);
+  const options = courseOptionsForPicker()
+    .filter((course) => !selectedSet.has(course.id))
+    .map((course) => `<option value="${escapeAttr(course.id)}">${escapeHtml(course.name)} · ${course.year}학년</option>`)
+    .join("");
+  const chips = visibleSelectedIds
+    .map((courseId) => findById(state.courses, courseId))
+    .filter(Boolean)
+    .map(
+      (course) => `
+        <span class="choice-chip">
+          ${escapeHtml(course.name)}
+          <button type="button" title="담당 과목 제거" data-remove-course="${escapeAttr(course.id)}" data-professor-id="${escapeAttr(professor.id)}">×</button>
+        </span>
+      `
+    )
+    .join("");
+  return `
+    <div class="course-picker">
+      <select class="table-select" data-course-add data-id="${escapeAttr(professor.id)}">
+        <option value="">과목명으로 추가</option>
+        ${options}
+      </select>
+      <div class="choice-chips">${chips || `<span class="empty-chip">선택 없음</span>`}</div>
+    </div>
+  `;
+}
+
+function courseOptionsForPicker() {
+  return state.courses
+    .filter((course) => course.enabled !== false && courseInCurrentScope(course))
+    .sort((a, b) => toNumber(a.year, 0) - toNumber(b.year, 0) || String(a.name).localeCompare(String(b.name), "ko"));
+}
+
+function normalizeCourseRefs(values) {
+  const ids = [];
+  parseList(values).forEach((value) => {
+    const course = resolveCourseRef(value);
+    const id = course?.id || value;
+    if (id && !ids.includes(id)) ids.push(id);
+  });
+  return ids;
+}
+
+function resolveCourseRef(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return state.courses.find((course) => course.id === text) || state.courses.find((course) => course.name === text) || null;
 }
 
 function renderRoomsTable() {
@@ -831,6 +1004,21 @@ function selectHtml(kind, id, field, value, options) {
 }
 
 function handleTableChange(event) {
+  const courseAdd = event.target.closest("[data-course-add]");
+  if (courseAdd) {
+    const professor = findById(state.professors, courseAdd.dataset.id);
+    const courseId = courseAdd.value;
+    if (!professor || !courseId) return;
+    const canTeach = normalizeCourseRefs(professor.canTeach);
+    if (!canTeach.includes(courseId)) {
+      professor.canTeach = [...canTeach, courseId];
+      state.schedule = [];
+      saveState();
+      renderAll();
+    }
+    return;
+  }
+
   const input = event.target.closest("[data-kind][data-id][data-field]");
   if (!input) return;
   const { kind, id, field } = input.dataset;
@@ -858,6 +1046,17 @@ function handleTableChange(event) {
 }
 
 function handleTableClick(event) {
+  const courseRemove = event.target.closest("[data-remove-course][data-professor-id]");
+  if (courseRemove) {
+    const professor = findById(state.professors, courseRemove.dataset.professorId);
+    if (!professor) return;
+    professor.canTeach = normalizeCourseRefs(professor.canTeach).filter((courseId) => courseId !== courseRemove.dataset.removeCourse);
+    state.schedule = [];
+    saveState();
+    renderAll();
+    return;
+  }
+
   const remove = event.target.closest("[data-remove]");
   if (!remove) return;
   const kind = remove.dataset.remove;
@@ -891,6 +1090,7 @@ function addCourse() {
   state.courses.push({
     id: `NEW${next}`,
     department: state.selectedDepartment,
+    term: semesterTerm(state.semester) || 2,
     name: "신규 과목",
     year: 1,
     category: "전공선택",
@@ -1425,7 +1625,7 @@ function validateSchedule(assignments) {
 function buildSections() {
   const sections = [];
   state.courses
-    .filter((course) => course.enabled !== false && courseInSelectedDepartment(course))
+    .filter((course) => course.enabled !== false && courseInCurrentScope(course))
     .forEach((course) => {
       const count = recommendedSections(course);
       const seats = Math.ceil(courseDemand(course) / count);
@@ -1456,6 +1656,14 @@ function getSelectedDepartment() {
 
 function courseInSelectedDepartment(course) {
   return !course.department || course.department === state.selectedDepartment;
+}
+
+function courseInSelectedTerm(course) {
+  return courseMatchesTerm(course, semesterTerm(state.semester));
+}
+
+function courseInCurrentScope(course) {
+  return courseInSelectedDepartment(course) && courseInSelectedTerm(course);
 }
 
 function courseDemand(course) {
