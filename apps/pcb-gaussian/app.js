@@ -9,6 +9,11 @@ const POT_MAX_CODE = 255;
 const ADC_TIA_COUNT = 8;
 const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
+const SWEEP_RENDER_INTERVAL_MS = 150;
+const SWEEP_STATUS_INTERVAL_MS = 250;
+const APP_VERSION = "2026-05-21-sweep-base32-230400";
+const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
+const FIRMWARE_SWEEP_RE = /^(SWEEP|SX),/i;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
 // Bench notes use 0-based TIA/device numbers. GUI and firmware commands use 1-based device labels.
 const TIA_DEVICE_MAP = [
@@ -308,6 +313,9 @@ const state = {
   lastSweep: null,
   sweepCounter: 0,
   plotFramePending: false,
+  plotRenderTimer: null,
+  lastSweepLogMs: 0,
+  lastPlotRenderMs: 0,
   sweepRunning: false,
   plotAdcSelection: {
     D1: PLOT_CONFIGS.D1.defaultAdcs.slice(),
@@ -352,11 +360,11 @@ async function connectSerial() {
   }
   try {
     state.port = await navigator.serial.requestPort();
-    await state.port.open({ baudRate: Number($("baudRate").value) || 115200 });
+    await state.port.open({ baudRate: Number($("baudRate").value) || 230400 });
     state.writer = state.port.writable.getWriter();
     state.keepReading = true;
     setConnected(true);
-    logLine(`Connected @ ${$("baudRate").value}`);
+    logLine(`Connected @ ${$("baudRate").value} (${APP_VERSION})`);
     readLoop();
   } catch (error) {
     logLine(`[connect error] ${error.message}`);
@@ -411,7 +419,8 @@ function handleSerialText(chunk) {
   for (const line of lines) {
     const text = line.trim().replace(/^;+/, "");
     if (!text) continue;
-    logLine(text, "< ");
+    const isFirmwareSweepLine = FIRMWARE_SWEEP_RE.test(text);
+    if (!isFirmwareSweepLine) logLine(text, "< ");
     if (!parseFirmwareSweepReply(text)) parseAdcReply(text);
     const pendingIndex = state.pendingReplies.findIndex(pending => !pending.matcher || pending.matcher(text));
     if (pendingIndex >= 0) {
@@ -811,6 +820,12 @@ function startSweepCapture() {
     startedAt: new Date().toISOString(),
     points: [],
     adcLabels: ADC_LABELS.slice(),
+    expectedByDac: {},
+    receivedByDac: {},
+    nextPointByDac: {},
+    missingByDac: {},
+    badByDac: {},
+    lastStatusMs: 0,
   };
   state.pendingAdcContext = null;
   state.lastSweep = null;
@@ -820,14 +835,20 @@ function startSweepCapture() {
 }
 
 function finishSweepCapture() {
+  if (state.plotRenderTimer) {
+    clearTimeout(state.plotRenderTimer);
+    state.plotRenderTimer = null;
+  }
   if (state.activeSweep?.points.length) {
     state.activeSweep.finishedAt = new Date().toISOString();
     state.lastSweep = state.activeSweep;
     state.activeSweep = null;
     state.pendingAdcContext = null;
+    renderMeasurementTableTail();
     renderSweepPlot();
     $("downloadSweepCsvButton").disabled = false;
-    setAllPlotStatus(`Sweep ${state.lastSweep.id}: ${state.lastSweep.points.length} ADC point(s).`);
+    const coverage = sweepCoverageSummary(state.lastSweep);
+    setAllPlotStatus(`Sweep ${state.lastSweep.id}: ${state.lastSweep.points.length} ADC point(s)${coverage ? `, ${coverage}` : ""}.`);
   } else {
     state.activeSweep = null;
     state.pendingAdcContext = null;
@@ -838,12 +859,18 @@ function finishSweepCapture() {
 }
 
 function scheduleSweepPlotRender() {
-  if (state.plotFramePending) return;
-  state.plotFramePending = true;
-  requestAnimationFrame(() => {
-    state.plotFramePending = false;
-    renderSweepPlot();
-  });
+  if (state.plotFramePending || state.plotRenderTimer) return;
+  const now = performance.now();
+  const delay = Math.max(0, SWEEP_RENDER_INTERVAL_MS - (now - state.lastPlotRenderMs));
+  state.plotRenderTimer = setTimeout(() => {
+    state.plotRenderTimer = null;
+    state.plotFramePending = true;
+    requestAnimationFrame(() => {
+      state.plotFramePending = false;
+      state.lastPlotRenderMs = performance.now();
+      renderSweepPlot();
+    });
+  }, delay);
 }
 
 function sweepPoints(prefix) {
@@ -911,6 +938,46 @@ function sweepAdcMask(dac) {
   return adcMaskFromIndices(selectedPlotAdcs(dac));
 }
 
+function encodeBase32(value) {
+  let number = Math.trunc(Number(value) || 0);
+  if (number === 0) return "0";
+  const sign = number < 0 ? "-" : "";
+  number = Math.abs(number);
+  let text = "";
+  while (number > 0) {
+    text = BASE32_ALPHABET[number & 31] + text;
+    number = Math.floor(number / 32);
+  }
+  return sign + text;
+}
+
+function decodeBase32(value) {
+  const text = String(value ?? "").trim().toUpperCase();
+  if (!text) return NaN;
+  let idx = 0;
+  let sign = 1;
+  if (text[0] === "-") {
+    sign = -1;
+    idx = 1;
+  }
+  if (idx >= text.length) return NaN;
+  let number = 0;
+  for (; idx < text.length; idx++) {
+    const digit = BASE32_ALPHABET.indexOf(text[idx]);
+    if (digit < 0) return NaN;
+    number = number * 32 + digit;
+  }
+  return sign * number;
+}
+
+function parseNumericField(value, base32 = false) {
+  if (base32) return decodeBase32(value);
+  const text = String(value ?? "").trim();
+  if (!text) return NaN;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : NaN;
+}
+
 function parseAdcFields(parts) {
   return Array.from({ length: ADC_TIA_COUNT }, (_, idx) => {
     const text = String(parts[idx] ?? "").trim();
@@ -918,6 +985,20 @@ function parseAdcFields(parts) {
     const value = Number(text);
     return Number.isFinite(value) ? value : null;
   });
+}
+
+function parseCompactBase32AdcFields(parts, mask) {
+  const values = Array.from({ length: ADC_TIA_COUNT }, () => null);
+  let fieldIndex = 0;
+  let ok = Number.isFinite(mask) && mask > 0;
+  for (let adcIndex = 0; adcIndex < ADC_TIA_COUNT; adcIndex++) {
+    if ((mask & (1 << adcIndex)) === 0) continue;
+    const value = decodeBase32(parts[fieldIndex]);
+    if (!Number.isFinite(value)) ok = false;
+    values[adcIndex] = Number.isFinite(value) ? value : null;
+    fieldIndex += 1;
+  }
+  return { values, ok };
 }
 
 function firmwareSweepRequest(prefix, totalMs, adcMask) {
@@ -933,7 +1014,7 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
   if (pointCount > 1024) throw new Error(`${prefix} firmware sweep has ${pointCount} points; max is 1024`);
   return {
     dac: prefix,
-    command: `SW${prefix.slice(1)},${start},${stop},${step},${totalMs},${adcMask}`,
+    command: `SX${prefix.slice(1)},${encodeBase32(start)},${encodeBase32(stop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)}`,
     pointCount,
     timeoutMs: Math.max(10000, totalMs + pointCount * 500 + 3000),
   };
@@ -982,14 +1063,14 @@ async function startSweep() {
         timeoutMs: request.timeoutMs,
         replyMatcher: text => {
           const upper = text.toUpperCase();
-          return upper.startsWith(`SWEEP,DONE,${request.dac}`) || upper.startsWith("SWEEP,ERR") || upper.startsWith("ADC,ERR") || upper.startsWith("ADC,INIT_ERR");
+          return upper.startsWith(`SX,DONE,${request.dac}`) || upper.startsWith(`SWEEP,DONE,${request.dac}`) || upper.startsWith("SX,ERR") || upper.startsWith("SWEEP,ERR") || upper.startsWith("ADC,ERR") || upper.startsWith("ADC,INIT_ERR");
         },
       });
       if (!reply) {
         logLine(`[timeout] Firmware sweep ${request.dac}`);
         break;
       }
-      if (reply.toUpperCase().startsWith("SWEEP,ERR") || reply.toUpperCase().startsWith("ADC,")) break;
+      if (reply.toUpperCase().startsWith("SX,ERR") || reply.toUpperCase().startsWith("SWEEP,ERR") || reply.toUpperCase().startsWith("ADC,")) break;
     }
   } finally {
     state.sweepRunning = false;
@@ -1151,19 +1232,75 @@ function connectedDevicesSummary(tia) {
 }
 
 
+
+function trackFirmwareSweepPoint(dac, pointIndex) {
+  const sweep = state.activeSweep;
+  if (!sweep || !Number.isFinite(pointIndex)) return;
+  sweep.receivedByDac[dac] = (sweep.receivedByDac[dac] || 0) + 1;
+  const expectedNext = sweep.nextPointByDac[dac] ?? pointIndex;
+  if (pointIndex > expectedNext) {
+    sweep.missingByDac[dac] = (sweep.missingByDac[dac] || 0) + (pointIndex - expectedNext);
+  }
+  if (pointIndex >= expectedNext) sweep.nextPointByDac[dac] = pointIndex + 1;
+}
+
+function trackFirmwareSweepBadLine(dac) {
+  const sweep = state.activeSweep;
+  if (!sweep) return;
+  sweep.badByDac[dac] = (sweep.badByDac[dac] || 0) + 1;
+  const nowMs = performance.now();
+  if (nowMs - (state.lastSweepLogMs || 0) >= SWEEP_STATUS_INTERVAL_MS) {
+    state.lastSweepLogMs = nowMs;
+    const progress = sweepCoverageSummary(sweep);
+    setAllPlotStatus(`Live sweep ${sweep.id}: ${sweep.points.length} ADC point(s)${progress ? `, ${progress}` : ""}.`);
+  }
+}
+
+function sweepCoverageText(sweep, dac) {
+  if (!sweep) return "";
+  const expected = Number(sweep.expectedByDac?.[dac]);
+  const received = Number(sweep.receivedByDac?.[dac] ?? sweep.points.filter(point => point.sweepDac === dac).length);
+  const bad = Number(sweep.badByDac?.[dac] || 0);
+  if (!Number.isFinite(expected) || expected <= 0) return `${received} received${bad ? `, bad ${bad}` : ""}`;
+  const gapMissing = Number(sweep.missingByDac?.[dac] || 0);
+  const countMissing = Math.max(0, expected - received - bad);
+  const missing = Math.max(gapMissing, countMissing);
+  return `received ${received}/${expected}${missing ? `, missing ${missing}` : ""}${bad ? `, bad ${bad}` : ""}`;
+}
+
+function sweepCoverageSummary(sweep) {
+  if (!sweep) return "";
+  return ["D1", "D2"]
+    .filter(dac => sweep.expectedByDac?.[dac] || sweep.receivedByDac?.[dac] || sweep.badByDac?.[dac])
+    .map(dac => `${dac} ${sweepCoverageText(sweep, dac)}`)
+    .join("; ");
+}
 function parseFirmwareSweepReply(text) {
   const parts = text.replaceAll(":", ",").split(",").map(part => part.trim());
-  if (parts[0]?.toUpperCase() !== "SWEEP") return false;
+  const protocol = parts[0]?.toUpperCase();
+  const isBase32 = protocol === "SX";
+  if (protocol !== "SWEEP" && protocol !== "SX") return false;
 
   const kind = parts[1]?.toUpperCase();
   if (kind === "START") {
     const dac = parts[2]?.toUpperCase() || "D?";
-    setPlotStatus(dac, `Firmware sweep ${dac}: ${parts[7] || "?"} point(s) requested.`);
+    const expected = parseNumericField(parts[7], isBase32);
+    if (state.activeSweep && Number.isFinite(expected)) {
+      state.activeSweep.expectedByDac[dac] = expected;
+      state.activeSweep.receivedByDac[dac] = 0;
+      state.activeSweep.nextPointByDac[dac] = 0;
+      state.activeSweep.missingByDac[dac] = 0;
+      state.activeSweep.badByDac[dac] = 0;
+    }
+    setPlotStatus(dac, `Firmware sweep ${dac}: ${Number.isFinite(expected) ? expected : "?"} point(s) requested.`);
     return true;
   }
   if (kind === "DONE") {
     const dac = parts[2]?.toUpperCase() || "D?";
-    setPlotStatus(dac, `Firmware sweep ${dac}: ${parts[3] || "?"} point(s) complete.`);
+    const expected = parseNumericField(parts[3], isBase32);
+    if (state.activeSweep && Number.isFinite(expected)) state.activeSweep.expectedByDac[dac] = expected;
+    const coverage = state.activeSweep ? sweepCoverageText(state.activeSweep, dac) : `${Number.isFinite(expected) ? expected : "?"} point(s) complete`;
+    setPlotStatus(dac, `Firmware sweep ${dac}: ${coverage}.`);
     return true;
   }
   if (kind === "ERR") {
@@ -1173,15 +1310,18 @@ function parseFirmwareSweepReply(text) {
   if (kind !== "D1" && kind !== "D2") return true;
   if (!state.activeSweep) return true;
 
-  const pointIndex = Number(parts[2]);
-  const code = Number(parts[3]);
-  const mv = Number(parts[4]);
-  const values = parseAdcFields(parts.slice(5, 5 + ADC_TIA_COUNT));
-  if (!Number.isFinite(pointIndex) || !Number.isFinite(code) || !Number.isFinite(mv) || !values.some(Number.isFinite)) {
-    logLine(`[parse warn] Bad firmware sweep line: ${text}`);
+  const pointIndex = parseNumericField(parts[2], isBase32);
+  const code = parseNumericField(parts[3], isBase32);
+  const mv = parseNumericField(parts[4], isBase32);
+  const mask = isBase32 ? parseNumericField(parts[5], true) : NaN;
+  const compact = isBase32 ? parseCompactBase32AdcFields(parts.slice(6), mask) : null;
+  const values = isBase32 ? compact.values : parseAdcFields(parts.slice(5, 5 + ADC_TIA_COUNT));
+  if (!Number.isFinite(pointIndex) || !Number.isFinite(code) || !Number.isFinite(mv) || (isBase32 && !compact.ok) || !values.some(Number.isFinite)) {
+    trackFirmwareSweepBadLine(kind);
     return true;
   }
 
+  trackFirmwareSweepPoint(kind, pointIndex);
   state.dacCodes[kind] = code;
   const snapshot = dacSnapshot();
   snapshot[kind] = { code, vhigh: mv / 1000 };
@@ -1244,7 +1384,7 @@ function recordAdcValues(values, source) {
       jumper: connected,
       devices: connected,
       source,
-    });
+    }, !context);
   }
   addSweepAdcPoint(values, context);
 }
@@ -1281,7 +1421,12 @@ function addSweepAdcPoint(values, context) {
     adcs,
     tias,
   });
-  setAllPlotStatus(`Live sweep ${state.activeSweep.id}: ${state.activeSweep.points.length} ADC point(s).`);
+  const nowMs = performance.now();
+  if (nowMs - (state.activeSweep.lastStatusMs || 0) >= SWEEP_STATUS_INTERVAL_MS) {
+    state.activeSweep.lastStatusMs = nowMs;
+    const progress = sweepCoverageSummary(state.activeSweep);
+    setAllPlotStatus(`Live sweep ${state.activeSweep.id}: ${state.activeSweep.points.length} ADC point(s)${progress ? `, ${progress}` : ""}.`);
+  }
   scheduleSweepPlotRender();
 }
 function recordMeasurement(dac, code, vhigh, source) {
@@ -1305,13 +1450,23 @@ function recordMeasurement(dac, code, vhigh, source) {
   }
 }
 
-function addMeasurement(row) {
-  state.measurements.push(row);
+function appendMeasurementRow(row) {
   const tr = document.createElement("tr");
   tr.innerHTML = `<td>${row.time}</td><td>${row.dac}</td><td>${row.code}</td><td>${row.vhigh}</td><td>${row.tia}</td><td>${row.raw}</td><td>${row.voltage}</td><td>${row.current}</td><td>${row.jumper}</td>`;
   const table = $("measurementTable");
   table.appendChild(tr);
   while (table.children.length > MEASUREMENT_TABLE_ROW_LIMIT) table.firstElementChild.remove();
+}
+
+function renderMeasurementTableTail() {
+  const table = $("measurementTable");
+  table.innerHTML = "";
+  for (const row of state.measurements.slice(-MEASUREMENT_TABLE_ROW_LIMIT)) appendMeasurementRow(row);
+}
+
+function addMeasurement(row, render = true) {
+  state.measurements.push(row);
+  if (render) appendMeasurementRow(row);
 }
 
 function sweepXValue(point, xDac) {
@@ -1500,9 +1655,9 @@ function renderDacSweepPlot(xDac) {
   labels.forEach((label, seriesIndex) => {
     const color = PLOT_COLORS[Number(label.replace("ADC", "")) % PLOT_COLORS.length];
     const series = points
-      .map(point => ({ x: sweepXValue(point, xDac), sample: point.adcs?.[label] }))
+      .map(point => ({ x: sweepXValue(point, xDac), point: point.point, sample: point.adcs?.[label] }))
       .filter(item => item.sample)
-      .map(item => ({ x: item.x, y: sweepYValue(item.sample, yMode) }));
+      .map(item => ({ x: item.x, y: sweepYValue(item.sample, yMode), point: item.point }));
     if (!series.length) return;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
@@ -1511,7 +1666,9 @@ function renderDacSweepPlot(xDac) {
     series.forEach((item, idx) => {
       const x = sx(item.x);
       const y = sy(item.y);
-      if (idx === 0) ctx.moveTo(x, y);
+      const previous = series[idx - 1];
+      const hasPointGap = previous && Math.abs(Number(item.point) - Number(previous.point)) > 1;
+      if (idx === 0 || hasPointGap) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
@@ -1527,7 +1684,8 @@ function renderDacSweepPlot(xDac) {
     const color = PLOT_COLORS[adcIdx % PLOT_COLORS.length];
     return `<span><i style="background:${color}"></i>${label} / TIA${adcIdx + 1}</span>`;
   }).join("");
-  setPlotStatus(xDac, `Sweep ${sweep.id}: ${sweep.points.length} point(s), ${labels.join("/")}.`);
+  const coverage = sweepCoverageText(sweep, xDac);
+  setPlotStatus(xDac, `Sweep ${sweep.id}: ${sweep.points.length} point(s), ${labels.join("/")}${coverage ? `, ${coverage}` : ""}.`);
 }
 
 function renderSweepPlot() {

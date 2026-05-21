@@ -20,7 +20,7 @@
         </div>
         <label>
           Baud
-          <input id="baudRate" type="number" value="115200" min="9600" step="9600" />
+          <input id="baudRate" type="number" value="230400" min="9600" step="9600" />
         </label>
         <button id="connectButton" class="primary">Connect</button>
         <button id="disconnectButton">Disconnect</button>
@@ -43,7 +43,7 @@
         </div>
         <div class="metric">
           <span>TIA Rf</span>
-                <strong>8 x 1 M廓</strong>
+          <strong>8 x 1 Mohm</strong>
         </div>
       </section>
 
@@ -272,7 +272,7 @@
               <label>Code <input id="switchCode" type="number" min="0" max="255" value="0" /></label>
             </div>
             <button id="switchWriteButton" class="primary wide">Write selected channel</button>
-            <p class="hint">MAX4581? firmware ?대??먯꽌 programming ?숈븞留?enable????release?⑸땲??</p>
+            <p class="hint">MAX4581 firmware enables the selected channel only during programming, then releases all channels.</p>
           </article>
           <article class="panel">
             <div class="panel-title">
@@ -418,6 +418,6 @@
 
     </main>
 
-    <script src="./app.js?v=288a291b1adc"></script>
+    <script src="./app.js?v=20260521-sweep-base32-230400"></script>
   </body>
 </html>
