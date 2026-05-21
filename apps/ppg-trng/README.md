@@ -17,10 +17,16 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - DAC set: ASCII number followed by `\r`, for example `2056\r`
 - TRNG bit mode toggle: `9999\r`
 - DAC sweep/reset: `0000\r`
-- LED toggle: `8888\r`
-- LED blink toggle while sampling: `7777\r`
+- Green LED toggle: `8881\r`
+- Red LED toggle: `8882\r`
+- Both LEDs off: `8880\r`
+- Both LEDs on: `8883\r`
+- Legacy both-LED toggle: `8888\r`
+- PPG measurement toggle: `7777\r`
 - ADC receive format: UART text numeric stream, for example `7568\n;`
 - Random bit receive format in `9999` mode: `0` and `1` text stream
+
+In PPG measurement mode, the firmware alternates ambient, Green-on, ambient, and Red-on samples, then streams the ambient-subtracted LED response magnitude as the same numeric ADC stream used by the plot.
 
 The inspected firmware uses UART RX `31`, TX `30`, and `115200` baud.
 
