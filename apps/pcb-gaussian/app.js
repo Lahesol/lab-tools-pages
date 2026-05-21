@@ -11,7 +11,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const APP_VERSION = "2026-05-21-sweep-base32-230400";
+const APP_VERSION = "2026-05-21-sweep-base32-avg";
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
 const FIRMWARE_SWEEP_RE = /^(SWEEP|SX),/i;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
@@ -1001,6 +1001,13 @@ function parseCompactBase32AdcFields(parts, mask) {
   return { values, ok };
 }
 
+function adcAvgSamples() {
+  const input = $("adcAvgSamples");
+  const value = clamp(Math.round(Number(input?.value) || 16), 1, 256);
+  if (input) input.value = value;
+  return value;
+}
+
 function firmwareSweepRequest(prefix, totalMs, adcMask) {
   const mode = $(`sweep${prefix}Mode`).value;
   if (mode !== "Vhigh mV") {
@@ -1012,9 +1019,11 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
   if (![start, stop, step].every(Number.isFinite) || step <= 0) throw new Error(`${prefix} sweep range/step is invalid`);
   const pointCount = sweepPointCountFromMv(start, stop, step);
   if (pointCount > 1024) throw new Error(`${prefix} firmware sweep has ${pointCount} points; max is 1024`);
+  const avgSamples = adcAvgSamples();
   return {
     dac: prefix,
-    command: `SX${prefix.slice(1)},${encodeBase32(start)},${encodeBase32(stop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)}`,
+    command: `SX${prefix.slice(1)},${encodeBase32(start)},${encodeBase32(stop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)},${encodeBase32(avgSamples)}`,
+    avgSamples,
     pointCount,
     timeoutMs: Math.max(10000, totalMs + pointCount * 500 + 3000),
   };
@@ -1050,14 +1059,14 @@ async function startSweep() {
   startSweepCapture();
   state.sweepRunning = true;
   const startedMs = performance.now();
-  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")}`).join(", ")}`;
+  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples}`).join(", ")}`;
   logLine($("sweepStatus").textContent);
 
   try {
     for (const request of requests) {
       if (!state.sweepRunning) break;
       state.firmwareSweepSelectedTias = request.tias;
-      $("sweepStatus").textContent = `Firmware sweep ${request.dac}: ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}`;
+      $("sweepStatus").textContent = `Firmware sweep ${request.dac}: ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}, avg ${request.avgSamples}`;
       const reply = await sendCommand(request.command, {
         waitForReply: true,
         timeoutMs: request.timeoutMs,
