@@ -108,8 +108,8 @@
                 <h2>DAC1 / DAC2 sweep</h2>
               </div>
               <label class="checkbox">
-                <input id="sampleEachPoint" type="checkbox" checked />
-                ADC each point
+                <input id="sampleEachPoint" type="checkbox" checked disabled />
+                Firmware ADC stream
               </label>
             </div>
             <div class="sweep-table">
@@ -122,20 +122,20 @@
 
               <input id="sweepD1Enable" type="checkbox" checked />
               <strong>D1</strong>
-              <select id="sweepD1Mode"><option>Vhigh mV</option><option>DAC out mV</option><option>Code</option></select>
+              <select id="sweepD1Mode"><option>Vhigh mV</option></select>
               <input id="sweepD1Start" type="number" value="-14800" />
               <input id="sweepD1Stop" type="number" value="14800" />
               <input id="sweepD1Step" type="number" value="500" />
 
               <input id="sweepD2Enable" type="checkbox" />
               <strong>D2</strong>
-              <select id="sweepD2Mode"><option>Vhigh mV</option><option>DAC out mV</option><option>Code</option></select>
+              <select id="sweepD2Mode"><option>Vhigh mV</option></select>
               <input id="sweepD2Start" type="number" value="-14800" />
               <input id="sweepD2Stop" type="number" value="14800" />
               <input id="sweepD2Step" type="number" value="500" />
             </div>
             <div class="button-row">
-              <label class="inline-field">Dwell ms <input id="sweepDwell" type="number" value="50" min="0" /></label>
+              <label class="inline-field">Sweep ms <input id="sweepDwell" type="number" value="0" min="0" /></label>
               <label class="inline-field">Y <select id="plotYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
               <button id="startSweepButton" class="primary">Start sweep</button>
               <button id="stopSweepButton">Stop</button>
@@ -327,6 +327,7 @@
               <button id="setMuCodeButton">Set A code</button>
               <button id="setMuVoltageButton">Set A voltage</button>
               <button id="applyPotButton" class="primary">Apply A + mu</button>
+              <button id="applyPotAllButton">Apply all devices</button>
             </div>
           </article>
           <article class="panel table-panel">
@@ -417,6 +418,6 @@
 
     </main>
 
-    <script src="./app.js?v=66ca106a00fe"></script>
+    <script src="./app.js?v=de65299ffa8d"></script>
   </body>
 </html>

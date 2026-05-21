@@ -8,6 +8,7 @@ const DAC_MAX_CODE = 4095;
 const POT_MAX_CODE = 255;
 const ADC_TIA_COUNT = 8;
 const MAX_DEVICES_PER_TIA = 4;
+const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
 // Bench notes use 0-based TIA/device numbers. GUI and firmware commands use 1-based device labels.
 const TIA_DEVICE_MAP = [
@@ -302,6 +303,7 @@ const state = {
   commandLog: [],
   pendingReplies: [],
   pendingAdcContext: null,
+  firmwareSweepSelectedTias: null,
   activeSweep: null,
   lastSweep: null,
   sweepCounter: 0,
@@ -410,18 +412,20 @@ function handleSerialText(chunk) {
     const text = line.trim().replace(/^;+/, "");
     if (!text) continue;
     logLine(text, "< ");
-    parseAdcReply(text);
-    const pending = state.pendingReplies.shift();
-    if (pending) {
+    if (!parseFirmwareSweepReply(text)) parseAdcReply(text);
+    const pendingIndex = state.pendingReplies.findIndex(pending => !pending.matcher || pending.matcher(text));
+    if (pendingIndex >= 0) {
+      const [pending] = state.pendingReplies.splice(pendingIndex, 1);
       clearTimeout(pending.timer);
       pending.resolve(text);
     }
   }
 }
 
-function waitForReply(timeoutMs) {
+function waitForReply(timeoutMs, matcher = null) {
   return new Promise(resolve => {
     const pending = {
+      matcher,
       resolve,
       timer: setTimeout(() => {
         state.pendingReplies = state.pendingReplies.filter(item => item !== pending);
@@ -450,7 +454,7 @@ async function sendCommand(command, options = {}) {
     logLine("[dry-run] serial not connected");
     return;
   }
-  const replyPromise = options.waitForReply ? waitForReply(options.timeoutMs || 1500) : null;
+  const replyPromise = options.waitForReply ? waitForReply(options.timeoutMs || 1500, options.replyMatcher || null) : null;
   const bytes = new TextEncoder().encode(`${cmd}\n`);
   await state.writer.write(bytes);
   if (replyPromise) {
@@ -856,56 +860,121 @@ function sweepPoints(prefix) {
   return points;
 }
 
+function sweepPointCountFromMv(start, stop, step) {
+  const span = Math.abs(stop - start);
+  let count = Math.floor(span / step) + 1;
+  if (span % step !== 0) count += 1;
+  return count;
+}
+
+function adcIndexFromTia(tiaIndex) {
+  const tia = state.tiaStates[tiaIndex - 1];
+  const match = String(tia?.adc || "").match(/AIN(\d+)/i);
+  const adcIndex = match ? Number(match[1]) : tiaIndex - 1;
+  return Number.isFinite(adcIndex) ? clamp(adcIndex, 0, ADC_TIA_COUNT - 1) : null;
+}
+
+function tiaIndexForAdc(adcIndex) {
+  const found = state.tiaStates.findIndex(tia => {
+    const match = String(tia?.adc || "").match(/AIN(\d+)/i);
+    return match && Number(match[1]) === adcIndex;
+  });
+  return found >= 0 ? found : adcIndex;
+}
+
+function adcMaskFromTias(tias) {
+  let mask = 0;
+  for (const tiaIndex of tias) {
+    const adcIndex = adcIndexFromTia(tiaIndex);
+    if (adcIndex !== null) mask |= (1 << adcIndex);
+  }
+  return mask || 0xFF;
+}
+
+function parseAdcFields(parts) {
+  return Array.from({ length: ADC_TIA_COUNT }, (_, idx) => {
+    const text = String(parts[idx] ?? "").trim();
+    if (!text) return null;
+    const value = Number(text);
+    return Number.isFinite(value) ? value : null;
+  });
+}
+
+function firmwareSweepRequest(prefix, totalMs, adcMask) {
+  const mode = $(`sweep${prefix}Mode`).value;
+  if (mode !== "Vhigh mV") {
+    throw new Error("Firmware sweep currently uses Vhigh mV mode. Set sweep unit to Vhigh mV.");
+  }
+  const start = Math.round(Number($(`sweep${prefix}Start`).value));
+  const stop = Math.round(Number($(`sweep${prefix}Stop`).value));
+  const step = Math.abs(Math.round(Number($(`sweep${prefix}Step`).value)));
+  if (![start, stop, step].every(Number.isFinite) || step <= 0) throw new Error(`${prefix} sweep range/step is invalid`);
+  const pointCount = sweepPointCountFromMv(start, stop, step);
+  if (pointCount > 1024) throw new Error(`${prefix} firmware sweep has ${pointCount} points; max is 1024`);
+  return {
+    dac: prefix,
+    command: `SW${prefix.slice(1)},${start},${stop},${step},${totalMs},${adcMask}`,
+    pointCount,
+    timeoutMs: Math.max(10000, totalMs + pointCount * 500 + 3000),
+  };
+}
+
 async function startSweep() {
   if (state.sweepRunning) return;
-  const sweeps = {};
+  const totalMs = Math.max(0, Math.round(Number($("sweepDwell").value) || 0));
+  const requests = [];
+  syncTiaStates();
+  const selectedTiasForSweep = selectedTias();
+  const adcMask = adcMaskFromTias(selectedTiasForSweep);
   try {
-    if ($("sweepD1Enable").checked) sweeps.D1 = sweepPoints("D1");
-    if ($("sweepD2Enable").checked) sweeps.D2 = sweepPoints("D2");
-    if (!Object.keys(sweeps).length) throw new Error("Enable at least one DAC sweep");
+    if ($("sweepD1Enable").checked) requests.push(firmwareSweepRequest("D1", totalMs, adcMask));
+    if ($("sweepD2Enable").checked) requests.push(firmwareSweepRequest("D2", totalMs, adcMask));
+    if (!requests.length) throw new Error("Enable at least one DAC sweep");
   } catch (error) {
     alert(error.message);
     return;
   }
-  const dwell = Math.max(0, Number($("sweepDwell").value) || 0);
-  const sample = $("sampleEachPoint").checked;
-  const maxPoints = Math.max(...Object.values(sweeps).map(points => points.length));
-  syncTiaStates();
+
+  state.firmwareSweepSelectedTias = selectedTiasForSweep;
   startSweepCapture();
   state.sweepRunning = true;
-  $("sweepStatus").textContent = `Sweep running: ${Object.entries(sweeps).map(([dac, pts]) => `${dac}:${pts.length}`).join(", ")}`;
-  logLine($("sweepStatus").textContent);
+  const startedMs = performance.now();
+  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount}`).join(", ")}`;
+  logLine(`${$("sweepStatus").textContent}, ADC mask 0x${adcMask.toString(16).padStart(2, "0")}`);
 
-  for (let index = 0; index < maxPoints && state.sweepRunning; index++) {
-    for (const [dac, points] of Object.entries(sweeps)) {
-      if (index >= points.length) continue;
-      const code = points[index];
-      await sendCommand(`${dac},${code}`, { waitForReply: true, timeoutMs: 1200 });
-      state.dacCodes[dac] = code;
-      recordMeasurement(dac, code, dacCodeToVhigh(dac, code), "sweep");
+  try {
+    for (const request of requests) {
+      if (!state.sweepRunning) break;
+      $("sweepStatus").textContent = `Firmware sweep ${request.dac}: ${request.pointCount} point(s), total ${totalMs} ms`;
+      const reply = await sendCommand(request.command, {
+        waitForReply: true,
+        timeoutMs: request.timeoutMs,
+        replyMatcher: text => {
+          const upper = text.toUpperCase();
+          return upper.startsWith(`SWEEP,DONE,${request.dac}`) || upper.startsWith("SWEEP,ERR") || upper.startsWith("ADC,ERR") || upper.startsWith("ADC,INIT_ERR");
+        },
+      });
+      if (!reply) {
+        logLine(`[timeout] Firmware sweep ${request.dac}`);
+        break;
+      }
+      if (reply.toUpperCase().startsWith("SWEEP,ERR") || reply.toUpperCase().startsWith("ADC,")) break;
     }
-    if (sample) {
-      state.pendingAdcContext = {
-        sweepId: state.activeSweep?.id,
-        pointIndex: index,
-        dac: dacSnapshot(),
-        selectedTias: selectedTias(),
-      };
-      await sendCommand($("adcCommand").value || "ADC", { waitForReply: true, timeoutMs: 4000 });
-      state.pendingAdcContext = null;
-    }
-    if (dwell) await sleep(dwell);
+  } finally {
+    state.sweepRunning = false;
+    state.firmwareSweepSelectedTias = null;
+    const captured = state.activeSweep?.points.length ?? 0;
+    const elapsedSeconds = ((performance.now() - startedMs) / 1000).toFixed(2);
+    finishSweepCapture();
+    $("sweepStatus").textContent = `Firmware sweep finished: ${captured} ADC point(s), ${elapsedSeconds} s`;
+    logLine(`${$("sweepStatus").textContent}, ADC mask 0x${adcMask.toString(16).padStart(2, "0")}`);
   }
-  state.sweepRunning = false;
-  $("sweepStatus").textContent = "Sweep idle";
-  finishSweepCapture();
-  logLine("Sweep finished");
 }
 
 function stopSweep() {
   state.sweepRunning = false;
   $("sweepStatus").textContent = "Sweep stop requested";
-  logLine("Sweep stop requested");
+  logLine("Sweep stop requested; firmware sweep will finish the in-progress command before stopping.");
 }
 
 function updateSwitchInfo() {
@@ -931,11 +1000,16 @@ async function switchTestWrite() {
   await sendCommand(`${cmd}${device},${code}`);
 }
 
-function updatePotReadout() {
+function readPotCodes() {
   const a = clamp(Math.round(Number($("aCode").value) || 0), 0, POT_MAX_CODE);
   const mu = clamp(Math.round(Number($("muCode").value) || 0), 0, POT_MAX_CODE);
   $("aCode").value = a;
   $("muCode").value = mu;
+  return { a, mu };
+}
+
+function updatePotReadout() {
+  const { a, mu } = readPotCodes();
   $("potReadout").innerHTML =
     `<div>A: code ${mu}, wiper ${potCodeToVWiper(mu).toFixed(4)} V, output ${potCodeToAVoltage(mu).toFixed(4)} V</div>` +
     `<div>mu: code ${a}, wiper ${potCodeToVWiper(a).toFixed(4)} V, output ${potCodeToMuVoltage(a).toFixed(4)} V</div>`;
@@ -944,27 +1018,48 @@ function updatePotReadout() {
 function loadDeviceState() {
   const device = deviceMuxInfo($("potDevice").value).device;
   $("potDevice").value = device;
-  $("aCode").value = state.deviceStates[device].a;
-  $("muCode").value = state.deviceStates[device].mu;
   updatePotReadout();
 }
 
 async function setAFromCode() {
   const device = deviceMuxInfo($("potDevice").value).device;
-  const code = clamp(Math.round(Number($("aCode").value) || 0), 0, POT_MAX_CODE);
-  state.deviceStates[device].a = code;
-  await sendCommand(`A${device},${code}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+  const { a } = readPotCodes();
+  state.deviceStates[device].a = a;
+  await sendCommand(`A${device},${a}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
   updatePotReadout();
   renderDeviceTable();
 }
 
 async function setMuFromCode() {
   const device = deviceMuxInfo($("potDevice").value).device;
-  const code = clamp(Math.round(Number($("muCode").value) || 0), 0, POT_MAX_CODE);
-  state.deviceStates[device].mu = code;
-  await sendCommand(`M${device},${code}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+  const { mu } = readPotCodes();
+  state.deviceStates[device].mu = mu;
+  await sendCommand(`M${device},${mu}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
   updatePotReadout();
   renderDeviceTable();
+}
+
+async function applyPotAllDevices() {
+  const { a, mu } = readPotCodes();
+  const button = $("applyPotAllButton");
+  if (button) button.disabled = true;
+  try {
+    logLine(`Programming all devices: mu code ${a}, A code ${mu}`);
+    for (let device = 1; device <= 16; device++) {
+      state.deviceStates[device].a = a;
+      const aReply = await sendCommand(`A${device},${a}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+      if (replyLooksBad(aReply)) logLine(`[warn] A${device} ${replySummary(aReply)}`);
+
+      state.deviceStates[device].mu = mu;
+      const muReply = await sendCommand(`M${device},${mu}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+      if (replyLooksBad(muReply)) logLine(`[warn] M${device} ${replySummary(muReply)}`);
+    }
+    logLine(`All devices programmed: mu code ${a}, A code ${mu}`);
+  } finally {
+    if (button) button.disabled = false;
+    updatePotReadout();
+    renderDeviceTable();
+  }
 }
 
 async function initializeAll() {
@@ -1025,11 +1120,58 @@ function connectedDevicesSummary(tia) {
 }
 
 
+function parseFirmwareSweepReply(text) {
+  const parts = text.replaceAll(":", ",").split(",").map(part => part.trim());
+  if (parts[0]?.toUpperCase() !== "SWEEP") return false;
+
+  const kind = parts[1]?.toUpperCase();
+  if (kind === "START") {
+    const dac = parts[2]?.toUpperCase() || "D?";
+    setPlotStatus(dac, `Firmware sweep ${dac}: ${parts[7] || "?"} point(s) requested.`);
+    return true;
+  }
+  if (kind === "DONE") {
+    const dac = parts[2]?.toUpperCase() || "D?";
+    setPlotStatus(dac, `Firmware sweep ${dac}: ${parts[3] || "?"} point(s) complete.`);
+    return true;
+  }
+  if (kind === "ERR") {
+    setAllPlotStatus(`Firmware sweep error: ${parts.slice(2).join(", ")}`);
+    return true;
+  }
+  if (kind !== "D1" && kind !== "D2") return true;
+  if (!state.activeSweep) return true;
+
+  const pointIndex = Number(parts[2]);
+  const code = Number(parts[3]);
+  const mv = Number(parts[4]);
+  const values = parseAdcFields(parts.slice(5, 5 + ADC_TIA_COUNT));
+  if (!Number.isFinite(pointIndex) || !Number.isFinite(code) || !Number.isFinite(mv) || !values.some(Number.isFinite)) {
+    logLine(`[parse warn] Bad firmware sweep line: ${text}`);
+    return true;
+  }
+
+  state.dacCodes[kind] = code;
+  const snapshot = dacSnapshot();
+  snapshot[kind] = { code, vhigh: mv / 1000 };
+  const previousContext = state.pendingAdcContext;
+  state.pendingAdcContext = {
+    sweepId: state.activeSweep.id,
+    pointIndex,
+    dac: snapshot,
+    selectedTias: state.firmwareSweepSelectedTias || selectedTias(),
+    sweepDac: kind,
+  };
+  recordAdcValues(values, text);
+  state.pendingAdcContext = previousContext;
+  return true;
+}
+
 function parseAdcReply(text) {
   const parts = text.replaceAll(":", ",").split(",").map(part => part.trim());
   if (parts[0]?.toUpperCase() === "ADC" && parts.length >= 2 && parts[1].toUpperCase() !== "ERR") {
-    const values = parts.slice(1, 1 + ADC_TIA_COUNT).map(Number);
-    if (values.every(Number.isFinite)) recordAdcValues(values, text);
+    const values = parseAdcFields(parts.slice(1, 1 + ADC_TIA_COUNT));
+    if (values.some(Number.isFinite)) recordAdcValues(values, text);
   }
 }
 
@@ -1053,9 +1195,12 @@ function recordAdcValues(values, source) {
   for (const idx of tias) {
     const tia = state.tiaStates[idx - 1];
     const connected = connectedDevicesSummary(tia);
-    const raw = values[idx - 1] ?? "";
-    const voltage = raw === "" ? "" : adcRawToVoltage(raw);
-    const current = voltage === "" ? "" : adcVoltageToCurrentUa(voltage);
+    const adcIndex = adcIndexFromTia(idx);
+    const rawValue = adcIndex === null ? null : values[adcIndex];
+    const hasRaw = Number.isFinite(rawValue);
+    const raw = hasRaw ? rawValue : "";
+    const voltage = hasRaw ? adcRawToVoltage(rawValue) : "";
+    const current = hasRaw ? adcVoltageToCurrentUa(voltage) : "";
     addMeasurement({
       time: nowTime(),
       dac: displayDac,
@@ -1081,10 +1226,11 @@ function addSweepAdcPoint(values, context) {
     if (!Number.isFinite(raw)) continue;
     const voltage = adcRawToVoltage(raw);
     const current = adcVoltageToCurrentUa(voltage);
-    const tia = state.tiaStates[adcIdx];
+    const tiaIndex = tiaIndexForAdc(adcIdx);
+    const tia = state.tiaStates[tiaIndex] || state.tiaStates[adcIdx];
     const connected = connectedDevicesSummary(tia);
     const adcLabel = `ADC${adcIdx}`;
-    const tiaLabel = `TIA${adcIdx + 1}`;
+    const tiaLabel = `TIA${tiaIndex + 1}`;
     const sample = {
       raw,
       voltage,
@@ -1099,6 +1245,7 @@ function addSweepAdcPoint(values, context) {
   state.activeSweep.points.push({
     point: context.pointIndex,
     time: nowTime(),
+    sweepDac: context.sweepDac || null,
     dac: context.dac,
     adcs,
     tias,
@@ -1131,7 +1278,9 @@ function addMeasurement(row) {
   state.measurements.push(row);
   const tr = document.createElement("tr");
   tr.innerHTML = `<td>${row.time}</td><td>${row.dac}</td><td>${row.code}</td><td>${row.vhigh}</td><td>${row.tia}</td><td>${row.raw}</td><td>${row.voltage}</td><td>${row.current}</td><td>${row.jumper}</td>`;
-  $("measurementTable").appendChild(tr);
+  const table = $("measurementTable");
+  table.appendChild(tr);
+  while (table.children.length > MEASUREMENT_TABLE_ROW_LIMIT) table.firstElementChild.remove();
 }
 
 function sweepXValue(point, xDac) {
@@ -1226,7 +1375,7 @@ function renderDacSweepPlot(xDac) {
   const yMode = $("plotYMode")?.value || "current";
   const adcIndices = selectedPlotAdcs(xDac);
   const labels = adcIndices.map(idx => `ADC${idx}`);
-  const points = sweep.points.slice().sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
+  const points = sweep.points.filter(point => !point.sweepDac || point.sweepDac === xDac).slice().sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
   const samples = [];
 
   for (const point of points) {
@@ -1383,7 +1532,7 @@ function downloadSweepCsv() {
   }
   const labels = ADC_LABELS.slice();
   const fields = [
-    "sweep_id", "point", "time",
+    "sweep_id", "point", "time", "sweep_dac",
     "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
     ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
   ];
@@ -1392,6 +1541,7 @@ function downloadSweepCsv() {
       sweep.id,
       point.point,
       point.time,
+      point.sweepDac ?? "",
       point.dac.D1?.code ?? "",
       point.dac.D1?.vhigh ?? "",
       point.dac.D2?.code ?? "",
@@ -1471,6 +1621,7 @@ function bindEvents() {
   $("setMuCodeButton").addEventListener("click", setMuFromCode);
   $("setMuVoltageButton").addEventListener("click", async () => { $("muCode").value = aVoltageToCode($("muTarget").value); await setMuFromCode(); });
   $("applyPotButton").addEventListener("click", async () => { await setAFromCode(); await setMuFromCode(); });
+  $("applyPotAllButton").addEventListener("click", applyPotAllDevices);
 
   $("adcButton").addEventListener("click", () => {
     syncTiaStates();
