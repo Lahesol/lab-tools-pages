@@ -574,6 +574,8 @@ const REFERENCE_TIMETABLES = [
 
 let state = loadState();
 let historicalTimetables = { records: [], roomSummary: [], generatedAt: "" };
+let isOptimizing = false;
+let loadingMessage = "최적 배정안을 계산 중입니다.";
 
 const els = {};
 
@@ -597,6 +599,11 @@ async function loadHistoricalTimetables() {
       records: Array.isArray(data.records) ? data.records : [],
       roomSummary: Array.isArray(data.roomSummary) ? data.roomSummary : []
     };
+    if (refreshProfessorsForSelectedDepartment()) {
+      state.schedule = [];
+      runOptimization({ iterations: 8, silent: true });
+      saveState();
+    }
     renderAll();
   } catch {
     historicalTimetables = { records: [], roomSummary: [], generatedAt: "" };
@@ -617,11 +624,14 @@ function cacheElements() {
   els.sameCourseLimit = document.querySelector("#sameCourseLimit");
   els.quotaInputs = [1, 2, 3, 4].map((year) => document.querySelector(`#quotaYear${year}`));
   els.importFile = document.querySelector("#importFile");
+  els.optimizeButton = document.querySelector("#optimizeButton");
+  els.loadingOverlay = document.querySelector("#loadingOverlay");
+  els.loadingMessage = document.querySelector("[data-loading-message]");
 }
 
 function bindEvents() {
-  document.querySelector("#optimizeButton").addEventListener("click", () => {
-    window.setTimeout(() => runOptimization({ iterations: 12 }), 0);
+  els.optimizeButton.addEventListener("click", () => {
+    runOptimizationWithLoading({ iterations: 12, message: "최적 배정안을 계산 중입니다." });
   });
   document.querySelector("#validateButton").addEventListener("click", () => {
     const validation = validateSchedule(state.schedule);
@@ -652,16 +662,14 @@ function bindEvents() {
   els.semester.addEventListener("change", () => {
     state.semester = els.semester.value.trim() || "미지정 학기";
     state.schedule = [];
-    runOptimization({ iterations: 8, silent: true });
-    saveState();
-    renderAll();
+    refreshProfessorsForSelectedDepartment();
+    runOptimizationWithLoading({ iterations: 8, message: "학기 기준에 맞춰 교수 목록과 시간표를 갱신 중입니다." });
   });
   els.department.addEventListener("change", () => {
     state.selectedDepartment = els.department.value;
     state.schedule = [];
-    runOptimization({ iterations: 8, silent: true });
-    saveState();
-    renderAll();
+    refreshProfessorsForSelectedDepartment();
+    runOptimizationWithLoading({ iterations: 8, message: "이전 시간표를 참고해 학과 교수 목록을 갱신 중입니다." });
   });
   els.quotaInputs.forEach((input, index) => {
     input.addEventListener("change", () => {
@@ -801,6 +809,130 @@ function mergeDefaultTermProfessors(raw) {
       const merged = [...parseList(current.canTeach), ...defaultCanTeach];
       current.canTeach = merged.filter((courseId, index) => merged.indexOf(courseId) === index);
     });
+}
+
+function refreshProfessorsForSelectedDepartment() {
+  const scopedCourses = state.courses.filter((course) => courseInCurrentScope(course));
+  if (!scopedCourses.length) return false;
+
+  const before = professorListSignature(state.professors);
+  const scopedCourseIds = new Set(scopedCourses.map((course) => course.id));
+  const existingById = new Map(state.professors.map((professor) => [professor.id, professor]));
+  const existingByName = new Map(state.professors.map((professor) => [normalizeProfessorName(professor.name), professor]).filter(([name]) => name));
+  const nextById = new Map();
+
+  const upsertProfessor = (template, courseIds, { keepWithoutCourses = false, historyCount = 0 } = {}) => {
+    const cleanCourseIds = uniqueList(courseIds).filter((courseId) => scopedCourseIds.has(courseId));
+    if (!cleanCourseIds.length && !keepWithoutCourses) return;
+
+    const nameKey = normalizeProfessorName(template.name);
+    const existing = existingById.get(template.id) || existingByName.get(nameKey);
+    const professorId = existing?.id || template.id;
+    if (!professorId || EXTERNAL_PROFESSOR_IDS.has(professorId)) return;
+
+    const current = nextById.get(professorId) || clone(existing || template);
+    current.id = professorId;
+    current.name = current.name || template.name;
+    current.type = current.type || template.type || "전임";
+    current.minCredits = toNumber(current.minCredits, toNumber(template.minCredits, 9));
+    current.maxCredits = toNumber(current.maxCredits, toNumber(template.maxCredits, 18));
+    current.availability = current.availability || template.availability || defaultProfessorAvailability();
+    current.canTeach = uniqueList([...parseList(current.canTeach).filter((courseId) => scopedCourseIds.has(courseId)), ...cleanCourseIds]);
+    current.sourceDepartment = state.selectedDepartment;
+    if (historyCount) current.historyCount = Math.max(toNumber(current.historyCount, 0), historyCount);
+    nextById.set(professorId, current);
+  };
+
+  defaultData.professors
+    .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
+    .forEach((professor) => {
+      upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
+    });
+
+  state.professors
+    .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
+    .forEach((professor) => {
+      upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
+    });
+
+  const historyCounts = new Map();
+  historicalRecordsForSelectedDepartment().forEach((record) => {
+    const professorName = String(record.professor || "").trim();
+    if (!professorName) return;
+    const professorId = historicalProfessorId(record, existingByName);
+    const matchedCourseIds = historyCourseMatches(record, scopedCourses).map((course) => course.id);
+    const countKey = professorId || normalizeProfessorName(professorName);
+    historyCounts.set(countKey, (historyCounts.get(countKey) || 0) + 1);
+    upsertProfessor(
+      {
+        id: professorId,
+        name: professorName,
+        type: "전임",
+        minCredits: 9,
+        maxCredits: 18,
+        availability: defaultProfessorAvailability(),
+        canTeach: []
+      },
+      matchedCourseIds,
+      { keepWithoutCourses: true, historyCount: historyCounts.get(countKey) }
+    );
+  });
+
+  state.professors = [...nextById.values()].sort((a, b) => {
+    const historyDiff = toNumber(b.historyCount, 0) - toNumber(a.historyCount, 0);
+    return historyDiff || String(a.name).localeCompare(String(b.name), "ko");
+  });
+
+  const nextProfessorIds = new Set(state.professors.map((professor) => professor.id));
+  state.professors.forEach((professor) => {
+    professor.canTeach = uniqueList(parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
+  });
+  state.courses.forEach((course) => {
+    if (!courseInCurrentScope(course)) return;
+    const linkedProfessorIds = state.professors
+      .filter((professor) => parseList(professor.canTeach).includes(course.id))
+      .map((professor) => professor.id);
+    course.eligible = uniqueList([...parseList(course.eligible).filter((professorId) => nextProfessorIds.has(professorId)), ...linkedProfessorIds]);
+  });
+
+  return before !== professorListSignature(state.professors);
+}
+
+function historyCourseMatches(record, scopedCourses) {
+  const selectedTerm = semesterTerm(state.semester);
+  const recordTerm = toNumber(record.term, 0);
+  const sameTerm = !selectedTerm || !recordTerm || recordTerm === selectedTerm;
+  const recordKey = normalizeCourseName(record.courseName);
+  const recordFamilyKey = normalizeCourseFamilyName(record.courseName);
+  return scopedCourses.filter((course) => {
+    const courseKey = normalizeCourseName(course.name);
+    const courseFamilyKey = normalizeCourseFamilyName(course.name);
+    return recordKey === courseKey || (sameTerm && recordFamilyKey && recordFamilyKey === courseFamilyKey);
+  });
+}
+
+function historicalProfessorId(record, existingByName) {
+  const name = String(record.professor || "").trim();
+  const existing = existingByName.get(normalizeProfessorName(name));
+  if (existing) return existing.id;
+  const number = String(record.professorNo || "").replace(/\D/g, "");
+  if (number) return `HP_${number}`;
+  return `HP_${normalizeProfessorName(name) || "UNKNOWN"}`;
+}
+
+function normalizeProfessorName(name) {
+  return String(name || "").replace(/\s+/g, "").trim();
+}
+
+function defaultProfessorAvailability() {
+  return "월1-10,화1-10,수1-10,목1-10,금1-10";
+}
+
+function professorListSignature(professors) {
+  return professors
+    .map((professor) => `${professor.id}:${professor.name}:${parseList(professor.canTeach).sort().join("|")}`)
+    .sort()
+    .join(";");
 }
 
 function syncTeachingLinks(data) {
@@ -1134,8 +1266,8 @@ function renderLoadRow(item) {
 
 function renderDataPanel(validation) {
   const hints = {
-    courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 담당가능은 교수 탭의 담당 가능 과목과 함께 갱신됩니다.",
-    professors: "이전 학기 시간표는 교수 후보와 가능 강의실을 파악하는 참고자료입니다. 담당 가능 과목은 현재 학과·학기 과목명 드롭다운으로 추가합니다.",
+    courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 학점/분배는 직접 수정하거나 지난 시간표 이력을 한 번에 적용할 수 있습니다.",
+    professors: "학과를 바꾸면 이전 시간표의 담당교수 이력을 참고해 현재 학과 교수 목록으로 갱신합니다. 담당 가능 과목은 과목명 드롭다운으로 추가합니다.",
     rooms: "이전 학기 시간표와 보유 시설을 참고해 사용할 강의실만 체크하고, 분류와 정원을 입력합니다. 최적화는 체크된 강의실만 후보로 사용합니다.",
     assignments: "배정 결과는 최적화 실행 후 갱신됩니다. 충돌 행은 제약조건 패널에서 원인을 확인할 수 있습니다.",
     reference: "전 학기 시간표는 교수 후보, 강의실 사용 패턴, 분반 표기 참고용입니다. 새 학기 개설 과목 판정에는 사용하지 않습니다."
@@ -1146,6 +1278,7 @@ function renderDataPanel(validation) {
   if (state.activeTab === "rooms") renderRoomsTable();
   if (state.activeTab === "assignments") renderAssignmentsTable(validation);
   if (state.activeTab === "reference") renderReferenceTable();
+  renderLoadingState();
 }
 
 function renderCoursesTable() {
@@ -1165,6 +1298,7 @@ function renderCoursesTable() {
           <td>${selectHtml("courses", course.id, "weekType", courseWeekType(course), [["regular16", "16주"], ["twelve12", "12주"], ["pPractice4", "P실무 4주"]])}</td>
           <td class="numeric"><input class="table-input short" type="number" step="0.5" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="credits" value="${escapeAttr(course.credits)}" /></td>
           <td><input class="table-input short" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="pattern" value="${escapeAttr(formatPattern(course.pattern))}" /></td>
+          <td>${timingHistoryHtml(course)}</td>
           <td class="numeric"><input class="table-input short" type="number" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="expectedStudents" value="${escapeAttr(course.expectedStudents)}" /></td>
           <td class="numeric"><input class="table-input short" type="number" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="maxSeats" value="${escapeAttr(course.maxSeats)}" /></td>
           <td class="numeric"><input class="table-input short" type="number" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="tolerance" value="${escapeAttr(course.tolerance)}" /></td>
@@ -1180,11 +1314,40 @@ function renderCoursesTable() {
   els.dataBody.innerHTML = `
     <table class="data-table">
       <thead><tr>
-        <th>코드</th><th>과목명</th><th>학년</th><th>이수구분</th><th>유형</th><th>운영주차</th><th class="numeric">학점</th><th>분배</th>
+        <th>코드</th><th>과목명</th><th>학년</th><th>이수구분</th><th>유형</th><th>운영주차</th><th class="numeric">학점</th><th>분배</th><th>이력 학점/시수</th>
         <th class="numeric">예상인원</th><th class="numeric">기준정원</th><th class="numeric">초과허용</th><th>강의실</th><th>담당가능</th><th>고정시간</th><th>계산</th><th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
+  `;
+}
+
+function timingHistoryHtml(course) {
+  const options = historicalCourseTimingOptions(course).slice(0, 2);
+  const current = `${formatNumber(course.credits)}학점 · ${escapeHtml(formatPattern(course.pattern))}시간`;
+  if (!options.length) {
+    return `
+      <div class="timing-suggestion">
+        <span class="timing-current">현재 ${current}</span>
+        <em>지난 시간표 이력 없음</em>
+      </div>
+    `;
+  }
+  const buttons = options
+    .map(
+      (option) => `
+        <button type="button" class="timing-apply" data-apply-timing data-course-id="${escapeAttr(course.id)}" data-credits="${escapeAttr(option.credits)}" data-pattern="${escapeAttr(formatPattern(option.pattern))}">
+          ${escapeHtml(formatNumber(option.credits))}학점 · ${escapeHtml(formatPattern(option.pattern))} 적용
+        </button>
+        <span>${escapeHtml(option.reason)}</span>
+      `
+    )
+    .join("");
+  return `
+    <div class="timing-suggestion">
+      <span class="timing-current">현재 ${current}</span>
+      ${buttons}
+    </div>
   `;
 }
 
@@ -1544,6 +1707,18 @@ function handleTableChange(event) {
 }
 
 function handleTableClick(event) {
+  const timingApply = event.target.closest("[data-apply-timing][data-course-id]");
+  if (timingApply) {
+    const course = findById(state.courses, timingApply.dataset.courseId);
+    if (!course) return;
+    course.credits = toNumber(timingApply.dataset.credits, course.credits);
+    course.pattern = parsePattern(timingApply.dataset.pattern);
+    state.schedule = [];
+    saveState();
+    renderAll();
+    return;
+  }
+
   const courseRemove = event.target.closest("[data-remove-course][data-professor-id]");
   if (courseRemove) {
     const professor = findById(state.professors, courseRemove.dataset.professorId);
@@ -1686,6 +1861,33 @@ function addRoom() {
   state.schedule = [];
   saveState();
   renderAll();
+}
+
+async function runOptimizationWithLoading({ iterations = 12, message = "최적 배정안을 계산 중입니다." } = {}) {
+  if (isOptimizing) return;
+  isOptimizing = true;
+  loadingMessage = message;
+  renderLoadingState();
+  await nextPaint();
+  try {
+    runOptimization({ iterations, silent: true });
+  } finally {
+    isOptimizing = false;
+    renderAll();
+  }
+}
+
+function renderLoadingState() {
+  if (!els.loadingOverlay) return;
+  els.loadingOverlay.hidden = !isOptimizing;
+  if (els.loadingMessage) els.loadingMessage.textContent = loadingMessage;
+  if (els.optimizeButton) els.optimizeButton.disabled = isOptimizing;
+}
+
+function nextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
 }
 
 function runOptimization({ iterations = 12, silent = false } = {}) {
@@ -2353,6 +2555,91 @@ function professorCanTeach(professor, course) {
   const professorAllows = professorCanTeachList.includes(course.id);
   if (course.type === "seminar" && !isFacultyType(professor.type)) return false;
   return courseAllows && professorAllows;
+}
+
+function historicalCourseTimingOptions(course) {
+  const selectedTerm = semesterTerm(state.semester);
+  const selectedYear = semesterYear(state.semester);
+  const previousYear = selectedYear ? selectedYear - 1 : 0;
+  const courseKey = normalizeCourseName(course.name);
+  const courseFamilyKey = normalizeCourseFamilyName(course.name);
+  const summaries = new Map();
+
+  historicalRecordsForSelectedDepartment().forEach((record) => {
+    const recordCourseKey = normalizeCourseName(record.courseName);
+    const recordFamilyKey = normalizeCourseFamilyName(record.courseName);
+    const exactCourse = courseKey && recordCourseKey === courseKey;
+    const familyCourse = courseFamilyKey && recordFamilyKey === courseFamilyKey;
+    if (!exactCourse && !familyCourse) return;
+
+    const credits = parseHistoricalCredits(record.sisu, course.credits);
+    const pattern = parseHistoricalPattern(record, course);
+    if (!credits || !pattern.length) return;
+
+    const key = `${credits}|${formatPattern(pattern)}`;
+    const existing = summaries.get(key) || { credits, pattern, score: 0, count: 0, sample: record, exactCount: 0 };
+    existing.count += 1;
+    existing.score += exactCourse ? 180 : 35;
+    if (exactCourse) existing.exactCount += 1;
+    if (toNumber(record.term, 0) === selectedTerm) existing.score += 70;
+    if (toNumber(record.year, 0) === previousYear) existing.score += 25;
+    if (toNumber(record.year, 0) > toNumber(existing.sample?.year, 0)) existing.sample = record;
+    summaries.set(key, existing);
+  });
+
+  return [...summaries.values()]
+    .sort((a, b) => b.score - a.score || b.count - a.count)
+    .map((item) => ({
+      credits: item.credits,
+      pattern: item.pattern,
+      reason: `${item.sample.year}-${item.sample.term} ${item.sample.courseName} · ${item.count}건 · ${item.sample.sisu || "시수 미상"}`
+    }));
+}
+
+function parseHistoricalCredits(sisu, fallback) {
+  const match = String(sisu || "").match(/^\s*([0-9]+(?:\.[0-9]+)?)/);
+  return match ? toNumber(match[1], fallback) : toNumber(fallback, 0);
+}
+
+function parseHistoricalPattern(record, course) {
+  const timePattern = parseHistoricalTimePattern(record.time);
+  if (timePattern.length) return timePattern;
+  const sisuPattern = parseHistoricalSisuPattern(record.sisu);
+  return sisuPattern.length ? sisuPattern : parsePattern(course.pattern);
+}
+
+function parseHistoricalTimePattern(time) {
+  const slotsByDay = {};
+  String(time || "")
+    .split(",")
+    .forEach((part) => {
+      const match = part.match(/([월화수목금])\s*([0-9]{1,2})/);
+      if (!match) return;
+      slotsByDay[match[1]] ||= [];
+      slotsByDay[match[1]].push(Number(match[2]));
+    });
+
+  const durations = [];
+  Object.values(slotsByDay).forEach((slots) => {
+    const sorted = uniqueList(slots).sort((a, b) => a - b);
+    let run = 0;
+    sorted.forEach((slot, index) => {
+      run += 1;
+      if (sorted[index + 1] !== slot + 1) {
+        durations.push(run);
+        run = 0;
+      }
+    });
+  });
+  return durations.sort((a, b) => b - a);
+}
+
+function parseHistoricalSisuPattern(sisu) {
+  const match = String(sisu || "").match(/^\s*[0-9]+(?:\.[0-9]+)?\s*\(([^/]+)\/([^)]+)\)/);
+  if (!match) return [];
+  const theory = toNumber(match[1], 0);
+  const practice = toNumber(match[2], 0);
+  return [theory, practice].filter((value) => value > 0).sort((a, b) => b - a);
 }
 
 function recommendedRoomsForCourse(course, assignment) {

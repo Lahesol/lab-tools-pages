@@ -66,6 +66,8 @@ h2 {
   font-size: 12px;
   margin-top: 2px;
 }
+.version-line.ok { color: #bfeee8; }
+.version-line.warn { color: #ffd3dc; }
 .status-dot {
   width: 13px;
   height: 13px;

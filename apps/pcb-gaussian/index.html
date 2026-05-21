@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=43e3280f1dab" />
+    <link rel="stylesheet" href="./styles.css?v=7acf92161d1f" />
   </head>
   <body>
     <header class="app-header">
@@ -17,6 +17,7 @@
         <div>
           <strong id="connectionState">Disconnected</strong>
           <span id="serialSupport">Web Serial check pending</span>
+          <span id="versionInfo" class="version-line">Web version pending / FW not checked</span>
         </div>
         <label>
           Baud
@@ -420,6 +421,6 @@
 
     </main>
 
-    <script src="./app.js?v=20260521-sweep-settle"></script>
+    <script src="./app.js?v=20260521-version-check"></script>
   </body>
 </html>

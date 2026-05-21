@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>주간시수 배정 최적화</title>
-    <link rel="stylesheet" href="./styles.css?v=d84d0a844d52" />
+    <title>가천대학교 시수배정 도우미</title>
+    <link rel="stylesheet" href="./styles.css?v=36c1054d313e" />
   </head>
   <body>
     <div class="app-shell">
@@ -12,8 +12,8 @@
         <div class="brand">
           <div class="brand-mark">시</div>
           <div>
-            <strong>주간시수 배정</strong>
-            <span>강의 시간표 최적화</span>
+            <strong>가천대학교 시수배정 도우미</strong>
+            <span>강의 시간표 · 교수 시수</span>
           </div>
         </div>
 
@@ -105,7 +105,7 @@
         <header class="topbar">
           <div>
             <p class="subtle">SISU 배정 도구</p>
-            <h1>대학교 강의 시간표와 교수 시수 배정</h1>
+            <h1>가천대학교 시수배정 도우미</h1>
           </div>
           <div class="top-actions">
             <label class="semester-control">
@@ -184,6 +184,15 @@
       </main>
     </div>
 
-    <script src="./app.js?v=0fc78e45f9e8"></script>
+    <div class="power-credit" aria-label="제작자">powered by Youngwoo Yoo</div>
+    <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite" hidden>
+      <div class="loading-box">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <strong data-loading-message>최적 배정안을 계산 중입니다.</strong>
+        <span>분반, 교수 시수, 강의실 충돌을 함께 확인하고 있습니다.</span>
+      </div>
+    </div>
+
+    <script src="./app.js?v=b8316fb59dcf"></script>
   </body>
 </html>

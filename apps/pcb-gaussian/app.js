@@ -13,7 +13,10 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const APP_VERSION = "2026-05-21-sweep-settle";
+const WEB_VERSION = "2026-05-21-sweep-settle";
+const EXPECTED_FIRMWARE_VERSION = "2026-05-21-sweep-settle";
+const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-v1";
+const APP_VERSION = WEB_VERSION;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
 const FIRMWARE_SWEEP_RE = /^(SWEEP|SX),/i;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
@@ -319,6 +322,10 @@ const state = {
   lastSweepLogMs: 0,
   lastPlotRenderMs: 0,
   sweepRunning: false,
+  firmwareVersion: null,
+  firmwareProtocol: null,
+  firmwareName: null,
+  versionWarningKey: "",
   plotAdcSelection: {
     D1: PLOT_CONFIGS.D1.defaultAdcs.slice(),
     D2: PLOT_CONFIGS.D2.defaultAdcs.slice(),
@@ -340,6 +347,87 @@ function setConnected(connected) {
   $("connectionState").textContent = connected ? "Connected" : "Disconnected";
   $("connectButton").disabled = connected;
   $("disconnectButton").disabled = !connected;
+  if (!connected) {
+    state.firmwareVersion = null;
+    state.firmwareProtocol = null;
+    state.firmwareName = null;
+    state.versionWarningKey = "";
+    updateVersionInfo();
+  }
+}
+
+function updateVersionInfo(extraClass = "") {
+  const line = $("versionInfo");
+  if (!line) return;
+  const fw = state.firmwareVersion ? `FW ${state.firmwareVersion}` : "FW not checked";
+  const proto = state.firmwareProtocol ? ` / ${state.firmwareProtocol}` : "";
+  line.textContent = `Web ${WEB_VERSION} / ${fw}${proto}`;
+  line.className = `version-line ${extraClass}`.trim();
+}
+
+function parseVersionKeyValues(parts, startIndex) {
+  const info = {};
+  for (let i = startIndex; i < parts.length - 1; i += 2) {
+    const key = parts[i]?.toUpperCase();
+    const value = parts[i + 1];
+    if (!key || value === undefined) continue;
+    if (key === "FW") info.version = value;
+    else if (key === "PROTO") info.protocol = value;
+    else if (key === "NAME") info.name = value;
+    else if (key === "BAUD") info.baud = value;
+  }
+  return info;
+}
+
+function handleFirmwareVersionReply(text) {
+  const parts = text.replaceAll(":", ",").split(",").map(part => part.trim()).filter(Boolean);
+  const kind = parts[0]?.toUpperCase();
+  if (!["VER", "READY", "PONG"].includes(kind)) return false;
+
+  let info = {};
+  if (kind === "VER") {
+    info = parseVersionKeyValues(parts, 1);
+  } else {
+    info.name = parts[1] || null;
+    info = { ...info, ...parseVersionKeyValues(parts, 2) };
+  }
+  if (!info.version && !info.protocol && !info.name) return false;
+
+  state.firmwareVersion = info.version || state.firmwareVersion;
+  state.firmwareProtocol = info.protocol || state.firmwareProtocol;
+  state.firmwareName = info.name || state.firmwareName;
+
+  const warnings = [];
+  if (state.firmwareVersion && state.firmwareVersion !== EXPECTED_FIRMWARE_VERSION) {
+    warnings.push(`FW ${state.firmwareVersion} != expected ${EXPECTED_FIRMWARE_VERSION}`);
+  }
+  if (state.firmwareProtocol && state.firmwareProtocol !== EXPECTED_FIRMWARE_PROTOCOL) {
+    warnings.push(`protocol ${state.firmwareProtocol} != expected ${EXPECTED_FIRMWARE_PROTOCOL}`);
+  }
+  updateVersionInfo(warnings.length ? "warn" : "ok");
+  if (warnings.length) {
+    const key = warnings.join("; ");
+    if (state.versionWarningKey !== key) {
+      state.versionWarningKey = key;
+      logLine(`[version warn] ${key}`);
+    }
+  }
+  return true;
+}
+
+async function queryFirmwareVersion() {
+  updateVersionInfo();
+  const reply = await sendCommand("VER?", {
+    waitForReply: true,
+    timeoutMs: 1500,
+    replyMatcher: text => text.toUpperCase().startsWith("VER,"),
+  });
+  if (!reply) {
+    updateVersionInfo("warn");
+    logLine(`[version warn] Firmware did not answer VER?; expected FW ${EXPECTED_FIRMWARE_VERSION} / ${EXPECTED_FIRMWARE_PROTOCOL}`);
+    return;
+  }
+  handleFirmwareVersionReply(reply);
 }
 
 function activateTab(tabName) {
@@ -366,8 +454,9 @@ async function connectSerial() {
     state.writer = state.port.writable.getWriter();
     state.keepReading = true;
     setConnected(true);
-    logLine(`Connected @ ${$("baudRate").value} (${APP_VERSION})`);
+    logLine(`Connected @ ${$("baudRate").value} (Web ${WEB_VERSION})`);
     readLoop();
+    queryFirmwareVersion();
   } catch (error) {
     logLine(`[connect error] ${error.message}`);
   }
@@ -423,6 +512,7 @@ function handleSerialText(chunk) {
     if (!text) continue;
     const isFirmwareSweepLine = FIRMWARE_SWEEP_RE.test(text);
     if (!isFirmwareSweepLine) logLine(text, "< ");
+    handleFirmwareVersionReply(text);
     if (!parseFirmwareSweepReply(text)) parseAdcReply(text);
     const pendingIndex = state.pendingReplies.findIndex(pending => !pending.matcher || pending.matcher(text));
     if (pendingIndex >= 0) {
@@ -1864,6 +1954,7 @@ function init() {
   renderTiaConfig();
   renderPlotAdcFilters();
   renderSweepPlot();
+  updateVersionInfo();
   logLine("Web GUI ready");
 }
 
