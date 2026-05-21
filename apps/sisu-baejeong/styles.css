@@ -890,6 +890,78 @@ svg {
   z-index: 1;
 }
 
+.reference-summary {
+  align-items: center;
+  background: #f8fafc;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 12px 14px;
+}
+
+.reference-summary strong {
+  color: var(--navy);
+  font-size: 13px;
+}
+
+.reference-summary span,
+.reference-empty-state span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reference-empty-state {
+  display: grid;
+  gap: 6px;
+  padding: 24px;
+}
+
+.reference-table {
+  min-width: 1680px;
+}
+
+.reference-table th,
+.reference-table td {
+  min-width: 82px;
+  vertical-align: top;
+}
+
+.reference-table .reference-day,
+.reference-table .reference-year {
+  background: #f8fafc;
+  color: var(--navy);
+  min-width: 58px;
+  text-align: center;
+}
+
+.reference-table .day-start th,
+.reference-table .day-start td {
+  border-top: 2px solid #b8c6d8;
+}
+
+.reference-table td {
+  background: #ffffff;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.reference-table td:not(.reference-empty) {
+  background: #eef8f6;
+  color: var(--text);
+  font-weight: 750;
+}
+
+.reference-table td.reference-general {
+  background: #f4f6f8;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.reference-table td.reference-empty {
+  background: #ffffff;
+}
+
 .data-table td.numeric,
 .data-table th.numeric {
   text-align: right;
@@ -929,7 +1001,8 @@ svg {
   width: 16px;
 }
 
-.course-picker {
+.course-picker,
+.choice-picker {
   display: grid;
   gap: 7px;
   min-width: 260px;
@@ -956,6 +1029,11 @@ svg {
 .choice-chip {
   background: #eaf6f4;
   color: var(--teal-dark);
+}
+
+.choice-chip.professor-chip {
+  background: #eef2ff;
+  color: #4752a3;
 }
 
 .empty-chip {

@@ -137,6 +137,7 @@
             <div class="button-row">
               <label class="inline-field">Sweep ms <input id="sweepDwell" type="number" value="0" min="0" /></label>
               <label class="inline-field">ADC avg <input id="adcAvgSamples" type="number" value="16" min="1" max="256" step="1" /></label>
+              <label class="inline-field">Settle us <input id="sweepSettleUs" type="number" value="2000" min="0" max="65000" step="100" /></label>
               <label class="inline-field">Y <select id="plotYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
               <button id="startSweepButton" class="primary">Start sweep</button>
               <button id="stopSweepButton">Stop</button>
@@ -419,6 +420,6 @@
 
     </main>
 
-    <script src="./app.js?v=20260521-sweep-range-clamp"></script>
+    <script src="./app.js?v=20260521-sweep-settle"></script>
   </body>
 </html>

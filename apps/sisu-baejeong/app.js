@@ -339,6 +339,239 @@ defaultData.rooms = [
   { id: "C716", name: "716호 전산실", type: "computer", capacity: 40 }
 ];
 
+const REFERENCE_TIMETABLES = [
+  {
+    id: "ee-2026-1",
+    department: "전자공학과",
+    semester: "2026 1학기",
+    source: "26-1학기 시간표-0122.xlsx",
+    rows: [
+      {
+        day: "월",
+        year: "1",
+        cells: [
+          { period: 1, span: 4, text: "C프로그래밍 [1. 김미진 715]" },
+          { period: 5, span: 2, text: "College English(교필)" },
+          { period: 10, span: 1, text: "가천인세미나" }
+        ]
+      },
+      {
+        day: "월",
+        year: "2",
+        cells: [
+          { period: 1, span: 2, text: "디지털논리회로 [3. 정재필 504] [4. 김장원 505]" },
+          { period: 3, span: 2, text: "공업수학 [1. 손혁민 505] [2. 남성식 504]" },
+          { period: 5, span: 2, text: "AI 프로그래밍입문(교선)" },
+          { period: 7, span: 2, text: "전자기학1 [3. 최호종 504]" },
+          { period: 9, span: 1, text: "전자기학1 [2. 최호종 410]" }
+        ]
+      },
+      { day: "월", year: "2", cells: [{ period: 6, span: 1, text: "505호 스마트보안" }] },
+      {
+        day: "월",
+        year: "3",
+        cells: [
+          { period: 1, span: 2, text: "기계학습과 AI [1. 민경식 410]" },
+          { period: 3, span: 2, text: "기계학습과 AI [2. 민경식 410]" },
+          { period: 5, span: 3, text: "디지털회로실험 [1. 김영준 716]" }
+        ]
+      },
+      { day: "월", year: "3", cells: [{ period: 5, span: 2, text: "전자회로1 [3. 최호종 504]" }] },
+      {
+        day: "월",
+        year: "4",
+        cells: [
+          { period: 1, span: 3, text: "캡스톤디자인1 [1. 박정철 714A]" },
+          { period: 4, span: 3, text: "캡스톤디자인1 [2. 정재필 717]" },
+          { period: 7, span: 2, text: "전자디스플레이공학 [1. 조의식 410] [2. 권상직 505]" },
+          { period: 9, span: 1, text: "디지털통신\n[1. 남성식 306]" }
+        ]
+      },
+      {
+        day: "화",
+        year: "1",
+        cells: [
+          { period: 1, span: 4, text: "C프로그래밍 [2. 김미진 208]" },
+          { period: 5, span: 4, text: "C프로그래밍 [3. 김미진 715] [4. 강동수 716]" }
+        ]
+      },
+      {
+        day: "화",
+        year: "2",
+        cells: [
+          { period: 1, span: 2, text: "회로이론1 [1. 이태봉 505]" },
+          { period: 4, span: 2, text: "물리전자공학 [2. 조의식 반도체233]" },
+          { period: 6, span: 1, text: "디지털논리회로\n[3. 정재필 504]" },
+          { period: 7, span: 2, text: "디지털논리회로 [1. 김장원 505] [2. 정재필 504]" }
+        ]
+      },
+      {
+        day: "화",
+        year: "2",
+        cells: [
+          { period: 1, span: 2, text: "물리전자공학 [1. 박정철 504]" },
+          { period: 6, span: 3, text: "디지털논리회로 [박진성 비전타워 305 (정원 50)]" }
+        ]
+      },
+      {
+        day: "화",
+        year: "3",
+        cells: [
+          { period: 1, span: 3, text: "디지털회로실험 [2. 한형석 716] [3.  김장원 715]" },
+          { period: 4, span: 1, text: "반도체공학 [1. 박정철 504] [2. 상민규 410]" },
+          { period: 5, span: 1, text: "기계학습과 AI\n[1. 민경식 505]" },
+          { period: 7, span: 1, text: "기계학습과 AI \n[2. 민경식 410]" }
+        ]
+      },
+      {
+        day: "화",
+        year: "3",
+        cells: [
+          { period: 3, span: 1, text: "제어공학 [1. 이태봉 505]" },
+          { period: 5, span: 2, text: "410호 스마트보안" }
+        ]
+      },
+      {
+        day: "화",
+        year: "4",
+        cells: [
+          { period: 2, span: 1, text: "전자디스플레이공학\n[1. 조의식 410]" },
+          { period: 4, span: 1, text: "306호 의공" },
+          { period: 8, span: 2, text: "디지털통신 [1. 남성식 306]" }
+        ]
+      },
+      {
+        day: "수",
+        year: "1",
+        cells: [
+          { period: 1, span: 3, text: "수학1(계교)" },
+          { period: 5, span: 3, text: "수학1(계교)" }
+        ]
+      },
+      {
+        day: "수",
+        year: "2",
+        cells: [
+          { period: 1, span: 1, text: "회로이론1 [1. 이태봉 505]" },
+          { period: 3, span: 1, text: "전자기학1 \n[1. 조성보 반도체 233]" },
+          { period: 4, span: 1, text: "물리전자공학 \n[2. 조의식 반도체233]" },
+          { period: 5, span: 1, text: "회로이론1 [2. 이원재 505] \n[3. 상민규 410]" },
+          { period: 6, span: 2, text: "전자기학1 [2. 최호종 410]" },
+          { period: 8, span: 1, text: "전자기학1 [3. 최호종 410]" }
+        ]
+      },
+      { day: "수", year: "2", cells: [{ period: 1, span: 1, text: "물리전자공학 \n[1. 박정철 504]" }] },
+      { day: "수", year: "3", cells: [{ period: 2, span: 2, text: "제어공학 [1. 이태봉 505]" }] },
+      {
+        day: "수",
+        year: "3",
+        cells: [
+          { period: 2, span: 2, text: "반도체공학 [1. 박정철 504]" },
+          { period: 5, span: 1, text: "통신이론 [3. 민경식 504]" },
+          { period: 6, span: 2, text: "전자회로1 [1. 김영준 505] [2. 상민규 504]" },
+          { period: 8, span: 1, text: "통신이론 [2. 손혁민 504]" },
+          { period: 9, span: 1, text: "전자회로1 [3. 최호종 410]" }
+        ]
+      },
+      { day: "수", year: "3", cells: [{ period: 8, span: 2, text: "통신이론 [1. 남성식 505]" }] },
+      { day: "수", year: "4", cells: [{ period: 6, span: 3, text: "전자공학심화실험 [4. 민경식 716]" }] },
+      {
+        day: "수",
+        year: "4",
+        cells: [
+          { period: 1, span: 3, text: "전자공학심화실험 [1. 김장원 715] [2. 한형석 716]" },
+          { period: 4, span: 1, text: "디지털신호처리\n[1. 남성식 306]" },
+          { period: 5, span: 3, text: "전자공학심화실험 [3. 조의식 반도체602]" }
+        ]
+      },
+      {
+        day: "목",
+        year: "1",
+        cells: [
+          { period: 1, span: 4, text: "화학및실험1(계교)" },
+          { period: 5, span: 4, text: "화학및실험1(계교)" }
+        ]
+      },
+      {
+        day: "목",
+        year: "1",
+        cells: [
+          { period: 1, span: 4, text: "물리학및실험1(계교)" },
+          { period: 5, span: 4, text: "물리학및실험1(계교)" }
+        ]
+      },
+      {
+        day: "목",
+        year: "2",
+        cells: [
+          { period: 1, span: 2, text: "공업수학 [3. 한형석 505]" },
+          { period: 3, span: 2, text: "전자기학1 [1. 조성보 반도체233]" },
+          { period: 5, span: 1, text: "디지털논리회로[1. 김장원 505][2.정재필 504]" },
+          { period: 6, span: 3, text: "회로이론1 [4. 박진성 410]" }
+        ]
+      },
+      { day: "목", year: "2", cells: [{ period: 2, span: 1, text: "디지털논리회로\n[4. 김장원 504]" }] },
+      {
+        day: "목",
+        year: "3",
+        cells: [
+          { period: 1, span: 3, text: "디지털회로실험 [4.716 김영준]" },
+          { period: 6, span: 3, text: "디지털회로실험 [5. 정재필 715]" }
+        ]
+      },
+      {
+        day: "목",
+        year: "3",
+        cells: [
+          { period: 1, span: 3, text: "제어공학 [3. 전광호 410]" },
+          { period: 6, span: 2, text: "통신이론 [3. 민경식 504]" },
+          { period: 8, span: 2, text: "반도체공학 [2. 상민규 510]" }
+        ]
+      },
+      { day: "목", year: "4", cells: [{ period: 6, span: 1, text: "전자디스플레이공학\n[2. 권상직 505]" }] },
+      {
+        day: "목",
+        year: "4",
+        cells: [
+          { period: 1, span: 3, text: "캡스톤디자인1 [5. 손혁민 306]" },
+          { period: 6, span: 3, text: "캡스톤디자인1 [3. 김장원 717] [4. 한형석 716]" }
+        ]
+      },
+      { day: "금", year: "1", cells: [{ period: 5, span: 4, text: "C프로그래밍 [5. 전광호 715]" }] },
+      {
+        day: "금",
+        year: "2",
+        cells: [
+          { period: 1, span: 1, text: "공업수학 [3. 한형석 505]" },
+          { period: 3, span: 1, text: "공업수학1 \n[2. 남성식504]" },
+          { period: 4, span: 2, text: "회로이론1 [3. 상민규 504]" },
+          { period: 6, span: 2, text: "회로이론1 [2. 이원재 505]" },
+          { period: 9, span: 1, text: "공업수학\n[1. 손혁민 505]" }
+        ]
+      },
+      {
+        day: "금",
+        year: "3",
+        cells: [
+          { period: 1, span: 3, text: "제어공학 [4. 전광호 410]" },
+          { period: 5, span: 1, text: "전자회로1 [1. 김영준 505]" },
+          { period: 6, span: 1, text: "전자회로1[2. 상민규 504]" },
+          { period: 7, span: 2, text: "통신이론 [2. 손혁민 410]" }
+        ]
+      },
+      { day: "금", year: "3", cells: [{ period: 8, span: 1, text: "통신이론 [1. 남성식 505]" }] },
+      {
+        day: "금",
+        year: "4",
+        cells: [
+          { period: 2, span: 3, text: "전자공학심화실험 [6. 한형석 716]" },
+          { period: 5, span: 2, text: "디지털신호처리[1. 남성식 306]" }
+        ]
+      }
+    ]
+  }
+];
+
 let state = loadState();
 
 const els = {};
@@ -451,11 +684,11 @@ function bindEvents() {
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return clone(defaultData);
+    if (!saved) return normalizeState(clone(defaultData));
     const parsed = JSON.parse(saved);
     return normalizeState({ ...clone(defaultData), ...parsed });
   } catch {
-    return clone(defaultData);
+    return normalizeState(clone(defaultData));
   }
 }
 
@@ -491,6 +724,7 @@ function normalizeState(raw) {
       .map((courseRef) => raw.courses.find((course) => course.id === courseRef || course.name === courseRef)?.id || courseRef)
       .filter((courseId, index, list) => courseIds.has(courseId) && list.indexOf(courseId) === index);
   });
+  syncTeachingLinks(raw);
   raw.rooms.forEach((room) => {
     room.enabled = room.enabled !== false;
     room.capacity = toNumber(room.capacity, 0);
@@ -549,6 +783,42 @@ function mergeDefaultTermProfessors(raw) {
       const merged = [...parseList(current.canTeach), ...defaultCanTeach];
       current.canTeach = merged.filter((courseId, index) => merged.indexOf(courseId) === index);
     });
+}
+
+function syncTeachingLinks(data) {
+  const courses = Array.isArray(data.courses) ? data.courses : [];
+  const professors = Array.isArray(data.professors) ? data.professors : [];
+  const courseById = new Map(courses.map((course) => [course.id, course]));
+  const courseByName = new Map(courses.map((course) => [String(course.name || "").trim(), course]).filter(([name]) => name));
+  const professorById = new Map(professors.map((professor) => [professor.id, professor]));
+  const professorByName = new Map(professors.map((professor) => [String(professor.name || "").trim(), professor]).filter(([name]) => name));
+  const resolveCourseId = (value) => {
+    const text = String(value || "").trim();
+    return courseById.has(text) ? text : courseByName.get(text)?.id || "";
+  };
+  const resolveProfessorId = (value) => {
+    const text = String(value || "").trim();
+    return professorById.has(text) ? text : professorByName.get(text)?.id || "";
+  };
+
+  courses.forEach((course) => {
+    course.eligible = uniqueList(parseList(course.eligible).map(resolveProfessorId).filter((professorId) => professorById.has(professorId)));
+  });
+  professors.forEach((professor) => {
+    professor.canTeach = uniqueList(parseList(professor.canTeach).map(resolveCourseId).filter((courseId) => courseById.has(courseId)));
+  });
+  courses.forEach((course) => {
+    course.eligible.forEach((professorId) => {
+      const professor = professorById.get(professorId);
+      if (professor && !professor.canTeach.includes(course.id)) professor.canTeach.push(course.id);
+    });
+  });
+  professors.forEach((professor) => {
+    professor.canTeach.forEach((courseId) => {
+      const course = courseById.get(courseId);
+      if (course && !course.eligible.includes(professor.id)) course.eligible.push(professor.id);
+    });
+  });
 }
 
 function isExternalCourse(course) {
@@ -613,6 +883,9 @@ function renderAll() {
   document.querySelectorAll("[data-tab-jump]").forEach((button) => {
     button.classList.toggle("active", button.dataset.tabJump === state.activeTab);
   });
+  document.querySelector("#addCourseButton").hidden = state.activeTab !== "courses";
+  document.querySelector("#addProfessorButton").hidden = state.activeTab !== "professors";
+  document.querySelector("#addRoomButton").hidden = state.activeTab !== "rooms";
 
   const validation = validateSchedule(state.schedule);
   state.lastRun = { ...(state.lastRun || {}), validation };
@@ -812,16 +1085,18 @@ function renderLoadRow(item) {
 
 function renderDataPanel(validation) {
   const hints = {
-    courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 과목별 예상 학생 수, 강의 유형, 운영주차를 바꾸면 분반 수와 P실무 보완 제약이 다시 계산됩니다.",
+    courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 담당가능은 교수 탭의 담당 가능 과목과 함께 갱신됩니다.",
     professors: "이전 학기 시간표는 교수 후보와 가능 강의실을 파악하는 참고자료입니다. 담당 가능 과목은 현재 학과·학기 과목명 드롭다운으로 추가합니다.",
     rooms: "이전 학기 시간표와 보유 시설을 참고해 사용할 강의실만 체크하고, 분류와 정원을 입력합니다. 최적화는 체크된 강의실만 후보로 사용합니다.",
-    assignments: "배정 결과는 최적화 실행 후 갱신됩니다. 충돌 행은 제약조건 패널에서 원인을 확인할 수 있습니다."
+    assignments: "배정 결과는 최적화 실행 후 갱신됩니다. 충돌 행은 제약조건 패널에서 원인을 확인할 수 있습니다.",
+    reference: "전 학기 시간표는 교수 후보, 강의실 사용 패턴, 분반 표기 참고용입니다. 새 학기 개설 과목 판정에는 사용하지 않습니다."
   };
   els.dataHint.textContent = hints[state.activeTab] || "";
   if (state.activeTab === "courses") renderCoursesTable();
   if (state.activeTab === "professors") renderProfessorsTable();
   if (state.activeTab === "rooms") renderRoomsTable();
   if (state.activeTab === "assignments") renderAssignmentsTable(validation);
+  if (state.activeTab === "reference") renderReferenceTable();
 }
 
 function renderCoursesTable() {
@@ -845,7 +1120,7 @@ function renderCoursesTable() {
           <td class="numeric"><input class="table-input short" type="number" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="maxSeats" value="${escapeAttr(course.maxSeats)}" /></td>
           <td class="numeric"><input class="table-input short" type="number" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="tolerance" value="${escapeAttr(course.tolerance)}" /></td>
           <td>${selectHtml("courses", course.id, "roomType", course.roomType, [["lecture", "이론"], ["lab", "실험"], ["computer", "전산/실습"]])}</td>
-          <td><input class="table-input medium" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="eligible" value="${escapeAttr(course.eligible.join(","))}" /></td>
+          <td>${professorPickerHtml(course)}</td>
           <td><input class="table-input short" data-kind="courses" data-id="${escapeAttr(course.id)}" data-field="fixed" value="${escapeAttr(course.fixed || "")}" placeholder="월10" /></td>
           <td><span class="pill ${cancel.level}">${sections}분반 · ${demand}명 · ${escapeHtml(cancel.label)}</span></td>
           <td><button class="row-button" data-remove="courses" data-id="${escapeAttr(course.id)}">삭제</button></td>
@@ -911,9 +1186,39 @@ function coursePickerHtml(professor) {
     )
     .join("");
   return `
-    <div class="course-picker">
+    <div class="choice-picker">
       <select class="table-select" data-course-add data-id="${escapeAttr(professor.id)}">
         <option value="">과목명으로 추가</option>
+        ${options}
+      </select>
+      <div class="choice-chips">${chips || `<span class="empty-chip">선택 없음</span>`}</div>
+    </div>
+  `;
+}
+
+function professorPickerHtml(course) {
+  const selectedIds = normalizeProfessorRefs(course.eligible);
+  const selectedSet = new Set(selectedIds);
+  const options = professorOptionsForPicker()
+    .filter((professor) => !selectedSet.has(professor.id))
+    .map((professor) => `<option value="${escapeAttr(professor.id)}">${escapeHtml(professor.name)} · ${escapeHtml(professor.type)}</option>`)
+    .join("");
+  const chips = selectedIds
+    .map((professorId) => findById(state.professors, professorId))
+    .filter(Boolean)
+    .map(
+      (professor) => `
+        <span class="choice-chip professor-chip">
+          ${escapeHtml(professor.name)}
+          <button type="button" title="담당 교수 제거" data-remove-professor="${escapeAttr(professor.id)}" data-course-id="${escapeAttr(course.id)}">×</button>
+        </span>
+      `
+    )
+    .join("");
+  return `
+    <div class="choice-picker">
+      <select class="table-select" data-professor-add data-id="${escapeAttr(course.id)}">
+        <option value="">교수명으로 추가</option>
         ${options}
       </select>
       <div class="choice-chips">${chips || `<span class="empty-chip">선택 없음</span>`}</div>
@@ -925,6 +1230,10 @@ function courseOptionsForPicker() {
   return state.courses
     .filter((course) => course.enabled !== false && courseInCurrentScope(course))
     .sort((a, b) => toNumber(a.year, 0) - toNumber(b.year, 0) || String(a.name).localeCompare(String(b.name), "ko"));
+}
+
+function professorOptionsForPicker() {
+  return [...state.professors].sort((a, b) => String(a.name).localeCompare(String(b.name), "ko"));
 }
 
 function normalizeCourseRefs(values) {
@@ -941,6 +1250,22 @@ function resolveCourseRef(value) {
   const text = String(value || "").trim();
   if (!text) return null;
   return state.courses.find((course) => course.id === text) || state.courses.find((course) => course.name === text) || null;
+}
+
+function normalizeProfessorRefs(values) {
+  const ids = [];
+  parseList(values).forEach((value) => {
+    const professor = resolveProfessorRef(value);
+    const id = professor?.id || value;
+    if (id && !ids.includes(id)) ids.push(id);
+  });
+  return ids;
+}
+
+function resolveProfessorRef(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return state.professors.find((professor) => professor.id === text) || state.professors.find((professor) => professor.name === text) || null;
 }
 
 function renderRoomsTable() {
@@ -997,6 +1322,74 @@ function renderAssignmentsTable(validation) {
   `;
 }
 
+function renderReferenceTable() {
+  const reference = referenceForSelectedDepartment();
+  if (!reference) {
+    els.dataBody.innerHTML = `
+      <div class="reference-empty-state">
+        <strong>${escapeHtml(state.selectedDepartment)} 전 학기 예시표가 없습니다.</strong>
+        <span>현재 내장된 예시는 제공된 2026 1학기 전자공학과 시간표입니다. 다른 학과 자료를 받으면 같은 형식으로 추가할 수 있습니다.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const filledCells = reference.rows.reduce((sum, row) => sum + row.cells.length, 0);
+  const header = `<tr><th>요일</th><th>학년</th>${PERIODS.map((period) => `<th>${period}교시</th>`).join("")}</tr>`;
+  const rows = reference.rows.map((row, index) => renderReferenceRow(row, index, reference.rows)).join("");
+  els.dataBody.innerHTML = `
+    <div class="reference-summary">
+      <strong>${escapeHtml(reference.department)} · ${escapeHtml(reference.semester)}</strong>
+      <span>${escapeHtml(reference.source)} 기준 · 배정 셀 ${filledCells}개 · 교필/교선은 흐리게 표시</span>
+    </div>
+    <table class="data-table reference-table">
+      <thead>${header}</thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderReferenceRow(row, index, rows) {
+  const isDayStart = index === 0 || rows[index - 1].day !== row.day;
+  const cellsByPeriod = new Map(row.cells.map((cell) => [cell.period, cell]));
+  let period = 1;
+  let cells = "";
+  while (period <= 14) {
+    const cell = cellsByPeriod.get(period);
+    if (cell) {
+      const span = Math.max(1, Math.min(15 - period, toNumber(cell.span, 1)));
+      const className = isExternalReferenceText(cell.text) ? "reference-general" : "";
+      cells += `<td class="${className}" colspan="${span}">${renderReferenceCellText(cell.text)}</td>`;
+      period += span;
+      continue;
+    }
+    cells += `<td class="reference-empty"></td>`;
+    period += 1;
+  }
+  return `
+    <tr class="${isDayStart ? "day-start" : ""}">
+      <th class="reference-day">${escapeHtml(row.day)}</th>
+      <th class="reference-year">${escapeHtml(row.year)}학년</th>
+      ${cells}
+    </tr>
+  `;
+}
+
+function renderReferenceCellText(text) {
+  return escapeHtml(text)
+    .replace(/\n/g, "<br>")
+    .replace(/([^\s])\[/g, "$1<br>[")
+    .replace(/\s+(?=\[[^\]]+\])/g, "<br>");
+}
+
+function referenceForSelectedDepartment() {
+  return REFERENCE_TIMETABLES.find((reference) => reference.department === state.selectedDepartment);
+}
+
+function isExternalReferenceText(text) {
+  return /(계교|교필|교선|College English|수학1|물리학및실험1|화학및실험1|가천인세미나)/.test(String(text || ""));
+}
+
 function selectHtml(kind, id, field, value, options) {
   return `<select class="table-select" data-kind="${escapeAttr(kind)}" data-id="${escapeAttr(id)}" data-field="${escapeAttr(field)}">${options
     .map(([optionValue, label]) => `<option value="${escapeAttr(optionValue)}" ${optionValue === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
@@ -1009,9 +1402,20 @@ function handleTableChange(event) {
     const professor = findById(state.professors, courseAdd.dataset.id);
     const courseId = courseAdd.value;
     if (!professor || !courseId) return;
-    const canTeach = normalizeCourseRefs(professor.canTeach);
-    if (!canTeach.includes(courseId)) {
-      professor.canTeach = [...canTeach, courseId];
+    if (addTeachingLink(professor.id, courseId)) {
+      state.schedule = [];
+      saveState();
+      renderAll();
+    }
+    return;
+  }
+
+  const professorAdd = event.target.closest("[data-professor-add]");
+  if (professorAdd) {
+    const course = findById(state.courses, professorAdd.dataset.id);
+    const professorId = professorAdd.value;
+    if (!course || !professorId) return;
+    if (addTeachingLink(professorId, course.id)) {
       state.schedule = [];
       saveState();
       renderAll();
@@ -1050,7 +1454,18 @@ function handleTableClick(event) {
   if (courseRemove) {
     const professor = findById(state.professors, courseRemove.dataset.professorId);
     if (!professor) return;
-    professor.canTeach = normalizeCourseRefs(professor.canTeach).filter((courseId) => courseId !== courseRemove.dataset.removeCourse);
+    removeTeachingLink(professor.id, courseRemove.dataset.removeCourse);
+    state.schedule = [];
+    saveState();
+    renderAll();
+    return;
+  }
+
+  const professorRemove = event.target.closest("[data-remove-professor][data-course-id]");
+  if (professorRemove) {
+    const course = findById(state.courses, professorRemove.dataset.courseId);
+    if (!course) return;
+    removeTeachingLink(professorRemove.dataset.removeProfessor, course.id);
     state.schedule = [];
     saveState();
     renderAll();
@@ -1062,9 +1477,50 @@ function handleTableClick(event) {
   const kind = remove.dataset.remove;
   const id = remove.dataset.id;
   state[kind] = state[kind].filter((item) => item.id !== id);
+  cleanupTeachingLinks();
   state.schedule = [];
   saveState();
   renderAll();
+}
+
+function addTeachingLink(professorId, courseId) {
+  const professor = findById(state.professors, professorId);
+  const course = findById(state.courses, courseId);
+  if (!professor || !course) return false;
+  let changed = false;
+  professor.canTeach = normalizeCourseRefs(professor.canTeach);
+  course.eligible = normalizeProfessorRefs(course.eligible);
+  if (!professor.canTeach.includes(course.id)) {
+    professor.canTeach.push(course.id);
+    changed = true;
+  }
+  if (!course.eligible.includes(professor.id)) {
+    course.eligible.push(professor.id);
+    changed = true;
+  }
+  return changed;
+}
+
+function removeTeachingLink(professorId, courseId) {
+  const professor = findById(state.professors, professorId);
+  const course = findById(state.courses, courseId);
+  if (professor) {
+    professor.canTeach = normalizeCourseRefs(professor.canTeach).filter((id) => id !== courseId);
+  }
+  if (course) {
+    course.eligible = normalizeProfessorRefs(course.eligible).filter((id) => id !== professorId);
+  }
+}
+
+function cleanupTeachingLinks() {
+  const courseIds = new Set(state.courses.map((course) => course.id));
+  const professorIds = new Set(state.professors.map((professor) => professor.id));
+  state.professors.forEach((professor) => {
+    professor.canTeach = normalizeCourseRefs(professor.canTeach).filter((courseId) => courseIds.has(courseId));
+  });
+  state.courses.forEach((course) => {
+    course.eligible = normalizeProfessorRefs(course.eligible).filter((professorId) => professorIds.has(professorId));
+  });
 }
 
 function updateEntityId(kind, oldId, newId) {
@@ -1675,7 +2131,7 @@ function courseDemand(course) {
 
 function difficultyScore(section) {
   const course = section.course;
-  const eligibleCount = state.professors.filter((professor) => professorCanTeach(professor, course)).length || 10;
+  const eligibleCount = state.professors.filter((professor) => professorCanTeach(professor, course)).length;
   let score = 0;
   score += parseFixed(course.fixed) ? 80 : 0;
   score += course.roomType !== "lecture" ? 28 : 0;
@@ -1797,15 +2253,10 @@ function isFacultyType(type) {
 }
 
 function professorCanTeach(professor, course) {
-  const courseKeys = [course.id, course.name].map(String);
-  const courseEligible = parseList(course.eligible);
-  const professorCanTeachList = parseList(professor.canTeach);
-  const courseAllows =
-    courseEligible.length === 0 ||
-    courseEligible.some((value) => [professor.id, professor.name].map(String).includes(String(value)));
-  const professorAllows =
-    professorCanTeachList.length === 0 ||
-    professorCanTeachList.some((value) => courseKeys.includes(String(value)));
+  const courseEligible = normalizeProfessorRefs(course.eligible);
+  const professorCanTeachList = normalizeCourseRefs(professor.canTeach);
+  const courseAllows = courseEligible.includes(professor.id);
+  const professorAllows = professorCanTeachList.includes(course.id);
   if (course.type === "seminar" && !isFacultyType(professor.type)) return false;
   return courseAllows && professorAllows;
 }
@@ -1873,6 +2324,10 @@ function parseList(value) {
     .split(/[,;\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function uniqueList(values) {
+  return values.filter((value, index, list) => value && list.indexOf(value) === index);
 }
 
 function blockSlots(block) {
