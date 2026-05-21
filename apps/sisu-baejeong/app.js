@@ -573,6 +573,7 @@ const REFERENCE_TIMETABLES = [
 ];
 
 let state = loadState();
+let historicalTimetables = { records: [], roomSummary: [], generatedAt: "" };
 
 const els = {};
 
@@ -583,7 +584,24 @@ document.addEventListener("DOMContentLoaded", () => {
     runOptimization({ iterations: 8, silent: true });
   }
   renderAll();
+  loadHistoricalTimetables();
 });
+
+async function loadHistoricalTimetables() {
+  try {
+    const response = await fetch("./data/historical-timetables.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    historicalTimetables = {
+      ...data,
+      records: Array.isArray(data.records) ? data.records : [],
+      roomSummary: Array.isArray(data.roomSummary) ? data.roomSummary : []
+    };
+    renderAll();
+  } catch {
+    historicalTimetables = { records: [], roomSummary: [], generatedAt: "" };
+  }
+}
 
 function cacheElements() {
   els.summary = document.querySelector("#summaryStrip");
@@ -1069,7 +1087,38 @@ function renderInspector(validation) {
 }
 
 function renderViolation(item) {
-  return `<div class="constraint-item ${item.level}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.message)}</span></div>`;
+  const recommendation = renderRoomRecommendation(item);
+  return `<div class="constraint-item ${item.level}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.message)}</span>${recommendation}</div>`;
+}
+
+function renderRoomRecommendation(violation) {
+  if (!isRoomRelatedViolation(violation)) return "";
+  const assignment = state.schedule.find((item) => item.id === violation.assignmentId);
+  const course = assignment ? findById(state.courses, assignment.courseId) : null;
+  if (!assignment || !course) return "";
+  const suggestions = recommendedRoomsForCourse(course, assignment).slice(0, 3);
+  if (!suggestions.length) return `<div class="room-recommendation"><em>저장된 최근 시간표에서 같은 조건의 추천 강의실을 찾지 못했습니다.</em></div>`;
+  return `
+    <div class="room-recommendation">
+      <b>전년도/3개년 기준 추천 강의실</b>
+      <ul>
+        ${suggestions
+          .map(
+            (item) => `
+              <li>
+                <strong>${escapeHtml(item.room.name)}</strong>
+                <span>${escapeHtml(item.reason)}</span>
+              </li>
+            `
+          )
+          .join("")}
+      </ul>
+    </div>
+  `;
+}
+
+function isRoomRelatedViolation(violation) {
+  return /강의실|P실무/.test(String(violation?.title || ""));
 }
 
 function renderLoadRow(item) {
@@ -1324,12 +1373,14 @@ function renderAssignmentsTable(validation) {
 
 function renderReferenceTable() {
   const reference = referenceForSelectedDepartment();
+  const historySummary = renderHistoricalDataSummary();
   if (!reference) {
     els.dataBody.innerHTML = `
       <div class="reference-empty-state">
         <strong>${escapeHtml(state.selectedDepartment)} 전 학기 예시표가 없습니다.</strong>
         <span>현재 내장된 예시는 제공된 2026 1학기 전자공학과 시간표입니다. 다른 학과 자료를 받으면 같은 형식으로 추가할 수 있습니다.</span>
       </div>
+      ${historySummary}
     `;
     return;
   }
@@ -1346,6 +1397,7 @@ function renderReferenceTable() {
       <thead>${header}</thead>
       <tbody>${rows}</tbody>
     </table>
+    ${historySummary}
   `;
 }
 
@@ -1388,6 +1440,48 @@ function referenceForSelectedDepartment() {
 
 function isExternalReferenceText(text) {
   return /(계교|교필|교선|College English|수학1|물리학및실험1|화학및실험1|가천인세미나)/.test(String(text || ""));
+}
+
+function renderHistoricalDataSummary() {
+  const records = historicalRecordsForSelectedDepartment();
+  if (!records.length) {
+    return `
+      <div class="history-summary">
+        <strong>저장된 최근 3개년 원자료 없음</strong>
+        <span>대상 학과 코드별 시간표 JSON을 불러오면 강의실 추천 근거로 사용합니다.</span>
+      </div>
+    `;
+  }
+  const byYearTerm = new Map();
+  records.forEach((record) => {
+    const key = `${record.year}-${record.term}`;
+    byYearTerm.set(key, (byYearTerm.get(key) || 0) + 1);
+  });
+  const terms = [...byYearTerm.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .slice(0, 8)
+    .map(([key, count]) => `<span>${escapeHtml(key.replace("-", "년 "))}학기 ${count}건</span>`)
+    .join("");
+  const topRooms = historicalRoomSummaryForSelectedDepartment()
+    .slice(0, 6)
+    .map((room) => `<span>${escapeHtml(room.room || room.roomKey)} ${room.count}회</span>`)
+    .join("");
+  return `
+    <div class="history-summary">
+      <strong>저장된 시간표 원자료 ${records.length}건</strong>
+      <span>생성일 ${escapeHtml(historicalTimetables.generatedAt || "-")} · 학과별 직접 조회 데이터</span>
+      <div class="history-tags">${terms}</div>
+      <div class="history-tags">${topRooms}</div>
+    </div>
+  `;
+}
+
+function historicalRecordsForSelectedDepartment() {
+  return (historicalTimetables.records || []).filter((record) => record.department === state.selectedDepartment);
+}
+
+function historicalRoomSummaryForSelectedDepartment() {
+  return (historicalTimetables.roomSummary || []).filter((item) => (item.departments || []).includes(state.selectedDepartment));
 }
 
 function selectHtml(kind, id, field, value, options) {
@@ -2259,6 +2353,110 @@ function professorCanTeach(professor, course) {
   const professorAllows = professorCanTeachList.includes(course.id);
   if (course.type === "seminar" && !isFacultyType(professor.type)) return false;
   return courseAllows && professorAllows;
+}
+
+function recommendedRoomsForCourse(course, assignment) {
+  const records = historicalRecordsForSelectedDepartment();
+  const selectedYear = semesterYear(state.semester);
+  const selectedTerm = semesterTerm(state.semester);
+  const previousYear = selectedYear ? selectedYear - 1 : 0;
+  const courseKey = normalizeCourseName(course.name);
+  const courseFamilyKey = normalizeCourseFamilyName(course.name);
+  const currentRoomsByKey = new Map();
+  activeRooms()
+    .filter((room) => roomMatchesCourse(room, course))
+    .filter((room) => room.capacity >= toNumber(assignment.seats, 0))
+    .forEach((room) => {
+      roomHistoryKeys(room.name || room.id).forEach((key) => {
+        if (!currentRoomsByKey.has(key)) currentRoomsByKey.set(key, []);
+        currentRoomsByKey.get(key).push(room);
+      });
+    });
+
+  const scores = new Map();
+  records.forEach((record) => {
+    const recordCourseKey = normalizeCourseName(record.courseName);
+    const recordFamilyKey = normalizeCourseFamilyName(record.courseName);
+    const exactCourse = courseKey && recordCourseKey === courseKey;
+    const familyCourse = courseFamilyKey && recordFamilyKey === courseFamilyKey;
+    if (!exactCourse && !familyCourse) return;
+
+    roomHistoryKeys(record.room || record.roomKey).forEach((key) => {
+      const rooms = currentRoomsByKey.get(key) || [];
+      rooms.forEach((room) => {
+        const existing = scores.get(room.id) || { room, score: 0, records: [], exactCount: 0, previousYearCount: 0 };
+        let score = exactCourse ? 100 : 55;
+        if (toNumber(record.year, 0) === previousYear) {
+          score += 45;
+          existing.previousYearCount += 1;
+        }
+        if (toNumber(record.term, 0) === selectedTerm) score += 25;
+        score += Math.max(0, toNumber(record.year, 0) - 2022);
+        existing.score += score;
+        if (exactCourse) existing.exactCount += 1;
+        if (existing.records.length < 3) existing.records.push(record);
+        scores.set(room.id, existing);
+      });
+    });
+  });
+
+  if (!scores.size) {
+    historicalRoomSummaryForSelectedDepartment().forEach((summary) => {
+      roomHistoryKeys(summary.room || summary.roomKey).forEach((key) => {
+        const rooms = currentRoomsByKey.get(key) || [];
+        rooms.forEach((room) => {
+          const existing = scores.get(room.id) || { room, score: 0, records: [], exactCount: 0, previousYearCount: 0 };
+          existing.score += toNumber(summary.count, 0);
+          scores.set(room.id, existing);
+        });
+      });
+    });
+  }
+
+  return [...scores.values()]
+    .sort((a, b) => b.score - a.score || a.room.capacity - b.room.capacity)
+    .map((item) => ({
+      room: item.room,
+      reason: roomRecommendationReason(item, course, selectedTerm, previousYear)
+    }));
+}
+
+function roomRecommendationReason(item, course, selectedTerm, previousYear) {
+  const sample = item.records[0];
+  const capacity = `정원 ${item.room.capacity}명`;
+  if (sample) {
+    const courseText = item.exactCount ? `${sample.courseName} 이력` : `${course.name} 유사 과목 이력`;
+    const yearTerm = `${sample.year}-${sample.term}`;
+    const previousText = item.previousYearCount ? `전년도 동일/유사 이력 ${item.previousYearCount}건` : `${yearTerm} ${courseText}`;
+    return `${capacity} · ${previousText} · ${sample.professor || "교수 미상"} · ${sample.room}`;
+  }
+  return `${capacity} · 최근 3개년 ${state.selectedDepartment}에서 자주 사용된 강의실`;
+}
+
+function semesterYear(text) {
+  const value = String(text || "");
+  const full = value.match(/20[0-9]{2}/);
+  if (full) return Number(full[0]);
+  const short = value.match(/\b([0-9]{2})\s*-/) || value.match(/^([0-9]{2})/);
+  return short ? 2000 + Number(short[1]) : 0;
+}
+
+function normalizeCourseName(name) {
+  return String(name || "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\s+/g, "")
+    .replace(/및/g, "")
+    .trim();
+}
+
+function normalizeCourseFamilyName(name) {
+  return normalizeCourseName(name).replace(/[12]$/g, "");
+}
+
+function roomHistoryKeys(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  const matches = [...text.matchAll(/[0-9]{3}[A-Z]?/g)].map((match) => `${text.includes("반도체") ? "반도체" : ""}${match[0]}`);
+  return matches.length ? [...new Set(matches)] : [text].filter(Boolean);
 }
 
 function roomMatchesCourse(room, course) {
