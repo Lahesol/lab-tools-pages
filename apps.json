@@ -22,5 +22,13 @@
         "group":  "Optics",
         "status":  "Ready",
         "accent":  "#087f72"
+    },
+    {
+        "name":  "시수배정 최적화",
+        "description":  "주간시수 배정과 강의 시간표 검증/최적화를 위한 웹 도구.",
+        "url":  "apps/sisu-baejeong/",
+        "group":  "Scheduling",
+        "status":  "Ready",
+        "accent":  "#8b5e34"
     }
 ]

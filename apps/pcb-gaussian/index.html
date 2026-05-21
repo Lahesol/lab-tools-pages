@@ -123,15 +123,15 @@
               <input id="sweepD1Enable" type="checkbox" checked />
               <strong>D1</strong>
               <select id="sweepD1Mode"><option>Vhigh mV</option></select>
-              <input id="sweepD1Start" type="number" value="-14800" />
-              <input id="sweepD1Stop" type="number" value="14800" />
+              <input id="sweepD1Start" type="number" value="-14800" min="-15000" max="15000" />
+              <input id="sweepD1Stop" type="number" value="14800" min="-15000" max="15000" />
               <input id="sweepD1Step" type="number" value="500" />
 
               <input id="sweepD2Enable" type="checkbox" />
               <strong>D2</strong>
               <select id="sweepD2Mode"><option>Vhigh mV</option></select>
-              <input id="sweepD2Start" type="number" value="-14800" />
-              <input id="sweepD2Stop" type="number" value="14800" />
+              <input id="sweepD2Start" type="number" value="-14800" min="-15000" max="15000" />
+              <input id="sweepD2Stop" type="number" value="14800" min="-15000" max="15000" />
               <input id="sweepD2Step" type="number" value="500" />
             </div>
             <div class="button-row">
@@ -419,6 +419,6 @@
 
     </main>
 
-    <script src="./app.js?v=20260521-sweep-base32-avg"></script>
+    <script src="./app.js?v=20260521-sweep-range-clamp"></script>
   </body>
 </html>

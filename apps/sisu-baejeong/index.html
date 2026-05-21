@@ -1,0 +1,184 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>二쇨컙?쒖닔 諛곗젙 理쒖쟻??/title>
+    <link rel="stylesheet" href="./styles.css?v=0789df9ea9cb" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="?꾨줈?앺듃 硫붾돱">
+        <div class="brand">
+          <div class="brand-mark">??/div>
+          <div>
+            <strong>二쇨컙?쒖닔 諛곗젙</strong>
+            <span>媛뺤쓽 ?쒓컙??理쒖쟻??/span>
+          </div>
+        </div>
+
+        <nav class="side-nav" aria-label="?묒뾽 ?곸뿭">
+          <button class="nav-item active" data-tab-jump="courses">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10" /></svg>
+            </span>
+            怨쇰ぉ ?곗씠??          </button>
+          <button class="nav-item" data-tab-jump="professors">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" /></svg>
+            </span>
+            援먯닔 ?곗씠??          </button>
+          <button class="nav-item" data-tab-jump="rooms">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 21V4h14v17M9 8h2M13 8h2M9 12h2M13 12h2M9 16h2M13 16h2" /></svg>
+            </span>
+            媛뺤쓽???뺤썝
+          </button>
+        </nav>
+
+        <section class="side-section">
+          <h2>?곗씠??/h2>
+          <button class="side-button" id="importButton">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M5 21h14" /></svg>
+            JSON 媛?몄삤湲?          </button>
+          <button class="side-button" id="exportButton">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V9M8 17l4 4 4-4M5 3h14" /></svg>
+            JSON ?대낫?닿린
+          </button>
+          <button class="side-button" id="csvButton">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg>
+            諛곗젙??CSV
+          </button>
+          <input id="importFile" type="file" accept="application/json,.json" hidden />
+        </section>
+
+        <section class="side-section">
+          <h2>吏移?諛섏쁺</h2>
+          <label class="toggle-line">
+            <input type="checkbox" id="constraintRotc" />
+            <span>3,4?숇뀈 ROTC ?쒓컙 ?쒖쇅</span>
+          </label>
+          <label class="toggle-line">
+            <input type="checkbox" id="constraintSplit" />
+            <span>3?숈젏 ?대줎 2??遺꾩궛</span>
+          </label>
+          <label class="field-line">
+            <span>?꾩엫援먯썝 ?대떦鍮꾩쑉</span>
+            <input id="ratioTarget" type="number" min="0" max="100" step="1" />
+          </label>
+          <label class="field-line">
+            <span>?숈씪怨쇰ぉ 理쒕? 遺꾨컲</span>
+            <input id="sameCourseLimit" type="number" min="1" max="10" step="1" />
+          </label>
+        </section>
+
+        <section class="side-section">
+          <h2>?숇뀈蹂??뺤썝</h2>
+          <label class="field-line">
+            <span>1?숇뀈</span>
+            <input id="quotaYear1" type="number" min="1" step="1" />
+          </label>
+          <label class="field-line">
+            <span>2?숇뀈</span>
+            <input id="quotaYear2" type="number" min="1" step="1" />
+          </label>
+          <label class="field-line">
+            <span>3?숇뀈</span>
+            <input id="quotaYear3" type="number" min="1" step="1" />
+          </label>
+          <label class="field-line">
+            <span>4?숇뀈</span>
+            <input id="quotaYear4" type="number" min="1" step="1" />
+          </label>
+        </section>
+
+        <section class="rules-note">
+          <h2>?먮즺 湲곗?</h2>
+          <p>?꾩엫 梨낆엫?쒖닔, 鍮꾩쟾???쒓퀎?쒖닔, 65% ?꾩엫援먯썝 ?대떦鍮꾩쑉, 遺꾨컲 湲곗?, ?먭컯 湲곗???湲곕낯 ?쒖빟?쇰줈 ?ъ슜?⑸땲??</p>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="subtle">SISU 諛곗젙 ?꾧뎄</p>
+            <h1>??숆탳 媛뺤쓽 ?쒓컙?쒖? 援먯닔 ?쒖닔 諛곗젙</h1>
+          </div>
+          <div class="top-actions">
+            <label class="semester-control">
+              <span>?숆낵</span>
+              <select id="departmentSelect"></select>
+            </label>
+            <label class="semester-control">
+              <span>?숆린</span>
+              <input id="semesterInput" type="text" />
+            </label>
+            <button class="ghost-button" id="validateButton">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+              ?ш???            </button>
+            <button class="primary-button" id="optimizeButton">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h5l2-7 3 14 2-7h4" /></svg>
+              理쒖쟻???ㅽ뻾
+            </button>
+          </div>
+        </header>
+
+        <section class="summary-strip" id="summaryStrip" aria-label="諛곗젙 ?붿빟"></section>
+
+        <section class="workspace">
+          <div class="timetable-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="subtle">二쇨컙 洹몃━??/p>
+                <h2>??湲?1-14援먯떆 諛곗젙??/h2>
+              </div>
+              <div class="legend">
+                <span><i class="legend-dot ok"></i>諛곗젙</span>
+                <span><i class="legend-dot warn"></i>二쇱쓽</span>
+                <span><i class="legend-dot danger"></i>異⑸룎</span>
+              </div>
+              <div class="segmented" aria-label="?쒓컙??蹂닿린 諛⑹떇">
+                <button data-view-mode="yearMatrix" class="active">?숇뀈蹂?/button>
+                <button data-view-mode="weekGrid">二쇨컙</button>
+              </div>
+            </div>
+            <div class="timetable-scroll">
+              <div class="timetable" id="timetable" aria-label="二쇨컙 ?쒓컙??></div>
+            </div>
+          </div>
+
+          <aside class="inspector" aria-label="?쒖빟議곌굔 寃??>
+            <div class="panel-heading compact">
+              <div>
+                <p class="subtle">寃??寃곌낵</p>
+                <h2>?쒖빟議곌굔</h2>
+              </div>
+            </div>
+            <div id="inspectorBody"></div>
+          </aside>
+        </section>
+
+        <section class="data-panel">
+          <div class="data-tabs" role="tablist" aria-label="?곗씠???몄쭛">
+            <button class="data-tab active" data-tab="courses" role="tab">怨쇰ぉ</button>
+            <button class="data-tab" data-tab="professors" role="tab">援먯닔</button>
+            <button class="data-tab" data-tab="rooms" role="tab">媛뺤쓽???뺤썝</button>
+            <button class="data-tab" data-tab="assignments" role="tab">諛곗젙 寃곌낵</button>
+          </div>
+          <div class="data-toolbar">
+            <p id="dataHint">怨쇰ぉ蹂??덉긽 ?숈깮 ?섏? 媛뺤쓽 ?좏삎??諛붽씀硫?遺꾨컲 ?섍? ?ㅼ떆 怨꾩궛?⑸땲??</p>
+            <div class="data-actions">
+              <button class="ghost-button small" id="addCourseButton">怨쇰ぉ 異붽?</button>
+              <button class="ghost-button small" id="addProfessorButton">援먯닔 異붽?</button>
+              <button class="ghost-button small" id="addRoomButton">媛뺤쓽??異붽?</button>
+              <button class="danger-button small" id="resetButton">?섑뵆濡?珥덇린??/button>
+            </div>
+          </div>
+          <div class="table-wrap" id="dataBody"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js?v=c2e755286527"></script>
+  </body>
+</html>
