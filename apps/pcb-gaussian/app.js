@@ -13,8 +13,8 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-21-sweep-settle";
-const EXPECTED_FIRMWARE_VERSION = "2026-05-21-sweep-settle";
+const WEB_VERSION = "2026-05-21-version-check";
+const EXPECTED_FIRMWARE_VERSION = "2026-05-21-version-check";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-v1";
 const APP_VERSION = WEB_VERSION;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
@@ -391,7 +391,7 @@ function handleFirmwareVersionReply(text) {
     info.name = parts[1] || null;
     info = { ...info, ...parseVersionKeyValues(parts, 2) };
   }
-  if (!info.version && !info.protocol && !info.name) return false;
+  if (!info.version && !info.protocol) return false;
 
   state.firmwareVersion = info.version || state.firmwareVersion;
   state.firmwareProtocol = info.protocol || state.firmwareProtocol;

@@ -3,6 +3,7 @@ const DAY_NAMES = { 월: "월요일", 화: "화요일", 수: "수요일", 목: "
 const PERIODS = Array.from({ length: 14 }, (_, index) => index + 1);
 const STORAGE_KEY = "sisu-timetable-state-v2";
 const TARGET_DEPARTMENT_NAMES = new Set(["전자공학과", "반도체공학과", "시스템반도체학과"]);
+const LOWER_DIVISION_SHARED_DEPARTMENTS = ["전자공학과", "반도체공학과"];
 const EXTERNAL_COURSE_NAMES = new Set(["수학1", "물리학및실험1", "화학및실험1"]);
 const EXTERNAL_PROFESSOR_IDS = new Set(["P_MATH", "P_PHY", "P_PHY2", "P_CHEM", "P_CHEM2"]);
 const FIRST_SEMESTER_SEED_IDS = new Set([
@@ -574,6 +575,7 @@ const REFERENCE_TIMETABLES = [
 
 let state = loadState();
 let historicalTimetables = { records: [], roomSummary: [], generatedAt: "" };
+let departmentProfessorDb = { generatedAt: "", departments: {} };
 let isOptimizing = false;
 let loadingMessage = "최적 배정안을 계산 중입니다.";
 
@@ -586,8 +588,29 @@ document.addEventListener("DOMContentLoaded", () => {
     runOptimization({ iterations: 8, silent: true });
   }
   renderAll();
+  loadDepartmentProfessors();
   loadHistoricalTimetables();
 });
+
+async function loadDepartmentProfessors() {
+  try {
+    const response = await fetch("./data/department-professors.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    departmentProfessorDb = {
+      ...data,
+      departments: data.departments && typeof data.departments === "object" ? data.departments : {}
+    };
+    if (refreshProfessorsForSelectedDepartment()) {
+      state.schedule = [];
+      runOptimization({ iterations: 8, silent: true });
+      saveState();
+    }
+    renderAll();
+  } catch {
+    departmentProfessorDb = { generatedAt: "", departments: {} };
+  }
+}
 
 async function loadHistoricalTimetables() {
   try {
@@ -599,7 +622,7 @@ async function loadHistoricalTimetables() {
       records: Array.isArray(data.records) ? data.records : [],
       roomSummary: Array.isArray(data.roomSummary) ? data.roomSummary : []
     };
-    if (refreshProfessorsForSelectedDepartment()) {
+    if (hasDepartmentProfessorDb() && refreshProfessorsForSelectedDepartment()) {
       state.schedule = [];
       runOptimization({ iterations: 8, silent: true });
       saveState();
@@ -627,9 +650,21 @@ function cacheElements() {
   els.optimizeButton = document.querySelector("#optimizeButton");
   els.loadingOverlay = document.querySelector("#loadingOverlay");
   els.loadingMessage = document.querySelector("[data-loading-message]");
+  els.tutorialButton = document.querySelector("#tutorialButton");
+  els.tutorialOverlay = document.querySelector("#tutorialOverlay");
 }
 
 function bindEvents() {
+  els.tutorialButton?.addEventListener("click", openTutorial);
+  els.tutorialOverlay?.addEventListener("click", (event) => {
+    if (event.target === els.tutorialOverlay || event.target.closest("[data-tutorial-close]")) {
+      closeTutorial();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.tutorialOverlay?.hidden) closeTutorial();
+  });
+
   els.optimizeButton.addEventListener("click", () => {
     runOptimizationWithLoading({ iterations: 12, message: "최적 배정안을 계산 중입니다." });
   });
@@ -819,68 +854,146 @@ function refreshProfessorsForSelectedDepartment() {
   const scopedCourseIds = new Set(scopedCourses.map((course) => course.id));
   const existingById = new Map(state.professors.map((professor) => [professor.id, professor]));
   const existingByName = new Map(state.professors.map((professor) => [normalizeProfessorName(professor.name), professor]).filter(([name]) => name));
+  const defaultById = new Map(defaultData.professors.map((professor) => [professor.id, professor]));
+  const defaultByName = new Map(defaultData.professors.map((professor) => [normalizeProfessorName(professor.name), professor]).filter(([name]) => name));
+  const departmentRecords = departmentProfessorRecordsForSelectedDepartment();
+  const hasOfficialDepartmentList = departmentRecords.length > 0;
   const nextById = new Map();
 
-  const upsertProfessor = (template, courseIds, { keepWithoutCourses = false, historyCount = 0 } = {}) => {
+  const upsertProfessor = (template, courseIds, { keepWithoutCourses = false, historyCount = 0, departmentOrder = 9999 } = {}) => {
     const cleanCourseIds = uniqueList(courseIds).filter((courseId) => scopedCourseIds.has(courseId));
     if (!cleanCourseIds.length && !keepWithoutCourses) return;
 
     const nameKey = normalizeProfessorName(template.name);
     const existing = existingById.get(template.id) || existingByName.get(nameKey);
-    const professorId = existing?.id || template.id;
+    const defaultProfessor = defaultById.get(template.id) || defaultByName.get(nameKey);
+    const professorId = template.id || existing?.id || defaultProfessor?.id;
     if (!professorId || EXTERNAL_PROFESSOR_IDS.has(professorId)) return;
 
-    const current = nextById.get(professorId) || clone(existing || template);
+    const preserved = clone(existing || defaultProfessor || {});
+    const seedCanTeach = [...parseList(preserved.canTeach), ...parseList(defaultProfessor?.canTeach), ...parseList(template.canTeach)];
+    const current =
+      nextById.get(professorId) ||
+      {
+        id: professorId,
+        name: template.name || preserved.name || professorId,
+        type: template.type || preserved.type || "전임",
+        position: template.position || preserved.position || "",
+        minCredits: toNumber(preserved.minCredits, toNumber(template.minCredits, 9)),
+        maxCredits: toNumber(preserved.maxCredits, toNumber(template.maxCredits, 18)),
+        availability: preserved.availability || template.availability || defaultProfessorAvailability(),
+        canTeach: [],
+        sourceDepartment: template.sourceDepartment || state.selectedDepartment,
+        sourceUrl: template.sourceUrl || "",
+        departmentOrder
+      };
     current.id = professorId;
-    current.name = current.name || template.name;
-    current.type = current.type || template.type || "전임";
+    current.name = template.name || current.name;
+    current.type = template.type || current.type || "전임";
+    current.position = template.position || current.position || "";
     current.minCredits = toNumber(current.minCredits, toNumber(template.minCredits, 9));
     current.maxCredits = toNumber(current.maxCredits, toNumber(template.maxCredits, 18));
     current.availability = current.availability || template.availability || defaultProfessorAvailability();
-    current.canTeach = uniqueList([...parseList(current.canTeach).filter((courseId) => scopedCourseIds.has(courseId)), ...cleanCourseIds]);
-    current.sourceDepartment = state.selectedDepartment;
+    current.canTeach = uniqueList([
+      ...parseList(current.canTeach).filter((courseId) => scopedCourseIds.has(courseId)),
+      ...seedCanTeach.filter((courseId) => scopedCourseIds.has(courseId)),
+      ...cleanCourseIds
+    ]);
+    current.sourceDepartment = template.sourceDepartment || state.selectedDepartment;
+    current.sourceUrl = template.sourceUrl || current.sourceUrl || "";
+    current.departmentOrder = Math.min(toNumber(current.departmentOrder, departmentOrder), departmentOrder);
     if (historyCount) current.historyCount = Math.max(toNumber(current.historyCount, 0), historyCount);
     nextById.set(professorId, current);
   };
 
-  defaultData.professors
-    .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
-    .forEach((professor) => {
-      upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
+  if (hasOfficialDepartmentList) {
+    const sourceUrl = departmentProfessorSourceForSelectedDepartment();
+    departmentRecords.forEach((record, index) => {
+      upsertProfessor(
+        {
+          id: record.id,
+          name: record.name,
+          type: record.type || "전임",
+          position: record.position || "",
+          minCredits: record.minCredits,
+          maxCredits: record.maxCredits,
+          availability: record.availability,
+          canTeach: record.canTeach,
+          sourceDepartment: state.selectedDepartment,
+          sourceUrl
+        },
+        [],
+        { keepWithoutCourses: true, departmentOrder: index + 1 }
+      );
     });
 
-  state.professors
-    .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
-    .forEach((professor) => {
-      upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
+    sharedLowerDivisionProfessorRecordsForSelectedDepartment().forEach(({ record, sourceDepartment, sourceUrl }, index) => {
+      const nameKey = normalizeProfessorName(record.name);
+      const defaultProfessor = defaultById.get(record.id) || defaultByName.get(nameKey);
+      const defaultCourseIds = parseList(defaultProfessor?.canTeach).filter((courseId) => {
+        const course = scopedCourses.find((item) => item.id === courseId);
+        return course && toNumber(course.year, 0) <= 2;
+      });
+      const historyCourseIds = (historicalTimetables.records || [])
+        .filter((history) => normalizeProfessorName(history.professor) === nameKey)
+        .flatMap((history) => historyCourseMatches(history, scopedCourses))
+        .filter((course) => toNumber(course.year, 0) <= 2)
+        .map((course) => course.id);
+
+      upsertProfessor(
+        {
+          id: record.id,
+          name: record.name,
+          type: record.type || "전임",
+          position: record.position || "",
+          minCredits: record.minCredits,
+          maxCredits: record.maxCredits,
+          availability: record.availability,
+          canTeach: record.canTeach,
+          sourceDepartment,
+          sourceUrl
+        },
+        uniqueList([...defaultCourseIds, ...historyCourseIds]),
+        { departmentOrder: 5000 + index }
+      );
     });
+  } else {
+    defaultData.professors
+      .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
+      .forEach((professor) => {
+        upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
+      });
+
+    state.professors
+      .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id))
+      .forEach((professor) => {
+        upsertProfessor(professor, parseList(professor.canTeach).filter((courseId) => scopedCourseIds.has(courseId)));
+      });
+  }
 
   const historyCounts = new Map();
-  historicalRecordsForSelectedDepartment().forEach((record) => {
+  const professorIdByHistoryName = new Map(
+    [...nextById.values()].map((professor) => [normalizeProfessorName(professor.name), professor.id]).filter(([name]) => name)
+  );
+  const historySourceRecords = hasOfficialDepartmentList ? historicalTimetables.records || [] : historicalRecordsForSelectedDepartment();
+  historySourceRecords.forEach((record) => {
     const professorName = String(record.professor || "").trim();
     if (!professorName) return;
-    const professorId = historicalProfessorId(record, existingByName);
+    const professorId = professorIdByHistoryName.get(normalizeProfessorName(professorName));
+    if (!professorId) return;
     const matchedCourseIds = historyCourseMatches(record, scopedCourses).map((course) => course.id);
+    if (!matchedCourseIds.length) return;
     const countKey = professorId || normalizeProfessorName(professorName);
     historyCounts.set(countKey, (historyCounts.get(countKey) || 0) + 1);
-    upsertProfessor(
-      {
-        id: professorId,
-        name: professorName,
-        type: "전임",
-        minCredits: 9,
-        maxCredits: 18,
-        availability: defaultProfessorAvailability(),
-        canTeach: []
-      },
-      matchedCourseIds,
-      { keepWithoutCourses: true, historyCount: historyCounts.get(countKey) }
-    );
+    const professor = nextById.get(professorId);
+    professor.canTeach = uniqueList([...parseList(professor.canTeach), ...matchedCourseIds]);
+    professor.historyCount = Math.max(toNumber(professor.historyCount, 0), historyCounts.get(countKey));
   });
 
   state.professors = [...nextById.values()].sort((a, b) => {
+    const orderDiff = toNumber(a.departmentOrder, 9999) - toNumber(b.departmentOrder, 9999);
     const historyDiff = toNumber(b.historyCount, 0) - toNumber(a.historyCount, 0);
-    return historyDiff || String(a.name).localeCompare(String(b.name), "ko");
+    return orderDiff || historyDiff || String(a.name).localeCompare(String(b.name), "ko");
   });
 
   const nextProfessorIds = new Set(state.professors.map((professor) => professor.id));
@@ -898,26 +1011,42 @@ function refreshProfessorsForSelectedDepartment() {
   return before !== professorListSignature(state.professors);
 }
 
+function hasDepartmentProfessorDb() {
+  return Object.keys(departmentProfessorDb.departments || {}).length > 0;
+}
+
+function departmentProfessorRecordsForSelectedDepartment() {
+  const department = departmentProfessorDb.departments?.[state.selectedDepartment];
+  return Array.isArray(department?.professors) ? department.professors : [];
+}
+
+function departmentProfessorSourceForSelectedDepartment() {
+  return departmentProfessorDb.departments?.[state.selectedDepartment]?.source || "";
+}
+
+function sharedLowerDivisionProfessorRecordsForSelectedDepartment() {
+  if (!LOWER_DIVISION_SHARED_DEPARTMENTS.includes(state.selectedDepartment)) return [];
+  return LOWER_DIVISION_SHARED_DEPARTMENTS.filter((departmentName) => departmentName !== state.selectedDepartment).flatMap((departmentName) => {
+    const department = departmentProfessorDb.departments?.[departmentName];
+    const professors = Array.isArray(department?.professors) ? department.professors : [];
+    return professors.map((record) => ({ record, sourceDepartment: departmentName, sourceUrl: department.source || "" }));
+  });
+}
+
 function historyCourseMatches(record, scopedCourses) {
-  const selectedTerm = semesterTerm(state.semester);
-  const recordTerm = toNumber(record.term, 0);
-  const sameTerm = !selectedTerm || !recordTerm || recordTerm === selectedTerm;
   const recordKey = normalizeCourseName(record.courseName);
   const recordFamilyKey = normalizeCourseFamilyName(record.courseName);
   return scopedCourses.filter((course) => {
     const courseKey = normalizeCourseName(course.name);
     const courseFamilyKey = normalizeCourseFamilyName(course.name);
-    return recordKey === courseKey || (sameTerm && recordFamilyKey && recordFamilyKey === courseFamilyKey);
+    const sameFamily = recordFamilyKey && courseFamilyKey && recordFamilyKey === courseFamilyKey;
+    const suffixFamily =
+      recordFamilyKey &&
+      courseFamilyKey &&
+      Math.min(recordFamilyKey.length, courseFamilyKey.length) >= 5 &&
+      (recordFamilyKey.endsWith(courseFamilyKey) || courseFamilyKey.endsWith(recordFamilyKey));
+    return recordKey === courseKey || sameFamily || suffixFamily;
   });
-}
-
-function historicalProfessorId(record, existingByName) {
-  const name = String(record.professor || "").trim();
-  const existing = existingByName.get(normalizeProfessorName(name));
-  if (existing) return existing.id;
-  const number = String(record.professorNo || "").replace(/\D/g, "");
-  if (number) return `HP_${number}`;
-  return `HP_${normalizeProfessorName(name) || "UNKNOWN"}`;
 }
 
 function normalizeProfessorName(name) {
@@ -1267,7 +1396,7 @@ function renderLoadRow(item) {
 function renderDataPanel(validation) {
   const hints = {
     courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 학점/분배는 직접 수정하거나 지난 시간표 이력을 한 번에 적용할 수 있습니다.",
-    professors: "학과를 바꾸면 이전 시간표의 담당교수 이력을 참고해 현재 학과 교수 목록으로 갱신합니다. 담당 가능 과목은 과목명 드롭다운으로 추가합니다.",
+    professors: "교수 목록은 공식 학과 교수진 DB를 우선 사용합니다. 지난 시간표는 DB에 있는 교수의 담당 가능 과목을 보강하는 용도로만 반영합니다.",
     rooms: "이전 학기 시간표와 보유 시설을 참고해 사용할 강의실만 체크하고, 분류와 정원을 입력합니다. 최적화는 체크된 강의실만 후보로 사용합니다.",
     assignments: "배정 결과는 최적화 실행 후 갱신됩니다. 충돌 행은 제약조건 패널에서 원인을 확인할 수 있습니다.",
     reference: "전 학기 시간표는 교수 후보, 강의실 사용 패턴, 분반 표기 참고용입니다. 새 학기 개설 과목 판정에는 사용하지 않습니다."
@@ -1357,6 +1486,7 @@ function renderProfessorsTable() {
       <tr>
         <td><input class="table-input short" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="id" value="${escapeAttr(professor.id)}" /></td>
         <td><input class="table-input medium" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="name" value="${escapeAttr(professor.name)}" /></td>
+        <td><span class="pill">${escapeHtml(professor.sourceDepartment || state.selectedDepartment)}</span></td>
         <td>${selectHtml("professors", professor.id, "type", professor.type, [["전임", "전임"], ["신임전임", "신임전임"], ["겸임", "겸임"], ["초빙", "초빙"], ["강사", "강사"], ["명예", "명예"], ["연구", "연구"]])}</td>
         <td class="numeric"><input class="table-input short" type="number" step="0.5" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="minCredits" value="${escapeAttr(professor.minCredits)}" /></td>
         <td class="numeric"><input class="table-input short" type="number" step="0.5" data-kind="professors" data-id="${escapeAttr(professor.id)}" data-field="maxCredits" value="${escapeAttr(professor.maxCredits)}" /></td>
@@ -1368,7 +1498,7 @@ function renderProfessorsTable() {
     .join("");
   els.dataBody.innerHTML = `
     <table class="data-table">
-      <thead><tr><th>ID</th><th>성명</th><th>구분</th><th class="numeric">최소</th><th class="numeric">최대</th><th>가능 시간</th><th>담당 가능 과목</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>성명</th><th>소속</th><th>구분</th><th class="numeric">최소</th><th class="numeric">최대</th><th>가능 시간</th><th>담당 가능 과목</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
@@ -1413,7 +1543,10 @@ function professorPickerHtml(course) {
   const selectedSet = new Set(selectedIds);
   const options = professorOptionsForPicker()
     .filter((professor) => !selectedSet.has(professor.id))
-    .map((professor) => `<option value="${escapeAttr(professor.id)}">${escapeHtml(professor.name)} · ${escapeHtml(professor.type)}</option>`)
+    .map((professor) => {
+      const sourceText = professor.sourceDepartment && professor.sourceDepartment !== state.selectedDepartment ? ` · ${professor.sourceDepartment}` : "";
+      return `<option value="${escapeAttr(professor.id)}">${escapeHtml(professor.name)} · ${escapeHtml(professor.type)}${escapeHtml(sourceText)}</option>`;
+    })
     .join("");
   const chips = selectedIds
     .map((professorId) => findById(state.professors, professorId))
@@ -1861,6 +1994,19 @@ function addRoom() {
   state.schedule = [];
   saveState();
   renderAll();
+}
+
+function openTutorial() {
+  if (!els.tutorialOverlay) return;
+  els.tutorialOverlay.hidden = false;
+  const closeButton = els.tutorialOverlay.querySelector("[data-tutorial-close]");
+  closeButton?.focus();
+}
+
+function closeTutorial() {
+  if (!els.tutorialOverlay) return;
+  els.tutorialOverlay.hidden = true;
+  els.tutorialButton?.focus();
 }
 
 async function runOptimizationWithLoading({ iterations = 12, message = "최적 배정안을 계산 중입니다." } = {}) {

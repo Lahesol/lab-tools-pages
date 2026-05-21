@@ -143,6 +143,105 @@ svg {
   display: none;
 }
 
+.tutorial-overlay {
+  align-items: center;
+  background: rgba(16, 32, 51, 0.36);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 45;
+}
+
+.tutorial-overlay[hidden] {
+  display: none;
+}
+
+.tutorial-panel {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 18px;
+  max-height: calc(100vh - 48px);
+  max-width: 760px;
+  overflow: auto;
+  padding: 26px;
+  position: relative;
+  width: min(760px, 100%);
+}
+
+.tutorial-close {
+  align-items: center;
+  background: #f3f6f9;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 20px;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  width: 34px;
+}
+
+.tutorial-close:hover {
+  color: var(--navy);
+}
+
+.tutorial-heading {
+  padding-right: 42px;
+}
+
+.tutorial-heading h2 {
+  color: var(--navy);
+  font-size: 22px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.tutorial-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tutorial-card {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+}
+
+.tutorial-card.wide {
+  grid-column: 1 / -1;
+}
+
+.tutorial-card strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.tutorial-card span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tutorial-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .loading-box {
   align-items: center;
   background: #ffffff;
@@ -1322,6 +1421,24 @@ select:disabled {
     bottom: 8px;
     padding: 5px 7px;
     right: 8px;
+  }
+
+  .tutorial-overlay {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .tutorial-panel {
+    max-height: calc(100vh - 24px);
+    padding: 20px;
+  }
+
+  .tutorial-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tutorial-heading h2 {
+    font-size: 19px;
   }
 
   .topbar,

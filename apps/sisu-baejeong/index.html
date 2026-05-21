@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>가천대학교 시수배정 도우미</title>
-    <link rel="stylesheet" href="./styles.css?v=36c1054d313e" />
+    <link rel="stylesheet" href="./styles.css?v=a10d4b3006a5" />
   </head>
   <body>
     <div class="app-shell">
@@ -108,6 +108,10 @@
             <h1>가천대학교 시수배정 도우미</h1>
           </div>
           <div class="top-actions">
+            <button class="ghost-button tutorial-button" id="tutorialButton" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17h.01M9.5 9a2.5 2.5 0 1 1 3.1 2.4c-.9.3-1.6 1-1.6 2.1" /><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5l-4-2-4 2-4-2-4 2Z" /></svg>
+              튜토리얼
+            </button>
             <label class="semester-control">
               <span>학과</span>
               <select id="departmentSelect"></select>
@@ -184,7 +188,41 @@
       </main>
     </div>
 
-    <div class="power-credit" aria-label="제작자">powered by Youngwoo Yoo</div>
+    <div class="power-credit" aria-label="제작자">powered by Youngwoo Yoo (201935464@MICSlab)</div>
+    <div class="tutorial-overlay" id="tutorialOverlay" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle" hidden>
+      <div class="tutorial-panel">
+        <button class="tutorial-close" type="button" data-tutorial-close aria-label="튜토리얼 닫기">×</button>
+        <div class="tutorial-heading">
+          <p class="subtle">처음 사용자 안내</p>
+          <h2 id="tutorialTitle">가천대학교 시수배정 도우미 사용 흐름</h2>
+        </div>
+        <div class="tutorial-grid">
+          <section class="tutorial-card">
+            <strong>1. 학과와 학기 선택</strong>
+            <span>전자공학과, 반도체공학과, 시스템반도체학과 중 하나를 고르면 해당 학과 과목과 교수 후보가 갱신됩니다.</span>
+          </section>
+          <section class="tutorial-card">
+            <strong>2. 기초 데이터 조정</strong>
+            <span>과목, 교수, 강의실/정원 탭에서 분반 기준, 담당 가능 과목, 강의실 유형과 정원을 수정합니다.</span>
+          </section>
+          <section class="tutorial-card">
+            <strong>3. 최적화 실행</strong>
+            <span>최적화 실행을 누르면 교수 시수, 가능 시간, 강의실 정원, 시간 충돌을 함께 계산합니다.</span>
+          </section>
+          <section class="tutorial-card">
+            <strong>4. 충돌과 추천 확인</strong>
+            <span>제약조건 패널에서 충돌 원인을 보고, 강의실 문제는 전년도/최근 3개년 기준 추천 강의실을 참고합니다.</span>
+          </section>
+          <section class="tutorial-card wide">
+            <strong>5. 이전 시간표 활용</strong>
+            <span>전학기 예시 탭에서 이전 배정표를 확인하고, 과목 탭의 이력 학점/시수 버튼으로 지난 시간표의 학점·강의시간 패턴을 적용합니다.</span>
+          </section>
+        </div>
+        <div class="tutorial-actions">
+          <button class="primary-button" type="button" data-tutorial-close>시작하기</button>
+        </div>
+      </div>
+    </div>
     <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite" hidden>
       <div class="loading-box">
         <span class="loading-spinner" aria-hidden="true"></span>
@@ -193,6 +231,6 @@
       </div>
     </div>
 
-    <script src="./app.js?v=b8316fb59dcf"></script>
+    <script src="./app.js?v=dc23139b18eb"></script>
   </body>
 </html>
