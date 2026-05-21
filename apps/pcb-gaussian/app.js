@@ -891,6 +891,26 @@ function adcMaskFromTias(tias) {
   return mask || 0xFF;
 }
 
+function adcMaskFromIndices(indices) {
+  let mask = 0;
+  for (const adcIndex of indices) {
+    if (Number.isFinite(adcIndex) && adcIndex >= 0 && adcIndex < ADC_TIA_COUNT) mask |= (1 << adcIndex);
+  }
+  return mask || 0xFF;
+}
+
+function tiaIndicesFromAdcMask(mask) {
+  const tias = [];
+  for (let adcIndex = 0; adcIndex < ADC_TIA_COUNT; adcIndex++) {
+    if ((mask & (1 << adcIndex)) !== 0) tias.push(tiaIndexForAdc(adcIndex) + 1);
+  }
+  return tias.length ? tias : selectedTias();
+}
+
+function sweepAdcMask(dac) {
+  return adcMaskFromIndices(selectedPlotAdcs(dac));
+}
+
 function parseAdcFields(parts) {
   return Array.from({ length: ADC_TIA_COUNT }, (_, idx) => {
     const text = String(parts[idx] ?? "").trim();
@@ -924,28 +944,39 @@ async function startSweep() {
   const totalMs = Math.max(0, Math.round(Number($("sweepDwell").value) || 0));
   const requests = [];
   syncTiaStates();
-  const selectedTiasForSweep = selectedTias();
-  const adcMask = adcMaskFromTias(selectedTiasForSweep);
   try {
-    if ($("sweepD1Enable").checked) requests.push(firmwareSweepRequest("D1", totalMs, adcMask));
-    if ($("sweepD2Enable").checked) requests.push(firmwareSweepRequest("D2", totalMs, adcMask));
+    if ($("sweepD1Enable").checked) {
+      const adcMask = sweepAdcMask("D1");
+      const request = firmwareSweepRequest("D1", totalMs, adcMask);
+      request.adcMask = adcMask;
+      request.tias = tiaIndicesFromAdcMask(adcMask);
+      requests.push(request);
+    }
+    if ($("sweepD2Enable").checked) {
+      const adcMask = sweepAdcMask("D2");
+      const request = firmwareSweepRequest("D2", totalMs, adcMask);
+      request.adcMask = adcMask;
+      request.tias = tiaIndicesFromAdcMask(adcMask);
+      requests.push(request);
+    }
     if (!requests.length) throw new Error("Enable at least one DAC sweep");
   } catch (error) {
     alert(error.message);
     return;
   }
 
-  state.firmwareSweepSelectedTias = selectedTiasForSweep;
+  state.firmwareSweepSelectedTias = requests[0]?.tias || selectedTias();
   startSweepCapture();
   state.sweepRunning = true;
   const startedMs = performance.now();
-  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount}`).join(", ")}`;
-  logLine(`${$("sweepStatus").textContent}, ADC mask 0x${adcMask.toString(16).padStart(2, "0")}`);
+  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")}`).join(", ")}`;
+  logLine($("sweepStatus").textContent);
 
   try {
     for (const request of requests) {
       if (!state.sweepRunning) break;
-      $("sweepStatus").textContent = `Firmware sweep ${request.dac}: ${request.pointCount} point(s), total ${totalMs} ms`;
+      state.firmwareSweepSelectedTias = request.tias;
+      $("sweepStatus").textContent = `Firmware sweep ${request.dac}: ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}`;
       const reply = await sendCommand(request.command, {
         waitForReply: true,
         timeoutMs: request.timeoutMs,
@@ -967,7 +998,7 @@ async function startSweep() {
     const elapsedSeconds = ((performance.now() - startedMs) / 1000).toFixed(2);
     finishSweepCapture();
     $("sweepStatus").textContent = `Firmware sweep finished: ${captured} ADC point(s), ${elapsedSeconds} s`;
-    logLine(`${$("sweepStatus").textContent}, ADC mask 0x${adcMask.toString(16).padStart(2, "0")}`);
+    logLine($("sweepStatus").textContent);
   }
 }
 
