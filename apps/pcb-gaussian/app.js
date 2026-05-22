@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-22-fit-overlay";
+const WEB_VERSION = "2026-05-22-auto-fit-control";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-21-version-check";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-v1";
 const APP_VERSION = WEB_VERSION;
@@ -324,6 +324,9 @@ const state = {
   lastGaussianFit: null,
   lastGmmPlan: [],
   sweepRunning: false,
+  autoFitRunning: false,
+  autoFitStopRequested: false,
+  autoFitHistory: [],
   firmwareVersion: null,
   firmwareProtocol: null,
   firmwareName: null,
@@ -911,12 +914,12 @@ function setAllPlotStatus(text) {
   for (const dac of ["D1", "D2"]) setPlotStatus(dac, text);
 }
 
-function startSweepCapture(requests = []) {
+function startSweepCapture(requests = [], repeatCount = 1) {
   const rangeByDac = {};
   for (const request of requests) {
     if (!request?.dac) continue;
-    const min = Math.min(Number(request.startMv), Number(request.stopMv)) / 1000;
-    const max = Math.max(Number(request.startMv), Number(request.stopMv)) / 1000;
+    const min = Number(request.rangeMinMv ?? Math.min(Number(request.startMv), Number(request.stopMv))) / 1000;
+    const max = Number(request.rangeMaxMv ?? Math.max(Number(request.startMv), Number(request.stopMv))) / 1000;
     if (Number.isFinite(min) && Number.isFinite(max)) rangeByDac[request.dac] = { min, max };
   }
   state.activeSweep = {
@@ -930,6 +933,8 @@ function startSweepCapture(requests = []) {
     missingByDac: {},
     badByDac: {},
     rangeByDac,
+    repeatCount,
+    currentRepeat: 1,
     lastStatusMs: 0,
   };
   state.pendingAdcContext = null;
@@ -1126,6 +1131,23 @@ function sweepSettleUs() {
   return value;
 }
 
+function sweepRepeatCount() {
+  const input = $("sweepRepeats");
+  const value = clamp(Math.round(Number(input?.value) || 1), 1, 100);
+  if (input) input.value = value;
+  return value;
+}
+
+function sweepReverseEnabled() {
+  return !!$("sweepReverse")?.checked;
+}
+
+function sweepTraceOpacity() {
+  const input = $("sweepTraceOpacity");
+  const value = clamp(Number(input?.value) || 0.45, 0.1, 1);
+  if (input) input.value = value;
+  return value;
+}
 function firmwareSweepRequest(prefix, totalMs, adcMask) {
   const mode = $(`sweep${prefix}Mode`).value;
   if (mode !== "Vhigh mV") {
@@ -1147,14 +1169,20 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
   if (pointCount > 1024) throw new Error(`${prefix} firmware sweep has ${pointCount} points; max is 1024`);
   const avgSamples = adcAvgSamples();
   const settleUs = sweepSettleUs();
+  const reverse = sweepReverseEnabled();
+  const requestStart = reverse ? stop : start;
+  const requestStop = reverse ? start : stop;
   return {
     dac: prefix,
-    command: `SX${prefix.slice(1)},${encodeBase32(start)},${encodeBase32(stop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)},${encodeBase32(avgSamples)},${encodeBase32(settleUs)}`,
+    command: `SX${prefix.slice(1)},${encodeBase32(requestStart)},${encodeBase32(requestStop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)},${encodeBase32(avgSamples)},${encodeBase32(settleUs)}`,
     avgSamples,
     settleUs,
+    reverse,
     pointCount,
-    startMv: start,
-    stopMv: stop,
+    startMv: requestStart,
+    stopMv: requestStop,
+    rangeMinMv: Math.min(start, stop),
+    rangeMaxMv: Math.max(start, stop),
     stepMv: step,
     timeoutMs: Math.max(10000, totalMs + Math.ceil(pointCount * settleUs / 1000) + pointCount * 500 + 3000),
   };
@@ -1163,6 +1191,7 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
 async function startSweep() {
   if (state.sweepRunning) return;
   const totalMs = Math.max(0, Math.round(Number($("sweepDwell").value) || 0));
+  const repeatCount = sweepRepeatCount();
   const requests = [];
   syncTiaStates();
   try {
@@ -1187,30 +1216,37 @@ async function startSweep() {
   }
 
   state.firmwareSweepSelectedTias = requests[0]?.tias || selectedTias();
-  startSweepCapture(requests);
+  startSweepCapture(requests, repeatCount);
   state.sweepRunning = true;
   const startedMs = performance.now();
-  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us`).join(", ")}`;
+  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us${req.reverse ? " reverse" : ""}`).join(", ")} x${repeatCount}`;
   logLine($("sweepStatus").textContent);
 
   try {
-    for (const request of requests) {
-      if (!state.sweepRunning) break;
-      state.firmwareSweepSelectedTias = request.tias;
-      $("sweepStatus").textContent = `Firmware sweep ${request.dac}: ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}, avg ${request.avgSamples}, settle ${request.settleUs} us`;
-      const reply = await sendCommand(request.command, {
-        waitForReply: true,
-        timeoutMs: request.timeoutMs,
-        replyMatcher: text => {
-          const upper = text.toUpperCase();
-          return upper.startsWith(`SX,DONE,${request.dac}`) || upper.startsWith(`SWEEP,DONE,${request.dac}`) || upper.startsWith("SX,ERR") || upper.startsWith("SWEEP,ERR") || upper.startsWith("ADC,ERR") || upper.startsWith("ADC,INIT_ERR");
-        },
-      });
-      if (!reply) {
-        logLine(`[timeout] Firmware sweep ${request.dac}`);
-        break;
+    for (let repeatIndex = 0; repeatIndex < repeatCount && state.sweepRunning; repeatIndex++) {
+      if (state.activeSweep) state.activeSweep.currentRepeat = repeatIndex + 1;
+      for (const request of requests) {
+        if (!state.sweepRunning) break;
+        state.firmwareSweepSelectedTias = request.tias;
+        $("sweepStatus").textContent = `Firmware sweep ${request.dac}: run ${repeatIndex + 1}/${repeatCount}, ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}, avg ${request.avgSamples}, settle ${request.settleUs} us${request.reverse ? ", reverse" : ""}`;
+        const reply = await sendCommand(request.command, {
+          waitForReply: true,
+          timeoutMs: request.timeoutMs,
+          replyMatcher: text => {
+            const upper = text.toUpperCase();
+            return upper.startsWith(`SX,DONE,${request.dac}`) || upper.startsWith(`SWEEP,DONE,${request.dac}`) || upper.startsWith("SX,ERR") || upper.startsWith("SWEEP,ERR") || upper.startsWith("ADC,ERR") || upper.startsWith("ADC,INIT_ERR");
+          },
+        });
+        if (!reply) {
+          logLine(`[timeout] Firmware sweep ${request.dac}`);
+          state.sweepRunning = false;
+          break;
+        }
+        if (reply.toUpperCase().startsWith("SX,ERR") || reply.toUpperCase().startsWith("SWEEP,ERR") || reply.toUpperCase().startsWith("ADC,")) {
+          state.sweepRunning = false;
+          break;
+        }
       }
-      if (reply.toUpperCase().startsWith("SX,ERR") || reply.toUpperCase().startsWith("SWEEP,ERR") || reply.toUpperCase().startsWith("ADC,")) break;
     }
   } finally {
     state.sweepRunning = false;
@@ -1426,11 +1462,11 @@ function parseFirmwareSweepReply(text) {
     const dac = parts[2]?.toUpperCase() || "D?";
     const expected = parseNumericField(parts[7], isBase32);
     if (state.activeSweep && Number.isFinite(expected)) {
-      state.activeSweep.expectedByDac[dac] = expected;
-      state.activeSweep.receivedByDac[dac] = 0;
+      state.activeSweep.expectedByDac[dac] = (state.activeSweep.expectedByDac[dac] || 0) + expected;
+      state.activeSweep.receivedByDac[dac] = state.activeSweep.receivedByDac[dac] || 0;
       state.activeSweep.nextPointByDac[dac] = 0;
-      state.activeSweep.missingByDac[dac] = 0;
-      state.activeSweep.badByDac[dac] = 0;
+      state.activeSweep.missingByDac[dac] = state.activeSweep.missingByDac[dac] || 0;
+      state.activeSweep.badByDac[dac] = state.activeSweep.badByDac[dac] || 0;
     }
     setPlotStatus(dac, `Firmware sweep ${dac}: ${Number.isFinite(expected) ? expected : "?"} point(s) requested.`);
     return true;
@@ -1438,7 +1474,6 @@ function parseFirmwareSweepReply(text) {
   if (kind === "DONE") {
     const dac = parts[2]?.toUpperCase() || "D?";
     const expected = parseNumericField(parts[3], isBase32);
-    if (state.activeSweep && Number.isFinite(expected)) state.activeSweep.expectedByDac[dac] = expected;
     const coverage = state.activeSweep ? sweepCoverageText(state.activeSweep, dac) : `${Number.isFinite(expected) ? expected : "?"} point(s) complete`;
     setPlotStatus(dac, `Firmware sweep ${dac}: ${coverage}.`);
     return true;
@@ -1555,6 +1590,7 @@ function addSweepAdcPoint(values, context) {
   }
   state.activeSweep.points.push({
     point: context.pointIndex,
+    repeat: state.activeSweep.currentRepeat || 1,
     time: nowTime(),
     sweepDac: context.sweepDac || null,
     dac: context.dac,
@@ -1853,19 +1889,20 @@ function renderDacSweepPlot(xDac) {
   labels.forEach((label, seriesIndex) => {
     const color = PLOT_COLORS[Number(label.replace("ADC", "")) % PLOT_COLORS.length];
     const series = points
-      .map(point => ({ x: sweepXValue(point, xDac), point: point.point, sample: point.adcs?.[label] }))
+      .map(point => ({ x: sweepXValue(point, xDac), point: point.point, repeat: point.repeat || 1, sample: point.adcs?.[label] }))
       .filter(item => item.sample)
-      .map(item => ({ x: item.x, y: sweepYValue(item.sample, yMode), point: item.point }));
+      .map(item => ({ x: item.x, y: sweepYValue(item.sample, yMode), point: item.point, repeat: item.repeat }));
     if (!series.length) return;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = 2;
+    ctx.globalAlpha = overlayFit ? sweepTraceOpacity() : 1;
     ctx.beginPath();
     series.forEach((item, idx) => {
       const x = sx(item.x);
       const y = sy(item.y);
       const previous = series[idx - 1];
-      const hasPointGap = previous && Math.abs(Number(item.point) - Number(previous.point)) > 1;
+      const hasPointGap = previous && (item.repeat !== previous.repeat || Math.abs(Number(item.point) - Number(previous.point)) > 1);
       if (idx === 0 || hasPointGap) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
@@ -1875,6 +1912,7 @@ function renderDacSweepPlot(xDac) {
       ctx.arc(sx(item.x), sy(item.y), 3, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
   });
 
   drawGaussianOverlay(ctx, overlayFit, overlaySamples, sx, sy);
@@ -2117,13 +2155,30 @@ function fitGaussianData(data) {
   const edgeLocked = params.mu <= minX + edgeMargin || params.mu >= maxX - edgeMargin;
   return { ...params, r2: sst > 0 ? 1 - sse / sst : 1, rmse: Math.sqrt(sse / clean.length), points: clean.length, edgeLocked };
 }
+function readGaussianTargetOrNull() {
+  const target = { A: Number($("fitTargetA")?.value), mu: Number($("fitTargetMu")?.value), sigma: NaN };
+  return [target.A, target.mu].every(Number.isFinite) ? target : null;
+}
+
+function renderGaussianTargetError(fit) {
+  const target = readGaussianTargetOrNull();
+  if (!target) {
+    return { html: `<div>target error<strong>-</strong></div><div>target status<strong>-</strong></div>`, text: "" };
+  }
+  const error = gaussianTargetError(fit, target);
+  return {
+    html: `<div>target error<strong>A ${error.aError.toPrecision(4)} / mu ${error.muError.toFixed(5)} V</strong></div><div>target status<strong>${error.converged ? "within tol" : `norm ${error.norm.toFixed(3)}`}</strong></div>`,
+    text: ` ${formatTargetError(error)}.`,
+  };
+}
 function renderGaussianFit(fit) {
   const grid = $("fitResultGrid");
   if (!grid) return;
   if (!fit) {
-    grid.innerHTML = `<div>A<strong>-</strong></div><div>mu<strong>-</strong></div><div>sigma<strong>-</strong></div><div>R2<strong>-</strong></div>`;
+    grid.innerHTML = `<div>A<strong>-</strong></div><div>mu<strong>-</strong></div><div>sigma<strong>-</strong></div><div>R2<strong>-</strong></div><div>target error<strong>-</strong></div><div>target status<strong>-</strong></div>`;
     return;
   }
+  const targetInfo = renderGaussianTargetError(fit);
   grid.innerHTML = `
     <div>A<strong>${fit.A.toPrecision(5)}</strong></div>
     <div>mu<strong>${fit.mu.toFixed(5)} V${fit.edgeLocked ? " edge" : ""}</strong></div>
@@ -2133,10 +2188,11 @@ function renderGaussianFit(fit) {
     <div>RMSE<strong>${fit.rmse.toPrecision(4)}</strong></div>
     <div>points<strong>${fit.points}</strong></div>
     <div>trace<strong>${fit.xDac} / ADC${fit.adcIndex}</strong></div>
+    ${targetInfo.html}
   `;
 }
 
-function fitSelectedGaussian() {
+function fitSelectedGaussian(options = {}) {
   try {
     const xDac = $("fitXDac").value;
     const adcIndex = clamp(Math.round(Number($("fitAdc").value) || 0), 0, ADC_TIA_COUNT - 1);
@@ -2144,14 +2200,19 @@ function fitSelectedGaussian() {
     const data = gaussianFitSeries(xDac, adcIndex, yMode);
     const fit = { ...fitGaussianData(data), xDac, adcIndex, yMode, data };
     state.lastGaussianFit = fit;
+    if (!(options && options.updateTarget === false)) {
+      $("fitTargetMu").value = fit.mu.toFixed(5);
+      $("fitTargetA").value = fit.A.toPrecision(6);
+    }
     renderGaussianFit(fit);
     renderSweepPlot();
-    $("fitTargetMu").value = fit.mu.toFixed(5);
-    $("fitTargetA").value = fit.A.toPrecision(6);
+    const targetInfo = renderGaussianTargetError(fit);
     const edgeNote = fit.edgeLocked ? " Center is near sweep edge; check selected trace or widen sweep range." : "";
-    setFitStatus(`Fit complete: ${fit.points} point(s), R2=${fit.r2.toFixed(4)}.${edgeNote}`, fit.r2 > 0.85 && !fit.edgeLocked ? "ok" : "warn");
+    setFitStatus(`Fit complete: ${fit.points} point(s), R2=${fit.r2.toFixed(4)}.${targetInfo.text}${edgeNote}`, fit.r2 > 0.85 && !fit.edgeLocked ? "ok" : "warn");
+    return fit;
   } catch (error) {
     setFitStatus(error.message, "warn");
+    return null;
   }
 }
 
@@ -2191,21 +2252,22 @@ function directPlanForTarget(device, target) {
   };
 }
 
-function gaussianAdjustPlan() {
+function gaussianAdjustPlan(options = {}) {
   const fit = state.lastGaussianFit;
   if (!fit) throw new Error("Run Gaussian fit first.");
   const device = deviceMuxInfo($("fitDevice").value).device;
   const targetMu = Number($("fitTargetMu").value);
   const targetA = Number($("fitTargetA").value);
-  const muGain = Number($("fitMuGain").value) || 1;
-  const aGain = Number($("fitAGain").value) || 1;
+  const muGain = Number(options.muGain ?? $("fitMuGain").value) || 1;
+  const aGain = Number(options.aGain ?? $("fitAGain").value) || 1;
   if (![targetMu, targetA].every(Number.isFinite)) throw new Error("Target A/mu values are invalid.");
   return adjustmentPlanForFit(device, { A: targetA, mu: targetMu, sigma: Math.abs(fit.sigma) }, fit, muGain, aGain);
 }
 
 function renderGaussianAdjustPlan(plan) {
   if (!plan) return;
-  setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), A ${plan.currentACode}->${plan.nextACode} (${plan.nextAV.toFixed(4)} V).`, "ok");
+  const errorText = plan.fit ? ` ${formatTargetError(gaussianTargetError(plan.fit, plan.target))}.` : "";
+  setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), A ${plan.currentACode}->${plan.nextACode} (${plan.nextAV.toFixed(4)} V).${errorText}`, "ok");
 }
 
 function previewGaussianAdjust() {
@@ -2274,7 +2336,7 @@ function adcIndexForDevice(device, fallbackIndex, xDac) {
   return adcs[fallbackIndex % adcs.length];
 }
 
-function gmmPlan() {
+function gmmPlan(options = {}) {
   const devices = parseDeviceList($("gmmDevices").value);
   const targets = parseGmmTargetRows($("gmmTarget").value);
   if (!devices.length) throw new Error("Select at least one device.");
@@ -2286,8 +2348,8 @@ function gmmPlan() {
   }
   const xDac = $("fitXDac").value;
   const yMode = $("fitYMode").value;
-  const muGain = Number($("fitMuGain").value) || 1;
-  const aGain = Number($("fitAGain").value) || 1;
+  const muGain = Number(options.muGain ?? $("fitMuGain").value) || 1;
+  const aGain = Number(options.aGain ?? $("fitAGain").value) || 1;
   return devices.map((device, idx) => {
     const adcIndex = adcIndexForDevice(device, idx, xDac);
     const data = gaussianFitSeries(xDac, adcIndex, yMode);
@@ -2306,7 +2368,7 @@ function renderGmmPlan(plan) {
       return `
         <div>
           Device ${item.device} / ADC${item.fit.adcIndex}<strong>${codeText}</strong>
-          <span>${targetText}; fit A=${item.fit.A.toPrecision(4)}, mu=${item.fit.mu.toFixed(4)}, sigma=${Math.abs(item.fit.sigma).toFixed(4)}, R2=${item.fit.r2.toFixed(3)}</span>
+          <span>${targetText}; fit A=${item.fit.A.toPrecision(4)}, mu=${item.fit.mu.toFixed(4)}, sigma=${Math.abs(item.fit.sigma).toFixed(4)}, R2=${item.fit.r2.toFixed(3)}; ${formatTargetError(gaussianTargetError(item.fit, item.target))}</span>
         </div>
       `;
     }
@@ -2341,6 +2403,202 @@ async function programGmm() {
     setGmmStatus(`Programmed ${plan.length} device target(s).`, "ok");
   } catch (error) {
     setGmmStatus(error.message, "warn");
+  }
+}
+function autoFitMaxIterations() {
+  const input = $("autoFitMaxIter");
+  const value = clamp(Math.round(Number(input?.value) || 6), 1, 50);
+  if (input) input.value = value;
+  return value;
+}
+
+function autoFitLearningRate() {
+  const input = $("autoFitLearningRate");
+  const value = clamp(Number(input?.value) || 0.5, 0.01, 2);
+  if (input) input.value = value;
+  return value;
+}
+
+function autoFitTolerances() {
+  const muInput = $("autoFitMuTol");
+  const aInput = $("autoFitATol");
+  const muTol = Math.max(0, Number(muInput?.value) || 0);
+  const aTol = Math.max(0, Number(aInput?.value) || 0);
+  if (muInput) muInput.value = muTol;
+  if (aInput) aInput.value = aTol;
+  return { muTol, aTol };
+}
+
+function autoFitControlGains() {
+  const lr = autoFitLearningRate();
+  return {
+    learningRate: lr,
+    muGain: (Number($("fitMuGain").value) || 1) * lr,
+    aGain: (Number($("fitAGain").value) || 1) * lr,
+  };
+}
+
+function gaussianTargetError(fit, target, tolerances = autoFitTolerances()) {
+  const muError = Number(target.mu) - Number(fit.mu);
+  const aError = Number(target.A) - Number(fit.A);
+  const muScale = tolerances.muTol > 0 ? Math.abs(muError) / tolerances.muTol : Math.abs(muError);
+  const aScale = tolerances.aTol > 0 ? Math.abs(aError) / tolerances.aTol : Math.abs(aError);
+  const norm = Math.max(muScale, aScale);
+  return {
+    muError,
+    aError,
+    sigmaError: Number.isFinite(Number(target.sigma)) ? Number(target.sigma) - Math.abs(Number(fit.sigma)) : NaN,
+    muScale,
+    aScale,
+    norm,
+    converged: norm <= 1,
+  };
+}
+
+function formatTargetError(error) {
+  const sigmaText = Number.isFinite(error.sigmaError) ? `, sigma=${error.sigmaError.toFixed(5)} V` : "";
+  return `err A=${error.aError.toPrecision(4)}, mu=${error.muError.toFixed(5)} V${sigmaText}, norm(A/mu)=${error.norm.toFixed(3)}`;
+}
+
+function singleAutoTarget() {
+  const target = readGaussianTargetOrNull();
+  if (!target) throw new Error("Target A/mu values are invalid.");
+  return target;
+}
+
+function applyProgrammedPlanToUi(plan) {
+  $("potDevice").value = plan.device;
+  $("aCode").value = plan.nextMuCode;
+  $("muCode").value = plan.nextACode;
+  updatePotReadout();
+  renderDeviceTable();
+}
+
+function planHasCodeChange(plan) {
+  return plan.currentMuCode !== plan.nextMuCode || plan.currentACode !== plan.nextACode;
+}
+
+function gmmErrorSummary(plan, tolerances = autoFitTolerances()) {
+  const errors = plan
+    .filter(item => item.mode === "fit" && item.fit)
+    .map(item => ({ item, error: gaussianTargetError(item.fit, item.target, tolerances) }));
+  if (!errors.length) return { errors, maxNorm: Infinity, converged: false };
+  const maxNorm = Math.max(...errors.map(entry => entry.error.norm));
+  return { errors, maxNorm, converged: maxNorm <= 1 };
+}
+
+function setAutoFitControlsDisabled(disabled) {
+  ["autoFitSingleButton", "autoFitGmmButton"].forEach(id => { const el = $(id); if (el) el.disabled = disabled; });
+  const stop = $("stopAutoFitButton");
+  if (stop) stop.disabled = !disabled;
+}
+
+async function runAutoSweep(label, statusSetter) {
+  const before = state.sweepCounter;
+  statusSetter(`${label}: sweeping...`);
+  await startSweep();
+  if (!state.lastSweep?.points?.length || state.lastSweep.id <= before) {
+    throw new Error("Auto fit did not capture a completed sweep.");
+  }
+  return state.lastSweep;
+}
+
+function stopAutoFit() {
+  state.autoFitStopRequested = true;
+  state.sweepRunning = false;
+  setFitStatus("Auto fit stop requested.", "warn");
+  setGmmStatus("Auto fit stop requested.", "warn");
+}
+
+async function autoFitSingle() {
+  if (state.autoFitRunning) return;
+  state.autoFitRunning = true;
+  state.autoFitStopRequested = false;
+  setAutoFitControlsDisabled(true);
+  try {
+    const maxIter = autoFitMaxIterations();
+    const tolerances = autoFitTolerances();
+    const target = singleAutoTarget();
+    state.autoFitHistory = [];
+    for (let iter = 1; iter <= maxIter; iter++) {
+      if (state.autoFitStopRequested) break;
+      await runAutoSweep(`Auto single ${iter}/${maxIter}`, text => setFitStatus(text));
+      const fit = fitSelectedGaussian({ updateTarget: false });
+      $("fitTargetMu").value = target.mu;
+      $("fitTargetA").value = target.A;
+      if (!fit) throw new Error("Gaussian fit failed during auto single.");
+      const error = gaussianTargetError(fit, target, tolerances);
+      state.autoFitHistory.push({ mode: "single", iter, fit, target, error });
+      if (error.converged) {
+        setFitStatus(`Auto single converged at ${iter}/${maxIter}: ${formatTargetError(error)}.`, "ok");
+        return;
+      }
+      const gains = autoFitControlGains();
+      const device = deviceMuxInfo($("fitDevice").value).device;
+      const plan = adjustmentPlanForFit(device, target, fit, gains.muGain, gains.aGain);
+      renderGaussianAdjustPlan(plan);
+      if (!planHasCodeChange(plan)) {
+        setFitStatus(`Auto single stopped: code unchanged, ${formatTargetError(error)}.`, "warn");
+        return;
+      }
+      await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextACode);
+      applyProgrammedPlanToUi(plan);
+      setFitStatus(`Auto single ${iter}/${maxIter}: programmed, ${formatTargetError(error)}, lr=${gains.learningRate}.`, "warn");
+    }
+    if (state.autoFitStopRequested) {
+      setFitStatus(`Auto single stopped at ${state.autoFitHistory.length}/${maxIter}.`, "warn");
+      return;
+    }
+    setFitStatus(`Auto single reached max iter ${maxIter}.`, "warn");
+  } catch (error) {
+    setFitStatus(error.message, "warn");
+  } finally {
+    state.autoFitRunning = false;
+    setAutoFitControlsDisabled(false);
+  }
+}
+
+async function autoFitGmm() {
+  if (state.autoFitRunning) return;
+  state.autoFitRunning = true;
+  state.autoFitStopRequested = false;
+  setAutoFitControlsDisabled(true);
+  try {
+    if (($("gmmMode")?.value || "fit") !== "fit") throw new Error("Auto GMM requires Fit measured curves mode.");
+    const maxIter = autoFitMaxIterations();
+    const tolerances = autoFitTolerances();
+    state.autoFitHistory = [];
+    for (let iter = 1; iter <= maxIter; iter++) {
+      if (state.autoFitStopRequested) break;
+      await runAutoSweep(`Auto GMM ${iter}/${maxIter}`, text => setGmmStatus(text));
+      const gains = autoFitControlGains();
+      const plan = gmmPlan({ muGain: gains.muGain, aGain: gains.aGain });
+      const summary = gmmErrorSummary(plan, tolerances);
+      renderGmmPlan(plan);
+      state.autoFitHistory.push({ mode: "gmm", iter, plan, summary });
+      if (summary.converged) {
+        setGmmStatus(`Auto GMM converged at ${iter}/${maxIter}: max norm=${summary.maxNorm.toFixed(3)}.`, "ok");
+        return;
+      }
+      if (!plan.some(planHasCodeChange)) {
+        setGmmStatus(`Auto GMM stopped: all codes unchanged, max norm=${summary.maxNorm.toFixed(3)}.`, "warn");
+        return;
+      }
+      for (const item of plan) await programLogicalDevice(item.device, item.nextMuCode, item.nextACode);
+      renderDeviceTable();
+      loadDeviceState();
+      setGmmStatus(`Auto GMM ${iter}/${maxIter}: programmed ${plan.length} device(s), max norm=${summary.maxNorm.toFixed(3)}, lr=${gains.learningRate}.`, "warn");
+    }
+    if (state.autoFitStopRequested) {
+      setGmmStatus(`Auto GMM stopped at ${state.autoFitHistory.length}/${maxIter}.`, "warn");
+      return;
+    }
+    setGmmStatus(`Auto GMM reached max iter ${maxIter}.`, "warn");
+  } catch (error) {
+    setGmmStatus(error.message, "warn");
+  } finally {
+    state.autoFitRunning = false;
+    setAutoFitControlsDisabled(false);
   }
 }
 function downloadFitCsv() {
@@ -2391,13 +2649,14 @@ function downloadSweepCsv() {
   }
   const labels = ADC_LABELS.slice();
   const fields = [
-    "sweep_id", "point", "time", "sweep_dac",
+    "sweep_id", "repeat", "point", "time", "sweep_dac",
     "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
     ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
   ];
   const rows = sweep.points.map(point => {
     const base = [
       sweep.id,
+      point.repeat ?? 1,
       point.point,
       point.time,
       point.sweepDac ?? "",
@@ -2462,11 +2721,15 @@ function bindEvents() {
   $("stopSweepButton").addEventListener("click", stopSweep);
   $("plotYMode").addEventListener("change", renderSweepPlot);
   $("fixedPlotRange").addEventListener("change", renderSweepPlot);
+  $("sweepTraceOpacity").addEventListener("input", renderSweepPlot);
   $("downloadSweepCsvButton").addEventListener("click", downloadSweepCsv);
   $("fitGaussianButton").addEventListener("click", fitSelectedGaussian);
   $("showFitOverlay").addEventListener("change", renderSweepPlot);
   $("previewGaussianAdjustButton").addEventListener("click", previewGaussianAdjust);
   $("programGaussianAdjustButton").addEventListener("click", programGaussianAdjust);
+  $("autoFitSingleButton").addEventListener("click", autoFitSingle);
+  $("autoFitGmmButton").addEventListener("click", autoFitGmm);
+  $("stopAutoFitButton").addEventListener("click", stopAutoFit);
   $("previewGmmButton").addEventListener("click", previewGmm);
   $("programGmmButton").addEventListener("click", programGmm);
   $("downloadFitCsvButton").addEventListener("click", downloadFitCsv);
@@ -2515,6 +2778,7 @@ function init() {
   renderPlotAdcFilters();
   renderFitAdcOptions();
   renderGaussianFit(null);
+  setAutoFitControlsDisabled(false);
   renderSweepPlot();
   updateVersionInfo();
   logLine("Web GUI ready");

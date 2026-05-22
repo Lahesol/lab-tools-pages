@@ -676,6 +676,7 @@ function normalizeAllDepartmentsDb(data = {}) {
     targetTerm: data.targetTerm || "",
     colleges: Array.isArray(data.colleges) ? data.colleges.filter((item) => item?.code && item?.label) : [],
     departments: Array.isArray(data.departments) ? data.departments.filter((item) => item?.code && item?.label) : [],
+    normalizedCatalog: normalizeDepartmentCatalog(data.normalizedCatalog),
     currentTermCourses: Array.isArray(data.currentTermCourses) ? data.currentTermCourses : [],
     historyRecords: Array.isArray(data.historyRecords) ? data.historyRecords : [],
     latestPreviousTermRecords: Array.isArray(data.latestPreviousTermRecords) ? data.latestPreviousTermRecords : [],
@@ -683,8 +684,41 @@ function normalizeAllDepartmentsDb(data = {}) {
   };
 }
 
+function normalizeDepartmentCatalog(catalog = {}) {
+  return {
+    ...catalog,
+    colleges: Array.isArray(catalog.colleges) ? catalog.colleges.filter((item) => item?.code && item?.label) : [],
+    departments: Array.isArray(catalog.departments)
+      ? catalog.departments
+          .filter((item) => item?.code && item?.label)
+          .map((department) => ({
+            ...department,
+            sourceCodes: Array.isArray(department.sourceCodes) ? department.sourceCodes.filter(Boolean) : [],
+            aliases: Array.isArray(department.aliases) ? department.aliases : []
+          }))
+      : []
+  };
+}
+
 function hasAllDepartmentsDb() {
   return Array.isArray(allDepartmentsDb.departments) && allDepartmentsDb.departments.length > 0;
+}
+
+function hasNormalizedDepartmentCatalog() {
+  return Array.isArray(allDepartmentsDb.normalizedCatalog?.departments) && allDepartmentsDb.normalizedCatalog.departments.length > 0;
+}
+
+function departmentCatalogSource() {
+  if (hasNormalizedDepartmentCatalog()) {
+    return {
+      colleges: allDepartmentsDb.normalizedCatalog.colleges,
+      departments: allDepartmentsDb.normalizedCatalog.departments
+    };
+  }
+  return {
+    colleges: allDepartmentsDb.colleges,
+    departments: allDepartmentsDb.departments
+  };
 }
 
 function applyAllDepartmentsCatalog({ preserveSelection = true } = {}) {
@@ -694,9 +728,10 @@ function applyAllDepartmentsCatalog({ preserveSelection = true } = {}) {
   const previousDepartments = Array.isArray(state.departments) ? state.departments : [];
   const previousById = new Map(previousDepartments.map((department) => [department.id, department]));
   const previousByLabel = new Map(previousDepartments.map((department) => [department.label || department.id, department]));
-  const colleges = [...allDepartmentsDb.colleges].sort((a, b) => String(a.label).localeCompare(String(b.label), "ko"));
+  const catalog = departmentCatalogSource();
+  const colleges = [...catalog.colleges].sort((a, b) => toNumber(a.order, 9999) - toNumber(b.order, 9999) || String(a.label).localeCompare(String(b.label), "ko"));
   state.colleges = colleges.map((college) => ({
-    id: college.code,
+    id: college.id || college.code,
     code: college.code,
     label: college.label,
     name: college.label
@@ -711,15 +746,15 @@ function applyAllDepartmentsCatalog({ preserveSelection = true } = {}) {
     state.selectedCollege = preferredCollege?.id || "";
   }
 
-  let departmentRows = allDepartmentsDb.departments.filter((department) => department.collegeCode === state.selectedCollege);
+  let departmentRows = catalog.departments.filter((department) => department.collegeCode === state.selectedCollege);
   if (!departmentRows.length) {
-    const firstCollegeWithDepartments = state.colleges.find((college) => allDepartmentsDb.departments.some((department) => department.collegeCode === college.id));
+    const firstCollegeWithDepartments = state.colleges.find((college) => catalog.departments.some((department) => department.collegeCode === college.id));
     state.selectedCollege = firstCollegeWithDepartments?.id || state.selectedCollege;
-    departmentRows = allDepartmentsDb.departments.filter((department) => department.collegeCode === state.selectedCollege);
+    departmentRows = catalog.departments.filter((department) => department.collegeCode === state.selectedCollege);
   }
 
   state.departments = departmentRows
-    .sort((a, b) => String(a.label).localeCompare(String(b.label), "ko") || String(a.code).localeCompare(String(b.code)))
+    .sort((a, b) => toNumber(a.order, 9999) - toNumber(b.order, 9999) || String(a.label).localeCompare(String(b.label), "ko") || String(a.code).localeCompare(String(b.code)))
     .map((department) => {
       const previous = previousById.get(department.code) || previousByLabel.get(department.label);
       return {
@@ -728,7 +763,10 @@ function applyAllDepartmentsCatalog({ preserveSelection = true } = {}) {
         label: department.label,
         college: department.collegeLabel,
         collegeCode: department.collegeCode,
-        quotas: clone(previous?.quotas || inferDepartmentQuotas(department.code))
+        sourceCodes: Array.isArray(department.sourceCodes) ? department.sourceCodes : [],
+        aliases: Array.isArray(department.aliases) ? department.aliases : [],
+        normalized: hasNormalizedDepartmentCatalog(),
+        quotas: clone(previous?.quotas || inferDepartmentQuotas(department))
       };
     });
 
@@ -769,7 +807,7 @@ function departmentRelationScore(a, b) {
 
 function preferredDepartmentForSelectedCollege() {
   if (!/반도체/.test(selectedDepartmentCollegeLabel())) return null;
-  const preferredLabels = ["전자공학전공", "전자공학과", "반도체공학전공", "반도체공학과", "시스템반도체학과"];
+  const preferredLabels = ["전자공학과", "반도체공학과", "시스템반도체학과", "차세대반도체설계전공"];
   return preferredLabels
     .map((label) => state.departments.find((department) => department.label === label && allDepartmentCourseSourceRecordsForDepartment(department).length))
     .find(Boolean);
@@ -786,9 +824,9 @@ function applyAllDepartmentSelectionData() {
   return true;
 }
 
-function inferDepartmentQuotas(departmentCode) {
+function inferDepartmentQuotas(department) {
   const quotas = { 1: 60, 2: 60, 3: 60, 4: 60 };
-  const records = allDepartmentsDb.currentTermCourses.filter((record) => recordBelongsToAllDepartment(record, departmentCode));
+  const records = allDepartmentsDb.currentTermCourses.filter((record) => recordBelongsToAllDepartment(record, department));
   records.forEach((record) => {
     const year = inferCourseYearFromRecord(record);
     if (year >= 1 && year <= 4) {
@@ -1031,11 +1069,11 @@ function allDepartmentCourseSourceRecordsForDepartment(department) {
   const term = semesterTerm(state.semester);
   const sources = [allDepartmentsDb.currentTermCourses, allDepartmentsDb.latestPreviousTermRecords, allDepartmentsDb.historyRecords];
   for (const source of sources) {
-    const records = uniqueDbRecords(source.filter((record) => recordBelongsToAllDepartment(record, department.code || department.id, department.label)));
+    const records = uniqueDbRecords(source.filter((record) => recordBelongsToAllDepartment(record, department)));
     const termRecords = year && term ? records.filter((record) => toNumber(record.year, 0) === year && toNumber(record.term, 0) === term) : records;
     if (termRecords.length) return termRecords;
   }
-  return uniqueDbRecords(allDepartmentsDb.currentTermCourses.filter((record) => recordBelongsToAllDepartment(record, department.code || department.id, department.label)));
+  return uniqueDbRecords(allDepartmentsDb.currentTermCourses.filter((record) => recordBelongsToAllDepartment(record, department)));
 }
 
 function allDepartmentCurrentRecordsForSelectedDepartment() {
@@ -1048,20 +1086,32 @@ function allDepartmentHistoricalRecordsForSelectedDepartment() {
 
 function recordBelongsToSelectedAllDepartment(record) {
   const meta = allDepartmentMetaForSelectedDepartment();
-  return recordBelongsToAllDepartment(record, meta?.code || state.selectedDepartment, meta?.label || state.selectedDepartment);
+  return recordBelongsToAllDepartment(record, meta || { code: state.selectedDepartment, label: state.selectedDepartment });
 }
 
-function recordBelongsToAllDepartment(record, departmentCode, departmentLabel = "") {
+function recordBelongsToAllDepartment(record, departmentOrCode, departmentLabel = "") {
   const codes = [record.queriedDepartmentCode, ...(Array.isArray(record.queriedDepartmentCodes) ? record.queriedDepartmentCodes : [])].map(cleanDbText);
   const labels = [record.queriedDepartmentLabel, ...(Array.isArray(record.queriedDepartmentLabels) ? record.queriedDepartmentLabels : [])].map(cleanDbText);
-  return codes.includes(cleanDbText(departmentCode)) || (departmentLabel && labels.includes(cleanDbText(departmentLabel)));
+  const department =
+    departmentOrCode && typeof departmentOrCode === "object"
+      ? departmentOrCode
+      : {
+          code: departmentOrCode,
+          label: departmentLabel
+        };
+  const sourceCodes = uniqueList([department.code, ...(Array.isArray(department.sourceCodes) ? department.sourceCodes : [])].map(cleanDbText));
+  const sourceLabels = uniqueList([
+    department.label,
+    ...(Array.isArray(department.aliases) ? department.aliases.map((alias) => alias.label) : [])
+  ].map(cleanDbText));
+  return codes.some((code) => sourceCodes.includes(code)) || labels.some((label) => sourceLabels.includes(label));
 }
 
 function allDepartmentMetaForSelectedDepartment() {
   if (!hasAllDepartmentsDb()) return null;
   const selected = String(state.selectedDepartment || "");
   const selectedCollege = String(state.selectedCollege || "");
-  const departments = allDepartmentsDb.departments || [];
+  const departments = departmentCatalogSource().departments || [];
   return (
     departments.find((department) => department.code === selected) ||
     departments.find((department) => department.label === selected && (!selectedCollege || department.collegeCode === selectedCollege)) ||
@@ -2420,8 +2470,10 @@ function renderHistoricalDataSummary() {
     .slice(0, 6)
     .map((room) => `<span>${escapeHtml(room.room || room.roomKey)} ${room.count}회</span>`)
     .join("");
+  const aliasCount = allDepartmentMetaForSelectedDepartment()?.sourceCodes?.length || 0;
+  const aliasText = hasNormalizedDepartmentCatalog() && aliasCount > 1 ? ` · 통합 조직 ${aliasCount}개` : "";
   const sourceLabel = hasAllDepartmentsDb()
-    ? `${selectedDepartmentCollegeLabel()} · ${selectedDepartmentLabel()} · 전체 학과 DB`
+    ? `${selectedDepartmentCollegeLabel()} · ${selectedDepartmentLabel()} · 전체 학과 DB${aliasText}`
     : "학과별 직접 조회 데이터";
   return `
     <div class="history-summary">
