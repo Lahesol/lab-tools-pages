@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-22-auto-fit-control";
+const WEB_VERSION = "2026-05-22-fit-a-amp";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-21-version-check";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-v1";
 const APP_VERSION = WEB_VERSION;
@@ -2155,6 +2155,10 @@ function fitGaussianData(data) {
   const edgeLocked = params.mu <= minX + edgeMargin || params.mu >= maxX - edgeMargin;
   return { ...params, r2: sst > 0 ? 1 - sse / sst : 1, rmse: Math.sqrt(sse / clean.length), points: clean.length, edgeLocked };
 }
+function gaussianCenterY(fit) {
+  return Number(fit.baseline) + Number(fit.A);
+}
+
 function readGaussianTargetOrNull() {
   const target = { A: Number($("fitTargetA")?.value), mu: Number($("fitTargetMu")?.value), sigma: NaN };
   return [target.A, target.mu].every(Number.isFinite) ? target : null;
@@ -2167,7 +2171,7 @@ function renderGaussianTargetError(fit) {
   }
   const error = gaussianTargetError(fit, target);
   return {
-    html: `<div>target error<strong>A ${error.aError.toPrecision(4)} / mu ${error.muError.toFixed(5)} V</strong></div><div>target status<strong>${error.converged ? "within tol" : `norm ${error.norm.toFixed(3)}`}</strong></div>`,
+    html: `<div>target error<strong>A_amp ${error.aError.toPrecision(4)} / mu ${error.muError.toFixed(5)} V</strong></div><div>target status<strong>${error.converged ? "within tol" : `norm ${error.norm.toFixed(3)}`}</strong></div>`,
     text: ` ${formatTargetError(error)}.`,
   };
 }
@@ -2175,12 +2179,13 @@ function renderGaussianFit(fit) {
   const grid = $("fitResultGrid");
   if (!grid) return;
   if (!fit) {
-    grid.innerHTML = `<div>A<strong>-</strong></div><div>mu<strong>-</strong></div><div>sigma<strong>-</strong></div><div>R2<strong>-</strong></div><div>target error<strong>-</strong></div><div>target status<strong>-</strong></div>`;
+    grid.innerHTML = `<div>A amp<strong>-</strong></div><div>center y<strong>-</strong></div><div>mu<strong>-</strong></div><div>sigma<strong>-</strong></div><div>R2<strong>-</strong></div><div>target error<strong>-</strong></div><div>target status<strong>-</strong></div>`;
     return;
   }
   const targetInfo = renderGaussianTargetError(fit);
   grid.innerHTML = `
-    <div>A<strong>${fit.A.toPrecision(5)}</strong></div>
+    <div>A amp<strong>${fit.A.toPrecision(5)}</strong></div>
+    <div>center y<strong>${gaussianCenterY(fit).toPrecision(5)}</strong></div>
     <div>mu<strong>${fit.mu.toFixed(5)} V${fit.edgeLocked ? " edge" : ""}</strong></div>
     <div>sigma<strong>${Math.abs(fit.sigma).toFixed(5)} V</strong></div>
     <div>R2<strong>${fit.r2.toFixed(4)}</strong></div>
@@ -2208,7 +2213,8 @@ function fitSelectedGaussian(options = {}) {
     renderSweepPlot();
     const targetInfo = renderGaussianTargetError(fit);
     const edgeNote = fit.edgeLocked ? " Center is near sweep edge; check selected trace or widen sweep range." : "";
-    setFitStatus(`Fit complete: ${fit.points} point(s), R2=${fit.r2.toFixed(4)}.${targetInfo.text}${edgeNote}`, fit.r2 > 0.85 && !fit.edgeLocked ? "ok" : "warn");
+    const peakNote = ` A_amp=${fit.A.toPrecision(5)}, center_y=${gaussianCenterY(fit).toPrecision(5)}.`;
+    setFitStatus(`Fit complete: ${fit.points} point(s), R2=${fit.r2.toFixed(4)}.${peakNote}${targetInfo.text}${edgeNote}`, fit.r2 > 0.85 && !fit.edgeLocked ? "ok" : "warn");
     return fit;
   } catch (error) {
     setFitStatus(error.message, "warn");
@@ -2363,12 +2369,12 @@ function renderGmmPlan(plan) {
   state.lastGmmPlan = plan || [];
   host.innerHTML = (plan || []).map(item => {
     const codeText = `mu ${item.currentMuCode}->${item.nextMuCode}, A ${item.currentACode}->${item.nextACode}`;
-    const targetText = `target A=${item.target.A}, mu=${item.target.mu}, sigma=${item.target.sigma}`;
+    const targetText = `target A_amp=${item.target.A}, mu=${item.target.mu}, sigma=${item.target.sigma}`;
     if (item.mode === "fit") {
       return `
         <div>
           Device ${item.device} / ADC${item.fit.adcIndex}<strong>${codeText}</strong>
-          <span>${targetText}; fit A=${item.fit.A.toPrecision(4)}, mu=${item.fit.mu.toFixed(4)}, sigma=${Math.abs(item.fit.sigma).toFixed(4)}, R2=${item.fit.r2.toFixed(3)}; ${formatTargetError(gaussianTargetError(item.fit, item.target))}</span>
+          <span>${targetText}; fit A_amp=${item.fit.A.toPrecision(4)}, center_y=${gaussianCenterY(item.fit).toPrecision(4)}, mu=${item.fit.mu.toFixed(4)}, sigma=${Math.abs(item.fit.sigma).toFixed(4)}, R2=${item.fit.r2.toFixed(3)}; ${formatTargetError(gaussianTargetError(item.fit, item.target))}</span>
         </div>
       `;
     }
@@ -2457,7 +2463,7 @@ function gaussianTargetError(fit, target, tolerances = autoFitTolerances()) {
 
 function formatTargetError(error) {
   const sigmaText = Number.isFinite(error.sigmaError) ? `, sigma=${error.sigmaError.toFixed(5)} V` : "";
-  return `err A=${error.aError.toPrecision(4)}, mu=${error.muError.toFixed(5)} V${sigmaText}, norm(A/mu)=${error.norm.toFixed(3)}`;
+  return `err A_amp=${error.aError.toPrecision(4)}, mu=${error.muError.toFixed(5)} V${sigmaText}, norm(A_amp/mu)=${error.norm.toFixed(3)}`;
 }
 
 function singleAutoTarget() {
@@ -2614,7 +2620,7 @@ function downloadFitCsv() {
   });
   const meta = [
     ["param", "value"],
-    ["A", fit.A], ["mu", fit.mu], ["sigma", fit.sigma], ["baseline", fit.baseline], ["r2", fit.r2], ["rmse", fit.rmse],
+    ["A_amp", fit.A], ["center_y", gaussianCenterY(fit)], ["mu", fit.mu], ["sigma", fit.sigma], ["baseline", fit.baseline], ["r2", fit.r2], ["rmse", fit.rmse],
     [], fields,
   ];
   const csv = [...meta, ...rows].map(row => row.map(csvEscape).join(",")).join("\n");

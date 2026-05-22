@@ -193,9 +193,9 @@
             <div class="fit-result-grid" id="fitResultGrid"></div>
             <div class="button-row">
               <label class="inline-field">Target mu <input id="fitTargetMu" type="number" step="0.001" /></label>
-              <label class="inline-field">Target A <input id="fitTargetA" type="number" step="0.001" /></label>
+              <label class="inline-field">Target A amp <input id="fitTargetA" type="number" step="0.001" /></label>
               <label class="inline-field">mu gain <input id="fitMuGain" type="number" value="1" step="0.1" /></label>
-              <label class="inline-field">A gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
+              <label class="inline-field">A amp gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">Trace opacity <input id="sweepTraceOpacity" type="number" value="0.45" min="0.1" max="1" step="0.05" /></label>
               <label class="checkbox inline-check"><input id="showFitOverlay" type="checkbox" checked /> Fit overlay</label>
               <button id="previewGaussianAdjustButton">Preview adjust</button>
@@ -203,7 +203,7 @@
               <label class="inline-field">Max iter <input id="autoFitMaxIter" type="number" value="6" min="1" max="50" step="1" /></label>
               <label class="inline-field">Learn rate <input id="autoFitLearningRate" type="number" value="0.5" min="0.01" max="2" step="0.05" /></label>
               <label class="inline-field">mu tol <input id="autoFitMuTol" type="number" value="0.05" min="0" step="0.001" /></label>
-              <label class="inline-field">A tol <input id="autoFitATol" type="number" value="0.002" min="0" step="0.0001" /></label>
+              <label class="inline-field">A amp tol <input id="autoFitATol" type="number" value="0.002" min="0" step="0.0001" /></label>
               <button id="autoFitSingleButton">Auto fit single</button>
               <button id="autoFitGmmButton">Auto fit GMM</button>
               <button id="stopAutoFitButton">Stop auto</button>
@@ -222,7 +222,7 @@
               <label>Devices <input id="gmmDevices" value="1,2,3" /></label>
               <label>Mode <select id="gmmMode"><option value="fit">Fit measured curves</option><option value="direct">Direct A/mu voltage</option></select></label>
             </div>
-            <label class="wide-label">Target rows: A, mu_V, sigma_V
+            <label class="wide-label">Target rows: A_amp, mu_V, sigma_V
               <textarea id="gmmTarget" class="gmm-target" spellcheck="false">1.0,0.0,2.0
 1.0,3.0,2.0
 1.0,-3.0,2.0</textarea>
@@ -232,7 +232,7 @@
               <button id="downloadFitCsvButton">Download fit CSV</button>
             </div>
             <div class="gmm-plan" id="gmmPlan"></div>
-            <p class="hint" id="gmmStatus">Fit mode uses the last sweep and programs A/mu; sigma remains diagnostic.</p>
+            <p class="hint" id="gmmStatus">Fit mode uses A_amp and mu from the last sweep; sigma remains diagnostic.</p>
           </article>
         </section>        <article class="panel activity-log">
           <div class="panel-title">
@@ -478,6 +478,6 @@
 
     </main>
 
-    <script src="./app.js?v=20260522-auto-fit-control"></script>
+    <script src="./app.js?v=20260522-fit-a-amp"></script>
   </body>
 </html>
