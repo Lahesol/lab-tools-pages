@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-22-fixed-plot-range";
+const WEB_VERSION = "2026-05-22-fit-overlay";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-21-version-check";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-v1";
 const APP_VERSION = WEB_VERSION;
@@ -1702,6 +1702,48 @@ function sweepXBounds(sweep, xDac, samples) {
   if (minX === maxX) { minX -= 0.5; maxX += 0.5; }
   return { minX, maxX };
 }
+function fitOverlayEnabled() {
+  const input = $("showFitOverlay");
+  return !input || input.checked;
+}
+
+function fitOverlayForPlot(xDac, yMode, labels) {
+  const fit = state.lastGaussianFit;
+  if (!fitOverlayEnabled() || !fit) return null;
+  if (fit.xDac !== xDac || fit.yMode !== yMode) return null;
+  const label = `ADC${fit.adcIndex}`;
+  return labels.includes(label) ? fit : null;
+}
+
+function gaussianOverlaySamples(fit, minX, maxX, count = 180) {
+  const samples = [];
+  const safeCount = Math.max(2, count);
+  for (let i = 0; i < safeCount; i++) {
+    const x = minX + (maxX - minX) * i / (safeCount - 1);
+    const y = gaussianValue(fit, x);
+    if (Number.isFinite(x) && Number.isFinite(y)) samples.push({ x, y });
+  }
+  return samples;
+}
+
+function drawGaussianOverlay(ctx, fit, overlay, sx, sy) {
+  if (!fit || !overlay.length) return;
+  const color = PLOT_COLORS[fit.adcIndex % PLOT_COLORS.length];
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.6;
+  if (typeof ctx.setLineDash === "function") ctx.setLineDash([7, 5]);
+  ctx.beginPath();
+  overlay.forEach((item, idx) => {
+    const x = sx(item.x);
+    const y = sy(item.y);
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+  ctx.restore();
+}
 function renderDacSweepPlot(xDac) {
   const config = PLOT_CONFIGS[xDac];
   const sweep = plotSweepSource();
@@ -1733,8 +1775,11 @@ function renderDacSweepPlot(xDac) {
   }
 
   const { minX, maxX } = sweepXBounds(sweep, xDac, samples);
-  let minY = Math.min(...samples.map(sample => sample.y));
-  let maxY = Math.max(...samples.map(sample => sample.y));
+  const overlayFit = fitOverlayForPlot(xDac, yMode, labels);
+  const overlaySamples = overlayFit ? gaussianOverlaySamples(overlayFit, minX, maxX) : [];
+  const yValues = overlaySamples.length ? samples.map(sample => sample.y).concat(overlaySamples.map(sample => sample.y)) : samples.map(sample => sample.y);
+  let minY = Math.min(...yValues);
+  let maxY = Math.max(...yValues);
   if (minY === maxY) { minY -= 1; maxY += 1; }
   const yPad = (maxY - minY) * 0.08;
   minY -= yPad;
@@ -1832,11 +1877,16 @@ function renderDacSweepPlot(xDac) {
     }
   });
 
+  drawGaussianOverlay(ctx, overlayFit, overlaySamples, sx, sy);
+
   $(config.legendId).innerHTML = labels.map(label => {
     const adcIdx = Number(label.replace("ADC", ""));
     const color = PLOT_COLORS[adcIdx % PLOT_COLORS.length];
     return `<span><i style="background:${color}"></i>${label} / TIA${adcIdx + 1}</span>`;
-  }).join("");
+  }).concat(overlayFit ? (() => {
+    const color = PLOT_COLORS[overlayFit.adcIndex % PLOT_COLORS.length];
+    return `<span><i style="background:repeating-linear-gradient(to right, ${color} 0 7px, transparent 7px 12px)"></i>Fit / ADC${overlayFit.adcIndex}</span>`;
+  })() : []).join("");
   const coverage = sweepCoverageText(sweep, xDac);
   const labelText = labels.length > 3 ? `${labels.length} ADCs` : labels.join("/");
   setPlotStatus(xDac, `Sweep ${sweep.id}: ${sweep.points.length} pts, ${labelText}${coverage ? `, ${coverage}` : ""}.`);
@@ -1903,57 +1953,129 @@ function gaussianLoss(data, params) {
   return sse / Math.max(1, data.length);
 }
 
-function initialGaussianParams(data) {
-  const xs = data.map(item => item.x);
-  const ys = data.map(item => item.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const sortedY = ys.slice().sort((a, b) => a - b);
-  const tail = Math.max(3, Math.floor(sortedY.length * 0.1));
-  const lowAvg = average(sortedY.slice(0, tail));
-  const highAvg = average(sortedY.slice(-tail));
-  const maxY = Math.max(...ys);
-  const minY = Math.min(...ys);
-  const positiveAmp = maxY - lowAvg;
-  const negativeAmp = minY - highAvg;
-  const positive = Math.abs(positiveAmp) >= Math.abs(negativeAmp);
-  const baseline = positive ? lowAvg : highAvg;
-  const peakY = positive ? maxY : minY;
-  const peakIndex = ys.findIndex(value => value === peakY);
-  const mu = data[Math.max(0, peakIndex)]?.x ?? (minX + maxX) / 2;
-  const A = peakY - baseline;
+function smoothedGaussianData(data) {
+  const radius = clamp(Math.floor(data.length / 50), 1, 5);
+  return data.map((item, idx) => {
+    let sum = 0;
+    let count = 0;
+    for (let j = Math.max(0, idx - radius); j <= Math.min(data.length - 1, idx + radius); j++) {
+      sum += data[j].y;
+      count += 1;
+    }
+    return { x: item.x, y: sum / count };
+  });
+}
+
+function estimateGaussianSigma(data, baseline, A, peakIndex, minSigma, maxSigma) {
   const sign = A >= 0 ? 1 : -1;
+  const half = Math.abs(A) * 0.5;
+  const centerX = data[peakIndex].x;
+  let left = NaN;
+  let right = NaN;
+  for (let i = peakIndex - 1; i >= 0; i--) {
+    if (sign * (data[i].y - baseline) <= half) {
+      left = data[i].x;
+      break;
+    }
+  }
+  for (let i = peakIndex + 1; i < data.length; i++) {
+    if (sign * (data[i].y - baseline) <= half) {
+      right = data[i].x;
+      break;
+    }
+  }
+  if (Number.isFinite(left) && Number.isFinite(right) && right > left) {
+    return clamp((right - left) / 2.35482, minSigma, maxSigma);
+  }
   let weightSum = 0;
   let varianceSum = 0;
   for (const item of data) {
     const weight = Math.max(0, sign * (item.y - baseline));
     weightSum += weight;
-    varianceSum += weight * (item.x - mu) ** 2;
+    varianceSum += weight * (item.x - centerX) ** 2;
   }
-  const span = Math.max(1e-6, maxX - minX);
-  const sigma = weightSum > 0 ? Math.sqrt(varianceSum / weightSum) : span / 6;
-  return { A, mu, sigma: clamp(sigma || span / 6, span / 200, span * 2), baseline };
+  if (weightSum > 0) return clamp(Math.sqrt(varianceSum / weightSum), minSigma, maxSigma);
+  return clamp((data[data.length - 1].x - data[0].x) / 6, minSigma, maxSigma);
 }
 
-function fitGaussianData(data) {
-  if (!data || data.length < 6) throw new Error("At least 6 sweep points are required for Gaussian fitting.");
-  const xs = data.map(item => item.x);
-  const span = Math.max(1e-6, Math.max(...xs) - Math.min(...xs));
-  const minSigma = span / 500;
-  const maxSigma = span * 2;
-  let params = initialGaussianParams(data);
+function gaussianSeedParams(data, minSigma, maxSigma) {
+  const smooth = smoothedGaussianData(data);
+  const ys = smooth.map(item => item.y);
+  const sortedY = ys.slice().sort((a, b) => a - b);
+  const tail = Math.max(3, Math.floor(sortedY.length * 0.1));
+  const lowAvg = average(sortedY.slice(0, tail));
+  const highAvg = average(sortedY.slice(-tail));
+  const seeds = [];
+  for (const sign of [1, -1]) {
+    const baseline = sign > 0 ? lowAvg : highAvg;
+    const residuals = smooth.map(item => sign * (item.y - baseline));
+    const localPeaks = [];
+    for (let i = 0; i < residuals.length; i++) {
+      const left = i === 0 ? -Infinity : residuals[i - 1];
+      const right = i === residuals.length - 1 ? -Infinity : residuals[i + 1];
+      if (residuals[i] >= left && residuals[i] >= right && residuals[i] > 0) localPeaks.push(i);
+    }
+    localPeaks.sort((a, b) => residuals[b] - residuals[a]);
+    const candidateIndices = localPeaks.slice(0, 8);
+    let weightSum = 0;
+    let weightedX = 0;
+    for (let i = 0; i < smooth.length; i++) {
+      const weight = Math.max(0, residuals[i]);
+      weightSum += weight;
+      weightedX += weight * smooth[i].x;
+    }
+    if (weightSum > 0) {
+      const mu = weightedX / weightSum;
+      let nearest = 0;
+      for (let i = 1; i < smooth.length; i++) {
+        if (Math.abs(smooth[i].x - mu) < Math.abs(smooth[nearest].x - mu)) nearest = i;
+      }
+      candidateIndices.push(nearest);
+    }
+    for (const idx of [...new Set(candidateIndices)]) {
+      const A = sign * Math.max(Math.abs(smooth[idx].y - baseline), 1e-9);
+      seeds.push({
+        A,
+        mu: smooth[idx].x,
+        sigma: estimateGaussianSigma(smooth, baseline, A, idx, minSigma, maxSigma),
+        baseline,
+      });
+    }
+  }
+  const minX = data[0].x;
+  const maxX = data[data.length - 1].x;
+  const midX = (minX + maxX) / 2;
+  const span = Math.max(1e-6, maxX - minX);
+  const midY = average(data.map(item => item.y));
+  const maxY = Math.max(...data.map(item => item.y));
+  const minY = Math.min(...data.map(item => item.y));
+  seeds.push({ A: maxY - lowAvg, mu: midX, sigma: clamp(span / 4, minSigma, maxSigma), baseline: lowAvg });
+  seeds.push({ A: minY - highAvg, mu: midX, sigma: clamp(span / 4, minSigma, maxSigma), baseline: highAvg });
+  seeds.push({ A: maxY - midY, mu: midX, sigma: clamp(span / 3, minSigma, maxSigma), baseline: midY });
+  return seeds.filter(seed => Number.isFinite(seed.A) && Number.isFinite(seed.mu) && Number.isFinite(seed.sigma) && Number.isFinite(seed.baseline));
+}
+
+function refineGaussianParams(data, seed, minX, maxX, minSigma, maxSigma) {
+  const span = Math.max(1e-6, maxX - minX);
+  let params = {
+    A: seed.A,
+    mu: clamp(seed.mu, minX, maxX),
+    sigma: clamp(Math.abs(seed.sigma), minSigma, maxSigma),
+    baseline: seed.baseline,
+  };
   let best = gaussianLoss(data, params);
   let steps = {
     A: Math.max(Math.abs(params.A) * 0.25, 1e-6),
-    mu: span * 0.08,
+    mu: span * 0.05,
     sigma: Math.max(params.sigma * 0.25, minSigma),
     baseline: Math.max(Math.abs(params.A) * 0.12, 1e-6),
   };
-  for (let iter = 0; iter < 120; iter++) {
+  for (let iter = 0; iter < 140; iter++) {
     let improved = false;
     for (const key of ["A", "mu", "sigma", "baseline"]) {
       for (const dir of [-1, 1]) {
         const next = { ...params, [key]: params[key] + dir * steps[key] };
+        next.mu = clamp(next.mu, minX, maxX);
         next.sigma = clamp(Math.abs(next.sigma), minSigma, maxSigma);
         const loss = gaussianLoss(data, next);
         if (loss < best) {
@@ -1964,16 +2086,37 @@ function fitGaussianData(data) {
       }
     }
     if (!improved) {
-      for (const key of Object.keys(steps)) steps[key] *= 0.58;
+      for (const key of Object.keys(steps)) steps[key] *= 0.55;
       if (Math.max(...Object.values(steps)) < 1e-9) break;
     }
   }
-  const meanY = average(data.map(item => item.y));
-  const sse = data.reduce((sum, item) => sum + (gaussianValue(params, item.x) - item.y) ** 2, 0);
-  const sst = data.reduce((sum, item) => sum + (item.y - meanY) ** 2, 0);
-  return { ...params, r2: sst > 0 ? 1 - sse / sst : 1, rmse: Math.sqrt(sse / data.length), points: data.length };
+  return { params, loss: best };
 }
 
+function fitGaussianData(data) {
+  if (!data || data.length < 6) throw new Error("At least 6 sweep points are required for Gaussian fitting.");
+  const clean = data.slice().sort((a, b) => a.x - b.x);
+  const xs = clean.map(item => item.x);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const span = Math.max(1e-6, maxX - minX);
+  const minSigma = span / 500;
+  const maxSigma = span * 2;
+  const seeds = gaussianSeedParams(clean, minSigma, maxSigma);
+  if (!seeds.length) throw new Error("Could not build Gaussian fit candidates.");
+  let bestFit = null;
+  for (const seed of seeds) {
+    const fit = refineGaussianParams(clean, seed, minX, maxX, minSigma, maxSigma);
+    if (!bestFit || fit.loss < bestFit.loss) bestFit = fit;
+  }
+  const params = bestFit.params;
+  const meanY = average(clean.map(item => item.y));
+  const sse = clean.reduce((sum, item) => sum + (gaussianValue(params, item.x) - item.y) ** 2, 0);
+  const sst = clean.reduce((sum, item) => sum + (item.y - meanY) ** 2, 0);
+  const edgeMargin = span * 0.03;
+  const edgeLocked = params.mu <= minX + edgeMargin || params.mu >= maxX - edgeMargin;
+  return { ...params, r2: sst > 0 ? 1 - sse / sst : 1, rmse: Math.sqrt(sse / clean.length), points: clean.length, edgeLocked };
+}
 function renderGaussianFit(fit) {
   const grid = $("fitResultGrid");
   if (!grid) return;
@@ -1983,7 +2126,7 @@ function renderGaussianFit(fit) {
   }
   grid.innerHTML = `
     <div>A<strong>${fit.A.toPrecision(5)}</strong></div>
-    <div>mu<strong>${fit.mu.toFixed(5)} V</strong></div>
+    <div>mu<strong>${fit.mu.toFixed(5)} V${fit.edgeLocked ? " edge" : ""}</strong></div>
     <div>sigma<strong>${Math.abs(fit.sigma).toFixed(5)} V</strong></div>
     <div>R2<strong>${fit.r2.toFixed(4)}</strong></div>
     <div>baseline<strong>${fit.baseline.toPrecision(5)}</strong></div>
@@ -2002,9 +2145,11 @@ function fitSelectedGaussian() {
     const fit = { ...fitGaussianData(data), xDac, adcIndex, yMode, data };
     state.lastGaussianFit = fit;
     renderGaussianFit(fit);
+    renderSweepPlot();
     $("fitTargetMu").value = fit.mu.toFixed(5);
     $("fitTargetA").value = fit.A.toPrecision(6);
-    setFitStatus(`Fit complete: ${fit.points} point(s), R2=${fit.r2.toFixed(4)}.`, fit.r2 > 0.85 ? "ok" : "warn");
+    const edgeNote = fit.edgeLocked ? " Center is near sweep edge; check selected trace or widen sweep range." : "";
+    setFitStatus(`Fit complete: ${fit.points} point(s), R2=${fit.r2.toFixed(4)}.${edgeNote}`, fit.r2 > 0.85 && !fit.edgeLocked ? "ok" : "warn");
   } catch (error) {
     setFitStatus(error.message, "warn");
   }
@@ -2319,6 +2464,7 @@ function bindEvents() {
   $("fixedPlotRange").addEventListener("change", renderSweepPlot);
   $("downloadSweepCsvButton").addEventListener("click", downloadSweepCsv);
   $("fitGaussianButton").addEventListener("click", fitSelectedGaussian);
+  $("showFitOverlay").addEventListener("change", renderSweepPlot);
   $("previewGaussianAdjustButton").addEventListener("click", previewGaussianAdjust);
   $("programGaussianAdjustButton").addEventListener("click", programGaussianAdjust);
   $("previewGmmButton").addEventListener("click", previewGmm);
