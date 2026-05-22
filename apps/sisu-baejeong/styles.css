@@ -478,7 +478,7 @@ select:disabled {
   border: 0;
   color: var(--text);
   font-weight: 800;
-  max-width: 180px;
+  max-width: 240px;
   outline: none;
 }
 
@@ -664,8 +664,8 @@ select:disabled {
 
 .timetable {
   display: grid;
-  grid-template-columns: 54px repeat(5, minmax(120px, 1fr));
-  min-width: 690px;
+  grid-template-columns: 60px repeat(5, minmax(220px, 1fr));
+  min-width: 1160px;
 }
 
 .timetable.matrix {
@@ -820,7 +820,6 @@ select:disabled {
   overflow: hidden;
   padding: 6px 7px;
   position: absolute;
-  right: 6px;
   text-align: left;
   transition:
     transform 150ms ease,

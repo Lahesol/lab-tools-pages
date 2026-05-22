@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=7acf92161d1f" />
+    <link rel="stylesheet" href="./styles.css?v=78d7de6b9bf8" />
   </head>
   <body>
     <header class="app-header">
@@ -140,6 +140,7 @@
               <label class="inline-field">ADC avg <input id="adcAvgSamples" type="number" value="16" min="1" max="256" step="1" /></label>
               <label class="inline-field">Settle us <input id="sweepSettleUs" type="number" value="2000" min="0" max="65000" step="100" /></label>
               <label class="inline-field">Y <select id="plotYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
+              <label class="checkbox inline-check"><input id="fixedPlotRange" type="checkbox" checked /> Fixed X range</label>
               <button id="startSweepButton" class="primary">Start sweep</button>
               <button id="stopSweepButton">Stop</button>
               <button id="downloadSweepCsvButton" disabled>Download sweep CSV</button>
@@ -172,8 +173,57 @@
             <canvas id="sweepPlotCanvasD2" height="320"></canvas>
             <div id="plotD2Legend" class="plot-legend"></div>
           </article>
-        </section>
-        <article class="panel activity-log">
+        </section>        <section class="fit-grid">
+          <article class="panel fit-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">gaussian fitting</p>
+                <h2>Fit measured curve</h2>
+              </div>
+              <button id="fitGaussianButton" class="primary">Fit Gaussian</button>
+            </div>
+            <div class="form-grid compact-fit-grid">
+              <label>X DAC <select id="fitXDac"><option>D2</option><option>D1</option></select></label>
+              <label>ADC <select id="fitAdc"></select></label>
+              <label>Y <select id="fitYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
+              <label>Device <input id="fitDevice" type="number" min="1" max="16" value="1" /></label>
+            </div>
+            <div class="fit-result-grid" id="fitResultGrid"></div>
+            <div class="button-row">
+              <label class="inline-field">Target mu <input id="fitTargetMu" type="number" step="0.001" /></label>
+              <label class="inline-field">Target A <input id="fitTargetA" type="number" step="0.001" /></label>
+              <label class="inline-field">mu gain <input id="fitMuGain" type="number" value="1" step="0.1" /></label>
+              <label class="inline-field">A gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
+              <button id="previewGaussianAdjustButton">Preview adjust</button>
+              <button id="programGaussianAdjustButton">Program adjust</button>
+            </div>
+            <p class="hint" id="fitStatus">Fit uses the completed sweep for one selected ADC trace.</p>
+          </article>
+          <article class="panel fit-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">gaussian mixture</p>
+                <h2>Target GMM programming</h2>
+              </div>
+              <button id="previewGmmButton" class="primary">Preview GMM</button>
+            </div>
+            <div class="form-grid compact-fit-grid">
+              <label>Devices <input id="gmmDevices" value="1,2,3" /></label>
+              <label>Mode <select id="gmmMode"><option value="fit">Fit measured curves</option><option value="direct">Direct A/mu voltage</option></select></label>
+            </div>
+            <label class="wide-label">Target rows: A, mu_V, sigma_V
+              <textarea id="gmmTarget" class="gmm-target" spellcheck="false">1.0,0.0,2.0
+1.0,3.0,2.0
+1.0,-3.0,2.0</textarea>
+            </label>
+            <div class="button-row">
+              <button id="programGmmButton">Program selected devices</button>
+              <button id="downloadFitCsvButton">Download fit CSV</button>
+            </div>
+            <div class="gmm-plan" id="gmmPlan"></div>
+            <p class="hint" id="gmmStatus">Fit mode uses the last sweep and programs A/mu; sigma remains diagnostic.</p>
+          </article>
+        </section>        <article class="panel activity-log">
           <div class="panel-title">
             <div>
               <p class="eyebrow">serial monitor</p>
@@ -239,8 +289,7 @@
             </div>
             <p class="hint status-line" id="paramCalStatus">Calibration not checked.</p>
           </article>
-        </div>
-        <article class="panel activity-log">
+        </div>        <article class="panel activity-log">
           <div class="panel-title">
             <div>
               <p class="eyebrow">serial monitor</p>
@@ -286,8 +335,7 @@
             </div>
             <pre id="switchInfo" class="info-box"></pre>
           </article>
-        </div>
-        <article class="panel activity-log">
+        </div>        <article class="panel activity-log">
           <div class="panel-title">
             <div>
               <p class="eyebrow">serial monitor</p>
@@ -347,8 +395,7 @@
               </table>
             </div>
           </article>
-        </div>
-        <article class="panel activity-log">
+        </div>        <article class="panel activity-log">
           <div class="panel-title">
             <div>
               <p class="eyebrow">serial monitor</p>
@@ -398,8 +445,7 @@
               </table>
             </div>
           </article>
-        </div>
-        <article class="panel activity-log">
+        </div>        <article class="panel activity-log">
           <div class="panel-title">
             <div>
               <p class="eyebrow">serial monitor</p>
@@ -421,6 +467,6 @@
 
     </main>
 
-    <script src="./app.js?v=20260521-version-check"></script>
+    <script src="./app.js?v=20260522-fixed-plot-range"></script>
   </body>
 </html>

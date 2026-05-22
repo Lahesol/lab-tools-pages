@@ -3,7 +3,6 @@ const DAY_NAMES = { 월: "월요일", 화: "화요일", 수: "수요일", 목: "
 const PERIODS = Array.from({ length: 14 }, (_, index) => index + 1);
 const STORAGE_KEY = "sisu-timetable-state-v2";
 const TARGET_DEPARTMENT_NAMES = new Set(["전자공학과", "반도체공학과", "시스템반도체학과"]);
-const LOWER_DIVISION_SHARED_DEPARTMENTS = ["전자공학과", "반도체공학과"];
 const EXTERNAL_COURSE_NAMES = new Set(["수학1", "물리학및실험1", "화학및실험1"]);
 const EXTERNAL_PROFESSOR_IDS = new Set(["P_MATH", "P_PHY", "P_PHY2", "P_CHEM", "P_CHEM2"]);
 const FIRST_SEMESTER_SEED_IDS = new Set([
@@ -576,6 +575,16 @@ const REFERENCE_TIMETABLES = [
 let state = loadState();
 let historicalTimetables = { records: [], roomSummary: [], generatedAt: "" };
 let departmentProfessorDb = { generatedAt: "", departments: {} };
+let allDepartmentsDb = {
+  generatedAt: "",
+  targetTerm: "",
+  colleges: [],
+  departments: [],
+  currentTermCourses: [],
+  historyRecords: [],
+  latestPreviousTermRecords: [],
+  summaries: {}
+};
 let isOptimizing = false;
 let loadingMessage = "최적 배정안을 계산 중입니다.";
 
@@ -588,6 +597,7 @@ document.addEventListener("DOMContentLoaded", () => {
     runOptimization({ iterations: 8, silent: true });
   }
   renderAll();
+  loadAllDepartmentsDatabase();
   loadDepartmentProfessors();
   loadHistoricalTimetables();
 });
@@ -633,12 +643,574 @@ async function loadHistoricalTimetables() {
   }
 }
 
+async function loadAllDepartmentsDatabase() {
+  try {
+    const response = await fetch("./data/all-departments-timetable-db.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    allDepartmentsDb = normalizeAllDepartmentsDb(data);
+    if (!hasAllDepartmentsDb()) return;
+    applyAllDepartmentsCatalog({ preserveSelection: true });
+    applyAllDepartmentSelectionData();
+    state.schedule = [];
+    runOptimization({ iterations: 8, silent: true });
+    renderAll();
+  } catch {
+    allDepartmentsDb = {
+      generatedAt: "",
+      targetTerm: "",
+      colleges: [],
+      departments: [],
+      currentTermCourses: [],
+      historyRecords: [],
+      latestPreviousTermRecords: [],
+      summaries: {}
+    };
+  }
+}
+
+function normalizeAllDepartmentsDb(data = {}) {
+  return {
+    ...data,
+    generatedAt: data.generatedAt || "",
+    targetTerm: data.targetTerm || "",
+    colleges: Array.isArray(data.colleges) ? data.colleges.filter((item) => item?.code && item?.label) : [],
+    departments: Array.isArray(data.departments) ? data.departments.filter((item) => item?.code && item?.label) : [],
+    currentTermCourses: Array.isArray(data.currentTermCourses) ? data.currentTermCourses : [],
+    historyRecords: Array.isArray(data.historyRecords) ? data.historyRecords : [],
+    latestPreviousTermRecords: Array.isArray(data.latestPreviousTermRecords) ? data.latestPreviousTermRecords : [],
+    summaries: data.summaries && typeof data.summaries === "object" ? data.summaries : {}
+  };
+}
+
+function hasAllDepartmentsDb() {
+  return Array.isArray(allDepartmentsDb.departments) && allDepartmentsDb.departments.length > 0;
+}
+
+function applyAllDepartmentsCatalog({ preserveSelection = true } = {}) {
+  if (!hasAllDepartmentsDb()) return false;
+
+  const previousDepartment = state.selectedDepartment;
+  const previousDepartments = Array.isArray(state.departments) ? state.departments : [];
+  const previousById = new Map(previousDepartments.map((department) => [department.id, department]));
+  const previousByLabel = new Map(previousDepartments.map((department) => [department.label || department.id, department]));
+  const colleges = [...allDepartmentsDb.colleges].sort((a, b) => String(a.label).localeCompare(String(b.label), "ko"));
+  state.colleges = colleges.map((college) => ({
+    id: college.code,
+    code: college.code,
+    label: college.label,
+    name: college.label
+  }));
+
+  const selectedMeta = allDepartmentMetaForSelectedDepartment();
+  if (preserveSelection && selectedMeta) {
+    state.selectedCollege = selectedMeta.collegeCode;
+  }
+  if (!state.selectedCollege || !state.colleges.some((college) => college.id === state.selectedCollege)) {
+    const preferredCollege = state.colleges.find((college) => /반도체/.test(college.label)) || state.colleges[0];
+    state.selectedCollege = preferredCollege?.id || "";
+  }
+
+  let departmentRows = allDepartmentsDb.departments.filter((department) => department.collegeCode === state.selectedCollege);
+  if (!departmentRows.length) {
+    const firstCollegeWithDepartments = state.colleges.find((college) => allDepartmentsDb.departments.some((department) => department.collegeCode === college.id));
+    state.selectedCollege = firstCollegeWithDepartments?.id || state.selectedCollege;
+    departmentRows = allDepartmentsDb.departments.filter((department) => department.collegeCode === state.selectedCollege);
+  }
+
+  state.departments = departmentRows
+    .sort((a, b) => String(a.label).localeCompare(String(b.label), "ko") || String(a.code).localeCompare(String(b.code)))
+    .map((department) => {
+      const previous = previousById.get(department.code) || previousByLabel.get(department.label);
+      return {
+        id: department.code,
+        code: department.code,
+        label: department.label,
+        college: department.collegeLabel,
+        collegeCode: department.collegeCode,
+        quotas: clone(previous?.quotas || inferDepartmentQuotas(department.code))
+      };
+    });
+
+  const matchingDepartment = state.departments.find(
+    (department) => department.id === previousDepartment || department.code === previousDepartment || department.label === previousDepartment
+  );
+  const preferredDepartment = preferredCatalogDepartment(matchingDepartment, previousDepartment, preserveSelection);
+  state.selectedDepartment = preferredDepartment?.id || "";
+  return true;
+}
+
+function preferredCatalogDepartment(matchingDepartment, previousDepartment, preserveSelection) {
+  const firstWithCourses = state.departments.find((department) => allDepartmentCourseSourceRecordsForDepartment(department).length);
+  const preferredForCollege = preferredDepartmentForSelectedCollege();
+  if (!preserveSelection) return preferredForCollege || firstWithCourses || state.departments[0];
+  if (!matchingDepartment) return preferredForCollege || firstWithCourses || state.departments[0];
+  if (allDepartmentCourseSourceRecordsForDepartment(matchingDepartment).length) return matchingDepartment;
+  const previousLabel = matchingDepartment.label || previousDepartment;
+  const relatedWithCourses = state.departments
+    .filter((department) => department.id !== matchingDepartment.id && allDepartmentCourseSourceRecordsForDepartment(department).length && departmentLabelsAreRelated(previousLabel, department.label))
+    .sort((a, b) => departmentRelationScore(previousLabel, a.label) - departmentRelationScore(previousLabel, b.label))[0];
+  return relatedWithCourses || preferredForCollege || matchingDepartment || firstWithCourses || state.departments[0];
+}
+
+function departmentLabelsAreRelated(a, b) {
+  const left = String(a || "").replace(/\([^)]*\)|학과|전공|학부|\s+/g, "");
+  const right = String(b || "").replace(/\([^)]*\)|학과|전공|학부|\s+/g, "");
+  return Boolean(left && right && (left.includes(right) || right.includes(left)));
+}
+
+function departmentRelationScore(a, b) {
+  const left = String(a || "").replace(/\([^)]*\)|학과|전공|학부|\s+/g, "");
+  const right = String(b || "").replace(/\([^)]*\)|학과|전공|학부|\s+/g, "");
+  const lengthGap = Math.abs(left.length - right.length);
+  const prefixPenalty = left[0] && right[0] && left[0] === right[0] ? 0 : 10;
+  return lengthGap + prefixPenalty;
+}
+
+function preferredDepartmentForSelectedCollege() {
+  if (!/반도체/.test(selectedDepartmentCollegeLabel())) return null;
+  const preferredLabels = ["전자공학전공", "전자공학과", "반도체공학전공", "반도체공학과", "시스템반도체학과"];
+  return preferredLabels
+    .map((label) => state.departments.find((department) => department.label === label && allDepartmentCourseSourceRecordsForDepartment(department).length))
+    .find(Boolean);
+}
+
+function applyAllDepartmentSelectionData() {
+  if (!hasAllDepartmentsDb() || !allDepartmentMetaForSelectedDepartment()) return false;
+  const courses = buildAllDepartmentCourses();
+  state.courses = courses;
+  state.rooms = buildAllDepartmentRooms(courses);
+  refreshProfessorsFromAllDepartmentsDb(courses);
+  syncTeachingLinks(state);
+  state.schedule = state.schedule.filter((assignment) => state.courses.some((course) => course.id === assignment.courseId));
+  return true;
+}
+
+function inferDepartmentQuotas(departmentCode) {
+  const quotas = { 1: 60, 2: 60, 3: 60, 4: 60 };
+  const records = allDepartmentsDb.currentTermCourses.filter((record) => recordBelongsToAllDepartment(record, departmentCode));
+  records.forEach((record) => {
+    const year = inferCourseYearFromRecord(record);
+    if (year >= 1 && year <= 4) {
+      quotas[year] = Math.max(toNumber(quotas[year], 60), toNumber(record.quota, 0) || 60);
+    }
+  });
+  return quotas;
+}
+
+function buildAllDepartmentCourses() {
+  const selectedDepartment = state.selectedDepartment;
+  const sourceRecords = allDepartmentCourseSourceRecordsForSelection().filter((record) => cleanDbText(record.courseName));
+  const groups = new Map();
+
+  sourceRecords.forEach((record) => {
+    const courseName = cleanDbText(record.courseName);
+    const year = inferCourseYearFromRecord(record);
+    const courseCode = cleanDbText(record.courseCode) || cleanDbText(record.haksuNo).replace(/[0-9]{3}$/, "") || normalizeCourseName(courseName);
+    const key = [courseCode, courseName, cleanDbText(record.isu), cleanDbText(record.sisu), year].join("|");
+    const group = groups.get(key) || {
+      courseCode,
+      courseName,
+      category: cleanDbText(record.isu) || "전공",
+      sisu: cleanDbText(record.sisu),
+      year,
+      records: [],
+      quotaSum: 0,
+      maxQuota: 0
+    };
+    const quota = toNumber(record.quota, 0);
+    group.records.push(record);
+    group.quotaSum += quota;
+    group.maxQuota = Math.max(group.maxQuota, quota);
+    groups.set(key, group);
+  });
+
+  const existingById = new Map(state.courses.map((course) => [course.id, course]));
+  const usedIds = new Set();
+  return [...groups.values()]
+    .sort((a, b) => a.year - b.year || String(a.courseName).localeCompare(String(b.courseName), "ko") || String(a.courseCode).localeCompare(String(b.courseCode)))
+    .map((group, index) => {
+      const sample = mostRecentDbRecord(group.records);
+      const type = inferCourseTypeFromRecords(group.records);
+      const credits = parseHistoricalCredits(sample?.sisu || group.sisu, 3);
+      const pattern = allDepartmentCoursePattern(sample, type, credits);
+      const maxSeats = group.maxQuota || defaultMaxSeats(type);
+      const expectedStudents = group.quotaSum || maxSeats * Math.max(1, group.records.length);
+      const id = uniqueSafeId(`DB_${selectedDepartment}_${group.courseCode || index + 1}`, usedIds);
+      const course = {
+        id,
+        department: selectedDepartment,
+        term: toNumber(sample?.term, semesterTerm(state.semester)) || semesterTerm(state.semester) || 0,
+        name: group.courseName,
+        year: group.year,
+        curriculumYear: semesterYear(state.semester) || toNumber(sample?.year, 0) || 0,
+        category: group.category,
+        type,
+        weekType: inferAllDepartmentWeekType(group.courseName),
+        credits,
+        pattern,
+        expectedStudents,
+        maxSeats,
+        tolerance: defaultTolerance(type),
+        roomType: roomTypeForCourseType(type),
+        eligible: [],
+        fixed: "",
+        enabled: true,
+        source: "all-departments-timetable-db",
+        sourceSections: group.records.map((record) => cleanDbText(record.section)).filter(Boolean),
+        sourceRecordCount: group.records.length
+      };
+      return mergeAllDepartmentCourseWithExisting(course, existingById.get(id));
+    });
+}
+
+function mergeAllDepartmentCourseWithExisting(course, existing) {
+  if (!existing) return course;
+  return {
+    ...course,
+    credits: toNumber(existing.credits, course.credits),
+    pattern: parsePattern(existing.pattern).length ? parsePattern(existing.pattern) : course.pattern,
+    expectedStudents: toNumber(existing.expectedStudents, course.expectedStudents),
+    maxSeats: toNumber(existing.maxSeats, course.maxSeats),
+    tolerance: toNumber(existing.tolerance, course.tolerance),
+    roomType: existing.roomType || course.roomType,
+    eligible: parseList(existing.eligible),
+    fixed: existing.fixed || course.fixed,
+    enabled: existing.enabled !== false,
+    weekType: existing.weekType || course.weekType
+  };
+}
+
+function refreshProfessorsFromAllDepartmentsDb(scopedCourses = state.courses.filter((course) => courseInCurrentScope(course))) {
+  const before = professorListSignature(state.professors);
+  const nextProfessors = buildAllDepartmentProfessors(scopedCourses);
+  const nextProfessorIds = new Set(nextProfessors.map((professor) => professor.id));
+  state.professors = nextProfessors;
+  state.courses.forEach((course) => {
+    if (!courseInCurrentScope(course)) return;
+    const linkedProfessorIds = nextProfessors
+      .filter((professor) => parseList(professor.canTeach).includes(course.id))
+      .map((professor) => professor.id);
+    course.eligible = uniqueList([...parseList(course.eligible).filter((professorId) => nextProfessorIds.has(professorId)), ...linkedProfessorIds]);
+  });
+  return before !== professorListSignature(state.professors);
+}
+
+function buildAllDepartmentProfessors(scopedCourses) {
+  const records = uniqueDbRecords([...allDepartmentHistoricalRecordsForSelectedDepartment(), ...allDepartmentCurrentRecordsForSelectedDepartment()]);
+  const previous = previousSemesterForSelection();
+  const previousRecords = previous
+    ? allDepartmentHistoricalRecordsForSelectedDepartment().filter((record) => toNumber(record.year, 0) === previous.year && toNumber(record.term, 0) === previous.term)
+    : [];
+  const requirePreviousTeaching = previousRecords.length > 0;
+  const existingById = new Map(state.professors.map((professor) => [professor.id, professor]));
+  const existingByName = new Map(state.professors.map((professor) => [normalizeProfessorName(professor.name), professor]).filter(([name]) => name));
+  const byId = new Map();
+
+  records.forEach((record) => {
+    const name = cleanDbText(record.professor);
+    if (!name) return;
+    const id = `DBP_${safeId(cleanDbText(record.professorNo) || normalizeProfessorName(name))}`;
+    const professor = byId.get(id) || {
+      id,
+      name,
+      records: [],
+      previousCount: 0
+    };
+    professor.records.push(record);
+    if (previous && toNumber(record.year, 0) === previous.year && toNumber(record.term, 0) === previous.term) professor.previousCount += 1;
+    byId.set(id, professor);
+  });
+
+  const entries = [...byId.values()];
+  const makeProfessor = (entry, canTeach, fallbackCandidate = false) => {
+      if (requirePreviousTeaching && !entry.previousCount) return null;
+      if (!canTeach.length) return null;
+      const existing = existingById.get(entry.id) || existingByName.get(normalizeProfessorName(entry.name));
+      return {
+        id: entry.id,
+        name: entry.name,
+        type: existing?.type || "전임",
+        position: existing?.position || "",
+        minCredits: toNumber(existing?.minCredits, 9),
+        maxCredits: toNumber(existing?.maxCredits, 18),
+        availability: existing?.availability || defaultProfessorAvailability(),
+        canTeach,
+        sourceDepartment: selectedDepartmentLabel(),
+        sourceUrl: "",
+        phone: existing?.phone || "",
+        historyCount: entry.records.length,
+        previousCount: entry.previousCount,
+        fallbackCandidate
+      };
+    };
+
+  let professors = entries
+    .map((entry) => makeProfessor(entry, uniqueList(entry.records.flatMap((record) => historyCourseMatches(record, scopedCourses).map((course) => course.id)))))
+    .filter(Boolean);
+
+  const coveredCourseIds = new Set(professors.flatMap((professor) => parseList(professor.canTeach)));
+  const uncoveredCourseIds = scopedCourses.map((course) => course.id).filter((courseId) => !coveredCourseIds.has(courseId));
+  if (uncoveredCourseIds.length) {
+    entries.forEach((entry) => {
+      const fallback = makeProfessor(entry, uncoveredCourseIds, true);
+      if (!fallback) return;
+      const existing = professors.find((professor) => professor.id === fallback.id);
+      if (existing) {
+        existing.canTeach = uniqueList([...parseList(existing.canTeach), ...uncoveredCourseIds]);
+        existing.fallbackCandidate = true;
+        return;
+      }
+      professors.push(fallback);
+    });
+  }
+
+  if (!professors.length && scopedCourses.length) {
+    const fallbackCourseIds = scopedCourses.map((course) => course.id);
+    professors = entries.map((entry) => makeProfessor(entry, fallbackCourseIds, true)).filter(Boolean);
+  }
+
+  return professors
+    .filter((professor) => {
+      const text = `${professor.type || ""} ${professor.position || ""}`.replace(/\s+/g, "");
+      return !text.includes("연구") && !text.includes("명예");
+    })
+    .sort((a, b) => toNumber(b.previousCount, 0) - toNumber(a.previousCount, 0) || toNumber(b.historyCount, 0) - toNumber(a.historyCount, 0) || String(a.name).localeCompare(String(b.name), "ko"));
+}
+
+function buildAllDepartmentRooms(courses) {
+  const records = uniqueDbRecords([...allDepartmentHistoricalRecordsForSelectedDepartment(), ...allDepartmentCurrentRecordsForSelectedDepartment()]);
+  const existingById = new Map(state.rooms.map((room) => [room.id, room]));
+  const existingByName = new Map(state.rooms.map((room) => [room.name, room]).filter(([name]) => name));
+  const byKey = new Map();
+
+  records.forEach((record) => {
+    const roomName = cleanDbText(record.room);
+    const roomKey = cleanDbText(record.roomKey) || extractRoomKey(roomName);
+    if (!roomName && !roomKey) return;
+    const key = roomName || roomKey;
+    const room = byKey.get(key) || {
+      id: `DBR_${safeId(key)}`,
+      name: roomName || key,
+      roomKey: key,
+      records: [],
+      capacity: 0
+    };
+    room.records.push(record);
+    room.capacity = Math.max(room.capacity, toNumber(record.quota, 0));
+    if (roomName && room.name === key) room.name = roomName;
+    byKey.set(key, room);
+  });
+
+  const rooms = [...byKey.values()]
+    .map((entry) => {
+      const existing = existingById.get(entry.id) || existingByName.get(entry.name);
+      const inferredType = inferRoomTypeFromRecords(entry.records, courses);
+      return {
+        id: entry.id,
+        name: existing?.name || entry.name,
+        type: existing?.type || inferredType,
+        capacity: toNumber(existing?.capacity, entry.capacity || defaultMaxSeats(inferredType)),
+        enabled: existing?.enabled !== false,
+        source: "all-departments-timetable-db",
+        historyCount: entry.records.length
+      };
+    })
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), "ko"));
+
+  return rooms.length ? rooms : state.rooms;
+}
+
+function allDepartmentCourseSourceRecordsForSelection() {
+  const meta = allDepartmentMetaForSelectedDepartment();
+  return meta ? allDepartmentCourseSourceRecordsForDepartment(meta) : [];
+}
+
+function allDepartmentCourseSourceRecordsForDepartment(department) {
+  const year = semesterYear(state.semester);
+  const term = semesterTerm(state.semester);
+  const sources = [allDepartmentsDb.currentTermCourses, allDepartmentsDb.latestPreviousTermRecords, allDepartmentsDb.historyRecords];
+  for (const source of sources) {
+    const records = uniqueDbRecords(source.filter((record) => recordBelongsToAllDepartment(record, department.code || department.id, department.label)));
+    const termRecords = year && term ? records.filter((record) => toNumber(record.year, 0) === year && toNumber(record.term, 0) === term) : records;
+    if (termRecords.length) return termRecords;
+  }
+  return uniqueDbRecords(allDepartmentsDb.currentTermCourses.filter((record) => recordBelongsToAllDepartment(record, department.code || department.id, department.label)));
+}
+
+function allDepartmentCurrentRecordsForSelectedDepartment() {
+  return uniqueDbRecords(allDepartmentsDb.currentTermCourses.filter(recordBelongsToSelectedAllDepartment));
+}
+
+function allDepartmentHistoricalRecordsForSelectedDepartment() {
+  return uniqueDbRecords([...allDepartmentsDb.historyRecords, ...allDepartmentsDb.latestPreviousTermRecords].filter(recordBelongsToSelectedAllDepartment));
+}
+
+function recordBelongsToSelectedAllDepartment(record) {
+  const meta = allDepartmentMetaForSelectedDepartment();
+  return recordBelongsToAllDepartment(record, meta?.code || state.selectedDepartment, meta?.label || state.selectedDepartment);
+}
+
+function recordBelongsToAllDepartment(record, departmentCode, departmentLabel = "") {
+  const codes = [record.queriedDepartmentCode, ...(Array.isArray(record.queriedDepartmentCodes) ? record.queriedDepartmentCodes : [])].map(cleanDbText);
+  const labels = [record.queriedDepartmentLabel, ...(Array.isArray(record.queriedDepartmentLabels) ? record.queriedDepartmentLabels : [])].map(cleanDbText);
+  return codes.includes(cleanDbText(departmentCode)) || (departmentLabel && labels.includes(cleanDbText(departmentLabel)));
+}
+
+function allDepartmentMetaForSelectedDepartment() {
+  if (!hasAllDepartmentsDb()) return null;
+  const selected = String(state.selectedDepartment || "");
+  const selectedCollege = String(state.selectedCollege || "");
+  const departments = allDepartmentsDb.departments || [];
+  return (
+    departments.find((department) => department.code === selected) ||
+    departments.find((department) => department.label === selected && (!selectedCollege || department.collegeCode === selectedCollege)) ||
+    departments.find((department) => department.label === selected) ||
+    null
+  );
+}
+
+function selectedDepartmentLabel() {
+  const meta = allDepartmentMetaForSelectedDepartment();
+  const department = state.departments.find((item) => item.id === state.selectedDepartment);
+  return meta?.label || department?.label || department?.id || state.selectedDepartment;
+}
+
+function selectedDepartmentCollegeLabel() {
+  const meta = allDepartmentMetaForSelectedDepartment();
+  const college = state.colleges?.find((item) => item.id === state.selectedCollege);
+  return meta?.collegeLabel || college?.label || "";
+}
+
+function summarizeAllDepartmentRoomsForSelectedDepartment() {
+  const summary = new Map();
+  historicalRecordsForSelectedDepartment().forEach((record) => {
+    const room = cleanDbText(record.room);
+    const roomKey = cleanDbText(record.roomKey) || extractRoomKey(room);
+    if (!room && !roomKey) return;
+    const key = roomKey || room;
+    const item = summary.get(key) || { room: room || key, roomKey: key, count: 0, departments: [state.selectedDepartment] };
+    item.count += 1;
+    summary.set(key, item);
+  });
+  return [...summary.values()].sort((a, b) => b.count - a.count || String(a.room).localeCompare(String(b.room), "ko"));
+}
+
+function uniqueDbRecords(records) {
+  const seen = new Set();
+  return (records || []).filter((record) => {
+    const key = [record.year, record.term, record.haksuNo || record.courseCode, record.section, cleanDbText(record.queriedDepartmentCode)].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mostRecentDbRecord(records) {
+  return [...records].sort((a, b) => toNumber(b.year, 0) - toNumber(a.year, 0) || toNumber(b.term, 0) - toNumber(a.term, 0))[0] || records[0] || {};
+}
+
+function inferCourseYearFromRecord(record) {
+  const printDepartment = cleanDbText(record.printDepartment);
+  const printMatch = printDepartment.match(/([1-6])$/);
+  if (printMatch) return Math.max(1, Math.min(4, Number(printMatch[1])));
+  const haksu = cleanDbText(record.haksuNo || record.courseCode);
+  const codeMatch = haksu.match(/^[A-Z]*([1-4])[0-9]{2}/i);
+  if (codeMatch) return Number(codeMatch[1]);
+  return 1;
+}
+
+function inferCourseTypeFromRecords(records) {
+  const text = records.map((record) => `${record.courseName || ""} ${record.room || ""} ${record.printDepartment || ""}`).join(" ");
+  const condensed = text.replace(/\s+/g, "");
+  const hasPracticeHours = records.some((record) => {
+    const pattern = parseHistoricalSisuPattern(record.sisu);
+    return pattern.length === 1 ? /\/[1-9]/.test(String(record.sisu || "")) : pattern.length > 1;
+  });
+  if (/P-?|프로젝트|캡스톤|실무/.test(condensed)) return "project";
+  if (/전산|컴퓨터|프로그래밍|소프트웨어|SW|AI/i.test(condensed)) return "computer";
+  if (hasPracticeHours || /실험|실습|설계|Lab|LAB/i.test(condensed)) return "lab";
+  return "theory";
+}
+
+function inferRoomTypeFromRecords(records, courses) {
+  const text = records.map((record) => `${record.room || ""} ${record.courseName || ""}`).join(" ");
+  if (/전산|컴퓨터|PC|SW|소프트웨어/i.test(text)) return "computer";
+  if (/실험|실습|Lab|LAB/i.test(text)) return "lab";
+  const matchingCourse = courses.find((course) => records.some((record) => historyCourseMatches(record, [course]).length));
+  return matchingCourse?.roomType || "lecture";
+}
+
+function allDepartmentCoursePattern(sample, type, credits) {
+  const sisuPattern = parseHistoricalSisuPattern(sample?.sisu);
+  if (type === "project") return toNumber(credits, 0) >= 6 ? [3, 3] : [3];
+  if (type === "theory" && toNumber(credits, 0) === 3 && sisuPattern.length === 1 && sisuPattern[0] >= 3) {
+    return sisuPattern[0] >= 4 ? [2, 2] : [2, 1];
+  }
+  if (sisuPattern.length) return sisuPattern;
+  if (type === "theory" && toNumber(credits, 0) === 3) return [2, 1];
+  return [Math.max(1, Math.ceil(toNumber(credits, 1)))];
+}
+
+function inferAllDepartmentWeekType(courseName) {
+  const name = String(courseName || "").replace(/\s+/g, "");
+  if (/P-?|실무|프로젝트/.test(name) && /P|실무/.test(name)) return "pPractice4";
+  if (/12주/.test(name)) return "twelve12";
+  return inferWeekType({ name: courseName });
+}
+
+function roomTypeForCourseType(type) {
+  if (type === "computer") return "computer";
+  if (type === "lab" || type === "project") return "lab";
+  return "lecture";
+}
+
+function extractRoomKey(value) {
+  const text = cleanDbText(value);
+  const match = text.match(/[0-9]{3}[A-Z]?/i);
+  return match ? match[0] : text;
+}
+
+function cleanDbText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function safeId(value) {
+  const original = String(value || "");
+  const cleaned = original
+    .replace(/[^\w가-힣ㄱ-ㅎㅏ-ㅣ一-龥-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return cleaned || `item_${hashString(original)}`;
+}
+
+function hashString(value) {
+  let hash = 0;
+  String(value || "").split("").forEach((char) => {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  });
+  return hash.toString(36);
+}
+
+function uniqueSafeId(base, usedIds) {
+  const cleanBase = safeId(base);
+  let candidate = cleanBase;
+  let index = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${cleanBase}_${index}`;
+    index += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
 function cacheElements() {
   els.summary = document.querySelector("#summaryStrip");
   els.timetable = document.querySelector("#timetable");
   els.inspector = document.querySelector("#inspectorBody");
   els.dataBody = document.querySelector("#dataBody");
   els.dataHint = document.querySelector("#dataHint");
+  els.college = document.querySelector("#collegeSelect");
   els.department = document.querySelector("#departmentSelect");
   els.semester = document.querySelector("#semesterInput");
   els.constraintRotc = document.querySelector("#constraintRotc");
@@ -676,6 +1248,10 @@ function bindEvents() {
   });
   document.querySelector("#resetButton").addEventListener("click", () => {
     state = clone(defaultData);
+    if (hasAllDepartmentsDb()) {
+      applyAllDepartmentsCatalog({ preserveSelection: false });
+      applyAllDepartmentSelectionData();
+    }
     runOptimization({ iterations: 8, silent: true });
     saveState();
     renderAll();
@@ -697,13 +1273,28 @@ function bindEvents() {
   els.semester.addEventListener("change", () => {
     state.semester = els.semester.value.trim() || "미지정 학기";
     state.schedule = [];
-    refreshProfessorsForSelectedDepartment();
+    if (hasAllDepartmentsDb()) {
+      applyAllDepartmentSelectionData();
+    } else {
+      refreshProfessorsForSelectedDepartment();
+    }
     runOptimizationWithLoading({ iterations: 8, message: "학기 기준에 맞춰 교수 목록과 시간표를 갱신 중입니다." });
+  });
+  els.college?.addEventListener("change", () => {
+    state.selectedCollege = els.college.value;
+    applyAllDepartmentsCatalog({ preserveSelection: false });
+    applyAllDepartmentSelectionData();
+    state.schedule = [];
+    runOptimizationWithLoading({ iterations: 8, message: "단과대 기준에 맞춰 학과와 배정 데이터를 갱신 중입니다." });
   });
   els.department.addEventListener("change", () => {
     state.selectedDepartment = els.department.value;
     state.schedule = [];
-    refreshProfessorsForSelectedDepartment();
+    if (hasAllDepartmentsDb()) {
+      applyAllDepartmentSelectionData();
+    } else {
+      refreshProfessorsForSelectedDepartment();
+    }
     runOptimizationWithLoading({ iterations: 8, message: "이전 시간표를 참고해 학과 교수 목록을 갱신 중입니다." });
   });
   els.quotaInputs.forEach((input, index) => {
@@ -757,6 +1348,8 @@ function normalizeState(raw) {
   raw.constraints = { ...clone(defaultData.constraints), ...(raw.constraints || {}) };
   raw.departments = filterTargetDepartments(Array.isArray(raw.departments) ? raw.departments : clone(defaultData.departments));
   if (!raw.departments.length) raw.departments = clone(defaultData.departments);
+  raw.colleges = Array.isArray(raw.colleges) ? raw.colleges : [];
+  raw.selectedCollege = raw.selectedCollege || raw.departments[0]?.collegeCode || raw.departments[0]?.college || "";
   raw.selectedDepartment = raw.selectedDepartment || raw.departments[0]?.id || defaultData.selectedDepartment;
   if (!raw.departments.some((department) => department.id === raw.selectedDepartment)) {
     raw.selectedDepartment = raw.departments[0]?.id || defaultData.selectedDepartment;
@@ -849,6 +1442,9 @@ function mergeDefaultTermProfessors(raw) {
 function refreshProfessorsForSelectedDepartment() {
   const scopedCourses = state.courses.filter((course) => courseInCurrentScope(course));
   if (!scopedCourses.length) return false;
+  if (hasAllDepartmentsDb() && allDepartmentMetaForSelectedDepartment()) {
+    return refreshProfessorsFromAllDepartmentsDb(scopedCourses);
+  }
 
   const before = professorListSignature(state.professors);
   const scopedCourseIds = new Set(scopedCourses.map((course) => course.id));
@@ -931,37 +1527,6 @@ function refreshProfessorsForSelectedDepartment() {
       );
     });
 
-    sharedLowerDivisionProfessorRecordsForSelectedDepartment().forEach(({ record, sourceDepartment, sourceUrl }, index) => {
-      const nameKey = normalizeProfessorName(record.name);
-      const defaultProfessor = defaultById.get(record.id) || defaultByName.get(nameKey);
-      const defaultCourseIds = parseList(defaultProfessor?.canTeach).filter((courseId) => {
-        const course = scopedCourses.find((item) => item.id === courseId);
-        return course && toNumber(course.year, 0) <= 2;
-      });
-      const historyCourseIds = (historicalTimetables.records || [])
-        .filter((history) => normalizeProfessorName(history.professor) === nameKey)
-        .flatMap((history) => historyCourseMatches(history, scopedCourses))
-        .filter((course) => toNumber(course.year, 0) <= 2)
-        .map((course) => course.id);
-
-      upsertProfessor(
-        {
-          id: record.id,
-          name: record.name,
-          type: record.type || "전임",
-          position: record.position || "",
-          minCredits: record.minCredits,
-          maxCredits: record.maxCredits,
-          availability: record.availability,
-          canTeach: record.canTeach,
-          phone: record.phone,
-          sourceDepartment,
-          sourceUrl
-        },
-        uniqueList([...defaultCourseIds, ...historyCourseIds]),
-        { departmentOrder: 5000 + index }
-      );
-    });
   } else {
     defaultData.professors
       .filter((professor) => !EXTERNAL_PROFESSOR_IDS.has(professor.id) && !isExcludedProfessor(professor))
@@ -1027,15 +1592,6 @@ function departmentProfessorRecordsForSelectedDepartment() {
 
 function departmentProfessorSourceForSelectedDepartment() {
   return departmentProfessorDb.departments?.[state.selectedDepartment]?.source || "";
-}
-
-function sharedLowerDivisionProfessorRecordsForSelectedDepartment() {
-  if (!LOWER_DIVISION_SHARED_DEPARTMENTS.includes(state.selectedDepartment)) return [];
-  return LOWER_DIVISION_SHARED_DEPARTMENTS.filter((departmentName) => departmentName !== state.selectedDepartment).flatMap((departmentName) => {
-    const department = departmentProfessorDb.departments?.[departmentName];
-    const professors = Array.isArray(department?.professors) ? department.professors : [];
-    return professors.filter(isDepartmentProfessorCandidate).map((record) => ({ record, sourceDepartment: departmentName, sourceUrl: department.source || "" }));
-  });
 }
 
 function isDepartmentProfessorCandidate(professor) {
@@ -1211,8 +1767,27 @@ function renderAll() {
 }
 
 function renderDepartmentControls() {
+  if (els.college) {
+    const colleges = state.colleges?.length
+      ? state.colleges
+      : uniqueList(state.departments.map((department) => department.college || department.collegeCode).filter(Boolean)).map((label) => ({ id: label, label }));
+    els.college.innerHTML = colleges
+      .map((college) => `<option value="${escapeAttr(college.id)}" ${college.id === state.selectedCollege ? "selected" : ""}>${escapeHtml(college.label || college.name || college.id)}</option>`)
+      .join("");
+    els.college.disabled = !hasAllDepartmentsDb();
+  }
+
+  const labelCounts = state.departments.reduce((counts, department) => {
+    const label = department.label || department.id;
+    counts.set(label, (counts.get(label) || 0) + 1);
+    return counts;
+  }, new Map());
   const options = state.departments
-    .map((department) => `<option value="${escapeAttr(department.id)}" ${department.id === state.selectedDepartment ? "selected" : ""}>${escapeHtml(department.id)}</option>`)
+    .map((department) => {
+      const label = department.label || department.id;
+      const visibleLabel = labelCounts.get(label) > 1 && department.code ? `${label} (${department.code})` : label;
+      return `<option value="${escapeAttr(department.id)}" ${department.id === state.selectedDepartment ? "selected" : ""}>${escapeHtml(visibleLabel)}</option>`;
+    })
     .join("");
   els.department.innerHTML = options;
 }
@@ -1256,19 +1831,56 @@ function renderWeekGrid(validation) {
       const blocked = isRotcBlocked({ year: 3 }, { day, start: period, duration: 1 }) ? " blocked" : "";
       return `<div class="slot-cell${state.constraints.enforceRotc ? blocked : ""}" aria-hidden="true"></div>`;
     }).join("");
-    const events = state.schedule
+    const dayEvents = state.schedule
       .filter((item) => item.status === "assigned")
       .flatMap((item) =>
         item.blocks
           .filter((block) => block.day === day)
-          .map((block) => renderEvent(item, block, assignmentLevels.get(item.id)))
-      )
+          .map((block) => ({ item, block, level: assignmentLevels.get(item.id) }))
+      );
+    const events = layoutDayEvents(dayEvents)
+      .map(({ item, block, level, lane, laneCount }) => renderEvent(item, block, level, { lane, laneCount }))
       .join("");
     return `<div class="day-lane">${cells}${events}</div>`;
   }).join("");
 
   const periods = PERIODS.map((period) => `<div class="period-label">${period}교시</div>`).join("");
   els.timetable.innerHTML = `<div class="corner-cell">교시</div>${DAYS.map((day) => `<div class="day-title">${DAY_NAMES[day]}</div>`).join("")}<div class="period-column">${periods}</div>${dayColumns}`;
+}
+
+function layoutDayEvents(events) {
+  const sorted = events
+    .map((event) => ({
+      ...event,
+      start: toNumber(event.block.start, 0),
+      end: toNumber(event.block.start, 0) + toNumber(event.block.duration, 1)
+    }))
+    .sort((a, b) => a.start - b.start || b.end - a.end || String(a.item.id).localeCompare(String(b.item.id)));
+  const groups = [];
+  sorted.forEach((event) => {
+    const last = groups[groups.length - 1];
+    if (!last || event.start >= last.end) {
+      groups.push({ end: event.end, events: [event] });
+      return;
+    }
+    last.events.push(event);
+    last.end = Math.max(last.end, event.end);
+  });
+
+  return groups.flatMap((group) => {
+    const laneEnds = [];
+    const placed = group.events.map((event) => {
+      let lane = laneEnds.findIndex((end) => end <= event.start);
+      if (lane < 0) {
+        lane = laneEnds.length;
+        laneEnds.push(0);
+      }
+      laneEnds[lane] = event.end;
+      return { ...event, lane };
+    });
+    const laneCount = Math.max(1, laneEnds.length);
+    return placed.map((event) => ({ ...event, laneCount }));
+  });
 }
 
 function renderYearMatrix(validation) {
@@ -1313,17 +1925,27 @@ function renderMatrixChip(item, level) {
   return `<button class="matrix-chip${statusClass}" data-assignment="${escapeAttr(item.id)}" title="${escapeAttr(course?.name || item.courseId)}">${escapeHtml(course?.name || item.courseId)} [${item.sectionNo}. ${escapeHtml(professor?.name || "미배정")} ${escapeHtml(roomShort(room))}]</button>`;
 }
 
-function renderEvent(item, block, level) {
+function renderEvent(item, block, level, layout = {}) {
   const course = findById(state.courses, item.courseId);
   const professor = findById(state.professors, item.professorId);
   const room = findById(state.rooms, item.roomId);
-  const top = (block.start - 1) * 46 + 4;
-  const height = block.duration * 46 - 8;
+  const lane = Math.max(0, toNumber(layout.lane, 0));
+  const laneCount = Math.max(1, toNumber(layout.laneCount, 1));
+  const gap = 4;
+  const periodHeight = 46;
+  const top = `${Math.max(0, toNumber(block.start, 1) - 1) * periodHeight + 4}px`;
+  const height = `${Math.max(1, toNumber(block.duration, 1)) * periodHeight - 8}px`;
+  const lanePercent = 100 / laneCount;
+  const totalGap = (laneCount - 1) * gap;
+  const laneWidthOffset = (12 + totalGap) / laneCount;
+  const leftOffset = 6 + lane * (gap - laneWidthOffset);
+  const left = `calc(${(lane * lanePercent).toFixed(4)}% + ${leftOffset.toFixed(2)}px)`;
+  const width = `calc(${lanePercent.toFixed(4)}% - ${laneWidthOffset.toFixed(2)}px)`;
   const selected = state.selectedAssignmentId === item.id ? " selected" : "";
   const statusClass = level === "hard" ? " danger" : level === "warn" ? " warn" : "";
   const label = `${course?.id || item.courseId}-${item.sectionNo}`;
   const title = `${course?.name || ""} ${item.sectionNo}분반`;
-  return `<button class="event${statusClass}${selected}" data-assignment="${escapeAttr(item.id)}" style="top:${top}px;height:${height}px" title="${escapeAttr(title)}"><strong>${escapeHtml(label)} ${escapeHtml(course?.name || "")}</strong><span>${escapeHtml(professor?.name || "미배정")} · ${escapeHtml(room?.name || "강의실 없음")}</span></button>`;
+  return `<button class="event${statusClass}${selected}" data-assignment="${escapeAttr(item.id)}" style="top:${top};height:${height};left:${left};width:${width}" title="${escapeAttr(title)}"><strong>${escapeHtml(label)} ${escapeHtml(course?.name || "")}</strong><span>${escapeHtml(professor?.name || "미배정")} · ${escapeHtml(room?.name || "강의실 없음")}</span></button>`;
 }
 
 function renderInspector(validation) {
@@ -1432,7 +2054,7 @@ function renderLoadRow(item) {
 function renderDataPanel(validation) {
   const hints = {
     courses: "새로 짤 시간표의 과목은 학년도별 교육과정 요람 기준입니다. 학점/분배는 직접 수정하거나 지난 시간표 이력을 한 번에 적용할 수 있습니다.",
-    professors: "교수 목록은 공식 교수진 페이지에 전화번호가 있고 직전 학기 강의 이력이 있는 인원만 우선 사용합니다. 지난 시간표는 담당 가능 과목 보강에도 반영합니다.",
+    professors: "교수 목록은 선택한 학과의 공식 교수진 DB만 사용합니다. 전화번호가 있고 직전 학기 강의 이력이 있는 인원을 기준으로 담당 가능 과목을 보강합니다.",
     rooms: "이전 학기 시간표와 보유 시설을 참고해 사용할 강의실만 체크하고, 분류와 정원을 입력합니다. 최적화는 체크된 강의실만 후보로 사용합니다.",
     assignments: "배정 결과는 최적화 실행 후 갱신됩니다. 충돌 행은 제약조건 패널에서 원인을 확인할 수 있습니다.",
     reference: "전 학기 시간표는 교수 후보, 강의실 사용 패턴, 분반 표기 참고용입니다. 새 학기 개설 과목 판정에는 사용하지 않습니다."
@@ -1580,7 +2202,7 @@ function professorPickerHtml(course) {
   const options = professorOptionsForPicker()
     .filter((professor) => !selectedSet.has(professor.id))
     .map((professor) => {
-      const sourceText = professor.sourceDepartment && professor.sourceDepartment !== state.selectedDepartment ? ` · ${professor.sourceDepartment}` : "";
+      const sourceText = professor.sourceDepartment && professor.sourceDepartment !== selectedDepartmentLabel() ? ` · ${professor.sourceDepartment}` : "";
       return `<option value="${escapeAttr(professor.id)}">${escapeHtml(professor.name)} · ${escapeHtml(professor.type)}${escapeHtml(sourceText)}</option>`;
     })
     .join("");
@@ -1798,10 +2420,13 @@ function renderHistoricalDataSummary() {
     .slice(0, 6)
     .map((room) => `<span>${escapeHtml(room.room || room.roomKey)} ${room.count}회</span>`)
     .join("");
+  const sourceLabel = hasAllDepartmentsDb()
+    ? `${selectedDepartmentCollegeLabel()} · ${selectedDepartmentLabel()} · 전체 학과 DB`
+    : "학과별 직접 조회 데이터";
   return `
     <div class="history-summary">
       <strong>저장된 시간표 원자료 ${records.length}건</strong>
-      <span>생성일 ${escapeHtml(historicalTimetables.generatedAt || "-")} · 학과별 직접 조회 데이터</span>
+      <span>생성일 ${escapeHtml((hasAllDepartmentsDb() ? allDepartmentsDb.generatedAt : historicalTimetables.generatedAt) || "-")} · ${escapeHtml(sourceLabel)}</span>
       <div class="history-tags">${terms}</div>
       <div class="history-tags">${topRooms}</div>
     </div>
@@ -1809,10 +2434,16 @@ function renderHistoricalDataSummary() {
 }
 
 function historicalRecordsForSelectedDepartment() {
+  if (hasAllDepartmentsDb() && allDepartmentMetaForSelectedDepartment()) {
+    return allDepartmentHistoricalRecordsForSelectedDepartment();
+  }
   return (historicalTimetables.records || []).filter((record) => record.department === state.selectedDepartment);
 }
 
 function historicalRoomSummaryForSelectedDepartment() {
+  if (hasAllDepartmentsDb() && allDepartmentMetaForSelectedDepartment()) {
+    return summarizeAllDepartmentRoomsForSelectedDepartment();
+  }
   return (historicalTimetables.roomSummary || []).filter((item) => (item.departments || []).includes(state.selectedDepartment));
 }
 
@@ -2899,7 +3530,7 @@ function roomRecommendationReason(item, course, selectedTerm, previousYear) {
     const previousText = item.previousYearCount ? `전년도 동일/유사 이력 ${item.previousYearCount}건` : `${yearTerm} ${courseText}`;
     return `${capacity} · ${previousText} · ${sample.professor || "교수 미상"} · ${sample.room}`;
   }
-  return `${capacity} · 최근 3개년 ${state.selectedDepartment}에서 자주 사용된 강의실`;
+  return `${capacity} · 최근 3개년 ${selectedDepartmentLabel()}에서 자주 사용된 강의실`;
 }
 
 function semesterYear(text) {
