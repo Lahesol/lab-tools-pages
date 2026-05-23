@@ -195,7 +195,8 @@
               <label class="inline-field">Target mu <input id="fitTargetMu" type="number" step="0.001" /></label>
               <label class="inline-field">Target A amp <input id="fitTargetA" type="number" step="0.001" /></label>
               <label class="inline-field">mu gain <input id="fitMuGain" type="number" value="1" step="0.1" /></label>
-              <label class="inline-field">A amp gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
+              <label class="inline-field">Vstart gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
+              <label class="inline-field">mu->Vstart <input id="fitMuVstartGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">Trace opacity <input id="sweepTraceOpacity" type="number" value="0.45" min="0.1" max="1" step="0.05" /></label>
               <label class="checkbox inline-check"><input id="showFitOverlay" type="checkbox" checked /> Fit overlay</label>
               <button id="previewGaussianAdjustButton">Preview adjust</button>
@@ -208,7 +209,7 @@
               <button id="autoFitGmmButton">Auto fit GMM</button>
               <button id="stopAutoFitButton">Stop auto</button>
             </div>
-            <p class="hint" id="fitStatus">Fit uses the completed sweep for one selected ADC trace.</p>
+            <p class="hint" id="fitStatus">Fit uses A_amp and mu from the completed sweep; Vstart_next = Vstart + mu->Vstart * dmu_control + Vstart gain * dA_amp.</p>
           </article>
           <article class="panel fit-panel">
             <div class="panel-title">
@@ -220,9 +221,9 @@
             </div>
             <div class="form-grid compact-fit-grid">
               <label>Devices <input id="gmmDevices" value="1,2,3" /></label>
-              <label>Mode <select id="gmmMode"><option value="fit">Fit measured curves</option><option value="direct">Direct A/mu voltage</option></select></label>
+              <label>Mode <select id="gmmMode"><option value="fit">Fit measured curves</option><option value="direct">Direct Vstart/mu voltage</option></select></label>
             </div>
-            <label class="wide-label">Target rows: A_amp, mu_V, sigma_V
+            <label class="wide-label">Target rows: fit = A_amp, mu_V, sigma_V / direct = Vstart_V, mu_V, sigma_V
               <textarea id="gmmTarget" class="gmm-target" spellcheck="false">1.0,0.0,2.0
 1.0,3.0,2.0
 1.0,-3.0,2.0</textarea>
@@ -232,7 +233,7 @@
               <button id="downloadFitCsvButton">Download fit CSV</button>
             </div>
             <div class="gmm-plan" id="gmmPlan"></div>
-            <p class="hint" id="gmmStatus">Fit mode uses A_amp and mu from the last sweep; sigma remains diagnostic.</p>
+            <p class="hint" id="gmmStatus">Fit mode uses A_amp and mu from the last sweep, then updates mu and coupled Vstart; sigma remains diagnostic.</p>
           </article>
         </section>        <article class="panel activity-log">
           <div class="panel-title">
@@ -282,18 +283,18 @@
             <div class="panel-title">
               <div>
                 <p class="eyebrow">MAX5488 output calibration</p>
-                <h2>A / mu code map</h2>
+                <h2>Vstart / mu code map</h2>
               </div>
               <div class="button-row compact">
                 <button id="loadProjectParamCalButton">Load project cal</button>
                 <button id="resetParamCalButton">Reset defaults</button>
-                <button id="saveParamCalButton" class="primary">Save A/mu cal</button>
+                <button id="saveParamCalButton" class="primary">Save Vstart/mu cal</button>
               </div>
             </div>
             <div class="table-wrap cal-table-wrap">
               <table class="cal-table">
                 <thead>
-                  <tr><th>Code</th><th>Send</th><th>A output V</th><th>mu output V</th></tr>
+                  <tr><th>Code</th><th>Send</th><th>Vstart output V</th><th>mu output V</th></tr>
                 </thead>
                 <tbody id="paramCalTable"></tbody>
               </table>
@@ -331,7 +332,7 @@
             </div>
             <div class="form-grid">
               <label>Device <input id="switchDevice" type="number" min="1" max="16" value="1" /></label>
-              <label>Wiper <select id="switchWiper"><option value="A">mu</option><option value="M">A</option></select></label>
+              <label>Wiper <select id="switchWiper"><option value="A">mu</option><option value="M">Vstart</option></select></label>
               <label>Code <input id="switchCode" type="number" min="0" max="255" value="0" /></label>
             </div>
             <button id="switchWriteButton" class="primary wide">Write selected channel</button>
@@ -372,23 +373,23 @@
             <div class="panel-title">
               <div>
                 <p class="eyebrow">REF193 = 3.0 V</p>
-                <h2>MAX5488 A / mu</h2>
+                <h2>MAX5488 Vstart / mu</h2>
               </div>
             </div>
             <div class="form-grid">
               <label>Device <input id="potDevice" type="number" min="1" max="16" value="1" /></label>
               <label>mu code <input id="aCode" type="number" min="0" max="255" value="0" /></label>
               <label>mu target V <input id="aTarget" type="number" value="0" step="0.05" /></label>
-              <label>A code <input id="muCode" type="number" min="0" max="255" value="0" /></label>
-              <label>A target V <input id="muTarget" type="number" value="0" step="0.05" /></label>
+              <label>Vstart code <input id="muCode" type="number" min="0" max="255" value="0" /></label>
+              <label>Vstart target V <input id="muTarget" type="number" value="0" step="0.05" /></label>
             </div>
             <div class="readout stacked" id="potReadout"></div>
             <div class="button-row">
               <button id="setACodeButton">Set mu code</button>
               <button id="setAVoltageButton">Set mu voltage</button>
-              <button id="setMuCodeButton">Set A code</button>
-              <button id="setMuVoltageButton">Set A voltage</button>
-              <button id="applyPotButton" class="primary">Apply A + mu</button>
+              <button id="setMuCodeButton">Set Vstart code</button>
+              <button id="setMuVoltageButton">Set Vstart voltage</button>
+              <button id="applyPotButton" class="primary">Apply Vstart + mu</button>
               <button id="applyPotAllButton">Apply all devices</button>
             </div>
           </article>
@@ -401,7 +402,7 @@
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Dev</th><th>Mux</th><th>A</th><th>A out</th><th>mu</th><th>mu out</th></tr></thead>
+                <thead><tr><th>Dev</th><th>Mux</th><th>Vstart</th><th>Vstart out</th><th>mu</th><th>mu out</th></tr></thead>
                 <tbody id="deviceTable"></tbody>
               </table>
             </div>
@@ -478,6 +479,6 @@
 
     </main>
 
-    <script src="./app.js?v=20260523-current-nonnegative"></script>
+    <script src="./app.js?v=20260523-vstart-pair-program"></script>
   </body>
 </html>

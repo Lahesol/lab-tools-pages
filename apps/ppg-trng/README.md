@@ -15,18 +15,25 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 ## Firmware Protocol
 
 - DAC set: ASCII number followed by `\r`, for example `2056\r`
+- DAC A set: `A2048\r`
+- DAC B set: `B2056\r`
 - TRNG bit mode toggle: `9999\r`
 - DAC sweep/reset: `0000\r`
+- Green-only PPG mode toggle: `7761\r`
+- Red-only PPG mode toggle: `7762\r`
+- Alternating Green/Red PPG mode toggle: `7763\r`
+- Raw diagnostic mode toggle: `7769\r`
 - Green LED toggle: `8881\r`
 - Red LED toggle: `8882\r`
 - Both LEDs off: `8880\r`
 - Both LEDs on: `8883\r`
 - Legacy both-LED toggle: `8888\r`
-- PPG measurement toggle: `7777\r`
+- Legacy PPG measurement toggle: `7777\r`
 - ADC receive format: UART text numeric stream, for example `7568\n;`
+- Tagged PPG receive format: `G,-123\n;`, `R,85\n;`, or `A,7340\n;`
 - Random bit receive format in `9999` mode: `0` and `1` text stream
 
-In PPG measurement mode, the firmware alternates ambient, Green-on, ambient, and Red-on samples, then streams the ambient-subtracted LED response magnitude as the same numeric ADC stream used by the plot.
+In PPG measurement modes, the firmware samples ambient light with LEDs off, discards one LED-on settling sample, averages two LED-on samples, then streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
 
 The inspected firmware uses UART RX `31`, TX `30`, and `115200` baud.
 
@@ -42,7 +49,9 @@ BLE notifications are parsed as text when they contain ASCII numeric payloads. N
 
 ## Signal Filtering
 
-The plot can display raw ADC data or browser-side filtered data without changing the firmware stream. Available filters are moving average, one-pole low-pass, one-pole high-pass, and high-pass plus low-pass band-pass. CSV export includes both raw and filtered values when a filter is active.
+The plot can display raw ADC data or browser-side filtered data without changing the firmware stream. Available filters are moving average, one-pole low-pass, one-pole high-pass, and high-pass plus low-pass band-pass. CSV export includes channel, raw, and filtered values when a filter is active.
+
+Tagged firmware streams are plotted as separate ADC, Green, Red, and Ambient channels. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
 
 ## Bit Extraction
 

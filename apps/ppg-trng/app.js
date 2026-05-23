@@ -8,6 +8,7 @@ const els = {
   demoButton: document.querySelector("#demoButton"),
   dacSlider: document.querySelector("#dacSlider"),
   dacInput: document.querySelector("#dacInput"),
+  dacTarget: document.querySelector("#dacTarget"),
   dacValueLabel: document.querySelector("#dacValueLabel"),
   sendDacButton: document.querySelector("#sendDacButton"),
   liveSend: document.querySelector("#liveSend"),
@@ -22,6 +23,7 @@ const els = {
   rateValue: document.querySelector("#rateValue"),
   sampleCount: document.querySelector("#sampleCount"),
   windowSize: document.querySelector("#windowSize"),
+  channelMode: document.querySelector("#channelMode"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
@@ -68,6 +70,8 @@ const state = {
   samples: [],
   totalSamples: 0,
   latest: null,
+  latestChannel: "ADC",
+  dacValues: { A: 2048, B: 2056 },
   bitMode: false,
   bits: [],
   totalBits: 0,
@@ -100,6 +104,19 @@ const NUS_RX_WRITE_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_TX_NOTIFY_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const NOISE_BASELINE_ALPHA = 0.02;
 const NOISE_WARMUP_SAMPLES = 12;
+const CHANNEL_ORDER = ["ADC", "G", "R", "A"];
+const CHANNEL_LABELS = {
+  ADC: "ADC",
+  G: "Green",
+  R: "Red",
+  A: "Ambient",
+};
+const CHANNEL_COLORS = {
+  ADC: "#087f72",
+  G: "#149447",
+  R: "#d64545",
+  A: "#5c6f82",
+};
 
 const plot = {
   ctx: els.plotCanvas.getContext("2d"),
@@ -121,15 +138,25 @@ function clampDac(value) {
   return Math.min(4095, Math.max(0, number));
 }
 
+function getSelectedDacTarget() {
+  return els.dacTarget?.value === "A" ? "A" : "B";
+}
+
+function formatDacCommand(value) {
+  const target = getSelectedDacTarget();
+  return `${target}${clampDac(value)}`;
+}
+
 function setDacValue(value, source = "ui") {
   const next = clampDac(value);
+  state.dacValues[getSelectedDacTarget()] = next;
   els.dacSlider.value = String(next);
   els.dacInput.value = String(next);
   els.dacValueLabel.value = String(next);
 
-  if (source !== "send" && els.liveSend.checked) {
+  if (source !== "send" && source !== "target" && els.liveSend.checked) {
     window.clearTimeout(state.liveSendTimer);
-    state.liveSendTimer = window.setTimeout(() => sendCommand(next), 120);
+    state.liveSendTimer = window.setTimeout(() => sendCommand(formatDacCommand(next)), 120);
   }
 }
 
@@ -437,7 +464,10 @@ function isTextPayload(bytes) {
     byte === 45 ||
     byte === 46 ||
     byte === 59 ||
-    (byte >= 48 && byte <= 57)
+    byte === 58 ||
+    (byte >= 48 && byte <= 57) ||
+    (byte >= 65 && byte <= 90) ||
+    (byte >= 97 && byte <= 122)
   ));
 }
 
@@ -493,10 +523,37 @@ function parseSegment(segment) {
     return;
   }
 
+  if (parseTaggedSegment(segment)) return;
+
   const match = segment.match(/[-+]?\d+(?:\.\d+)?/);
   if (!match) return;
   const value = Number(match[0]);
   if (Number.isFinite(value)) addSample(value);
+}
+
+function normalizeChannel(channel) {
+  const key = String(channel || "ADC").trim().toUpperCase();
+  if (key === "GREEN") return "G";
+  if (key === "RED") return "R";
+  if (key === "AMBIENT") return "A";
+  if (CHANNEL_ORDER.includes(key)) return key;
+  return null;
+}
+
+function parseTaggedSegment(segment) {
+  const matches = [...segment.matchAll(/\b(ADC|GREEN|RED|AMBIENT|[AGR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
+  if (!matches.length) return false;
+
+  let parsed = false;
+  matches.forEach((match) => {
+    const channel = normalizeChannel(match[1]);
+    const value = Number(match[2]);
+    if (channel && Number.isFinite(value)) {
+      addSample(value, channel);
+      parsed = true;
+    }
+  });
+  return parsed;
 }
 
 function parseBitSegment(segment) {
@@ -506,11 +563,13 @@ function parseBitSegment(segment) {
   return true;
 }
 
-function addSample(value) {
+function addSample(value, channel = "ADC") {
   if (state.paused) return;
 
-  const sample = { t: performance.now(), value };
+  const normalizedChannel = normalizeChannel(channel) || "ADC";
+  const sample = { t: performance.now(), value, channel: normalizedChannel };
   state.latest = value;
+  state.latestChannel = normalizedChannel;
   state.samples.push(sample);
   state.totalSamples += 1;
 
@@ -523,7 +582,7 @@ function addSample(value) {
     state.lastStatsAt = now;
     updateStats();
   }
-  extractNoiseBit(value);
+  if (normalizedChannel === "ADC") extractNoiseBit(value);
   state.needsDraw = true;
 }
 
@@ -591,7 +650,7 @@ function updateStats() {
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
     els.sampleCount.textContent = String(state.totalSamples);
-    els.plotCaption.textContent = `Waiting for samples | ${getFilterDescription()}`;
+    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getFilterDescription()}`;
     return;
   }
 
@@ -603,13 +662,14 @@ function updateStats() {
   const elapsed = Math.max(0.001, (last.t - first.t) / 1000);
   const rate = displaySamples.length > 1 ? (displaySamples.length - 1) / elapsed : 0;
 
-  els.latestValue.textContent = formatNumber(values.at(-1));
+  const latest = displaySamples.at(-1);
+  els.latestValue.textContent = `${formatNumber(latest.value)} ${latest.channel || "ADC"}`;
   els.minValue.textContent = formatNumber(min);
   els.maxValue.textContent = formatNumber(max);
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
   els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view | ${getFilterDescription()}`;
+  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getFilterDescription()}`;
 }
 
 function setBitMode(enabled) {
@@ -748,6 +808,29 @@ function getFilterDescription(settings = getFilterSettings()) {
   return "Raw ADC";
 }
 
+function getSelectedChannel() {
+  return normalizeChannel(els.channelMode?.value) || "all";
+}
+
+function getSamplesForChannel(channel = getSelectedChannel()) {
+  if (channel === "all") return state.samples;
+  return state.samples.filter((sample) => (sample.channel || "ADC") === channel);
+}
+
+function getChannelsInSamples(samples) {
+  const present = new Set(samples.map((sample) => sample.channel || "ADC"));
+  return CHANNEL_ORDER.filter((channel) => present.has(channel));
+}
+
+function getChannelDescription(samples = getDisplaySamples()) {
+  const selected = getSelectedChannel();
+  if (selected !== "all") return CHANNEL_LABELS[selected] || selected;
+
+  const channels = getChannelsInSamples(samples);
+  if (!channels.length) return "All channels";
+  return channels.map((channel) => CHANNEL_LABELS[channel] || channel).join(" + ");
+}
+
 function updateFilterUi() {
   const mode = els.filterMode.value;
   els.filterWindowField.hidden = mode !== "moving-average";
@@ -756,13 +839,23 @@ function updateFilterUi() {
   els.filterSummary.textContent = getFilterDescription();
 }
 
-function getDisplaySamples() {
-  const settings = getFilterSettings();
-  if (settings.mode === "raw") return state.samples;
+function getDisplaySamples(channel = getSelectedChannel()) {
+  if (channel === "all") {
+    return getChannelsInSamples(state.samples)
+      .flatMap((visibleChannel) => getDisplaySamples(visibleChannel))
+      .sort((left, right) => left.t - right.t);
+  }
 
-  const filteredValues = applyFilter(state.samples, settings);
-  return state.samples.map((sample, index) => ({
+  const settings = getFilterSettings();
+  const samples = getSamplesForChannel(channel);
+  if (settings.mode === "raw") {
+    return samples.map((sample) => ({ ...sample, rawValue: sample.value }));
+  }
+
+  const filteredValues = applyFilter(samples, settings);
+  return samples.map((sample, index) => ({
     t: sample.t,
+    channel: sample.channel || "ADC",
     rawValue: sample.value,
     value: filteredValues[index],
   }));
@@ -906,6 +999,34 @@ async function toggleBitModeCommand() {
   setBitMode(!state.bitMode);
 }
 
+function applyPpgCommandPreset(command) {
+  if (command === "7769") {
+    els.filterMode.value = "raw";
+    els.channelMode.value = "all";
+  } else if (command === "7761") {
+    els.filterMode.value = "band-pass";
+    els.highCutoff.value = "0.5";
+    els.lowCutoff.value = "5";
+    els.channelMode.value = "G";
+  } else if (command === "7762") {
+    els.filterMode.value = "band-pass";
+    els.highCutoff.value = "0.5";
+    els.lowCutoff.value = "5";
+    els.channelMode.value = "R";
+  } else if (command === "7763" || command === "7777") {
+    els.filterMode.value = "band-pass";
+    els.highCutoff.value = "0.5";
+    els.lowCutoff.value = "5";
+    els.channelMode.value = "all";
+  } else {
+    return;
+  }
+
+  updateFilterUi();
+  updateStats();
+  state.needsDraw = true;
+}
+
 function clearSamples() {
   state.samples = [];
   state.totalSamples = 0;
@@ -925,13 +1046,15 @@ function exportCsv() {
   const start = state.samples[0].t;
   const settings = getFilterSettings();
   const displaySamples = getDisplaySamples();
-  const rows = settings.mode === "raw" ? ["time_ms,value"] : ["time_ms,raw_value,filtered_value"];
-  displaySamples.forEach((sample, index) => {
+  const rows = settings.mode === "raw"
+    ? ["time_ms,channel,value"]
+    : ["time_ms,channel,raw_value,filtered_value"];
+  displaySamples.forEach((sample) => {
     const time = (sample.t - start).toFixed(3);
     if (settings.mode === "raw") {
-      rows.push(`${time},${sample.value}`);
+      rows.push(`${time},${sample.channel || "ADC"},${sample.value}`);
     } else {
-      rows.push(`${time},${state.samples[index].value},${sample.value}`);
+      rows.push(`${time},${sample.channel || "ADC"},${sample.rawValue},${sample.value}`);
     }
   });
 
@@ -1000,7 +1123,9 @@ function toggleDemo() {
     const baseline = 7200 + (dac - 2056) * 0.42;
     const ppg = Math.sin(state.demoPhase) * 160 + Math.sin(state.demoPhase * 0.31) * 38;
     const noise = (Math.random() - 0.5) * 42;
-    addSample(Math.round(baseline + ppg + noise));
+    addSample(Math.round(ppg + noise), "G");
+    addSample(Math.round(ppg * 0.62 + noise * 0.55), "R");
+    addSample(Math.round(baseline + noise * 0.2), "A");
   }, 33);
   els.demoButton.textContent = "Stop demo";
   addLog("SYS", "Demo started");
@@ -1054,6 +1179,14 @@ function getYRange(values) {
   return { min: min - pad, max: max + pad };
 }
 
+function getTimeRange(samples) {
+  if (!samples.length) return { start: 0, end: 1, duration: 1 };
+  const start = samples[0].t;
+  const end = samples.at(-1).t;
+  const duration = Math.max(1, end - start);
+  return { start, end, duration };
+}
+
 function drawPlot() {
   const ctx = plot.ctx;
   const width = plot.width;
@@ -1072,6 +1205,7 @@ function drawPlot() {
   const displaySamples = getDisplaySamples();
   const values = displaySamples.map((sample) => sample.value);
   const { min, max } = getYRange(values);
+  const timeRange = getTimeRange(displaySamples);
 
   drawGrid(ctx, margin, chartW, chartH, min, max);
   drawZeroLine(ctx, margin, chartW, chartH, min, max);
@@ -1083,30 +1217,68 @@ function drawPlot() {
     return;
   }
 
+  const selected = getSelectedChannel();
+  const channels = selected === "all" ? getChannelsInSamples(displaySamples) : [selected];
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(margin.left, margin.top, chartW, chartH);
   ctx.clip();
 
+  channels.forEach((channel) => {
+    const series = selected === "all"
+      ? displaySamples.filter((sample) => (sample.channel || "ADC") === channel)
+      : displaySamples;
+    drawSeries(ctx, series, channel, margin, chartW, chartH, min, max, timeRange);
+  });
+  ctx.restore();
+
+  drawLegend(ctx, channels, margin, chartW);
+}
+
+function drawSeries(ctx, samples, channel, margin, chartW, chartH, min, max, timeRange) {
+  if (samples.length < 2) return;
+
+  const color = CHANNEL_COLORS[channel] || CHANNEL_COLORS.ADC;
   ctx.beginPath();
-  values.forEach((value, index) => {
-    const x = margin.left + (index / Math.max(1, values.length - 1)) * chartW;
-    const y = margin.top + (1 - (value - min) / (max - min)) * chartH;
+  samples.forEach((sample, index) => {
+    const x = margin.left + ((sample.t - timeRange.start) / timeRange.duration) * chartW;
+    const y = margin.top + (1 - (sample.value - min) / (max - min)) * chartH;
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
 
   ctx.lineWidth = 2;
-  ctx.strokeStyle = "#087f72";
+  ctx.strokeStyle = color;
   ctx.stroke();
 
-  const lastValue = values.at(-1);
-  const x = margin.left + chartW;
-  const y = margin.top + (1 - (lastValue - min) / (max - min)) * chartH;
-  ctx.fillStyle = "#087f72";
+  const last = samples.at(-1);
+  const x = margin.left + ((last.t - timeRange.start) / timeRange.duration) * chartW;
+  const y = margin.top + (1 - (last.value - min) / (max - min)) * chartH;
+  ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc(x, y, 4, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function drawLegend(ctx, channels, margin, chartW) {
+  if (!channels.length) return;
+
+  ctx.save();
+  ctx.font = "700 11px Segoe UI, sans-serif";
+  ctx.textBaseline = "middle";
+
+  let x = margin.left + chartW;
+  const y = margin.top - 8;
+  [...channels].reverse().forEach((channel) => {
+    const label = CHANNEL_LABELS[channel] || channel;
+    const width = ctx.measureText(label).width + 18;
+    x -= width + 10;
+    ctx.fillStyle = CHANNEL_COLORS[channel] || CHANNEL_COLORS.ADC;
+    ctx.fillRect(x, y - 4, 9, 8);
+    ctx.fillStyle = "#30423d";
+    ctx.fillText(label, x + 13, y);
+  });
   ctx.restore();
 }
 
@@ -1239,7 +1411,10 @@ function bindEvents() {
   els.demoButton.addEventListener("click", toggleDemo);
   els.dacSlider.addEventListener("input", (event) => setDacValue(event.target.value));
   els.dacInput.addEventListener("input", (event) => setDacValue(event.target.value));
-  els.sendDacButton.addEventListener("click", () => sendCommand(clampDac(els.dacInput.value)));
+  els.dacTarget.addEventListener("change", () => {
+    setDacValue(state.dacValues[getSelectedDacTarget()], "target");
+  });
+  els.sendDacButton.addEventListener("click", () => sendCommand(formatDacCommand(els.dacInput.value)));
 
   document.querySelectorAll("[data-step]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1254,6 +1429,7 @@ function bindEvents() {
         toggleBitModeCommand();
         return;
       }
+      applyPpgCommandPreset(button.dataset.command);
       sendCommand(button.dataset.command);
     });
   });
@@ -1267,6 +1443,11 @@ function bindEvents() {
     if (state.samples.length > state.maxSamples) {
       state.samples.splice(0, state.samples.length - state.maxSamples);
     }
+    updateStats();
+    state.needsDraw = true;
+  });
+
+  els.channelMode.addEventListener("change", () => {
     updateStats();
     state.needsDraw = true;
   });

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=a4571006e0c1" />
+    <link rel="stylesheet" href="./styles.css?v=8dbc59589d78" />
   </head>
   <body>
     <div class="app-shell">
@@ -50,6 +50,11 @@
               <h2>DAC</h2>
               <output id="dacValueLabel" for="dacSlider dacInput">2056</output>
             </div>
+            <label class="field-label" for="dacTarget">Target</label>
+            <select id="dacTarget">
+              <option value="B" selected>DAC B · TIA side</option>
+              <option value="A">DAC A · Buffer side</option>
+            </select>
             <input id="dacSlider" type="range" min="0" max="4095" step="1" value="2056" />
             <div class="dac-grid">
               <button class="button ghost" data-step="-100" type="button">-100</button>
@@ -78,7 +83,11 @@
               <button class="button secondary" data-command="8881" type="button" title="Toggle Green LED">G 8881</button>
               <button class="button secondary" data-command="8882" type="button" title="Toggle Red LED">R 8882</button>
               <button class="button secondary" data-command="8880" type="button" title="Turn both LEDs off">Off 8880</button>
-              <button class="button secondary" data-command="7777" type="button" title="Toggle ambient-subtracted Green/Red PPG sampling">PPG 7777</button>
+              <button class="button secondary" data-command="7761" type="button" title="Green-only PPG sampling">G PPG</button>
+              <button class="button secondary" data-command="7762" type="button" title="Red-only PPG sampling">R PPG</button>
+              <button class="button secondary" data-command="7763" type="button" title="Alternating Green/Red PPG sampling">G/R PPG</button>
+              <button class="button secondary" data-command="7769" type="button" title="Raw ambient and LED diagnostic stream">Diag</button>
+              <button class="button secondary" data-command="7777" type="button" title="Legacy toggle for alternating Green/Red PPG sampling">7777</button>
             </div>
           </section>
 
@@ -134,6 +143,16 @@
                     <option value="2000" selected>2000</option>
                     <option value="5000">5000</option>
                     <option value="10000">10000</option>
+                  </select>
+                </label>
+                <label class="compact-field" for="channelMode">
+                  <span>Channel</span>
+                  <select id="channelMode">
+                    <option value="all" selected>All</option>
+                    <option value="G">Green</option>
+                    <option value="R">Red</option>
+                    <option value="A">Ambient</option>
+                    <option value="ADC">ADC</option>
                   </select>
                 </label>
                 <label class="switch">
@@ -233,6 +252,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=0dcff1f840cb" defer></script>
+    <script src="./app.js?v=e2a1abd3f723" defer></script>
   </body>
 </html>

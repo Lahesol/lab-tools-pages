@@ -13,9 +13,9 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-23-current-nonnegative";
-const EXPECTED_FIRMWARE_VERSION = "2026-05-21-version-check";
-const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-v1";
+const WEB_VERSION = "2026-05-23-vstart-pair-program";
+const EXPECTED_FIRMWARE_VERSION = "2026-05-23-pair-program";
+const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-v1";
 const APP_VERSION = WEB_VERSION;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
 const FIRMWARE_SWEEP_RE = /^(SWEEP|SX),/i;
@@ -243,7 +243,7 @@ function persistParamCalibration() {
     localStorage.setItem(PARAM_CAL_STORAGE_KEY, JSON.stringify(state.paramCal));
     return true;
   } catch (error) {
-    logLine(`[storage error] A / mu calibration not saved: ${error.message}`);
+    logLine(`[storage error] Vstart / mu calibration not saved: ${error.message}`);
     return false;
   }
 }
@@ -268,6 +268,12 @@ function potCodeToMuVoltage(code) {
 }
 function aVoltageToCode(voltage) {
   return paramVoltageToCode("A", voltage);
+}
+function potCodeToVstartVoltage(code) {
+  return potCodeToAVoltage(code);
+}
+function vstartVoltageToCode(voltage) {
+  return aVoltageToCode(voltage);
 }
 function muVoltageToCode(voltage) {
   return paramVoltageToCode("mu", voltage);
@@ -369,6 +375,12 @@ function updateVersionInfo(extraClass = "") {
   const proto = state.firmwareProtocol ? ` / ${state.firmwareProtocol}` : "";
   line.textContent = `Web ${WEB_VERSION} / ${fw}${proto}`;
   line.className = `version-line ${extraClass}`.trim();
+}
+
+function firmwareSupportsPairProgram() {
+  const protocol = String(state.firmwareProtocol || "").toLowerCase();
+  const version = String(state.firmwareVersion || "").toLowerCase();
+  return protocol.includes("pair") || version.includes("pair-program");
 }
 
 function parseVersionKeyValues(parts, startIndex) {
@@ -817,7 +829,7 @@ function updateParamCalPreview() {
   }
   const aZero = next.A.find(point => point.code === 0)?.voltage;
   const muZero = next.mu.find(point => point.code === 0)?.voltage;
-  setParamCalStatus(`Pending calibration is valid. A@0=${aZero.toFixed(3)} V, mu@0=${muZero.toFixed(3)} V.`, "ok");
+  setParamCalStatus(`Pending calibration is valid. Vstart@0=${aZero.toFixed(3)} V, mu@0=${muZero.toFixed(3)} V.`, "ok");
 }
 
 function saveParamCalibrationFromInputs() {
@@ -832,10 +844,10 @@ function saveParamCalibrationFromInputs() {
   updatePotReadout();
   renderDeviceTable();
   if (saved) {
-    setParamCalStatus("A / mu calibration saved locally.", "ok");
-    logLine("A / mu calibration saved locally");
+    setParamCalStatus("Vstart / mu calibration saved locally.", "ok");
+    logLine("Vstart / mu calibration saved locally");
   } else {
-    setParamCalStatus("A / mu calibration could not be saved in this browser.", "warn");
+    setParamCalStatus("Vstart / mu calibration could not be saved in this browser.", "warn");
   }
 }
 
@@ -846,10 +858,10 @@ function loadProjectParamCalibration() {
   updatePotReadout();
   renderDeviceTable();
   if (saved) {
-    setParamCalStatus("Project A / mu calibration loaded and saved locally.", "ok");
-    logLine("Project A / mu calibration loaded and saved locally");
+    setParamCalStatus("Project Vstart / mu calibration loaded and saved locally.", "ok");
+    logLine("Project Vstart / mu calibration loaded and saved locally");
   } else {
-    setParamCalStatus("Project A / mu calibration loaded, but local save failed.", "warn");
+    setParamCalStatus("Project Vstart / mu calibration loaded, but local save failed.", "warn");
   }
 }
 
@@ -861,8 +873,8 @@ function resetParamCalibration() {
   renderParamCalibration();
   updatePotReadout();
   renderDeviceTable();
-  setParamCalStatus("A / mu calibration reset to defaults.", "ok");
-  logLine("A / mu calibration reset to defaults");
+  setParamCalStatus("Vstart / mu calibration reset to defaults.", "ok");
+  logLine("Vstart / mu calibration reset to defaults");
 }
 
 function calculateDacTarget() {
@@ -1300,7 +1312,7 @@ function readPotCodes() {
 function updatePotReadout() {
   const { a, mu } = readPotCodes();
   $("potReadout").innerHTML =
-    `<div>A: code ${mu}, wiper ${potCodeToVWiper(mu).toFixed(4)} V, output ${potCodeToAVoltage(mu).toFixed(4)} V</div>` +
+    `<div>Vstart: code ${mu}, wiper ${potCodeToVWiper(mu).toFixed(4)} V, output ${potCodeToVstartVoltage(mu).toFixed(4)} V</div>` +
     `<div>mu: code ${a}, wiper ${potCodeToVWiper(a).toFixed(4)} V, output ${potCodeToMuVoltage(a).toFixed(4)} V</div>`;
 }
 
@@ -1333,17 +1345,12 @@ async function applyPotAllDevices() {
   const button = $("applyPotAllButton");
   if (button) button.disabled = true;
   try {
-    logLine(`Programming all devices: mu code ${a}, A code ${mu}`);
+    const mode = firmwareSupportsPairProgram() ? "pair" : "legacy";
+    logLine(`Programming all devices (${mode}): mu code ${a}, Vstart code ${mu}`);
     for (let device = 1; device <= 16; device++) {
-      state.deviceStates[device].a = a;
-      const aReply = await sendCommand(`A${device},${a}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
-      if (replyLooksBad(aReply)) logLine(`[warn] A${device} ${replySummary(aReply)}`);
-
-      state.deviceStates[device].mu = mu;
-      const muReply = await sendCommand(`M${device},${mu}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
-      if (replyLooksBad(muReply)) logLine(`[warn] M${device} ${replySummary(muReply)}`);
+      await programLogicalDevice(device, a, mu);
     }
-    logLine(`All devices programmed: mu code ${a}, A code ${mu}`);
+    logLine(`All devices programmed: mu code ${a}, Vstart code ${mu}`);
   } finally {
     if (button) button.disabled = false;
     updatePotReadout();
@@ -1364,7 +1371,7 @@ function renderDeviceTable() {
     const info = deviceMuxInfo(device);
     const st = state.deviceStates[device];
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${device}</td><td>${info.group} addr ${info.addr} / ${info.cs}</td><td>${st.mu}</td><td>${potCodeToAVoltage(st.mu).toFixed(3)}</td><td>${st.a}</td><td>${potCodeToMuVoltage(st.a).toFixed(3)}</td>`;
+    tr.innerHTML = `<td>${device}</td><td>${info.group} addr ${info.addr} / ${info.cs}</td><td>${st.mu}</td><td>${potCodeToVstartVoltage(st.mu).toFixed(3)}</td><td>${st.a}</td><td>${potCodeToMuVoltage(st.a).toFixed(3)}</td>`;
     tr.addEventListener("click", () => {
       $("potDevice").value = device;
       loadDeviceState();
@@ -2229,35 +2236,68 @@ function logicalMuCodeForDevice(device) {
   return clamp(Math.round(Number(state.deviceStates[device]?.a ?? $("aCode").value) || 0), 0, POT_MAX_CODE);
 }
 
-function logicalACodeForDevice(device) {
+function logicalVstartCodeForDevice(device) {
   return clamp(Math.round(Number(state.deviceStates[device]?.mu ?? $("muCode").value) || 0), 0, POT_MAX_CODE);
 }
 
-function adjustmentPlanForFit(device, target, fit, muGain, aGain) {
+function logicalACodeForDevice(device) {
+  return logicalVstartCodeForDevice(device);
+}
+
+function adjustmentPlanForFit(device, target, fit, muGain, vstartGain, muVstartGain = 1) {
   const currentMuCode = logicalMuCodeForDevice(device);
-  const currentACode = logicalACodeForDevice(device);
+  const currentVstartCode = logicalVstartCodeForDevice(device);
   const currentMuV = potCodeToMuVoltage(currentMuCode);
-  const currentAV = potCodeToAVoltage(currentACode);
-  const nextMuV = currentMuV + (target.mu - fit.mu) * muGain;
-  const nextAV = currentAV + (target.A - fit.A) * aGain;
+  const currentVstartV = potCodeToVstartVoltage(currentVstartCode);
+  const muError = target.mu - fit.mu;
+  const ampError = target.A - fit.A;
+  const muControlDelta = muError * muGain;
+  const vstartCoupledDelta = muControlDelta * muVstartGain;
+  const vstartAmplitudeDelta = ampError * vstartGain;
+  const nextMuV = currentMuV + muControlDelta;
+  const nextVstartV = currentVstartV + vstartCoupledDelta + vstartAmplitudeDelta;
   const nextMuCode = muVoltageToCode(nextMuV);
-  const nextACode = aVoltageToCode(nextAV);
-  return { mode: "fit", device, target, fit, currentMuCode, currentACode, currentMuV, currentAV, nextMuV, nextAV, nextMuCode, nextACode };
+  const nextVstartCode = vstartVoltageToCode(nextVstartV);
+  return {
+    mode: "fit",
+    device,
+    target,
+    fit,
+    currentMuCode,
+    currentVstartCode,
+    currentMuV,
+    currentVstartV,
+    nextMuV,
+    nextVstartV,
+    nextMuCode,
+    nextVstartCode,
+    muControlDelta,
+    vstartCoupledDelta,
+    vstartAmplitudeDelta,
+    currentACode: currentVstartCode,
+    currentAV: currentVstartV,
+    nextAV: nextVstartV,
+    nextACode: nextVstartCode,
+  };
 }
 
 function directPlanForTarget(device, target) {
   const nextMuCode = muVoltageToCode(target.mu);
-  const nextACode = aVoltageToCode(target.A);
+  const nextVstartCode = vstartVoltageToCode(target.A);
+  const currentVstartCode = logicalVstartCodeForDevice(device);
   return {
     mode: "direct",
     device,
     target,
     currentMuCode: logicalMuCodeForDevice(device),
-    currentACode: logicalACodeForDevice(device),
+    currentVstartCode,
     nextMuV: target.mu,
-    nextAV: target.A,
+    nextVstartV: target.A,
     nextMuCode,
-    nextACode,
+    nextVstartCode,
+    currentACode: currentVstartCode,
+    nextAV: target.A,
+    nextACode: nextVstartCode,
   };
 }
 
@@ -2268,15 +2308,20 @@ function gaussianAdjustPlan(options = {}) {
   const targetMu = Number($("fitTargetMu").value);
   const targetA = Number($("fitTargetA").value);
   const muGain = Number(options.muGain ?? $("fitMuGain").value) || 1;
-  const aGain = Number(options.aGain ?? $("fitAGain").value) || 1;
-  if (![targetMu, targetA].every(Number.isFinite)) throw new Error("Target A/mu values are invalid.");
-  return adjustmentPlanForFit(device, { A: targetA, mu: targetMu, sigma: Math.abs(fit.sigma) }, fit, muGain, aGain);
+  const vstartGain = Number(options.vstartGain ?? options.aGain ?? $("fitAGain").value) || 1;
+  const muVstartGain = Number(options.muVstartGain ?? $("fitMuVstartGain")?.value) || 1;
+  if (![targetMu, targetA].every(Number.isFinite)) throw new Error("Target A_amp/mu values are invalid.");
+  return adjustmentPlanForFit(device, { A: targetA, mu: targetMu, sigma: Math.abs(fit.sigma) }, fit, muGain, vstartGain, muVstartGain);
 }
 
 function renderGaussianAdjustPlan(plan) {
   if (!plan) return;
   const errorText = plan.fit ? ` ${formatTargetError(gaussianTargetError(plan.fit, plan.target))}.` : "";
-  setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), A ${plan.currentACode}->${plan.nextACode} (${plan.nextAV.toFixed(4)} V).${errorText}`, "ok");
+  const vstartDelta = Number.isFinite(plan.nextVstartV) && Number.isFinite(plan.currentVstartV) ? plan.nextVstartV - plan.currentVstartV : NaN;
+  const couplingText = plan.mode === "fit" && Number.isFinite(vstartDelta)
+    ? `; Vstart delta ${vstartDelta.toFixed(4)} V = mu link ${plan.vstartCoupledDelta.toFixed(4)} + A_amp correction ${plan.vstartAmplitudeDelta.toFixed(4)}`
+    : "";
+  setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), Vstart ${plan.currentVstartCode}->${plan.nextVstartCode} (${plan.nextVstartV.toFixed(4)} V)${couplingText}.${errorText}`, "ok");
 }
 
 function previewGaussianAdjust() {
@@ -2287,26 +2332,29 @@ function previewGaussianAdjust() {
   }
 }
 
-async function programLogicalDevice(device, logicalMuCode, logicalACode) {
+async function programLogicalDevice(device, logicalMuCode, logicalVstartCode) {
   const muCode = clamp(Math.round(Number(logicalMuCode) || 0), 0, POT_MAX_CODE);
-  const aCode = clamp(Math.round(Number(logicalACode) || 0), 0, POT_MAX_CODE);
+  const vstartCode = clamp(Math.round(Number(logicalVstartCode) || 0), 0, POT_MAX_CODE);
   state.deviceStates[device].a = muCode;
+  state.deviceStates[device].mu = vstartCode;
+
+  if (firmwareSupportsPairProgram()) {
+    const pairReply = await sendCommand(`P${device},${muCode},${vstartCode}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+    if (!replyLooksBad(pairReply)) return;
+    logLine(`[warn] logical pair device ${device} ${replySummary(pairReply)}; falling back to A/M`);
+  }
+
   const muReply = await sendCommand(`A${device},${muCode}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
   if (replyLooksBad(muReply)) logLine(`[warn] logical mu device ${device} ${replySummary(muReply)}`);
-  state.deviceStates[device].mu = aCode;
-  const aReply = await sendCommand(`M${device},${aCode}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
-  if (replyLooksBad(aReply)) logLine(`[warn] logical A device ${device} ${replySummary(aReply)}`);
+  const vstartReply = await sendCommand(`M${device},${vstartCode}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+  if (replyLooksBad(vstartReply)) logLine(`[warn] logical Vstart device ${device} ${replySummary(vstartReply)}`);
 }
 
 async function programGaussianAdjust() {
   try {
     const plan = gaussianAdjustPlan();
-    await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextACode);
-    $("potDevice").value = plan.device;
-    $("aCode").value = plan.nextMuCode;
-    $("muCode").value = plan.nextACode;
-    updatePotReadout();
-    renderDeviceTable();
+    await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextVstartCode ?? plan.nextACode);
+    applyProgrammedPlanToUi(plan);
     renderGaussianAdjustPlan(plan);
   } catch (error) {
     setFitStatus(error.message, "warn");
@@ -2325,7 +2373,7 @@ function parseGmmTargetRows(text) {
     .filter(Boolean)
     .map((line, idx) => {
       const values = line.split(/[\s,;]+/).map(Number).filter(Number.isFinite);
-      if (values.length < 3) throw new Error(`GMM row ${idx + 1} needs A, mu, sigma.`);
+      if (values.length < 3) throw new Error(`GMM row ${idx + 1} needs A_amp(or Vstart), mu, sigma.`);
       return { A: values[0], mu: values[1], sigma: Math.abs(values[2]) };
     });
 }
@@ -2358,12 +2406,13 @@ function gmmPlan(options = {}) {
   const xDac = $("fitXDac").value;
   const yMode = $("fitYMode").value;
   const muGain = Number(options.muGain ?? $("fitMuGain").value) || 1;
-  const aGain = Number(options.aGain ?? $("fitAGain").value) || 1;
+  const vstartGain = Number(options.vstartGain ?? options.aGain ?? $("fitAGain").value) || 1;
+  const muVstartGain = Number(options.muVstartGain ?? $("fitMuVstartGain")?.value) || 1;
   return devices.map((device, idx) => {
     const adcIndex = adcIndexForDevice(device, idx, xDac);
     const data = gaussianFitSeries(xDac, adcIndex, yMode);
     const fit = { ...fitGaussianData(data), xDac, adcIndex, yMode, data };
-    return adjustmentPlanForFit(device, targets[idx], fit, muGain, aGain);
+    return adjustmentPlanForFit(device, targets[idx], fit, muGain, vstartGain, muVstartGain);
   });
 }
 function renderGmmPlan(plan) {
@@ -2371,8 +2420,12 @@ function renderGmmPlan(plan) {
   if (!host) return;
   state.lastGmmPlan = plan || [];
   host.innerHTML = (plan || []).map(item => {
-    const codeText = `mu ${item.currentMuCode}->${item.nextMuCode}, A ${item.currentACode}->${item.nextACode}`;
-    const targetText = `target A_amp=${item.target.A}, mu=${item.target.mu}, sigma=${item.target.sigma}`;
+    const currentVstartCode = item.currentVstartCode ?? item.currentACode;
+    const nextVstartCode = item.nextVstartCode ?? item.nextACode;
+    const codeText = `mu ${item.currentMuCode}->${item.nextMuCode}, Vstart ${currentVstartCode}->${nextVstartCode}`;
+    const targetText = item.mode === "direct"
+      ? `target Vstart=${item.target.A}, mu=${item.target.mu}, sigma=${item.target.sigma}`
+      : `target A_amp=${item.target.A}, mu=${item.target.mu}, sigma=${item.target.sigma}`;
     if (item.mode === "fit") {
       return `
         <div>
@@ -2384,7 +2437,7 @@ function renderGmmPlan(plan) {
     return `
       <div>
         Device ${item.device}<strong>${codeText}</strong>
-        <span>${targetText}; direct control voltage mode</span>
+        <span>${targetText}; direct Vstart/mu voltage mode</span>
       </div>
     `;
   }).join("");
@@ -2405,7 +2458,7 @@ function previewGmm() {
 async function programGmm() {
   try {
     const plan = state.lastGmmPlan.length ? state.lastGmmPlan : gmmPlan();
-    for (const item of plan) await programLogicalDevice(item.device, item.nextMuCode, item.nextACode);
+    for (const item of plan) await programLogicalDevice(item.device, item.nextMuCode, item.nextVstartCode ?? item.nextACode);
     renderDeviceTable();
     loadDeviceState();
     renderGmmPlan(plan);
@@ -2440,10 +2493,13 @@ function autoFitTolerances() {
 
 function autoFitControlGains() {
   const lr = autoFitLearningRate();
+  const vstartGain = (Number($("fitAGain").value) || 1) * lr;
   return {
     learningRate: lr,
     muGain: (Number($("fitMuGain").value) || 1) * lr,
-    aGain: (Number($("fitAGain").value) || 1) * lr,
+    vstartGain,
+    aGain: vstartGain,
+    muVstartGain: Number($("fitMuVstartGain")?.value) || 1,
   };
 }
 
@@ -2471,20 +2527,20 @@ function formatTargetError(error) {
 
 function singleAutoTarget() {
   const target = readGaussianTargetOrNull();
-  if (!target) throw new Error("Target A/mu values are invalid.");
+  if (!target) throw new Error("Target A_amp/mu values are invalid.");
   return target;
 }
 
 function applyProgrammedPlanToUi(plan) {
   $("potDevice").value = plan.device;
   $("aCode").value = plan.nextMuCode;
-  $("muCode").value = plan.nextACode;
+  $("muCode").value = plan.nextVstartCode ?? plan.nextACode;
   updatePotReadout();
   renderDeviceTable();
 }
 
 function planHasCodeChange(plan) {
-  return plan.currentMuCode !== plan.nextMuCode || plan.currentACode !== plan.nextACode;
+  return plan.currentMuCode !== plan.nextMuCode || (plan.currentVstartCode ?? plan.currentACode) !== (plan.nextVstartCode ?? plan.nextACode);
 }
 
 function gmmErrorSummary(plan, tolerances = autoFitTolerances()) {
@@ -2544,15 +2600,15 @@ async function autoFitSingle() {
       }
       const gains = autoFitControlGains();
       const device = deviceMuxInfo($("fitDevice").value).device;
-      const plan = adjustmentPlanForFit(device, target, fit, gains.muGain, gains.aGain);
+      const plan = adjustmentPlanForFit(device, target, fit, gains.muGain, gains.vstartGain, gains.muVstartGain);
       renderGaussianAdjustPlan(plan);
       if (!planHasCodeChange(plan)) {
         setFitStatus(`Auto single stopped: code unchanged, ${formatTargetError(error)}.`, "warn");
         return;
       }
-      await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextACode);
+      await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextVstartCode ?? plan.nextACode);
       applyProgrammedPlanToUi(plan);
-      setFitStatus(`Auto single ${iter}/${maxIter}: programmed, ${formatTargetError(error)}, lr=${gains.learningRate}.`, "warn");
+      setFitStatus(`Auto single ${iter}/${maxIter}: programmed, ${formatTargetError(error)}, lr=${gains.learningRate}, mu->Vstart=${gains.muVstartGain}.`, "warn");
     }
     if (state.autoFitStopRequested) {
       setFitStatus(`Auto single stopped at ${state.autoFitHistory.length}/${maxIter}.`, "warn");
@@ -2581,7 +2637,7 @@ async function autoFitGmm() {
       if (state.autoFitStopRequested) break;
       await runAutoSweep(`Auto GMM ${iter}/${maxIter}`, text => setGmmStatus(text));
       const gains = autoFitControlGains();
-      const plan = gmmPlan({ muGain: gains.muGain, aGain: gains.aGain });
+      const plan = gmmPlan({ muGain: gains.muGain, vstartGain: gains.vstartGain, muVstartGain: gains.muVstartGain });
       const summary = gmmErrorSummary(plan, tolerances);
       renderGmmPlan(plan);
       state.autoFitHistory.push({ mode: "gmm", iter, plan, summary });
@@ -2593,10 +2649,10 @@ async function autoFitGmm() {
         setGmmStatus(`Auto GMM stopped: all codes unchanged, max norm=${summary.maxNorm.toFixed(3)}.`, "warn");
         return;
       }
-      for (const item of plan) await programLogicalDevice(item.device, item.nextMuCode, item.nextACode);
+      for (const item of plan) await programLogicalDevice(item.device, item.nextMuCode, item.nextVstartCode ?? item.nextACode);
       renderDeviceTable();
       loadDeviceState();
-      setGmmStatus(`Auto GMM ${iter}/${maxIter}: programmed ${plan.length} device(s), max norm=${summary.maxNorm.toFixed(3)}, lr=${gains.learningRate}.`, "warn");
+      setGmmStatus(`Auto GMM ${iter}/${maxIter}: programmed ${plan.length} device(s), max norm=${summary.maxNorm.toFixed(3)}, lr=${gains.learningRate}, mu->Vstart=${gains.muVstartGain}.`, "warn");
     }
     if (state.autoFitStopRequested) {
       setGmmStatus(`Auto GMM stopped at ${state.autoFitHistory.length}/${maxIter}.`, "warn");
@@ -2758,7 +2814,7 @@ function bindEvents() {
   $("setACodeButton").addEventListener("click", setAFromCode);
   $("setAVoltageButton").addEventListener("click", async () => { $("aCode").value = muVoltageToCode($("aTarget").value); await setAFromCode(); });
   $("setMuCodeButton").addEventListener("click", setMuFromCode);
-  $("setMuVoltageButton").addEventListener("click", async () => { $("muCode").value = aVoltageToCode($("muTarget").value); await setMuFromCode(); });
+  $("setMuVoltageButton").addEventListener("click", async () => { $("muCode").value = vstartVoltageToCode($("muTarget").value); await setMuFromCode(); });
   $("applyPotButton").addEventListener("click", async () => { await setAFromCode(); await setMuFromCode(); });
   $("applyPotAllButton").addEventListener("click", applyPotAllDevices);
 
