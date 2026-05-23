@@ -14,7 +14,7 @@ const channels = [
 const state = new Map(
   channels.map((channel) => [
     channel.id,
-    { on: true, pwm: true, duty: 1000, pulse: false, pulseOnUs: 100000, pulseOffUs: 100000 },
+    { on: false, pwm: true, duty: 1000, pulse: false, pulseOnUs: 100000, pulseOffUs: 100000 },
   ]),
 );
 
@@ -75,6 +75,11 @@ function channelCommand(channelId, nextState = state.get(channelId)) {
   const on = nextState.on ? 1 : 0;
   const duty = nextState.pwm ? nextState.duty : 1000;
   return `SET,${channelId},${on},${duty}`;
+}
+
+function dimmingCommand(channelId, nextState = state.get(channelId)) {
+  const duty = nextState.pwm ? nextState.duty : 1000;
+  return `PWM,${channelId},${duty}`;
 }
 
 function clampPulseUs(value) {
@@ -148,7 +153,7 @@ function renderChannel(channel) {
   function sync() {
     const current = state.get(channel.id);
     stateText.textContent =
-      `${current.on ? "ON" : "OFF"} | PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)} | ${compactPulse(current)}`;
+      `${current.on ? "ON" : "OFF"} | ADIM PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)} | ${compactPulse(current)}`;
     onOffButton.textContent = current.on ? "ON" : "OFF";
     onOffButton.setAttribute("aria-pressed", String(current.on));
     pwmButton.textContent = current.pwm ? "ON" : "OFF";
@@ -165,6 +170,11 @@ function renderChannel(channel) {
   onOffButton.addEventListener("click", async () => {
     const current = state.get(channel.id);
     current.on = !current.on;
+    current.pulse = false;
+    if (current.on && current.duty === 0) {
+      current.pwm = true;
+      current.duty = 1000;
+    }
     sync();
     await sendCommand(channelCommand(channel.id, current));
   });
@@ -173,7 +183,7 @@ function renderChannel(channel) {
     const current = state.get(channel.id);
     current.pwm = !current.pwm;
     sync();
-    await sendCommand(channelCommand(channel.id, current));
+    await sendCommand(dimmingCommand(channel.id, current));
   });
 
   slider.addEventListener("input", () => {
@@ -184,7 +194,7 @@ function renderChannel(channel) {
 
   slider.addEventListener("change", async () => {
     const current = state.get(channel.id);
-    await sendCommand(channelCommand(channel.id, current));
+    await sendCommand(dimmingCommand(channel.id, current));
   });
 
   quickButtons.forEach((button) => {
@@ -193,7 +203,7 @@ function renderChannel(channel) {
       current.pwm = true;
       current.duty = Number(button.dataset.duty);
       sync();
-      await sendCommand(channelCommand(channel.id, current));
+      await sendCommand(dimmingCommand(channel.id, current));
     });
   });
 
@@ -241,7 +251,7 @@ function syncAllCards() {
     const channelId = card.dataset.channel;
     const current = state.get(channelId);
     card.querySelector(".channel-state").textContent =
-      `${current.on ? "ON" : "OFF"} | PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)} | ${compactPulse(current)}`;
+      `${current.on ? "ON" : "OFF"} | ADIM PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)} | ${compactPulse(current)}`;
     card.querySelector(".onoff-button").textContent = current.on ? "ON" : "OFF";
     card.querySelector(".onoff-button").setAttribute("aria-pressed", String(current.on));
     card.querySelector(".pwm-button").textContent = current.pwm ? "ON" : "OFF";
@@ -343,9 +353,13 @@ async function sendAll(on, duty = null) {
   for (const channel of channels) {
     const current = state.get(channel.id);
     current.on = on;
+    current.pulse = false;
     if (duty !== null) {
       current.pwm = duty < 1000;
       current.duty = duty;
+    } else if (on && current.duty === 0) {
+      current.pwm = true;
+      current.duty = 1000;
     }
   }
   syncAllCards();
