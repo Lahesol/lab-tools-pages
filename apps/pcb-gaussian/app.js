@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-22-fit-a-amp";
+const WEB_VERSION = "2026-05-23-current-nonnegative";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-21-version-check";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-v1";
 const APP_VERSION = WEB_VERSION;
@@ -276,7 +276,8 @@ function adcRawToVoltage(raw) {
   return Number(raw) * SAADC_INPUT_RANGE_V / SAADC_FULL_SCALE_RAW;
 }
 function adcVoltageToCurrentUa(voltage) {
-  return Number(voltage) / TIA_RESISTANCE_OHM * 1_000_000.0;
+  const current = Number(voltage) / TIA_RESISTANCE_OHM * 1_000_000.0;
+  return Number.isFinite(current) ? Math.max(0, current) : current;
 }
 function deviceMuxInfo(device) {
   const dev = clamp(Math.round(Number(device) || 1), 1, 16);
@@ -2095,11 +2096,12 @@ function gaussianSeedParams(data, minSigma, maxSigma) {
 
 function refineGaussianParams(data, seed, minX, maxX, minSigma, maxSigma) {
   const span = Math.max(1e-6, maxX - minX);
+  const nonNegativeData = data.every(item => item.y >= 0);
   let params = {
     A: seed.A,
     mu: clamp(seed.mu, minX, maxX),
     sigma: clamp(Math.abs(seed.sigma), minSigma, maxSigma),
-    baseline: seed.baseline,
+    baseline: nonNegativeData ? Math.max(0, seed.baseline) : seed.baseline,
   };
   let best = gaussianLoss(data, params);
   let steps = {
@@ -2115,6 +2117,7 @@ function refineGaussianParams(data, seed, minX, maxX, minSigma, maxSigma) {
         const next = { ...params, [key]: params[key] + dir * steps[key] };
         next.mu = clamp(next.mu, minX, maxX);
         next.sigma = clamp(Math.abs(next.sigma), minSigma, maxSigma);
+        if (nonNegativeData) next.baseline = Math.max(0, next.baseline);
         const loss = gaussianLoss(data, next);
         if (loss < best) {
           params = next;
