@@ -236,6 +236,23 @@ input:focus, select:focus {
   width: 110px;
   margin: 0;
 }
+.inline-field select {
+  width: 96px;
+  margin: 0;
+}
+.gate-probe {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.gate-slider {
+  width: 100%;
+  height: 28px;
+  margin: 10px 0 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
 .checkbox {
   display: inline-flex;
   align-items: center;

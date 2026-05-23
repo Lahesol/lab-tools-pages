@@ -13,9 +13,9 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-23-vstart-pair-program";
-const EXPECTED_FIRMWARE_VERSION = "2026-05-23-pair-program";
-const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-v1";
+const WEB_VERSION = "2026-05-23-gate-slider-map";
+const EXPECTED_FIRMWARE_VERSION = "2026-05-23-gate-probe";
+const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-v1";
 const APP_VERSION = WEB_VERSION;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
 const FIRMWARE_SWEEP_RE = /^(SWEEP|SX),/i;
@@ -331,6 +331,11 @@ const state = {
   lastGaussianFit: null,
   lastGmmPlan: [],
   sweepRunning: false,
+  gateProbeRunning: false,
+  gateProbeBusy: false,
+  gateProbePending: false,
+  gateProbePointIndex: 0,
+  gateProbeTimer: null,
   autoFitRunning: false,
   autoFitStopRequested: false,
   autoFitHistory: [],
@@ -380,7 +385,13 @@ function updateVersionInfo(extraClass = "") {
 function firmwareSupportsPairProgram() {
   const protocol = String(state.firmwareProtocol || "").toLowerCase();
   const version = String(state.firmwareVersion || "").toLowerCase();
-  return protocol.includes("pair") || version.includes("pair-program");
+  return protocol.includes("pair") || version.includes("pair-program") || version.includes("gate-probe");
+}
+
+function firmwareSupportsGateProbe() {
+  const protocol = String(state.firmwareProtocol || "").toLowerCase();
+  const version = String(state.firmwareVersion || "").toLowerCase();
+  return protocol.includes("gate") || version.includes("gate-probe");
 }
 
 function parseVersionKeyValues(parts, startIndex) {
@@ -1278,6 +1289,183 @@ function stopSweep() {
   logLine("Sweep stop requested; firmware sweep will finish the in-progress command before stopping.");
 }
 
+function gateProbeStatus(text, kind = "") {
+  const status = $("gateProbeStatus");
+  if (!status) return;
+  status.textContent = text;
+  status.className = `hint ${kind}`.trim();
+}
+
+function gateProbeDac() {
+  return $("gateProbeDac")?.value === "D1" ? "D1" : "D2";
+}
+
+function gateProbeRateMs() {
+  const input = $("gateProbeRateMs");
+  const value = clamp(Math.round(Number(input?.value) || 80), 20, 2000);
+  if (input) input.value = value;
+  return value;
+}
+
+function gateProbeMv(source = "") {
+  const slider = $("gateProbeSlider");
+  const number = $("gateProbeMvNumber");
+  const raw = source === "number" ? number?.value : source === "slider" ? slider?.value : (number?.value ?? slider?.value);
+  const value = clamp(Math.round(Number(raw) || 0), DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+  if (slider) slider.value = value;
+  if (number) number.value = value;
+  return value;
+}
+
+function setGateProbeControls(running) {
+  const start = $("gateProbeStartButton");
+  const stop = $("gateProbeStopButton");
+  if (start) start.disabled = running;
+  if (stop) stop.disabled = !running;
+}
+
+function ensureGateProbeCapture(dac) {
+  if (state.activeSweep?.gateProbe && state.activeSweep.gateProbeDac === dac) return;
+  startSweepCapture([{ dac, startMv: DAC_OUTPUT_MIN_MV, stopMv: DAC_OUTPUT_MAX_MV, rangeMinMv: DAC_OUTPUT_MIN_MV, rangeMaxMv: DAC_OUTPUT_MAX_MV }], 1);
+  state.activeSweep.gateProbe = true;
+  state.activeSweep.gateProbeDac = dac;
+  state.gateProbePointIndex = 0;
+  setPlotStatus(dac, `Gate map ${state.activeSweep.id}: waiting for ADC data.`);
+}
+
+function finalizeGateProbeCapture() {
+  if (!state.activeSweep?.gateProbe) return;
+  const count = state.activeSweep.points.length;
+  if (count) {
+    finishSweepCapture();
+    gateProbeStatus(`Gate map complete: ${count} point(s).`, "ok");
+  } else {
+    state.activeSweep = null;
+    state.pendingAdcContext = null;
+    renderSweepPlot();
+    gateProbeStatus("Gate map idle");
+  }
+}
+
+function clearGateProbeMap() {
+  state.gateProbeRunning = false;
+  state.gateProbePending = false;
+  if (state.gateProbeTimer) clearTimeout(state.gateProbeTimer);
+  state.gateProbeTimer = null;
+  state.activeSweep = null;
+  state.lastSweep = null;
+  state.pendingAdcContext = null;
+  state.lastGaussianFit = null;
+  state.lastGmmPlan = [];
+  renderGaussianFit(null);
+  renderGmmPlan([]);
+  renderSweepPlot();
+  setGateProbeControls(false);
+  setAllPlotStatus("No sweep data yet.");
+  gateProbeStatus("Gate map cleared.", "ok");
+}
+
+function scheduleGateProbeSample(delayMs = null) {
+  if (!state.gateProbeRunning) return;
+  if (state.gateProbeTimer) clearTimeout(state.gateProbeTimer);
+  state.gateProbeTimer = setTimeout(() => {
+    state.gateProbeTimer = null;
+    sampleGateProbe(false);
+  }, delayMs ?? gateProbeRateMs());
+}
+
+async function sampleGateProbe(force = false) {
+  if (state.gateProbeBusy) {
+    state.gateProbePending = true;
+    return;
+  }
+  state.gateProbeBusy = true;
+  try {
+    do {
+      state.gateProbePending = false;
+      if (!force && !state.gateProbeRunning) break;
+      const dac = gateProbeDac();
+      const mv = gateProbeMv();
+      const code = vhighToDacCode(dac, mv / 1000);
+      const mask = sweepAdcMask(dac);
+      const avg = adcAvgSamples();
+      const settle = sweepSettleUs();
+      ensureGateProbeCapture(dac);
+      state.dacCodes[dac] = code;
+      if ($("dacSelect")?.value === dac) {
+        $("dacCode").value = code;
+        updateDacReadout();
+      }
+      const pointIndex = state.gateProbePointIndex++;
+      const snapshot = dacSnapshot();
+      snapshot[dac] = { code, vhigh: mv / 1000 };
+      state.pendingAdcContext = {
+        sweepId: state.activeSweep.id,
+        pointIndex,
+        dac: snapshot,
+        selectedTias: selectedTias(),
+        sweepDac: dac,
+      };
+      let reply = null;
+      if (firmwareSupportsGateProbe()) {
+        reply = await sendCommand(`G${dac.slice(1)},${Math.round(mv)},${mask},${avg},${settle}`, {
+          waitForReply: true,
+          timeoutMs: 4000,
+          replyMatcher: text => {
+            const upper = text.toUpperCase();
+            return upper.startsWith("ADC,") || upper.startsWith("G,ERR");
+          },
+        });
+        if (typeof reply === "string" && reply.toUpperCase().startsWith("G,ERR")) {
+          gateProbeStatus(reply, "warn");
+        }
+      } else {
+        const dacReply = await sendCommand(`V${dac.slice(1)},${Math.round(mv)}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+        if (replyLooksBad(dacReply)) logLine(`[warn] gate ${dac} ${replySummary(dacReply)}`);
+        reply = await sendCommand("ADC", { waitForReply: true, timeoutMs: 4000, replyMatcher: text => text.toUpperCase().startsWith("ADC,") });
+      }
+      if (state.pendingAdcContext?.sweepId === state.activeSweep?.id && state.pendingAdcContext?.pointIndex === pointIndex) {
+        state.pendingAdcContext = null;
+      }
+      if (replyLooksBad(reply)) gateProbeStatus(`Gate map ${dac}: ${replySummary(reply)}.`, "warn");
+      else gateProbeStatus(`Gate map ${dac}: ${(mv / 1000).toFixed(3)} V, ${(state.activeSweep?.points.length || 0)} point(s).`, "ok");
+      force = false;
+    } while (state.gateProbePending && state.gateProbeRunning);
+  } catch (error) {
+    gateProbeStatus(error.message, "warn");
+  } finally {
+    state.gateProbeBusy = false;
+    if (state.gateProbePending && state.gateProbeRunning) scheduleGateProbeSample(0);
+    if (!state.gateProbeRunning) finalizeGateProbeCapture();
+  }
+}
+
+function startGateProbe() {
+  if (state.sweepRunning) {
+    gateProbeStatus("Stop firmware sweep before live gate map.", "warn");
+    return;
+  }
+  state.gateProbeRunning = true;
+  state.gateProbePending = false;
+  setGateProbeControls(true);
+  ensureGateProbeCapture(gateProbeDac());
+  sampleGateProbe(false);
+}
+
+function stopGateProbe() {
+  state.gateProbeRunning = false;
+  state.gateProbePending = false;
+  if (state.gateProbeTimer) clearTimeout(state.gateProbeTimer);
+  state.gateProbeTimer = null;
+  setGateProbeControls(false);
+  if (!state.gateProbeBusy) finalizeGateProbeCapture();
+}
+
+function onGateProbeInput(source) {
+  gateProbeMv(source);
+  if (state.gateProbeRunning) scheduleGateProbeSample();
+}
+
 function updateSwitchInfo() {
   const info = deviceMuxInfo($("switchDevice").value);
   $("switchInfo").textContent =
@@ -1737,7 +1925,7 @@ function fixedPlotRangeEnabled() {
 }
 
 function sweepXBounds(sweep, xDac, samples) {
-  const fixed = fixedPlotRangeEnabled() ? sweep?.rangeByDac?.[xDac] : null;
+  const fixed = (sweep?.gateProbe || fixedPlotRangeEnabled()) ? sweep?.rangeByDac?.[xDac] : null;
   if (fixed && Number.isFinite(fixed.min) && Number.isFinite(fixed.max) && fixed.min !== fixed.max) {
     return { minX: fixed.min, maxX: fixed.max };
   }
@@ -2784,6 +2972,14 @@ function bindEvents() {
   $("initButton").addEventListener("click", initializeAll);
   $("startSweepButton").addEventListener("click", startSweep);
   $("stopSweepButton").addEventListener("click", stopSweep);
+  $("gateProbeSlider").addEventListener("input", () => onGateProbeInput("slider"));
+  $("gateProbeMvNumber").addEventListener("input", () => onGateProbeInput("number"));
+  $("gateProbeDac").addEventListener("change", () => { gateProbeMv(); if (state.gateProbeRunning) { ensureGateProbeCapture(gateProbeDac()); scheduleGateProbeSample(0); } });
+  $("gateProbeRateMs").addEventListener("change", gateProbeRateMs);
+  $("gateProbeStartButton").addEventListener("click", startGateProbe);
+  $("gateProbeSampleButton").addEventListener("click", () => sampleGateProbe(true));
+  $("gateProbeStopButton").addEventListener("click", stopGateProbe);
+  $("gateProbeClearButton").addEventListener("click", clearGateProbeMap);
   $("plotYMode").addEventListener("change", renderSweepPlot);
   $("fixedPlotRange").addEventListener("change", renderSweepPlot);
   $("sweepTraceOpacity").addEventListener("input", renderSweepPlot);
@@ -2844,6 +3040,8 @@ function init() {
   renderFitAdcOptions();
   renderGaussianFit(null);
   setAutoFitControlsDisabled(false);
+  setGateProbeControls(false);
+  gateProbeMv();
   renderSweepPlot();
   updateVersionInfo();
   logLine("Web GUI ready");
