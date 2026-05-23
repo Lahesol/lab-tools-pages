@@ -259,6 +259,44 @@ h1 {
   font-size: 13px;
 }
 
+.pulse-panel {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.pulse-panel .control-row {
+  border-top: 0;
+}
+
+.pulse-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.pulse-times label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pulse-times input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 9px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.pulse-apply-button {
+  width: 100%;
+  min-height: 36px;
+}
+
 .terminal {
   margin-top: 16px;
   background: #12191c;

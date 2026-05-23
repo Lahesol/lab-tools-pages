@@ -14,7 +14,7 @@ const channels = [
 const state = new Map(
   channels.map((channel) => [
     channel.id,
-    { on: true, pwm: true, duty: 1000 },
+    { on: true, pwm: true, duty: 1000, pulse: false, pulseOnUs: 100000, pulseOffUs: 100000 },
   ]),
 );
 
@@ -52,7 +52,7 @@ function isConnected() {
 function setConnectionStatus(connected, label = "") {
   el.connectionDot.classList.toggle("connected", connected);
   el.connectionText.textContent = connected ? "Connected" : "Disconnected";
-  el.connectButton.textContent = connected ? "Disconnect" : "⌁ Connect";
+  el.connectButton.textContent = connected ? "Disconnect" : "BLE Connect";
   el.deviceName.textContent = label || "BLE NUS";
   document.body.classList.toggle("is-connected", connected);
 }
@@ -67,10 +67,31 @@ function compactDuty(duty) {
   return `${Math.round((duty / 1000) * 100)}%`;
 }
 
+function compactPulse(current) {
+  return current.pulse ? `PULSE ${current.pulseOnUs}/${current.pulseOffUs} us` : "PULSE OFF";
+}
+
 function channelCommand(channelId, nextState = state.get(channelId)) {
   const on = nextState.on ? 1 : 0;
   const duty = nextState.pwm ? nextState.duty : 1000;
   return `SET,${channelId},${on},${duty}`;
+}
+
+function clampPulseUs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 100000;
+  }
+  return Math.max(10, Math.min(60000000, Math.round(numeric)));
+}
+
+function pulseCommand(channelId, nextState = state.get(channelId)) {
+  const enabled = nextState.pulse ? 1 : 0;
+  const onUs = clampPulseUs(nextState.pulseOnUs);
+  const offUs = clampPulseUs(nextState.pulseOffUs);
+  nextState.pulseOnUs = onUs;
+  nextState.pulseOffUs = offUs;
+  return `PULSEU,${channelId},${enabled},${onUs},${offUs}`;
 }
 
 async function sendCommand(command) {
@@ -115,6 +136,10 @@ function renderChannel(channel) {
   const slider = fragment.querySelector(".duty-slider");
   const output = fragment.querySelector(".duty-output");
   const quickButtons = fragment.querySelectorAll(".quick-button");
+  const pulseButton = fragment.querySelector(".pulse-button");
+  const pulseOnInput = fragment.querySelector(".pulse-on-input");
+  const pulseOffInput = fragment.querySelector(".pulse-off-input");
+  const pulseApplyButton = fragment.querySelector(".pulse-apply-button");
 
   card.dataset.channel = channel.id;
   chip.style.background = channel.color;
@@ -122,7 +147,8 @@ function renderChannel(channel) {
 
   function sync() {
     const current = state.get(channel.id);
-    stateText.textContent = `${current.on ? "ON" : "OFF"} | PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)}`;
+    stateText.textContent =
+      `${current.on ? "ON" : "OFF"} | PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)} | ${compactPulse(current)}`;
     onOffButton.textContent = current.on ? "ON" : "OFF";
     onOffButton.setAttribute("aria-pressed", String(current.on));
     pwmButton.textContent = current.pwm ? "ON" : "OFF";
@@ -130,6 +156,10 @@ function renderChannel(channel) {
     slider.value = current.duty;
     slider.disabled = !current.pwm;
     output.textContent = `${current.duty}/1000`;
+    pulseButton.textContent = current.pulse ? "ON" : "OFF";
+    pulseButton.setAttribute("aria-pressed", String(current.pulse));
+    pulseOnInput.value = current.pulseOnUs;
+    pulseOffInput.value = current.pulseOffUs;
   }
 
   onOffButton.addEventListener("click", async () => {
@@ -167,6 +197,41 @@ function renderChannel(channel) {
     });
   });
 
+  pulseButton.addEventListener("click", async () => {
+    const current = state.get(channel.id);
+    current.pulse = !current.pulse;
+    if (current.pulse) {
+      current.on = true;
+    }
+    current.pulseOnUs = clampPulseUs(pulseOnInput.value);
+    current.pulseOffUs = clampPulseUs(pulseOffInput.value);
+    sync();
+    await sendCommand(pulseCommand(channel.id, current));
+  });
+
+  pulseOnInput.addEventListener("change", () => {
+    const current = state.get(channel.id);
+    current.pulseOnUs = clampPulseUs(pulseOnInput.value);
+    sync();
+  });
+
+  pulseOffInput.addEventListener("change", () => {
+    const current = state.get(channel.id);
+    current.pulseOffUs = clampPulseUs(pulseOffInput.value);
+    sync();
+  });
+
+  pulseApplyButton.addEventListener("click", async () => {
+    const current = state.get(channel.id);
+    current.pulseOnUs = clampPulseUs(pulseOnInput.value);
+    current.pulseOffUs = clampPulseUs(pulseOffInput.value);
+    if (current.pulse) {
+      current.on = true;
+    }
+    sync();
+    await sendCommand(pulseCommand(channel.id, current));
+  });
+
   sync();
   el.channelGrid.appendChild(fragment);
 }
@@ -176,7 +241,7 @@ function syncAllCards() {
     const channelId = card.dataset.channel;
     const current = state.get(channelId);
     card.querySelector(".channel-state").textContent =
-      `${current.on ? "ON" : "OFF"} | PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)}`;
+      `${current.on ? "ON" : "OFF"} | PWM ${current.pwm ? "ON" : "OFF"} | ${compactDuty(current.duty)} | ${compactPulse(current)}`;
     card.querySelector(".onoff-button").textContent = current.on ? "ON" : "OFF";
     card.querySelector(".onoff-button").setAttribute("aria-pressed", String(current.on));
     card.querySelector(".pwm-button").textContent = current.pwm ? "ON" : "OFF";
@@ -184,6 +249,10 @@ function syncAllCards() {
     card.querySelector(".duty-slider").value = current.duty;
     card.querySelector(".duty-slider").disabled = !current.pwm;
     card.querySelector(".duty-output").textContent = `${current.duty}/1000`;
+    card.querySelector(".pulse-button").textContent = current.pulse ? "ON" : "OFF";
+    card.querySelector(".pulse-button").setAttribute("aria-pressed", String(current.pulse));
+    card.querySelector(".pulse-on-input").value = current.pulseOnUs;
+    card.querySelector(".pulse-off-input").value = current.pulseOffUs;
   }
 }
 

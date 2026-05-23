@@ -253,6 +253,13 @@ input:focus, select:focus {
   border: 0;
   background: transparent;
 }
+.tune-row {
+  margin: 14px 0 10px;
+}
+.tune-slider-label {
+  display: block;
+  margin-top: 10px;
+}
 .checkbox {
   display: inline-flex;
   align-items: center;
