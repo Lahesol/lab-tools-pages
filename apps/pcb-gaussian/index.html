@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=6bd0ef45ef3f" />
+    <link rel="stylesheet" href="./styles.css?v=3e06d1a23ca0" />
   </head>
   <body>
     <header class="app-header">
@@ -211,6 +211,9 @@
               <label class="inline-field">mu gain <input id="fitMuGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">Vstart gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">mu->Vstart <input id="fitMuVstartGain" type="number" value="1" step="0.1" /></label>
+              <label class="inline-field">mu dir <select id="fitMuDirection"><option value="1">+err -> +Vmu</option><option value="-1">+err -> -Vmu</option></select></label>
+              <label class="inline-field">A dir <select id="fitADirection"><option value="1">+err -> +Vstart</option><option value="-1">+err -> -Vstart</option></select></label>
+              <label class="checkbox inline-check"><input id="fitAerrorGuard" type="checkbox" checked /> A dir lock</label>
               <label class="inline-field">Trace opacity <input id="sweepTraceOpacity" type="number" value="0.45" min="0.1" max="1" step="0.05" /></label>
               <label class="checkbox inline-check"><input id="showFitOverlay" type="checkbox" checked /> Fit overlay</label>
               <button id="previewGaussianAdjustButton">Preview adjust</button>
@@ -223,7 +226,7 @@
               <button id="autoFitGmmButton">Auto fit GMM</button>
               <button id="stopAutoFitButton">Stop auto</button>
             </div>
-            <p class="hint" id="fitStatus">Fit uses A_amp and mu from the completed sweep; Vstart_next = Vstart + mu->Vstart * dmu_control + Vstart gain * dA_amp.</p>
+            <p class="hint" id="fitStatus">Fit uses signed A_amp and mu errors; A dir lock prevents mu->Vstart coupling from overriding the A-error Vstart direction.</p>
           </article>
           <article class="panel fit-panel">
             <div class="panel-title">
@@ -452,9 +455,11 @@
             </div>
             <div class="form-grid">
               <label>Device <input id="deviceTuneDevice" type="number" min="1" max="16" value="1" /></label>
-              <label>X axis <select id="deviceTuneXAxis"><option value="mu">Vmu</option><option value="vstart">Vstart</option></select></label>
+              <label>X axis <select id="deviceTuneXAxis"><option value="dac">DAC output</option><option value="mu">Vmu</option><option value="vstart">Vstart</option></select></label>
             </div>
             <div class="button-row tune-row">
+              <label class="inline-field">Gate DAC <select id="deviceTuneDac"><option>D2</option><option>D1</option></select></label>
+              <label class="inline-field">Gate mV <input id="deviceTuneDacMvNumber" type="number" value="0" min="-15000" max="15000" step="10" /></label>
               <label class="inline-field">Vmu V <input id="deviceTuneMuNumber" type="number" value="0" step="0.01" /></label>
               <label class="inline-field">Vstart V <input id="deviceTuneVstartNumber" type="number" value="0" step="0.01" /></label>
               <label class="inline-field">Rate ms <input id="deviceTuneRateMs" type="number" value="100" min="20" max="2000" step="10" /></label>
@@ -464,6 +469,9 @@
               <button id="deviceTuneStopButton" disabled>Stop live</button>
               <button id="deviceTuneClearButton">Clear map</button>
             </div>
+            <label class="tune-slider-label">Gate DAC output
+              <input id="deviceTuneDacSlider" class="gate-slider" type="range" min="-15000" max="15000" step="10" value="0" />
+            </label>
             <label class="tune-slider-label">Vmu
               <input id="deviceTuneMuSlider" class="gate-slider" type="range" min="-6" max="0" step="0.01" value="0" />
             </label>
@@ -477,7 +485,7 @@
             <div class="panel-title">
               <div>
                 <p class="eyebrow">live ADC map</p>
-                <h2 id="deviceTunePlotTitle">Vmu X-axis plot</h2>
+                <h2 id="deviceTunePlotTitle">DAC X-axis plot</h2>
               </div>
               <p class="hint" id="deviceTunePlotStatus">No device tune data yet.</p>
             </div>
@@ -500,7 +508,7 @@
           </div>
           <textarea class="log-view" readonly spellcheck="false"></textarea>
           <div class="manual-send">
-            <input class="manual-command" placeholder="Manual command, e.g. Q1,128,128" />
+            <input class="manual-command" placeholder="Manual command, e.g. T2,1,128,128,0,15,16,2000" />
             <button class="manual-send-control primary">Send</button>
           </div>
         </article>
@@ -558,7 +566,8 @@
 
     </main>
 
-    <script src="./app.js?v=20260523-device-tune"></script>
-    <script src="./device_tune.js?v=20260523-device-tune"></script>
+    <script src="./app.js?v=20260523-device-dac-tune"></script>
+    <script src="./fit_control.js?v=20260523-device-dac-tune"></script>
+    <script src="./device_tune.js?v=20260523-device-dac-tune"></script>
   </body>
 </html>

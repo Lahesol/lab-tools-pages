@@ -71,10 +71,8 @@ function compactPulse(current) {
   return current.pulse ? `PULSE ${current.pulseOnUs}/${current.pulseOffUs} us` : "PULSE OFF";
 }
 
-function channelCommand(channelId, nextState = state.get(channelId)) {
-  const on = nextState.on ? 1 : 0;
-  const duty = nextState.pwm ? nextState.duty : 1000;
-  return `SET,${channelId},${on},${duty}`;
+function lightCommand(channelId, nextState = state.get(channelId)) {
+  return `${nextState.on ? "ON" : "OFF"},${channelId}`;
 }
 
 function dimmingCommand(channelId, nextState = state.get(channelId)) {
@@ -87,7 +85,7 @@ function clampPulseUs(value) {
   if (!Number.isFinite(numeric)) {
     return 100000;
   }
-  return Math.max(10, Math.min(60000000, Math.round(numeric)));
+  return Math.max(100, Math.min(60000000, Math.round(numeric)));
 }
 
 function pulseCommand(channelId, nextState = state.get(channelId)) {
@@ -176,7 +174,7 @@ function renderChannel(channel) {
       current.duty = 1000;
     }
     sync();
-    await sendCommand(channelCommand(channel.id, current));
+    await sendCommand(lightCommand(channel.id, current));
   });
 
   pwmButton.addEventListener("click", async () => {
@@ -365,7 +363,10 @@ async function sendAll(on, duty = null) {
   syncAllCards();
 
   const first = state.get(channels[0].id);
-  await sendCommand(`SET,ALL,${first.on ? 1 : 0},${first.duty}`);
+  if (duty !== null) {
+    await sendCommand(`PWM,ALL,${first.duty}`);
+  }
+  await sendCommand(`${first.on ? "ON" : "OFF"},ALL`);
 }
 
 el.connectButton.addEventListener("click", async () => {

@@ -240,6 +240,10 @@ input:focus, select:focus {
   width: 96px;
   margin: 0;
 }
+.fit-panel .inline-field select,
+.tune-row .inline-field select {
+  width: 132px;
+}
 .gate-probe {
   margin-top: 14px;
   padding-top: 12px;

@@ -31,6 +31,12 @@
     return protocol.includes("device") || version.includes("device-probe");
   }
 
+  function firmwareSupportsDeviceDacProbe() {
+    const protocol = String(state.firmwareProtocol || "").toLowerCase();
+    const version = String(state.firmwareVersion || "").toLowerCase();
+    return protocol.includes("device-dac") || version.includes("device-dac-probe");
+  }
+
   function voltageRange(param) {
     const fallback = param === "mu" ? { min: -6, max: 0 } : { min: -17, max: 0 };
     const voltages = getParamCalPoints(param)
@@ -64,8 +70,37 @@
     return device;
   }
 
+  function deviceTuneDac() {
+    return $("deviceTuneDac")?.value === "D1" ? "D1" : "D2";
+  }
+
+  function setDeviceTuneDacMv(value) {
+    const safeMv = clamp(Math.round(Number(value) || 0), DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+    const slider = $("deviceTuneDacSlider");
+    const number = $("deviceTuneDacMvNumber");
+    if (slider) slider.value = safeMv;
+    if (number) number.value = safeMv;
+    return safeMv;
+  }
+
+  function readDeviceTuneDacMv(source = "") {
+    const slider = $("deviceTuneDacSlider");
+    const number = $("deviceTuneDacMvNumber");
+    const raw = source === "dacSlider" ? slider?.value : source === "dacNumber" ? number?.value : (number?.value ?? slider?.value);
+    return setDeviceTuneDacMv(raw);
+  }
+
+  function syncDeviceTuneDacFromState() {
+    const dac = deviceTuneDac();
+    const code = state.dacCodes[dac] ?? 0;
+    setDeviceTuneDacMv(Math.round(dacCodeToVhigh(dac, code) * 1000));
+  }
+
   function deviceTuneXMode() {
-    return $("deviceTuneXAxis")?.value === "vstart" ? "vstart" : "mu";
+    const value = $("deviceTuneXAxis")?.value;
+    if (value === "vstart") return "vstart";
+    if (value === "mu") return "mu";
+    return "dac";
   }
 
   function deviceTuneYMode() {
@@ -73,10 +108,12 @@
   }
 
   function deviceTuneXLabel(mode = deviceTuneXMode()) {
+    if (mode === "dac") return `${deviceTuneDac()} output (V)`;
     return mode === "vstart" ? "Vstart (V)" : "Vmu (V)";
   }
 
   function deviceTuneXRange(mode = deviceTuneXMode()) {
+    if (mode === "dac") return { min: DAC_OUTPUT_MIN_MV / 1000, max: DAC_OUTPUT_MAX_MV / 1000 };
     return mode === "vstart" ? voltageRange("A") : voltageRange("mu");
   }
 
@@ -111,10 +148,13 @@
     const device = deviceTuneDevice();
     const st = state.deviceStates[device] || { a: 0, mu: 0 };
     setDeviceTuneVoltages(potCodeToMuVoltage(st.a), potCodeToVstartVoltage(st.mu));
+    syncDeviceTuneDacFromState();
     renderDeviceTunePlot();
   }
 
   function setupDeviceTuneSliders() {
+    setRange($("deviceTuneDacSlider"), { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV });
+    setRange($("deviceTuneDacMvNumber"), { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV });
     setRange($("deviceTuneMuSlider"), voltageRange("mu"));
     setRange($("deviceTuneMuNumber"), voltageRange("mu"));
     setRange($("deviceTuneVstartSlider"), voltageRange("A"));
@@ -215,6 +255,9 @@
       device: context.device,
       xAxis: context.xAxis,
       x: context.x,
+      dac: context.dac,
+      dacMv: context.dacMv,
+      dacCode: context.dacCode,
       muV: context.muV,
       vstartV: context.vstartV,
       muCode: context.muCode,
@@ -234,9 +277,9 @@
       const current = hasRaw ? adcVoltageToCurrentUa(voltage) : "";
       addMeasurement({
         time: nowTime(),
-        dac: `DEV${context.device}`,
-        code: `${context.muCode}/${context.vstartCode}`,
-        vhigh: `${context.muV.toFixed(5)}/${context.vstartV.toFixed(5)}`,
+        dac: context.dac || `DEV${context.device}`,
+        code: `${context.dacCode ?? ""}/${context.muCode}/${context.vstartCode}`,
+        vhigh: `${Number(context.dacMv ?? 0).toFixed(0)} mV; mu ${context.muV.toFixed(5)} / Vstart ${context.vstartV.toFixed(5)}`,
         tia: `TIA${tiaNo}/${tia.adc}`,
         raw: hasRaw ? rawValue : "",
         voltage: hasRaw ? voltage.toFixed(6) : "",
@@ -288,12 +331,13 @@
     const xAxis = deviceTuneXMode();
     const yMode = deviceTuneYMode();
     const title = $("deviceTunePlotTitle");
-    if (title) title.textContent = `${xAxis === "vstart" ? "Vstart" : "Vmu"} X-axis plot`;
+    const xName = xAxis === "dac" ? "DAC" : xAxis === "vstart" ? "Vstart" : "Vmu";
+    if (title) title.textContent = `${xName} X-axis plot`;
 
     const adcIndices = selectedDeviceTuneAdcs();
     const labels = adcIndices.map(idx => `ADC${idx}`);
     const points = state.deviceTunePoints
-      .filter(point => point.device === device && point.xAxis === xAxis)
+      .filter(point => point.device === device && point.xAxis === xAxis && (xAxis !== "dac" || point.dac === deviceTuneDac()))
       .slice();
 
     if (!adcIndices.length) {
@@ -311,8 +355,8 @@
     }
 
     if (!samples.length) {
-      drawEmptyDeviceTunePlot(`Move the ${xAxis === "vstart" ? "Vstart" : "Vmu"} slider and sample ADC.`);
-      setDeviceTunePlotStatus(`Device ${device}: no ${xAxis === "vstart" ? "Vstart" : "Vmu"} tune data yet.`);
+      drawEmptyDeviceTunePlot(`Move the ${xName} slider and sample ADC.`);
+      setDeviceTunePlotStatus(`Device ${device}: no ${xName} tune data yet.`);
       return;
     }
 
@@ -458,18 +502,29 @@
         }
         const mask = deviceTuneAdcMask(adcIndices);
         const device = deviceTuneDevice();
+        const dac = deviceTuneDac();
+        const dacMv = readDeviceTuneDacMv();
+        const dacCode = vhighToDacCode(dac, dacMv / 1000);
         const { muV, vstartV } = readDeviceTuneVoltages();
         const muCode = muVoltageToCode(muV);
         const vstartCode = vstartVoltageToCode(vstartV);
         const xAxis = deviceTuneXMode();
         const pointIndex = state.deviceTunePointIndex++;
         applyDeviceTuneState(device, muCode, vstartCode);
+        state.dacCodes[dac] = dacCode;
+        if ($("dacSelect")?.value === dac) {
+          $("dacCode").value = dacCode;
+          updateDacReadout();
+        }
         const context = {
           deviceTune: true,
           pointIndex,
           device,
+          dac,
+          dacMv,
+          dacCode,
           xAxis,
-          x: xAxis === "vstart" ? vstartV : muV,
+          x: xAxis === "dac" ? dacMv / 1000 : xAxis === "vstart" ? vstartV : muV,
           muV,
           vstartV,
           muCode,
@@ -480,7 +535,19 @@
         };
 
         let reply = null;
-        if (firmwareSupportsDeviceProbe()) {
+        if (firmwareSupportsDeviceDacProbe()) {
+          state.pendingAdcContext = context;
+          reply = await sendCommand(`T${dac.slice(1)},${device},${muCode},${vstartCode},${Math.round(dacMv)},${mask},${adcAvgSamples()},${sweepSettleUs()}`, {
+            waitForReply: true,
+            timeoutMs: 4000,
+            replyMatcher: text => {
+              const upper = text.toUpperCase();
+              return upper.startsWith("ADC,") || upper.startsWith("T,ERR") || upper.startsWith("ERR");
+            },
+          });
+        } else if (firmwareSupportsDeviceProbe()) {
+          const dacReply = await sendCommand(`V${dac.slice(1)},${Math.round(dacMv)}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+          if (replyLooksBad(dacReply)) logLine(`[warn] device tune ${dac} ${replySummary(dacReply)}`);
           state.pendingAdcContext = context;
           reply = await sendCommand(`Q${device},${muCode},${vstartCode},${mask},${adcAvgSamples()},${sweepSettleUs()}`, {
             waitForReply: true,
@@ -491,6 +558,8 @@
             },
           });
         } else {
+          const dacReply = await sendCommand(`V${dac.slice(1)},${Math.round(dacMv)}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+          if (replyLooksBad(dacReply)) logLine(`[warn] device tune ${dac} ${replySummary(dacReply)}`);
           await programLogicalDevice(device, muCode, vstartCode);
           state.pendingAdcContext = context;
           reply = await sendCommand("ADC", {
@@ -507,10 +576,10 @@
         const upperReply = String(reply || "").toUpperCase();
         if (reply === undefined) {
           deviceTuneStatus("Serial not connected; dry-run only.", "warn");
-        } else if (!reply || upperReply.startsWith("ERR") || upperReply.startsWith("Q,ERR")) {
+        } else if (!reply || upperReply.startsWith("ERR") || upperReply.startsWith("Q,ERR") || upperReply.startsWith("T,ERR")) {
           deviceTuneStatus(`Device tune failed: ${replySummary(reply)}.`, "warn");
         } else {
-          deviceTuneStatus(`Device ${device}: Vmu ${muV.toFixed(3)} V, Vstart ${vstartV.toFixed(3)} V, ${state.deviceTunePoints.length} point(s).`, "ok");
+          deviceTuneStatus(`Device ${device}: ${dac} ${(dacMv / 1000).toFixed(3)} V, Vmu ${muV.toFixed(3)} V, Vstart ${vstartV.toFixed(3)} V, ${state.deviceTunePoints.length} point(s).`, "ok");
         }
         force = false;
       } while (state.deviceTunePending && state.deviceTuneRunning);
@@ -554,7 +623,8 @@
   }
 
   function onDeviceTuneInput(source) {
-    readDeviceTuneVoltages(source);
+    if (source === "dacSlider" || source === "dacNumber") readDeviceTuneDacMv(source);
+    else readDeviceTuneVoltages(source);
     if (state.deviceTuneRunning) scheduleDeviceTuneSample();
   }
 
@@ -562,7 +632,14 @@
     $("deviceTuneDevice")?.addEventListener("input", syncDeviceTuneFromState);
     $("deviceTuneXAxis")?.addEventListener("change", renderDeviceTunePlot);
     $("deviceTuneYMode")?.addEventListener("change", renderDeviceTunePlot);
+    $("deviceTuneDac")?.addEventListener("change", () => {
+      syncDeviceTuneDacFromState();
+      renderDeviceTunePlot();
+      if (state.deviceTuneRunning) scheduleDeviceTuneSample(0);
+    });
     $("deviceTuneRateMs")?.addEventListener("change", deviceTuneRateMs);
+    $("deviceTuneDacSlider")?.addEventListener("input", () => onDeviceTuneInput("dacSlider"));
+    $("deviceTuneDacMvNumber")?.addEventListener("input", () => onDeviceTuneInput("dacNumber"));
     $("deviceTuneMuSlider")?.addEventListener("input", () => onDeviceTuneInput("muSlider"));
     $("deviceTuneMuNumber")?.addEventListener("input", () => onDeviceTuneInput("muNumber"));
     $("deviceTuneVstartSlider")?.addEventListener("input", () => onDeviceTuneInput("vstartSlider"));
