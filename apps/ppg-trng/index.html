@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=8dbc59589d78" />
+    <link rel="stylesheet" href="./styles.css?v=0d925eebff58" />
   </head>
   <body>
     <div class="app-shell">
@@ -78,16 +78,46 @@
               <span id="bitModeStatus" class="mode-pill is-muted">Bit mode off</span>
             </div>
             <div class="quick-grid">
-              <button id="bitModeButton" class="button secondary" data-command="9999" type="button" title="Toggle random bit mode">9999</button>
-              <button class="button secondary warn" data-command="0000" type="button" title="DAC sweep, then reset">0000</button>
-              <button class="button secondary" data-command="8881" type="button" title="Toggle Green LED">G 8881</button>
-              <button class="button secondary" data-command="8882" type="button" title="Toggle Red LED">R 8882</button>
-              <button class="button secondary" data-command="8880" type="button" title="Turn both LEDs off">Off 8880</button>
-              <button class="button secondary" data-command="7761" type="button" title="Green-only PPG sampling">G PPG</button>
-              <button class="button secondary" data-command="7762" type="button" title="Red-only PPG sampling">R PPG</button>
-              <button class="button secondary" data-command="7763" type="button" title="Alternating Green/Red PPG sampling">G/R PPG</button>
-              <button class="button secondary" data-command="7769" type="button" title="Raw ambient and LED diagnostic stream">Diag</button>
-              <button class="button secondary" data-command="7777" type="button" title="Legacy toggle for alternating Green/Red PPG sampling">7777</button>
+              <button id="bitModeButton" class="button secondary command-button" data-command="9999" type="button" title="Toggle random bit mode">
+                <span class="command-code">9999</span>
+                <span class="command-label">랜덤 비트</span>
+              </button>
+              <button class="button secondary warn command-button" data-command="0000" type="button" title="DAC sweep, then reset">
+                <span class="command-code">0000</span>
+                <span class="command-label">DAC sweep/reset</span>
+              </button>
+              <button class="button secondary command-button" data-command="8881" type="button" title="Toggle Green LED">
+                <span class="command-code">8881</span>
+                <span class="command-label">Green LED</span>
+              </button>
+              <button class="button secondary command-button" data-command="8882" type="button" title="Toggle Red LED">
+                <span class="command-code">8882</span>
+                <span class="command-label">Red LED</span>
+              </button>
+              <button class="button secondary command-button" data-command="8880" type="button" title="Turn both LEDs off">
+                <span class="command-code">8880</span>
+                <span class="command-label">LED 모두 off</span>
+              </button>
+              <button class="button secondary command-button" data-command="7761" type="button" title="Green-only PPG sampling">
+                <span class="command-code">7761</span>
+                <span class="command-label">Green PPG</span>
+              </button>
+              <button class="button secondary command-button" data-command="7762" type="button" title="Red-only PPG sampling">
+                <span class="command-code">7762</span>
+                <span class="command-label">Red PPG</span>
+              </button>
+              <button class="button secondary command-button" data-command="7763" type="button" title="Alternating Green/Red PPG sampling">
+                <span class="command-code">7763</span>
+                <span class="command-label">G/R 교대 PPG</span>
+              </button>
+              <button class="button secondary command-button" data-command="7769" type="button" title="Raw ambient and LED diagnostic stream">
+                <span class="command-code">7769</span>
+                <span class="command-label">Raw 진단</span>
+              </button>
+              <button class="button secondary command-button" data-command="7777" type="button" title="Legacy toggle for alternating Green/Red PPG sampling">
+                <span class="command-code">7777</span>
+                <span class="command-label">호환 PPG</span>
+              </button>
             </div>
           </section>
 
