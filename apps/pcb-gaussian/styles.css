@@ -422,6 +422,9 @@ tr:hover td { background: #fbf5ed; }
 .plot-panel {
   margin-top: 0;
 }
+.time-domain-panel {
+  margin-top: 16px;
+}
 .plot-panel .panel-title {
   min-height: 54px;
   align-items: flex-start;

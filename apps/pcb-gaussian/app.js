@@ -13,12 +13,12 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-23-device-dac-tune";
-const EXPECTED_FIRMWARE_VERSION = "2026-05-23-device-dac-probe";
-const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-v1";
+const WEB_VERSION = "2026-05-27-uart-dfu";
+const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
+const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
-const FIRMWARE_SWEEP_RE = /^(SWEEP|SX),/i;
+const FIRMWARE_SWEEP_RE = /^(SWEEP|SX|Y),/i;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
 // Bench notes use 0-based TIA/device numbers. GUI and firmware commands use 1-based device labels.
 const TIA_DEVICE_MAP = [
