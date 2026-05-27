@@ -1,0 +1,25 @@
+﻿[
+    {
+        "schema":  1,
+        "id":  "pcb-gaussian",
+        "project":  "PCB Gaussian",
+        "board":  "nRF52 UART DFU target",
+        "setupGuide":  "Flash the initial UART DFU-capable image once with a hardware programmer. After that, use the PCB Gaussian DFU tab for browser UART DFU ZIP updates.",
+        "projectDfuUrl":  "apps/pcb-gaussian/#dfu",
+        "latestDfuManifestUrl":  "apps/pcb-gaussian/firmware/latest.json",
+        "initialFirmware":  {
+                                "version":  "2026-05-27-uart-dfu",
+                                "file":  "pcb_gaussian_uart_dfu_initial.hex",
+                                "url":  "firmware/pcb-gaussian/pcb_gaussian_uart_dfu_initial.hex",
+                                "size":  556595,
+                                "sha256":  "9f3de1a4c3d9526e23b3173a224aa14a1075d4dada1b6d5c021efb41446096f5",
+                                "notes":  "First-time programmer image. Use a hardware programmer or Nordic desktop tooling; do not upload this raw HEX through browser DFU.",
+                                "generatedAt":  "2026-05-27 19:20:51"
+                            },
+        "webDfu":  {
+                       "version":  "2026-05-27-uart-dfu",
+                       "packageUrl":  "apps/pcb-gaussian/firmware/pcb_gaussian_latest_dfu.zip",
+                       "protocol":  "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1"
+                   }
+    }
+]

@@ -35,6 +35,8 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 
 In PPG measurement modes, the firmware samples ambient light with LEDs off, discards one LED-on settling sample, averages two LED-on samples, then streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
 
+PPG timing displayed in the GUI follows the current firmware constants: 5 ms phase tick, 50 Hz output for Green-only or Red-only PPG, and 25 Hz per optical channel for alternating Green/Red PPG.
+
 The inspected firmware uses UART RX `31`, TX `30`, and `115200` baud.
 
 ## Bluetooth LE

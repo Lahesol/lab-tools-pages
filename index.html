@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local Lab Portal</title>
-  <link rel="stylesheet" href="./styles.css?v=7b8e17d0412b">
+  <link rel="stylesheet" href="./styles.css?v=0c7645b250b9">
 </head>
 <body>
   <main class="portal-shell">
@@ -19,6 +19,40 @@
       </div>
     </header>
 
+    <section class="dfu-panel" aria-labelledby="dfuPanelTitle">
+      <div class="dfu-heading">
+        <div>
+          <p class="eyebrow">Firmware onboarding</p>
+          <h2 id="dfuPanelTitle">Initial UART DFU setup</h2>
+        </div>
+        <span id="dfuProjectCount" class="dfu-count">Loading</span>
+      </div>
+      <p class="dfu-summary">
+        Install the DFU-capable initial firmware once with a hardware programmer.
+        After this step, future firmware updates can be done from each project's
+        web GUI through Web Serial.
+      </p>
+
+      <div class="dfu-layout">
+        <div id="dfuProjectList" class="dfu-project-list" aria-label="DFU projects"></div>
+        <aside class="dfu-guide" aria-label="DFU setup guide">
+          <h3>Setup flow</h3>
+          <ol>
+            <li>Flash the initial DFU-capable image once using a hardware programmer.</li>
+            <li>Open the project web GUI over HTTPS or localhost.</li>
+            <li>Connect to the board application UART from Chrome or Edge.</li>
+            <li>Use the project DFU tab to enter bootloader mode.</li>
+            <li>Run browser UART DFU with the bundled latest ZIP package.</li>
+            <li>Reconnect and verify the firmware version with <code>VER?</code>.</li>
+          </ol>
+          <p class="guide-note">
+            Raw HEX files are for first-time programmer setup. Browser DFU uses a
+            signed Nordic DFU ZIP after a compatible bootloader is already installed.
+          </p>
+        </aside>
+      </div>
+    </section>
+
     <section id="appGrid" class="app-grid" aria-label="Applications"></section>
 
     <section class="info-panel">
@@ -29,6 +63,43 @@
       </p>
     </section>
   </main>
+
+  <template id="dfuProjectTemplate">
+    <article class="dfu-card">
+      <div class="dfu-card-head">
+        <div>
+          <h3 class="dfu-project"></h3>
+          <p class="dfu-board"></p>
+        </div>
+        <span class="dfu-version"></span>
+      </div>
+      <p class="dfu-setup"></p>
+      <dl class="dfu-fields">
+        <div>
+          <dt>Initial firmware</dt>
+          <dd class="dfu-initial"></dd>
+        </div>
+        <div>
+          <dt>Web DFU package</dt>
+          <dd class="dfu-web"></dd>
+        </div>
+        <div>
+          <dt>Protocol</dt>
+          <dd class="dfu-protocol"></dd>
+        </div>
+        <div>
+          <dt>SHA-256</dt>
+          <dd class="dfu-hash"></dd>
+        </div>
+      </dl>
+      <div class="dfu-actions">
+        <button class="guide-button" type="button">Open setup guide</button>
+        <a class="hex-link" download>Download initial firmware HEX</a>
+        <a class="project-link" target="_blank" rel="noreferrer">Open project DFU page</a>
+        <a class="manifest-link" target="_blank" rel="noreferrer">View latest DFU package</a>
+      </div>
+    </article>
+  </template>
 
   <template id="appTemplate">
     <article class="app-card">
@@ -48,6 +119,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=eee596a8e764"></script>
+  <script src="./app.js?v=14c66eb95963"></script>
 </body>
 </html>

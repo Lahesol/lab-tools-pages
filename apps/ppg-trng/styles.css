@@ -346,6 +346,13 @@ input[type="range"] {
   color: var(--amber);
 }
 
+.command-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .mode-pill {
   display: inline-flex;
   align-items: center;

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=0d925eebff58" />
+    <link rel="stylesheet" href="./styles.css?v=51a15c1746ad" />
   </head>
   <body>
     <div class="app-shell">
@@ -100,25 +100,26 @@
               </button>
               <button class="button secondary command-button" data-command="7761" type="button" title="Green-only PPG sampling">
                 <span class="command-code">7761</span>
-                <span class="command-label">Green PPG</span>
+                <span class="command-label">Green PPG · 50 Hz</span>
               </button>
               <button class="button secondary command-button" data-command="7762" type="button" title="Red-only PPG sampling">
                 <span class="command-code">7762</span>
-                <span class="command-label">Red PPG</span>
+                <span class="command-label">Red PPG · 50 Hz</span>
               </button>
               <button class="button secondary command-button" data-command="7763" type="button" title="Alternating Green/Red PPG sampling">
                 <span class="command-code">7763</span>
-                <span class="command-label">G/R 교대 PPG</span>
+                <span class="command-label">G/R PPG · 25 Hz/ch</span>
               </button>
               <button class="button secondary command-button" data-command="7769" type="button" title="Raw ambient and LED diagnostic stream">
                 <span class="command-code">7769</span>
-                <span class="command-label">Raw 진단</span>
+                <span class="command-label">Raw 진단 · 25 Hz/ch</span>
               </button>
               <button class="button secondary command-button" data-command="7777" type="button" title="Legacy toggle for alternating Green/Red PPG sampling">
                 <span class="command-code">7777</span>
-                <span class="command-label">호환 PPG</span>
+                <span class="command-label">호환 PPG · 25 Hz/ch</span>
               </button>
             </div>
+            <p class="command-note">PPG phase tick: 5 ms</p>
           </section>
 
           <section class="panel log-panel">
