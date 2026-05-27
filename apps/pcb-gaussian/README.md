@@ -42,6 +42,9 @@ powershell -ExecutionPolicy Bypass -File .\trust_https_cert_current_user.ps1
 - Uses the browser Web Serial API, so Chrome or Edge is recommended.
 - LAN Web Serial requires a secure context. `localhost` works over HTTP, but
   IP-address access needs HTTPS with a trusted certificate.
+- The DFU tab can program the bundled latest firmware without file selection.
+  The bundled package is described by `firmware/latest.json` and stored as
+  `firmware/pcb_gaussian_latest_dfu.zip`.
 - Commands match the firmware UART protocol: `D1,<code>`, `D2,<code>`, `A<device>,<code>`, `M<device>,<code>`, `INIT`, `ADC`, `PING`.
 - `ADC` is expected to return 8 values: `ADC,v0,v1,v2,v3,v4,v5,v6,v7`.
 - Calibrated DAC output model:

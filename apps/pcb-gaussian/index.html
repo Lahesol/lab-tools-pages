@@ -616,6 +616,7 @@
             <div class="button-row">
               <button id="dfuAnalyzeButton">Analyze file</button>
               <button id="dfuEnterButton" class="primary">Enter bootloader</button>
+              <button id="dfuLatestButton" class="primary">Program latest firmware</button>
               <button id="dfuUploadButton" class="primary">Upload ZIP in browser</button>
               <button id="dfuCommandButton">Show command</button>
             </div>
@@ -629,19 +630,19 @@
                 <h2>DFU package</h2>
               </div>
             </div>
-            <pre id="dfuInfo" class="info-box">Select a signed DFU .zip package for browser upload, or a Release .hex file to generate the nrfutil command.</pre>
+            <pre id="dfuInfo" class="info-box">Use Program latest firmware to load the bundled DFU ZIP from ./firmware/latest.json, or select a signed DFU .zip package for manual browser upload.</pre>
           </article>
         </div>
       </section>
 
     </main>
 
-    <script src="./app.js?v=20260527-browser-dfu"></script>
-    <script src="./serial_watchdog.js?v=20260527-browser-dfu"></script>
-    <script src="./gate_probe_step.js?v=20260527-browser-dfu"></script>
-    <script src="./fit_control.js?v=20260527-browser-dfu"></script>
-    <script src="./device_tune.js?v=20260527-browser-dfu"></script>
-    <script src="./device_time.js?v=20260527-browser-dfu"></script>
-    <script src="./dfu.js?v=20260527-browser-dfu"></script>
+    <script src="./app.js?v=20260527-bundled-dfu"></script>
+    <script src="./serial_watchdog.js?v=20260527-bundled-dfu"></script>
+    <script src="./gate_probe_step.js?v=20260527-bundled-dfu"></script>
+    <script src="./fit_control.js?v=20260527-bundled-dfu"></script>
+    <script src="./device_tune.js?v=20260527-bundled-dfu"></script>
+    <script src="./device_time.js?v=20260527-bundled-dfu"></script>
+    <script src="./dfu.js?v=20260527-bundled-dfu"></script>
   </body>
 </html>

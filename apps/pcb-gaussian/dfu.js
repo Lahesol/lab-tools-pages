@@ -5,6 +5,7 @@
   const DFU_WRITE_CHUNK_SIZE = 64;
   const DFU_PRN = 8;
   const DFU_BOOT_DELAY_MS = 1400;
+  const LATEST_DFU_MANIFEST_URL = "./firmware/latest.json";
 
   const DFU_OP = {
     PROTOCOL_VERSION: 0x00,
@@ -102,6 +103,10 @@
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  }
+
+  function hexBytes(bytes) {
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
   }
 
   function parseHexByte(text, offset) {
@@ -323,6 +328,82 @@
       binCrc: binEntry.crc,
       ok: true,
     };
+  }
+
+  async function sha256Hex(buffer) {
+    if (!globalThis.crypto?.subtle) throw new Error("SHA-256 verification requires a secure browser context.");
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
+    return hexBytes(new Uint8Array(digest));
+  }
+
+  function packageNameFromUrl(url) {
+    return decodeURIComponent(String(url || "firmware.zip").split("/").pop() || "firmware.zip");
+  }
+
+  async function loadBundledDfuPackage() {
+    setDfuStatus("Loading bundled latest DFU manifest...");
+    setDfuProgress(0);
+    const manifestResponse = await fetch(LATEST_DFU_MANIFEST_URL, { cache: "no-store" });
+    if (!manifestResponse.ok) {
+      throw new Error(`Latest DFU manifest not found (${manifestResponse.status}).`);
+    }
+    const release = await manifestResponse.json();
+    if (!release?.package) throw new Error("Latest DFU manifest has no package field.");
+
+    const packageUrl = new URL(release.package, manifestResponse.url).toString();
+    const packageName = packageNameFromUrl(release.package);
+    setDfuInfo(
+`Bundled latest firmware
+Version: ${release.version || "unknown"}
+Protocol: ${release.protocol || "unknown"}
+Package: ${packageName}
+Status: downloading package...`
+    );
+
+    const packageResponse = await fetch(packageUrl, { cache: "no-store" });
+    if (!packageResponse.ok) throw new Error(`Latest DFU ZIP not found (${packageResponse.status}).`);
+    const buffer = await packageResponse.arrayBuffer();
+    if (Number.isFinite(Number(release.size)) && buffer.byteLength !== Number(release.size)) {
+      throw new Error(`Latest DFU size mismatch: ${buffer.byteLength} B, expected ${release.size} B.`);
+    }
+    if (release.sha256) {
+      const actualSha = await sha256Hex(buffer);
+      if (actualSha !== String(release.sha256).toLowerCase()) {
+        throw new Error(`Latest DFU SHA-256 mismatch: ${actualSha}`);
+      }
+    }
+
+    const file = typeof File === "function"
+      ? new File([buffer], packageName, { type: "application/zip" })
+      : Object.assign(new Blob([buffer], { type: "application/zip" }), { name: packageName });
+    const pkg = await parseDfuZip(file);
+    pkg.release = release;
+    pkg.fileName = packageName;
+    lastDfuPackage = pkg;
+    lastDfuAnalysis = {
+      type: "zip",
+      fileName: packageName,
+      fileSize: buffer.byteLength,
+      ok: true,
+      datSize: pkg.dat.length,
+      binSize: pkg.bin.length,
+      datName: pkg.datName,
+      binName: pkg.binName,
+      releaseVersion: release.version || "",
+    };
+    setDfuInfo(
+`Bundled latest firmware ready
+Version: ${release.version || "unknown"}
+Protocol: ${release.protocol || "unknown"}
+Package: ${packageName} (${formatBytes(buffer.byteLength)})
+Init packet: ${pkg.datName} (${formatBytes(pkg.dat.length)})
+Application: ${pkg.binName} (${formatBytes(pkg.bin.length)})
+SHA-256: ${release.sha256 || "not provided"}
+
+Ready for one-click UART DFU upload.`
+    );
+    setDfuStatus("Bundled latest DFU package is ready.", "ok");
+    return pkg;
   }
 
   function selectedDfuFile() {
@@ -697,24 +778,20 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
     );
   }
 
-  async function uploadDfuZipFromBrowser() {
-    if (dfuUploadBusy) return;
-    dfuUploadBusy = true;
-    const uploadButton = $("dfuUploadButton");
-    if (uploadButton) uploadButton.disabled = true;
+  async function uploadDfuPackageWithBrowser(pkg, sourceLabel) {
+    if (!("serial" in navigator)) throw new Error("Web Serial is not available in this browser.");
+    if (!window.isSecureContext) throw new Error("Web Serial requires HTTPS or localhost.");
+    const baud = Math.max(9600, Math.round(Number($("dfuBaud")?.value) || 230400));
+    const connectedApp = !!state.connected;
+    const releaseText = pkg.release?.version ? `\nFirmware: ${pkg.release.version}` : "";
+    const prompt = connectedApp
+      ? `This will reset the current app into UART DFU mode, close Web Serial, then ask you to select the bootloader COM port.\n\nPackage: ${pkg.fileName}${releaseText}`
+      : `This will ask you to select the board's UART bootloader COM port and upload ${sourceLabel}.\n\nPackage: ${pkg.fileName}${releaseText}`;
+    if (!confirm(prompt)) return false;
+
     let bootPort = null;
     let client = null;
     try {
-      if (!("serial" in navigator)) throw new Error("Web Serial is not available in this browser.");
-      if (!window.isSecureContext) throw new Error("Web Serial requires HTTPS or localhost.");
-      const pkg = await ensureDfuZipPackage();
-      const baud = Math.max(9600, Math.round(Number($("dfuBaud")?.value) || 230400));
-      const connectedApp = !!state.connected;
-      const prompt = connectedApp
-        ? "This will reset the current app into UART DFU mode, close Web Serial, then ask you to select the bootloader COM port."
-        : "This will ask you to select the board's UART bootloader COM port and upload the selected DFU ZIP.";
-      if (!confirm(prompt)) return;
-
       if (connectedApp) await enterDfuBootloader({ silent: true });
       setDfuStatus("Select the UART bootloader serial port...");
       bootPort = await navigator.serial.requestPort();
@@ -723,14 +800,48 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
       dfuLog(`browser DFU opened @ ${baud}`);
       await uploadDfuZipWithClient(pkg, client);
       setDfuStatus("Browser DFU upload complete. Reconnect to the app.", "ok");
+      return true;
+    } finally {
+      if (client) await client.close().catch(() => {});
+      else if (bootPort) await bootPort.close().catch(() => {});
+    }
+  }
+
+  function setDfuBusy(disabled) {
+    $("dfuUploadButton")?.toggleAttribute("disabled", disabled);
+    $("dfuLatestButton")?.toggleAttribute("disabled", disabled);
+  }
+
+  async function uploadDfuZipFromBrowser() {
+    if (dfuUploadBusy) return;
+    dfuUploadBusy = true;
+    setDfuBusy(true);
+    try {
+      const pkg = await ensureDfuZipPackage();
+      await uploadDfuPackageWithBrowser(pkg, "the selected DFU ZIP");
     } catch (error) {
       setDfuStatus(error.message, "warn");
       setDfuInfo(`Browser DFU upload failed:\n${error.message}`);
       dfuLog(`upload failed: ${error.message}`);
     } finally {
-      if (client) await client.close().catch(() => {});
-      else if (bootPort) await bootPort.close().catch(() => {});
-      if (uploadButton) uploadButton.disabled = false;
+      setDfuBusy(false);
+      dfuUploadBusy = false;
+    }
+  }
+
+  async function uploadLatestDfuFromBrowser() {
+    if (dfuUploadBusy) return;
+    dfuUploadBusy = true;
+    setDfuBusy(true);
+    try {
+      const pkg = await loadBundledDfuPackage();
+      await uploadDfuPackageWithBrowser(pkg, "the bundled latest firmware");
+    } catch (error) {
+      setDfuStatus(error.message, "warn");
+      setDfuInfo(`Bundled latest DFU failed:\n${error.message}`);
+      dfuLog(`latest upload failed: ${error.message}`);
+    } finally {
+      setDfuBusy(false);
       dfuUploadBusy = false;
     }
   }
@@ -742,6 +853,7 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
     $("dfuEnterButton")?.addEventListener("click", () => enterDfuBootloader());
     $("dfuCommandButton")?.addEventListener("click", showDfuCommand);
     $("dfuUploadButton")?.addEventListener("click", uploadDfuZipFromBrowser);
+    $("dfuLatestButton")?.addEventListener("click", uploadLatestDfuFromBrowser);
   }
 
   window.addEventListener("DOMContentLoaded", bindDfuEvents);
