@@ -302,6 +302,13 @@ input:focus, select:focus {
 .status-line.ok { color: var(--ok); }
 .status-line.warn { color: var(--warn); }
 
+.dfu-progress {
+  width: 100%;
+  height: 14px;
+  margin-top: 14px;
+  accent-color: var(--accent);
+}
+
 .info-box {
   min-height: 270px;
   white-space: pre-wrap;

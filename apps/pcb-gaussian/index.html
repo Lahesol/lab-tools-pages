@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=013dd9e27cc7" />
+    <link rel="stylesheet" href="./styles.css?v=f822b6d15ef8" />
   </head>
   <body>
     <header class="app-header">
@@ -616,30 +616,32 @@
             <div class="button-row">
               <button id="dfuAnalyzeButton">Analyze file</button>
               <button id="dfuEnterButton" class="primary">Enter bootloader</button>
+              <button id="dfuUploadButton" class="primary">Upload ZIP in browser</button>
               <button id="dfuCommandButton">Show command</button>
             </div>
+            <progress id="dfuProgress" class="dfu-progress" value="0" max="100"></progress>
             <p class="hint status-line" id="dfuStatus">DFU idle.</p>
           </article>
           <article class="panel">
             <div class="panel-title">
               <div>
-                <p class="eyebrow">host command</p>
-                <h2>nrfutil upload</h2>
+                <p class="eyebrow">browser uploader</p>
+                <h2>DFU package</h2>
               </div>
             </div>
-            <pre id="dfuInfo" class="info-box">Select a Release .hex file and enter the COM port.</pre>
+            <pre id="dfuInfo" class="info-box">Select a signed DFU .zip package for browser upload, or a Release .hex file to generate the nrfutil command.</pre>
           </article>
         </div>
       </section>
 
     </main>
 
-    <script src="./app.js?v=20260527-uart-dfu"></script>
-    <script src="./serial_watchdog.js?v=20260527-uart-dfu"></script>
-    <script src="./gate_probe_step.js?v=20260527-uart-dfu"></script>
-    <script src="./fit_control.js?v=20260527-uart-dfu"></script>
-    <script src="./device_tune.js?v=20260527-uart-dfu"></script>
-    <script src="./device_time.js?v=20260527-uart-dfu"></script>
-    <script src="./dfu.js?v=20260527-uart-dfu"></script>
+    <script src="./app.js?v=20260527-browser-dfu"></script>
+    <script src="./serial_watchdog.js?v=20260527-browser-dfu"></script>
+    <script src="./gate_probe_step.js?v=20260527-browser-dfu"></script>
+    <script src="./fit_control.js?v=20260527-browser-dfu"></script>
+    <script src="./device_tune.js?v=20260527-browser-dfu"></script>
+    <script src="./device_time.js?v=20260527-browser-dfu"></script>
+    <script src="./dfu.js?v=20260527-browser-dfu"></script>
   </body>
 </html>
