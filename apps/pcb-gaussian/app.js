@@ -468,6 +468,18 @@ function activateTab(tabName) {
   });
 }
 
+function tabNameFromHash() {
+  const hash = decodeURIComponent(window.location.hash || "").replace(/^#/, "");
+  if (!hash) return "";
+  const tabs = Array.from(document.querySelectorAll(".tab"));
+  return tabs.some(tab => tab.dataset.tab === hash) ? hash : "";
+}
+
+function activateInitialTabFromHash() {
+  const tabName = tabNameFromHash();
+  if (tabName) activateTab(tabName);
+}
+
 async function connectSerial() {
   if (!window.isSecureContext) {
     alert("Web Serial requires a secure context. Use HTTPS for LAN access.");
@@ -2935,6 +2947,9 @@ function bindEvents() {
   document.querySelectorAll(".tab").forEach(tab => {
     tab.addEventListener("click", () => {
       activateTab(tab.dataset.tab);
+      if (window.location.hash !== "#" + tab.dataset.tab) {
+        window.history.replaceState(null, "", "#" + tab.dataset.tab);
+      }
     });
   });
 
@@ -3029,6 +3044,7 @@ function init() {
   }
   setConnected(false);
   bindEvents();
+  activateInitialTabFromHash();
   updateDacReadout();
   renderDacCalibration();
   renderParamCalibration();
@@ -3048,6 +3064,7 @@ function init() {
 }
 
 window.addEventListener("DOMContentLoaded", init);
+window.addEventListener("hashchange", activateInitialTabFromHash);
 window.addEventListener("beforeunload", () => {
   if (state.connected) disconnectSerial();
 });
