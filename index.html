@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local Lab Portal</title>
-  <link rel="stylesheet" href="./styles.css?v=0c7645b250b9">
+  <link rel="stylesheet" href="./styles.css?v=33483768289e">
 </head>
 <body>
   <main class="portal-shell">
@@ -19,39 +19,48 @@
       </div>
     </header>
 
-    <section class="dfu-panel" aria-labelledby="dfuPanelTitle">
-      <div class="dfu-heading">
+    <details class="dfu-disclosure">
+      <summary class="dfu-toggle">
         <div>
           <p class="eyebrow">Firmware onboarding</p>
-          <h2 id="dfuPanelTitle">Initial UART DFU setup</h2>
+          <span id="dfuPanelTitle" class="dfu-toggle-title">DFU setup</span>
         </div>
         <span id="dfuProjectCount" class="dfu-count">Loading</span>
-      </div>
-      <p class="dfu-summary">
-        Install the DFU-capable initial firmware once with a hardware programmer.
-        After this step, future firmware updates can be done from each project's
-        web GUI through Web Serial.
-      </p>
+      </summary>
 
-      <div class="dfu-layout">
-        <div id="dfuProjectList" class="dfu-project-list" aria-label="DFU projects"></div>
-        <aside class="dfu-guide" aria-label="DFU setup guide">
-          <h3>Setup flow</h3>
-          <ol>
-            <li>Flash the initial DFU-capable image once using a hardware programmer.</li>
-            <li>Open the project web GUI over HTTPS or localhost.</li>
-            <li>Connect to the board application UART from Chrome or Edge.</li>
-            <li>Use the project DFU tab to enter bootloader mode.</li>
-            <li>Run browser UART DFU with the bundled latest ZIP package.</li>
-            <li>Reconnect and verify the firmware version with <code>VER?</code>.</li>
-          </ol>
-          <p class="guide-note">
-            Raw HEX files are for first-time programmer setup. Browser DFU uses a
-            signed Nordic DFU ZIP after a compatible bootloader is already installed.
-          </p>
-        </aside>
-      </div>
-    </section>
+      <section class="dfu-panel" aria-labelledby="dfuPanelTitle">
+        <div class="dfu-heading">
+          <div>
+            <p class="eyebrow">Initial setup</p>
+            <h2>Initial UART DFU setup</h2>
+          </div>
+        </div>
+        <p class="dfu-summary">
+          Install the DFU-capable initial firmware once with a hardware programmer.
+          After this step, future firmware updates can be done from each project's
+          web GUI through Web Serial.
+        </p>
+
+        <div class="dfu-layout">
+          <div id="dfuProjectList" class="dfu-project-list" aria-label="DFU projects"></div>
+          <aside class="dfu-guide" aria-label="DFU setup guide">
+            <h3>Setup flow</h3>
+            <ol>
+              <li>Flash the initial DFU-capable image once using a hardware programmer.</li>
+              <li>Open the project web GUI over HTTPS or localhost.</li>
+              <li>Connect to the board application UART from Chrome or Edge.</li>
+              <li>Use the project DFU tab to enter bootloader mode.</li>
+              <li>Run browser UART DFU with the bundled latest ZIP package.</li>
+              <li>Reconnect and verify the firmware version with <code>VER?</code>.</li>
+            </ol>
+            <p class="guide-note">
+              Raw HEX files are for first-time programmer setup. Browser DFU uses a
+              signed Nordic DFU ZIP after a compatible bootloader is already installed.
+            </p>
+          </aside>
+        </div>
+      </section>
+    </details>
 
     <section id="appGrid" class="app-grid" aria-label="Applications"></section>
 

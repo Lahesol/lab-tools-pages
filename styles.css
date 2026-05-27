@@ -31,6 +31,7 @@ input {
 }
 
 button,
+.dfu-toggle,
 .open-link,
 .hex-link,
 .project-link,
@@ -49,6 +50,7 @@ button,
 }
 
 button:hover,
+.dfu-toggle:hover,
 .open-link:hover,
 .hex-link:hover,
 .project-link:hover,
@@ -107,7 +109,52 @@ h1 {
   color: var(--text);
 }
 
+.dfu-disclosure {
+  margin-bottom: 14px;
+}
+
+.dfu-toggle {
+  width: fit-content;
+  gap: 12px;
+  min-height: 44px;
+  padding: 7px 12px;
+  box-shadow: var(--shadow);
+  list-style: none;
+}
+
+.dfu-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.dfu-toggle::after {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #e8eff1;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.dfu-disclosure[open] .dfu-toggle::after {
+  content: "-";
+}
+
+.dfu-toggle .eyebrow {
+  margin-bottom: 1px;
+  font-size: 11px;
+}
+
+.dfu-toggle-title {
+  font-size: 15px;
+  font-weight: 780;
+  line-height: 1.1;
+}
+
 .dfu-panel {
+  margin-top: 10px;
   margin-bottom: 16px;
   padding: 18px;
   border: 1px solid var(--line);
@@ -423,6 +470,11 @@ code {
   .app-title-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .dfu-toggle {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .dfu-actions,
