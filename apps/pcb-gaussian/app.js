@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-28-code-stop-detail";
+const WEB_VERSION = "2026-05-28-code-nudge";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -2791,10 +2791,12 @@ function unchangedPlanDetails(plan) {
   const muCodeStep = localParamCodeStepVoltage("mu", plan.currentMuCode);
   const vstartCodeStep = localParamCodeStepVoltage("A", currentVstartCode);
   const reasons = [];
-  if (Number.isFinite(muCodeStep) && Math.abs(appliedMuDelta) < muCodeStep) reasons.push("Vmu step below 1 code");
-  if (Number.isFinite(vstartCodeStep) && Math.abs(appliedVstartDelta) < vstartCodeStep) reasons.push("Vstart step below 1 code");
-  if (plan.vstartBoundaryGuardApplied || (Number.isFinite(Number(plan.requestedNextVstartV)) && Number.isFinite(Number(plan.nextVstartV)) && Math.abs(Number(plan.requestedNextVstartV) - Number(plan.nextVstartV)) > 1e-9)) reasons.push("Vstart range clamp");
-  if (Number.isFinite(Number(plan.requestedNextMuV)) && Number.isFinite(Number(plan.nextMuV)) && Math.abs(Number(plan.requestedNextMuV) - Number(plan.nextMuV)) > 1e-9) reasons.push("Vmu range clamp");
+  const vstartClamped = plan.vstartBoundaryGuardApplied || (Number.isFinite(Number(plan.requestedNextVstartV)) && Number.isFinite(Number(plan.nextVstartV)) && Math.abs(Number(plan.requestedNextVstartV) - Number(plan.nextVstartV)) > 1e-9);
+  const muClamped = Number.isFinite(Number(plan.requestedNextMuV)) && Number.isFinite(Number(plan.nextMuV)) && Math.abs(Number(plan.requestedNextMuV) - Number(plan.nextMuV)) > 1e-9;
+  if (Number.isFinite(muCodeStep) && Math.abs(appliedMuDelta) < muCodeStep && !muClamped) reasons.push("Vmu step below 1 code");
+  if (Number.isFinite(vstartCodeStep) && Math.abs(appliedVstartDelta) < vstartCodeStep && !vstartClamped) reasons.push("Vstart step below 1 code");
+  if (vstartClamped) reasons.push("Vstart range clamp");
+  if (muClamped) reasons.push("Vmu range clamp");
   if (plan.lossBackoffApplied) reasons.push(`LM backoff${plan.lossBackoffReason ? ` (${plan.lossBackoffReason})` : ""}`);
   if (plan.jacobianStepLimited) reasons.push("step limit");
   if (!reasons.length) reasons.push("rounded to same MAX5488 code");
@@ -2807,6 +2809,58 @@ function unchangedPlanDetails(plan) {
 
 function unchangedPlanStopMessage(prefix, plan, error) {
   return `${prefix} stopped: code unchanged (${unchangedPlanDetails(plan)}). ${formatTargetError(error)}.`;
+}
+
+function adjacentParamCodeForVoltageDelta(param, currentCode, desiredDeltaV) {
+  const safeCode = clamp(Math.round(Number(currentCode) || 0), 0, POT_MAX_CODE);
+  const desired = Number(desiredDeltaV);
+  if (!Number.isFinite(desired) || Math.abs(desired) < 1e-12) return safeCode;
+  const currentV = paramCodeToVoltage(param, safeCode);
+  const candidates = [];
+  for (const code of [safeCode - 1, safeCode + 1]) {
+    if (code < 0 || code > POT_MAX_CODE) continue;
+    const voltage = paramCodeToVoltage(param, code);
+    const delta = voltage - currentV;
+    if (Number.isFinite(delta) && Math.sign(delta) === Math.sign(desired)) {
+      candidates.push({ code, delta, distance: Math.abs(delta - desired) });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  return candidates.length ? candidates[0].code : safeCode;
+}
+
+function planWithMinimumCodeNudge(plan) {
+  if (!plan || planHasCodeChange(plan)) return plan;
+  const nudged = { ...plan };
+  const axes = [];
+  const requestedMuDelta = Number(plan.requestedNextMuV) - Number(plan.currentMuV);
+  const muCode = adjacentParamCodeForVoltageDelta("mu", plan.currentMuCode, requestedMuDelta);
+  if (muCode !== plan.currentMuCode) {
+    nudged.nextMuCode = muCode;
+    nudged.nextMuV = paramCodeToVoltage("mu", muCode);
+    axes.push("Vmu");
+  }
+  const currentVstartCode = plan.currentVstartCode ?? plan.currentACode;
+  const requestedVstartDelta = Number(plan.requestedNextVstartV) - Number(plan.currentVstartV);
+  const vstartCode = adjacentParamCodeForVoltageDelta("A", currentVstartCode, requestedVstartDelta);
+  if (vstartCode !== currentVstartCode) {
+    nudged.nextVstartCode = vstartCode;
+    nudged.nextACode = vstartCode;
+    nudged.nextVstartV = paramCodeToVoltage("A", vstartCode);
+    nudged.nextAV = nudged.nextVstartV;
+    axes.push("Vstart");
+  }
+  if (!axes.length || !planHasCodeChange(nudged)) return null;
+  nudged.minimumCodeNudgeApplied = true;
+  nudged.minimumCodeNudgeAxes = axes;
+  return nudged;
+}
+
+function minimumCodeNudgeText(plan) {
+  const axes = Array.isArray(plan?.minimumCodeNudgeAxes) ? plan.minimumCodeNudgeAxes.join("/") : "unknown";
+  const currentVstartCode = plan.currentVstartCode ?? plan.currentACode;
+  const nextVstartCode = plan.nextVstartCode ?? plan.nextACode;
+  return `minimum 1-code nudge ${axes}: mu code ${plan.currentMuCode}->${plan.nextMuCode}, Vstart code ${currentVstartCode}->${nextVstartCode}`;
 }
 
 function gmmErrorSummary(plan, tolerances = autoFitTolerances()) {
@@ -2866,15 +2920,21 @@ async function autoFitSingle() {
       }
       const gains = autoFitControlGains();
       const device = deviceMuxInfo($("fitDevice").value).device;
-      const plan = adjustmentPlanForFit(device, target, fit, gains.muGain, gains.vstartGain, gains.muVstartGain);
+      let plan = adjustmentPlanForFit(device, target, fit, gains.muGain, gains.vstartGain, gains.muVstartGain);
       renderGaussianAdjustPlan(plan);
       if (!planHasCodeChange(plan)) {
-        setFitStatus(unchangedPlanStopMessage("Auto single", plan, error), "warn");
-        return;
+        const nudgedPlan = planWithMinimumCodeNudge(plan);
+        if (!nudgedPlan) {
+          setFitStatus(unchangedPlanStopMessage("Auto single", plan, error), "warn");
+          return;
+        }
+        plan = nudgedPlan;
+        renderGaussianAdjustPlan(plan);
       }
       await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextVstartCode ?? plan.nextACode);
       applyProgrammedPlanToUi(plan);
-      setFitStatus(`Auto single ${iter}/${maxIter}: programmed, ${formatTargetError(error)}, lr=${gains.learningRate}, mu->Vstart=${gains.muVstartGain}.`, "warn");
+      const nudgeText = plan.minimumCodeNudgeApplied ? `, ${minimumCodeNudgeText(plan)}` : "";
+      setFitStatus(`Auto single ${iter}/${maxIter}: programmed${nudgeText}, ${formatTargetError(error)}, lr=${gains.learningRate}, mu->Vstart=${gains.muVstartGain}.`, "warn");
     }
     if (state.autoFitStopRequested) {
       setFitStatus(`Auto single stopped at ${state.autoFitHistory.length}/${maxIter}.`, "warn");
