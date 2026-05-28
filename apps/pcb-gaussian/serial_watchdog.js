@@ -3,6 +3,10 @@
   let watchdogTimer = null;
   let watchdogBusy = false;
 
+  function firmwareVersionDetected() {
+    return typeof state !== "undefined" && !!state.firmwareVersion;
+  }
+
   function stampSerialActivity(kind) {
     if (typeof state === "undefined") return;
     const now = performance.now();
@@ -12,7 +16,7 @@
   }
 
   async function checkSerialConnection() {
-    if (watchdogBusy || !state.connected || !state.port) return;
+    if (watchdogBusy || !state.connected || !state.port || !firmwareVersionDetected()) return;
     const last = state.lastSerialRxMs || state.lastSerialTxMs || state.lastSerialActivityMs || performance.now();
     if (performance.now() - last < SERIAL_IDLE_CHECK_MS) return;
 
@@ -30,9 +34,11 @@
   }
 
   function startSerialWatchdog() {
+    if (!state.connected || !state.port || !firmwareVersionDetected() || watchdogTimer) return;
     stopSerialWatchdog();
     stampSerialActivity("rx");
     watchdogTimer = setInterval(checkSerialConnection, 1000);
+    logLine(`[serial watchdog] enabled after FW ${state.firmwareVersion} detected`);
   }
 
   function stopSerialWatchdog() {
@@ -43,8 +49,14 @@
   const baseSetConnected = setConnected;
   setConnected = function patchedSetConnected(connected) {
     baseSetConnected(connected);
-    if (connected) startSerialWatchdog();
-    else stopSerialWatchdog();
+    if (!connected) stopSerialWatchdog();
+  };
+
+  const baseHandleFirmwareVersionReply = handleFirmwareVersionReply;
+  handleFirmwareVersionReply = function patchedHandleFirmwareVersionReply(text) {
+    const handled = baseHandleFirmwareVersionReply(text);
+    if (handled) startSerialWatchdog();
+    return handled;
   };
 
   const baseHandleSerialText = handleSerialText;

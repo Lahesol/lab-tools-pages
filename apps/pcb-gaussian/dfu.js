@@ -782,17 +782,25 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
     if (!("serial" in navigator)) throw new Error("Web Serial is not available in this browser.");
     if (!window.isSecureContext) throw new Error("Web Serial requires HTTPS or localhost.");
     const baud = Math.max(9600, Math.round(Number($("dfuBaud")?.value) || 230400));
-    const connectedApp = !!state.connected;
+    const connectedApp = !!state.connected && !!state.firmwareVersion;
+    const connectedSilent = !!state.connected && !state.firmwareVersion;
     const releaseText = pkg.release?.version ? `\nFirmware: ${pkg.release.version}` : "";
     const prompt = connectedApp
       ? `This will reset the current app into UART DFU mode, close Web Serial, then ask you to select the bootloader COM port.\n\nPackage: ${pkg.fileName}${releaseText}`
-      : `This will ask you to select the board's UART bootloader COM port and upload ${sourceLabel}.\n\nPackage: ${pkg.fileName}${releaseText}`;
+      : connectedSilent
+        ? `This looks like a silent bootloader/blank firmware serial connection. The GUI will close the current port, then ask you to select the bootloader COM port for ${sourceLabel}.\n\nPackage: ${pkg.fileName}${releaseText}`
+        : `This will ask you to select the board's UART bootloader COM port and upload ${sourceLabel}.\n\nPackage: ${pkg.fileName}${releaseText}`;
     if (!confirm(prompt)) return false;
 
     let bootPort = null;
     let client = null;
     try {
       if (connectedApp) await enterDfuBootloader({ silent: true });
+      else if (connectedSilent) {
+        setDfuStatus("Closing silent serial connection before DFU upload...");
+        await disconnectSerial().catch(() => {});
+        await dfuSleep(300);
+      }
       setDfuStatus("Select the UART bootloader serial port...");
       bootPort = await navigator.serial.requestPort();
       client = new DfuSerialClient(bootPort, baud);
