@@ -1,4 +1,11 @@
 (function () {
+  const GATE_PROBE_MV_STEP = 10;
+
+  function snapGateProbeMv(value) {
+    const snapped = Math.round((Number(value) || 0) / GATE_PROBE_MV_STEP) * GATE_PROBE_MV_STEP;
+    return clamp(snapped, DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+  }
+
   function gateProbeCodeStep() {
     const input = $("gateProbeRateMs");
     const value = clamp(Math.round(Number(input?.value) || 50), 1, DAC_MAX_CODE);
@@ -6,12 +13,22 @@
     return value;
   }
 
+  gateProbeMv = function patchedGateProbeMv(source = "") {
+    const slider = $("gateProbeSlider");
+    const number = $("gateProbeMvNumber");
+    const raw = source === "number" ? number?.value : source === "slider" ? slider?.value : (number?.value ?? slider?.value);
+    const value = snapGateProbeMv(raw);
+    if (slider) slider.value = value;
+    if (number) number.value = value;
+    return value;
+  };
+
   function currentGateProbeCode() {
     return vhighToDacCode(gateProbeDac(), gateProbeMv() / 1000);
   }
 
   function codeToGateProbeMv(dac, code) {
-    return clamp(Math.round(dacCodeToVhigh(dac, code) * 1000), DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+    return snapGateProbeMv(dacCodeToVhigh(dac, code) * 1000);
   }
 
   function setGateProbeUiTarget(dac, code) {

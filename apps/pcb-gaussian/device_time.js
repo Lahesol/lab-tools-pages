@@ -2,13 +2,21 @@
   const DEVICE_TIME_POINT_LIMIT = 50000;
   const DEVICE_TIME_WINDOW_S = 10;
   const DEVICE_TIME_CHUNK_S = 1;
+  const DEVICE_TIME_DAC_MV_STEP = 10;
   let renderTimer = null;
+
+  function snapDeviceTimeDacMv(value) {
+    const snapped = Math.round((Number(value) || 0) / DEVICE_TIME_DAC_MV_STEP) * DEVICE_TIME_DAC_MV_STEP;
+    return clamp(snapped, DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+  }
 
   function ensureDeviceTimeState() {
     if (!Array.isArray(state.deviceTimePoints)) state.deviceTimePoints = [];
     state.deviceTimeRunning = !!state.deviceTimeRunning;
     state.deviceTimeAccepting = state.deviceTimeAccepting !== false;
     state.deviceTimeCapture = state.deviceTimeCapture || null;
+    state.deviceTimeRunToken = Number.isFinite(Number(state.deviceTimeRunToken)) ? Number(state.deviceTimeRunToken) : 0;
+    state.deviceTimeLoopActive = !!state.deviceTimeLoopActive;
   }
 
   function setDeviceTimeStatus(text, kind = "") {
@@ -108,7 +116,7 @@
   function readDeviceTimeBiasInputs() {
     const device = deviceMuxInfo($("deviceTimeDevice")?.value ?? $("deviceTuneDevice")?.value).device;
     const dac = $("deviceTimeDac")?.value === "D1" ? "D1" : "D2";
-    const dacMv = clamp(Math.round(Number($("deviceTimeDacMvNumber")?.value) || 0), DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+    const dacMv = snapDeviceTimeDacMv($("deviceTimeDacMvNumber")?.value);
     const muRange = voltageRange("mu");
     const vstartRange = voltageRange("A");
     const muV = clamp(Number($("deviceTimeMuNumber")?.value) || 0, muRange.min, muRange.max);
@@ -220,6 +228,7 @@
   }
 
   function handleTimeStart(parts) {
+    if (!state.deviceTimeRunning) return;
     const expected = Number(parts[2]) || state.deviceTimeChunkSamples || 0;
     const mask = Number(parts[3]) || adcMaskFromSelectedAdcs(selectedDeviceTimeAdcs());
     const avg = Number(parts[4]) || deviceTimeOversample();
@@ -463,8 +472,11 @@
     }, 100);
   }
 
-  async function runDeviceTimeChunks(mask, avg, adcs) {
-    while (state.deviceTimeRunning) {
+  async function runDeviceTimeChunks(runToken) {
+    while (state.deviceTimeRunning && state.deviceTimeRunToken === runToken) {
+      const adcs = selectedDeviceTimeAdcs();
+      const mask = adcMaskFromSelectedAdcs(adcs);
+      const avg = deviceTimeOversample();
       const targetRateHz = deviceTimeRateHz();
       const samples = deviceTimeChunkSamples(targetRateHz);
       const intervalUs = deviceTimeIntervalUs(targetRateHz);
@@ -488,7 +500,7 @@
           return upper.startsWith("Y,DONE") || upper.startsWith("Y,ERR") || upper.startsWith("ADC,ERR") || upper.startsWith("ADC,INIT_ERR");
         },
       });
-      if (!state.deviceTimeRunning) break;
+      if (!state.deviceTimeRunning || state.deviceTimeRunToken !== runToken) break;
       if (!reply) {
         state.deviceTimeRunning = false;
         state.deviceTimeAccepting = false;
@@ -497,7 +509,7 @@
         break;
       }
       if (String(reply).toUpperCase().startsWith("Y,ERR") || String(reply).toUpperCase().startsWith("ADC,")) break;
-      if (state.deviceTimePendingBias && state.deviceTimeRunning) {
+      if (state.deviceTimePendingBias && state.deviceTimeRunning && state.deviceTimeRunToken === runToken) {
         state.deviceTimePendingBias = false;
         setDeviceTimeStatus("Applying queued noise monitor bias...");
         await applyDeviceTimeBias();
@@ -520,9 +532,16 @@
       setDeviceTimeStatus("Connect serial before starting noise monitor.", "warn");
       return;
     }
+    if (state.deviceTimeRunning || state.deviceTimeLoopActive) {
+      setDeviceTimeStatus("Noise monitor is already running. Stop it before starting a new run.", "warn");
+      return;
+    }
     const adcs = selectedDeviceTimeAdcs();
     const mask = adcMaskFromSelectedAdcs(adcs);
     const avg = deviceTimeOversample();
+    const runToken = state.deviceTimeRunToken + 1;
+    state.deviceTimeRunToken = runToken;
+    state.deviceTimeLoopActive = true;
     state.deviceTimeRunning = true;
     state.deviceTimeAccepting = true;
     state.deviceTimePendingBias = false;
@@ -543,16 +562,27 @@
     try {
       await applyDeviceTimeBias();
       setDeviceTimeStatus(`Noise monitor running: target ${state.deviceTimeCapture.targetRateHz} Hz, oversample ${avg}, window ${DEVICE_TIME_WINDOW_S}s.`);
-      await runDeviceTimeChunks(mask, avg, adcs);
+      await runDeviceTimeChunks(runToken);
     } catch (error) {
-      state.deviceTimeRunning = false;
-      state.deviceTimeAccepting = false;
-      setDeviceTimeControls(false);
-      setDeviceTimeStatus(error.message, "warn");
+      if (state.deviceTimeRunToken === runToken) {
+        state.deviceTimeRunning = false;
+        state.deviceTimeAccepting = false;
+        setDeviceTimeControls(false);
+        setDeviceTimeStatus(error.message, "warn");
+      }
+    } finally {
+      if (state.deviceTimeRunToken === runToken) {
+        state.deviceTimeLoopActive = false;
+        if (!state.deviceTimeRunning) setDeviceTimeControls(false);
+      } else if (!state.deviceTimeRunning) {
+        state.deviceTimeLoopActive = false;
+      }
     }
   }
 
   function stopDeviceTimePlot() {
+    ensureDeviceTimeState();
+    state.deviceTimeRunToken += 1;
     state.deviceTimeAccepting = false;
     state.deviceTimeRunning = false;
     state.deviceTimePendingBias = false;

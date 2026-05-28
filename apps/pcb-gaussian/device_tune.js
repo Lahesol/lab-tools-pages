@@ -1,6 +1,12 @@
 (function () {
   const DEVICE_TUNE_POINT_LIMIT = 5000;
   const DEFAULT_DEVICE_TUNE_ADCS = [0, 1, 2, 3];
+  const DEVICE_TUNE_DAC_MV_STEP = 10;
+
+  function snapDeviceTuneDacMv(value) {
+    const snapped = Math.round((Number(value) || 0) / DEVICE_TUNE_DAC_MV_STEP) * DEVICE_TUNE_DAC_MV_STEP;
+    return clamp(snapped, DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+  }
 
   function ensureDeviceTuneState() {
     if (typeof state === "undefined") return false;
@@ -75,7 +81,7 @@
   }
 
   function setDeviceTuneDacMv(value) {
-    const safeMv = clamp(Math.round(Number(value) || 0), DAC_OUTPUT_MIN_MV, DAC_OUTPUT_MAX_MV);
+    const safeMv = snapDeviceTuneDacMv(value);
     const slider = $("deviceTuneDacSlider");
     const number = $("deviceTuneDacMvNumber");
     if (slider) slider.value = safeMv;
