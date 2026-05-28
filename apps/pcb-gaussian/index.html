@@ -593,7 +593,7 @@
                 <p class="eyebrow">uart update</p>
                 <h2>Serial DFU</h2>
               </div>
-              <button id="dfuCheckButton">DFU?</button>
+              <button id="dfuCheckButton" title="Check DFU support from the running application firmware. This is not used for a blank MCU.">App DFU?</button>
             </div>
             <div class="form-grid">
               <label>
@@ -630,19 +630,19 @@
                 <h2>DFU package</h2>
               </div>
             </div>
-            <pre id="dfuInfo" class="info-box">Blank or bootloader-only board: use Program latest firmware directly; the browser will ask for the bootloader COM port. Running application board: Connect first only if you want Enter bootloader to reset the app. Manual upload can still use a selected signed DFU .zip package.</pre>
+            <pre id="dfuInfo" class="info-box">Bootloader-ready board: use Program latest firmware; the browser will ask for the bootloader COM port. Blank MCU: browser DFU cannot install the first bootloader, so flash the initial UART DFU HEX once with a programmer first. Running application board: Connect first only if you want Enter bootloader to reset the app.</pre>
           </article>
         </div>
       </section>
 
     </main>
 
-    <script src="./app.js?v=2ba6a4d86d9a"></script>
-    <script src="./serial_watchdog.js?v=20260528-fw-watchdog"></script>
-    <script src="./gate_probe_step.js?v=20260528-fw-watchdog"></script>
-    <script src="./fit_control.js?v=20260528-fw-watchdog"></script>
-    <script src="./device_tune.js?v=20260528-fw-watchdog"></script>
-    <script src="./device_time.js?v=20260528-fw-watchdog"></script>
-    <script src="./dfu.js?v=20260528-fw-watchdog"></script>
+    <script src="./app.js?v=09de786662d8"></script>
+    <script src="./serial_watchdog.js?v=20260528-dfu-release"></script>
+    <script src="./gate_probe_step.js?v=20260528-dfu-release"></script>
+    <script src="./fit_control.js?v=20260528-dfu-release"></script>
+    <script src="./device_tune.js?v=20260528-dfu-release"></script>
+    <script src="./device_time.js?v=20260528-dfu-release"></script>
+    <script src="./dfu.js?v=20260528-dfu-release"></script>
   </body>
 </html>

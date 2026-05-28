@@ -6,6 +6,13 @@
   const DFU_PRN = 8;
   const DFU_BOOT_DELAY_MS = 1400;
   const LATEST_DFU_MANIFEST_URL = "./firmware/latest.json";
+  const DFU_FALLBACK_BAUDS = [230400, 115200, 1000000];
+  const DFU_TIMEOUT_HELP = [
+    "No Nordic UART DFU bootloader responded.",
+    "If the MCU is blank, browser DFU cannot install the first bootloader. Flash the initial UART DFU HEX once with J-Link/nrfjprog first.",
+    "If application firmware is running, use Connect -> Enter bootloader or select the bootloader COM port after reset.",
+    "Check UART RX/TX are crossed to nRF pins RX=23/TX=24, GND is shared, baud is 230400, and HW flow control is off.",
+  ].join("\n");
 
   const DFU_OP = {
     PROTOCOL_VERSION: 0x00,
@@ -340,6 +347,27 @@
     return decodeURIComponent(String(url || "firmware.zip").split("/").pop() || "firmware.zip");
   }
 
+  function candidateBaudRates(requestedBaud) {
+    const requested = Math.max(9600, Math.round(Number(requestedBaud) || 230400));
+    return [requested, ...DFU_FALLBACK_BAUDS].filter((baud, index, list) => list.indexOf(baud) === index);
+  }
+
+  function dfuFailureText(error) {
+    const message = error?.message || String(error || "Unknown DFU error");
+    if (/already open/i.test(message)) {
+      return `${message}\n\nThe selected COM port is still open in this browser tab or another serial terminal. Click Disconnect, close other serial monitors, then retry Program latest firmware.`;
+    }
+    if (/response timeout|No Nordic UART DFU response/i.test(message)) {
+      return `${message}\n\n${DFU_TIMEOUT_HELP}`;
+    }
+    return message;
+  }
+
+  function dfuStatusText(error) {
+    return (error?.message || String(error || "DFU error")).split("\n")[0];
+  }
+
+
   async function loadBundledDfuPackage() {
     setDfuStatus("Loading bundled latest DFU manifest...");
     setDfuProgress(0);
@@ -496,7 +524,18 @@ Ready for browser UART DFU upload.`
     }
 
     async open() {
-      await this.port.open({ baudRate: this.baudRate });
+      await this.port.open({
+        baudRate: this.baudRate,
+        dataBits: 8,
+        stopBits: 1,
+        parity: "none",
+        flowControl: "none",
+        bufferSize: 65536,
+      });
+      if (typeof this.port.setSignals === "function") {
+        await this.port.setSignals({ dataTerminalReady: true, requestToSend: false }).catch(() => {});
+      }
+      await dfuSleep(150);
       this.reader = this.port.readable.getReader();
       this.writer = this.port.writable.getWriter();
     }
@@ -585,9 +624,9 @@ Ready for browser UART DFU upload.`
       return this.response(op, timeoutMs);
     }
 
-    async ping() {
+    async ping(timeoutMs = 3000) {
       const id = Math.floor(Math.random() * 255) + 1;
-      const rsp = await this.request(DFU_OP.PING, [id], 3000);
+      const rsp = await this.request(DFU_OP.PING, [id], timeoutMs);
       if (rsp[3] !== id) throw new Error("DFU ping echo mismatch");
     }
 
@@ -663,6 +702,36 @@ Ready for browser UART DFU upload.`
     if (state.connected) await disconnectSerial().catch(() => {});
     await dfuSleep(DFU_BOOT_DELAY_MS);
     return true;
+  }
+
+  async function closeApplicationSerialForDfu(reason = "Preparing DFU upload") {
+    if (!state?.port && !state?.reader && !state?.writer) return;
+    setDfuStatus(`${reason}: closing application serial port...`);
+    state.keepReading = false;
+
+    const reader = state.reader;
+    if (reader) {
+      await reader.cancel().catch(() => {});
+      try { reader.releaseLock(); } catch {}
+      if (state.reader === reader) state.reader = null;
+    }
+
+    const writer = state.writer;
+    if (writer) {
+      try { writer.releaseLock(); } catch {}
+      if (state.writer === writer) state.writer = null;
+    }
+
+    const port = state.port;
+    if (port) {
+      await port.close().catch(error => {
+        dfuLog(`application serial close skipped: ${error.message}`);
+      });
+      if (state.port === port) state.port = null;
+    }
+
+    setConnected(false);
+    await dfuSleep(400);
   }
 
   async function showDfuCommand() {
@@ -778,6 +847,27 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
     );
   }
 
+  async function openDfuClientWithBaudProbe(port, requestedBaud) {
+    const bauds = candidateBaudRates(requestedBaud);
+    const failures = [];
+    for (const baud of bauds) {
+      const client = new DfuSerialClient(port, baud);
+      try {
+        setDfuStatus(`Probing UART DFU bootloader @ ${baud}...`);
+        await client.open();
+        await client.ping(2500);
+        if ($("dfuBaud")) $("dfuBaud").value = String(baud);
+        dfuLog(`DFU bootloader responded @ ${baud}`);
+        return client;
+      } catch (error) {
+        failures.push(`${baud}: ${error.message}`);
+        dfuLog(`DFU probe @ ${baud} failed: ${error.message}`);
+        await client.close().catch(() => {});
+      }
+    }
+    throw new Error(`No Nordic UART DFU response at ${bauds.join(", ")} baud.\n${failures.join("\n")}`);
+  }
+
   async function uploadDfuPackageWithBrowser(pkg, sourceLabel) {
     if (!("serial" in navigator)) throw new Error("Web Serial is not available in this browser.");
     if (!window.isSecureContext) throw new Error("Web Serial requires HTTPS or localhost.");
@@ -797,15 +887,17 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
     try {
       if (connectedApp) await enterDfuBootloader({ silent: true });
       else if (connectedSilent) {
-        setDfuStatus("Closing silent serial connection before DFU upload...");
-        await disconnectSerial().catch(() => {});
-        await dfuSleep(300);
+        await closeApplicationSerialForDfu("Silent serial connection detected");
+      } else if (state.port || state.reader || state.writer) {
+        await closeApplicationSerialForDfu("Stale serial connection detected");
+      }
+      if (state.port || state.reader || state.writer) {
+        await closeApplicationSerialForDfu("Releasing previous serial handle");
       }
       setDfuStatus("Select the UART bootloader serial port...");
       bootPort = await navigator.serial.requestPort();
-      client = new DfuSerialClient(bootPort, baud);
-      await client.open();
-      dfuLog(`browser DFU opened @ ${baud}`);
+      client = await openDfuClientWithBaudProbe(bootPort, baud);
+      dfuLog(`browser DFU opened @ ${client.baudRate}`);
       await uploadDfuZipWithClient(pkg, client);
       setDfuStatus("Browser DFU upload complete. Reconnect to the app.", "ok");
       return true;
@@ -828,8 +920,9 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
       const pkg = await ensureDfuZipPackage();
       await uploadDfuPackageWithBrowser(pkg, "the selected DFU ZIP");
     } catch (error) {
-      setDfuStatus(error.message, "warn");
-      setDfuInfo(`Browser DFU upload failed:\n${error.message}`);
+      const detail = dfuFailureText(error);
+      setDfuStatus(dfuStatusText(error), "warn");
+      setDfuInfo(`Browser DFU upload failed:\n${detail}`);
       dfuLog(`upload failed: ${error.message}`);
     } finally {
       setDfuBusy(false);
@@ -845,8 +938,9 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
       const pkg = await loadBundledDfuPackage();
       await uploadDfuPackageWithBrowser(pkg, "the bundled latest firmware");
     } catch (error) {
-      setDfuStatus(error.message, "warn");
-      setDfuInfo(`Bundled latest DFU failed:\n${error.message}`);
+      const detail = dfuFailureText(error);
+      setDfuStatus(dfuStatusText(error), "warn");
+      setDfuInfo(`Bundled latest DFU failed:\n${detail}`);
       dfuLog(`latest upload failed: ${error.message}`);
     } finally {
       setDfuBusy(false);
