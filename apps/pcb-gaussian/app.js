@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-28-prebias-ms";
+const WEB_VERSION = "2026-05-28-return-zero";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -1220,6 +1220,35 @@ function fixedPlotYBounds() {
   if (!Number.isFinite(minY) || !Number.isFinite(maxY) || minY >= maxY) return null;
   return { minY, maxY };
 }
+async function returnSweepDacsToZero(requests) {
+  const dacs = [...new Set((requests || []).map(req => req.dac).filter(dac => dac === "D1" || dac === "D2"))];
+  const returned = [];
+  for (const dac of dacs) {
+    const dacNumber = dac.slice(1);
+    const reply = await sendCommand(`V${dacNumber},0`, {
+      waitForReply: true,
+      timeoutMs: PROGRAM_REPLY_TIMEOUT_MS,
+      replyMatcher: text => {
+        const upper = text.toUpperCase();
+        return upper.startsWith(`V${dacNumber},`) || upper.startsWith("V,") || upper.startsWith("OK") || upper.startsWith("ERR");
+      },
+    });
+    if (replyLooksBad(reply)) {
+      logLine(`[warn] Return ${dac} to 0 V ${replySummary(reply)}`);
+      continue;
+    }
+    const zeroCode = vhighToDacCode(dac, 0);
+    state.dacCodes[dac] = zeroCode;
+    if ($("dacSelect")?.value === dac) {
+      $("dacCode").value = zeroCode;
+      updateDacReadout();
+    }
+    returned.push(dac);
+  }
+  if (returned.length) logLine(`Returned ${returned.join("/")} to 0 V after sweep.`);
+  return returned;
+}
+
 function firmwareSweepRequest(prefix, totalMs, adcMask) {
   const mode = $(`sweep${prefix}Mode`).value;
   if (mode !== "Vhigh mV") {
@@ -1344,9 +1373,11 @@ async function startSweep() {
     state.sweepRunning = false;
     state.firmwareSweepSelectedTias = null;
     const captured = state.activeSweep?.points.length ?? 0;
-    const elapsedSeconds = ((performance.now() - startedMs) / 1000).toFixed(2);
     finishSweepCapture();
-    $("sweepStatus").textContent = `Firmware sweep finished: ${captured} ADC point(s), ${elapsedSeconds} s`;
+    const returnedDacs = await returnSweepDacsToZero(requests);
+    const elapsedSeconds = ((performance.now() - startedMs) / 1000).toFixed(2);
+    const returnText = returnedDacs.length ? `, returned ${returnedDacs.join("/")} to 0 V` : "";
+    $("sweepStatus").textContent = `Firmware sweep finished: ${captured} ADC point(s), ${elapsedSeconds} s${returnText}`;
     logLine($("sweepStatus").textContent);
   }
 }
