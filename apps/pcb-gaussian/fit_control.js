@@ -750,6 +750,14 @@
     setFitLogStatus("Fit log and adaptive Jacobian history cleared.");
   }
 
+  function clearFitTrailOnly() {
+    ensureFitLogState();
+    const count = state.fitCurveTrail.length;
+    state.fitCurveTrail = [];
+    if (typeof renderSweepPlot === "function") renderSweepPlot();
+    setFitLogStatus(`Cleared ${count} fit trail curve(s); fit log was kept.`, "ok");
+  }
+
   function fitCurveCsvRows() {
     const entries = Array.isArray(state.fitCurveLog) ? state.fitCurveLog : [];
     const fields = [
@@ -898,6 +906,7 @@
     ensureFitLogState();
     renderFitIterationLog();
     $("clearFitLogButton")?.addEventListener("click", clearFitIterationLog);
+    $("clearFitTrailButton")?.addEventListener("click", clearFitTrailOnly);
     $("downloadFitLogButton")?.addEventListener("click", downloadFitLogCsv);
     ["showTargetOverlay", "showFitTrail", "fitTrailOpacity", "fitTargetMu", "fitTargetA", "fitTargetSigma", "gmmTarget", "gmmDevices", "gmmMode"].forEach(id => {
       const element = $(id);
