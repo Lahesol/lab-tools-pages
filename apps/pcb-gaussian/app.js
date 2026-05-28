@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-28-fit-lm-loss";
+const WEB_VERSION = "2026-05-28-code-stop-detail";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -1184,6 +1184,20 @@ function sweepTraceOpacity() {
   if (input) input.value = value;
   return value;
 }
+
+function fixedPlotYRangeEnabled() {
+  return !!$("fixedPlotYRange")?.checked;
+}
+
+function fixedPlotYBounds() {
+  if (!fixedPlotYRangeEnabled()) return null;
+  const minInput = $("plotYMin");
+  const maxInput = $("plotYMax");
+  const minY = Number(minInput?.value);
+  const maxY = Number(maxInput?.value);
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY) || minY >= maxY) return null;
+  return { minY, maxY };
+}
 function firmwareSweepRequest(prefix, totalMs, adcMask) {
   const mode = $(`sweep${prefix}Mode`).value;
   if (mode !== "Vhigh mV") {
@@ -2024,10 +2038,16 @@ function renderDacSweepPlot(xDac) {
   const yValues = overlaySamples.length ? samples.map(sample => sample.y).concat(overlaySamples.map(sample => sample.y)) : samples.map(sample => sample.y);
   let minY = Math.min(...yValues);
   let maxY = Math.max(...yValues);
-  if (minY === maxY) { minY -= 1; maxY += 1; }
-  const yPad = (maxY - minY) * 0.08;
-  minY -= yPad;
-  maxY += yPad;
+  const fixedY = fixedPlotYBounds();
+  if (fixedY) {
+    minY = fixedY.minY;
+    maxY = fixedY.maxY;
+  } else {
+    if (minY === maxY) { minY -= 1; maxY += 1; }
+    const yPad = (maxY - minY) * 0.08;
+    minY -= yPad;
+    maxY += yPad;
+  }
 
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(460, Math.round(rect.width || 720));
@@ -2743,6 +2763,52 @@ function planHasCodeChange(plan) {
   return plan.currentMuCode !== plan.nextMuCode || (plan.currentVstartCode ?? plan.currentACode) !== (plan.nextVstartCode ?? plan.nextACode);
 }
 
+function localParamCodeStepVoltage(param, code) {
+  const safeCode = clamp(Math.round(Number(code) || 0), 0, POT_MAX_CODE);
+  const here = paramCodeToVoltage(param, safeCode);
+  const candidates = [];
+  if (safeCode > 0) candidates.push(Math.abs(here - paramCodeToVoltage(param, safeCode - 1)));
+  if (safeCode < POT_MAX_CODE) candidates.push(Math.abs(paramCodeToVoltage(param, safeCode + 1) - here));
+  const finite = candidates.filter(value => Number.isFinite(value) && value > 0);
+  return finite.length ? Math.min(...finite) : NaN;
+}
+
+function formatSignedDelta(value, digits = 5) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "n/a";
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toFixed(digits)} V`;
+}
+
+function unchangedPlanDetails(plan) {
+  if (!plan) return "no adjustment plan";
+  const currentVstartCode = plan.currentVstartCode ?? plan.currentACode;
+  const nextVstartCode = plan.nextVstartCode ?? plan.nextACode;
+  const requestedMuDelta = Number(plan.requestedNextMuV) - Number(plan.currentMuV);
+  const requestedVstartDelta = Number(plan.requestedNextVstartV) - Number(plan.currentVstartV);
+  const appliedMuDelta = Number(plan.nextMuV) - Number(plan.currentMuV);
+  const appliedVstartDelta = Number(plan.nextVstartV) - Number(plan.currentVstartV);
+  const muCodeStep = localParamCodeStepVoltage("mu", plan.currentMuCode);
+  const vstartCodeStep = localParamCodeStepVoltage("A", currentVstartCode);
+  const reasons = [];
+  if (Number.isFinite(muCodeStep) && Math.abs(appliedMuDelta) < muCodeStep) reasons.push("Vmu step below 1 code");
+  if (Number.isFinite(vstartCodeStep) && Math.abs(appliedVstartDelta) < vstartCodeStep) reasons.push("Vstart step below 1 code");
+  if (plan.vstartBoundaryGuardApplied || (Number.isFinite(Number(plan.requestedNextVstartV)) && Number.isFinite(Number(plan.nextVstartV)) && Math.abs(Number(plan.requestedNextVstartV) - Number(plan.nextVstartV)) > 1e-9)) reasons.push("Vstart range clamp");
+  if (Number.isFinite(Number(plan.requestedNextMuV)) && Number.isFinite(Number(plan.nextMuV)) && Math.abs(Number(plan.requestedNextMuV) - Number(plan.nextMuV)) > 1e-9) reasons.push("Vmu range clamp");
+  if (plan.lossBackoffApplied) reasons.push(`LM backoff${plan.lossBackoffReason ? ` (${plan.lossBackoffReason})` : ""}`);
+  if (plan.jacobianStepLimited) reasons.push("step limit");
+  if (!reasons.length) reasons.push("rounded to same MAX5488 code");
+  return `mu code ${plan.currentMuCode}->${plan.nextMuCode}, Vstart code ${currentVstartCode}->${nextVstartCode}; ` +
+    `requested dVmu ${formatSignedDelta(requestedMuDelta)}, dVstart ${formatSignedDelta(requestedVstartDelta)}; ` +
+    `applied dVmu ${formatSignedDelta(appliedMuDelta)}, dVstart ${formatSignedDelta(appliedVstartDelta)}; ` +
+    `1-code step mu ${formatSignedDelta(muCodeStep)}, Vstart ${formatSignedDelta(vstartCodeStep)}; ` +
+    `reason: ${reasons.join(", ")}`;
+}
+
+function unchangedPlanStopMessage(prefix, plan, error) {
+  return `${prefix} stopped: code unchanged (${unchangedPlanDetails(plan)}). ${formatTargetError(error)}.`;
+}
+
 function gmmErrorSummary(plan, tolerances = autoFitTolerances()) {
   const errors = plan
     .filter(item => item.mode === "fit" && item.fit)
@@ -2803,7 +2869,7 @@ async function autoFitSingle() {
       const plan = adjustmentPlanForFit(device, target, fit, gains.muGain, gains.vstartGain, gains.muVstartGain);
       renderGaussianAdjustPlan(plan);
       if (!planHasCodeChange(plan)) {
-        setFitStatus(`Auto single stopped: code unchanged, ${formatTargetError(error)}.`, "warn");
+        setFitStatus(unchangedPlanStopMessage("Auto single", plan, error), "warn");
         return;
       }
       await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextVstartCode ?? plan.nextACode);
@@ -2846,7 +2912,7 @@ async function autoFitGmm() {
         return;
       }
       if (!plan.some(planHasCodeChange)) {
-        setGmmStatus(`Auto GMM stopped: all codes unchanged, max norm=${summary.maxNorm.toFixed(3)}.`, "warn");
+        setGmmStatus(`${unchangedPlanStopMessage("Auto GMM", plan[0], summary.errors?.[0]?.error || { aError: NaN, muError: NaN, norm: summary.maxNorm })} max norm=${summary.maxNorm.toFixed(3)}.`, "warn");
         return;
       }
       for (const item of plan) await programLogicalDevice(item.device, item.nextMuCode, item.nextVstartCode ?? item.nextACode);
@@ -2997,6 +3063,9 @@ function bindEvents() {
   $("gateProbeClearButton").addEventListener("click", clearGateProbeMap);
   $("plotYMode").addEventListener("change", renderSweepPlot);
   $("fixedPlotRange").addEventListener("change", renderSweepPlot);
+  $("fixedPlotYRange").addEventListener("change", renderSweepPlot);
+  $("plotYMin").addEventListener("input", renderSweepPlot);
+  $("plotYMax").addEventListener("input", renderSweepPlot);
   $("sweepTraceOpacity").addEventListener("input", renderSweepPlot);
   $("downloadSweepCsvButton").addEventListener("click", downloadSweepCsv);
   $("fitGaussianButton").addEventListener("click", fitSelectedGaussian);

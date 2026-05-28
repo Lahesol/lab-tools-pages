@@ -3,6 +3,9 @@
   const FIT_JACOBIAN_HISTORY_LIMIT = 30;
   const FIT_JACOBIAN_MIN_CONTROL_DELTA_V = 1e-5;
   const FIT_JACOBIAN_MAX_STEP_V = 1.2;
+  const FIT_CURVE_TRAIL_LIMIT = 40;
+  const FIT_CURVE_LOG_LIMIT = 200;
+  const FIT_CURVE_SAMPLE_COUNT = 220;
 
   function directionValue(id, fallback = 1) {
     const value = Number($(id)?.value);
@@ -270,6 +273,8 @@
 
   function ensureFitLogState() {
     if (!Array.isArray(state.fitIterationLog)) state.fitIterationLog = [];
+    if (!Array.isArray(state.fitCurveLog)) state.fitCurveLog = [];
+    if (!Array.isArray(state.fitCurveTrail)) state.fitCurveTrail = [];
     if (!Number.isFinite(Number(state.fitLogCounter))) state.fitLogCounter = 0;
   }
 
@@ -278,6 +283,18 @@
     if (!status) return;
     status.textContent = text;
     status.className = `hint status-line ${kind}`.trim();
+  }
+
+  function fitTrailEnabled() {
+    const input = $("showFitTrail");
+    return !input || input.checked;
+  }
+
+  function fitTrailOpacity() {
+    const input = $("fitTrailOpacity");
+    const value = clamp(Number(input?.value) || 0.32, 0.05, 0.9);
+    if (input) input.value = value;
+    return value;
   }
 
   function targetOverlayEnabled() {
@@ -329,6 +346,85 @@
     };
   }
 
+  function sampledCurveParams(params, data, count = FIT_CURVE_SAMPLE_COUNT) {
+    const source = Array.isArray(data) && data.length ? data : params?.data || [];
+    const xs = source.map(item => Number(item.x)).filter(Number.isFinite);
+    if (!xs.length) return [];
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const safeCount = Math.max(2, count);
+    const samples = [];
+    for (let i = 0; i < safeCount; i++) {
+      const x = minX + (maxX - minX) * i / (safeCount - 1);
+      const y = gaussianValue(params, x);
+      if (Number.isFinite(x) && Number.isFinite(y)) samples.push({ point: i, x, y });
+    }
+    return samples;
+  }
+
+  function fitTrailOverlaysForPlot(xDac, yMode, labels) {
+    if (!fitTrailEnabled()) return [];
+    const trail = Array.isArray(state.fitCurveTrail) ? state.fitCurveTrail : [];
+    const filtered = trail
+      .filter(entry => entry.xDac === xDac && entry.yMode === yMode)
+      .filter(entry => labels.includes(`ADC${entry.adcIndex}`));
+    const total = filtered.length;
+    return filtered.map((entry, index) => ({
+      ...entry.params,
+      source: "trail",
+      label: `Trail ${entry.logId} / ADC${entry.adcIndex}`,
+      logId: entry.logId,
+      trailIndex: index,
+      trailTotal: total,
+    }));
+  }
+
+  function recordFitCurve(row, fit, target) {
+    if (!row || !fit) return;
+    state.fitCurveLog = Array.isArray(state.fitCurveLog) ? state.fitCurveLog : [];
+    state.fitCurveTrail = Array.isArray(state.fitCurveTrail) ? state.fitCurveTrail : [];
+    const targetParams = targetParamsForFit(fit, target);
+    const measured = Array.isArray(fit.data)
+      ? fit.data.map((item, index) => ({ point: item.point ?? index, x: item.x, y: item.y }))
+      : [];
+    const params = {
+      A: fit.A,
+      mu: fit.mu,
+      sigma: fit.sigma,
+      baseline: fit.baseline,
+      adcIndex: fit.adcIndex,
+      xDac: fit.xDac,
+      yMode: fit.yMode,
+    };
+    const entry = {
+      curveId: `fit-${row.id}`,
+      logId: row.id,
+      mode: row.mode,
+      iter: row.iter,
+      device: row.device,
+      trace: row.trace,
+      xDac: fit.xDac,
+      adcIndex: fit.adcIndex,
+      yMode: fit.yMode,
+      params,
+      targetParams,
+      targetA: target?.A,
+      targetMu: target?.mu,
+      targetSigma: target?.sigma,
+      controlMuV: row.controlMuV,
+      controlVstartV: row.controlVstartV,
+      controlLoss: row.controlLoss,
+      measured,
+      fitSamples: sampledCurveParams(params, measured),
+      targetSamples: targetParams ? sampledCurveParams(targetParams, measured) : [],
+    };
+    state.fitCurveLog.push(entry);
+    if (state.fitCurveLog.length > FIT_CURVE_LOG_LIMIT) state.fitCurveLog.splice(0, state.fitCurveLog.length - FIT_CURVE_LOG_LIMIT);
+    state.fitCurveTrail.push(entry);
+    if (state.fitCurveTrail.length > FIT_CURVE_TRAIL_LIMIT) state.fitCurveTrail.splice(0, state.fitCurveTrail.length - FIT_CURVE_TRAIL_LIMIT);
+  }
+
+
   function singleTargetOverlaysForPlot(xDac, yMode, labels) {
     const fit = state.lastGaussianFit;
     if (!fit || fit.xDac !== xDac || fit.yMode !== yMode) return [];
@@ -368,11 +464,12 @@
     fitOverlayForPlot = function patchedFitOverlayForPlot(xDac, yMode, labels) {
       const fitOverlay = baseFitOverlayForPlot(xDac, yMode, labels);
       const targets = targetOverlaysForPlot(xDac, yMode, labels);
+      const trails = fitTrailOverlaysForPlot(xDac, yMode, labels);
       let overlay = fitOverlay;
-      if (targets.length) {
+      if (targets.length || trails.length) {
         overlay = fitOverlay
-          ? { ...fitOverlay, targetOverlays: targets }
-          : { ...targets[0], hideFit: true, targetOverlays: targets };
+          ? { ...fitOverlay, targetOverlays: targets, trailOverlays: trails }
+          : { ...(targets[0] || trails[0]), hideFit: true, targetOverlays: targets, trailOverlays: trails };
       }
       state.fitControlLastOverlayByDac = state.fitControlLastOverlayByDac || {};
       state.fitControlLastOverlayByDac[xDac] = overlay;
@@ -388,6 +485,13 @@
       if (!fit.hideFit) {
         samples.push(...baseGaussianOverlaySamples(fit, minX, maxX, count).map(item => ({ ...item, overlayKind: "fit" })));
       }
+      (fit.trailOverlays || []).forEach((trail, overlayIndex) => {
+        samples.push(...baseGaussianOverlaySamples(trail, minX, maxX, count).map(item => ({
+          ...item,
+          overlayKind: "trail",
+          overlayIndex,
+        })));
+      });
       (fit.targetOverlays || []).forEach((target, overlayIndex) => {
         samples.push(...baseGaussianOverlaySamples(target, minX, maxX, count).map(item => ({
           ...item,
@@ -403,6 +507,29 @@
   if (baseDrawGaussianOverlay) {
     drawGaussianOverlay = function patchedDrawGaussianOverlay(ctx, fit, overlay, sx, sy) {
       if (!fit || !overlay?.length) return;
+      (fit.trailOverlays || []).forEach((trail, overlayIndex) => {
+        const series = overlay.filter(item => item.overlayKind === "trail" && item.overlayIndex === overlayIndex);
+        if (!series.length) return;
+        const color = PLOT_COLORS[trail.adcIndex % PLOT_COLORS.length];
+        const fraction = trail.trailTotal > 1 ? (trail.trailIndex + 1) / trail.trailTotal : 1;
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.globalAlpha = fitTrailOpacity() * (0.25 + 0.75 * fraction);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.1 + 1.3 * fraction;
+        if (typeof ctx.setLineDash === "function") ctx.setLineDash([2, 6]);
+        ctx.beginPath();
+        series.forEach((item, idx) => {
+          const x = sx(item.x);
+          const y = sy(item.y);
+          if (idx === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+        ctx.restore();
+      });
+
       const fitSamples = overlay.filter(item => !item.overlayKind || item.overlayKind === "fit");
       if (!fit.hideFit && fitSamples.length) baseDrawGaussianOverlay(ctx, fit, fitSamples, sx, sy);
 
@@ -452,6 +579,17 @@
         });
       }
       const targets = overlay.targetOverlays || [];
+      const trails = overlay.trailOverlays || [];
+      if (trails.length) {
+        const byAdc = new Map();
+        for (const trail of trails) byAdc.set(trail.adcIndex, (byAdc.get(trail.adcIndex) || 0) + 1);
+        for (const [adcIndex, count] of byAdc.entries()) {
+          const color = PLOT_COLORS[adcIndex % PLOT_COLORS.length];
+          const item = document.createElement("span");
+          item.innerHTML = `<i style="background:repeating-linear-gradient(to right, ${color} 0 2px, transparent 2px 6px)"></i>Fit trail / ADC${adcIndex} (${count})`;
+          legend.appendChild(item);
+        }
+      }
       for (const target of targets) {
         const color = PLOT_COLORS[target.adcIndex % PLOT_COLORS.length];
         const label = htmlEscape(target.label || `Target / ADC${target.adcIndex}`);
@@ -553,8 +691,10 @@
       action: entry.action || "",
     };
     state.fitIterationLog.push(row);
+    recordFitCurve(row, entry.fit, target);
     if (state.fitIterationLog.length > 1000) state.fitIterationLog.splice(0, state.fitIterationLog.length - 1000);
     renderFitIterationLog();
+    if (typeof renderSweepPlot === "function") renderSweepPlot();
   }
 
   function renderFitIterationLog() {
@@ -603,8 +743,58 @@
     state.fitIterationLog = [];
     state.fitLogCounter = 0;
     state.fitJacobianByKey = {};
+    state.fitCurveLog = [];
+    state.fitCurveTrail = [];
     renderFitIterationLog();
+    if (typeof renderSweepPlot === "function") renderSweepPlot();
     setFitLogStatus("Fit log and adaptive Jacobian history cleared.");
+  }
+
+  function fitCurveCsvRows() {
+    const entries = Array.isArray(state.fitCurveLog) ? state.fitCurveLog : [];
+    const fields = [
+      "curve_id", "log_id", "mode", "iter", "device", "trace",
+      "x_dac", "adc", "y_mode", "curve_type", "point", "x", "y",
+      "A", "mu", "sigma", "baseline",
+      "target_A", "target_mu", "target_sigma",
+      "control_Vmu", "control_Vstart", "control_loss",
+    ];
+    const rows = [fields.join(",")];
+    for (const entry of entries) {
+      const writeSeries = (type, series, params = entry.params) => {
+        for (const sample of series || []) {
+          rows.push([
+            entry.curveId,
+            entry.logId,
+            entry.mode,
+            entry.iter,
+            entry.device,
+            entry.trace,
+            entry.xDac,
+            `ADC${entry.adcIndex}`,
+            entry.yMode,
+            type,
+            sample.point ?? "",
+            sample.x,
+            sample.y,
+            params?.A,
+            params?.mu,
+            params?.sigma,
+            params?.baseline,
+            entry.targetA,
+            entry.targetMu,
+            entry.targetSigma,
+            entry.controlMuV,
+            entry.controlVstartV,
+            entry.controlLoss,
+          ].map(csvEscape).join(","));
+        }
+      };
+      writeSeries("measured", entry.measured, entry.params);
+      writeSeries("fit_model", entry.fitSamples, entry.params);
+      writeSeries("target_model", entry.targetSamples, entry.targetParams);
+    }
+    return rows;
   }
 
   function downloadFitLogCsv() {
@@ -621,7 +811,7 @@
       "fit_loss", "target_loss", "error_A", "error_mu",
       "r2", "target_similarity", "norm", "control_loss", "action",
     ];
-    const csv = [
+    const summaryRows = [
       fields.join(","),
       ...state.fitIterationLog.map(row => fields.map(field => {
         const map = {
@@ -642,9 +832,16 @@
         };
         return csvEscape(map[field] ?? row[field]);
       }).join(",")),
+    ];
+    const csv = [
+      ...summaryRows,
+      "",
+      "# curve_points",
+      ...fitCurveCsvRows(),
     ].join("\n");
     download(`pcb_gaussian_fit_log_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
-    setFitLogStatus(`Downloaded ${state.fitIterationLog.length} fit log row(s).`, "ok");
+    const curveCount = Array.isArray(state.fitCurveLog) ? state.fitCurveLog.length : 0;
+    setFitLogStatus(`Downloaded ${state.fitIterationLog.length} fit log row(s) and ${curveCount} curve set(s).`, "ok");
   }
 
   function logGmmPlan(plan) {
@@ -702,7 +899,7 @@
     renderFitIterationLog();
     $("clearFitLogButton")?.addEventListener("click", clearFitIterationLog);
     $("downloadFitLogButton")?.addEventListener("click", downloadFitLogCsv);
-    ["showTargetOverlay", "fitTargetMu", "fitTargetA", "fitTargetSigma", "gmmTarget", "gmmDevices", "gmmMode"].forEach(id => {
+    ["showTargetOverlay", "showFitTrail", "fitTrailOpacity", "fitTargetMu", "fitTargetA", "fitTargetSigma", "gmmTarget", "gmmDevices", "gmmMode"].forEach(id => {
       const element = $(id);
       if (!element) return;
       element.addEventListener("change", renderSweepPlot);
