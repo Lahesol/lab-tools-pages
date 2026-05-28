@@ -1,4 +1,6 @@
 (function () {
+  const A_ERROR_VSTART_STEP_V = 0.05;
+
   function directionValue(id, fallback = 1) {
     const value = Number($(id)?.value);
     return value < 0 ? -1 : fallback;
@@ -7,6 +9,31 @@
   function aDirectionGuardEnabled() {
     const input = $("fitAerrorGuard");
     return !input || input.checked;
+  }
+
+  function paramVoltageBounds(param) {
+    const points = typeof getParamCalPoints === "function" ? getParamCalPoints(param) : [];
+    const voltages = points.map(point => Number(point.voltage)).filter(Number.isFinite);
+    if (!voltages.length) return { min: -Infinity, max: Infinity };
+    return { min: Math.min(...voltages), max: Math.max(...voltages) };
+  }
+
+  function clampParamVoltage(param, voltage) {
+    const bounds = paramVoltageBounds(param);
+    return clamp(Number(voltage), bounds.min, bounds.max);
+  }
+
+  function normalizedAmplitudeDelta(ampError, vstartGain, aDirection) {
+    const tolerances = typeof autoFitTolerances === "function" ? autoFitTolerances() : { aTol: 0 };
+    const aTol = Number(tolerances.aTol);
+    const scale = aTol > 0 ? aTol : 1;
+    const norm = Number(ampError) / scale;
+    const gain = Math.max(0, Math.abs(Number(vstartGain) || 0));
+    const rawDelta = norm * A_ERROR_VSTART_STEP_V * gain * aDirection;
+    return {
+      delta: clamp(rawDelta, -1.2, 1.2),
+      norm,
+    };
   }
 
   function finiteNumber(value) {
@@ -473,17 +500,36 @@
     const aDirection = directionValue("fitADirection", 1);
     const muControlDelta = muError * muGain * muDirection;
     const vstartCoupledDelta = muControlDelta * muVstartGain;
-    const vstartAmplitudeDelta = ampError * vstartGain * aDirection;
+    const amplitudeControl = normalizedAmplitudeDelta(ampError, vstartGain, aDirection);
+    const vstartAmplitudeDelta = amplitudeControl.delta;
     let vstartTotalDelta = vstartCoupledDelta + vstartAmplitudeDelta;
     let aDirectionGuardApplied = false;
+    let aOvershootGuardApplied = false;
+    let vstartBoundaryGuardApplied = false;
 
     if (aDirectionGuardEnabled() && Math.abs(vstartAmplitudeDelta) > 0 && Math.sign(vstartTotalDelta) !== Math.sign(vstartAmplitudeDelta)) {
       vstartTotalDelta = vstartAmplitudeDelta;
       aDirectionGuardApplied = true;
     }
 
-    const nextMuV = currentMuV + muControlDelta;
-    const nextVstartV = currentVstartV + vstartTotalDelta;
+    const tolerances = typeof autoFitTolerances === "function" ? autoFitTolerances() : { aTol: 0 };
+    const aTol = Math.max(0, Number(tolerances.aTol) || 0);
+    if (aTol > 0 && ampError < -aTol && vstartTotalDelta < 0) {
+      vstartTotalDelta = Math.max(0, vstartAmplitudeDelta);
+      aOvershootGuardApplied = true;
+    }
+
+    const requestedNextMuV = currentMuV + muControlDelta;
+    const requestedNextVstartV = currentVstartV + vstartTotalDelta;
+    const nextMuV = clampParamVoltage("mu", requestedNextMuV);
+    const vstartBounds = paramVoltageBounds("A");
+    let nextVstartV = clampParamVoltage("A", requestedNextVstartV);
+    if ((requestedNextVstartV < vstartBounds.min && vstartTotalDelta < 0) ||
+        (requestedNextVstartV > vstartBounds.max && vstartTotalDelta > 0)) {
+      nextVstartV = currentVstartV;
+      vstartTotalDelta = 0;
+      vstartBoundaryGuardApplied = true;
+    }
     const nextMuCode = muVoltageToCode(nextMuV);
     const nextVstartCode = vstartVoltageToCode(nextVstartV);
     return {
@@ -497,15 +543,20 @@
       currentVstartV,
       nextMuV,
       nextVstartV,
+      requestedNextMuV,
+      requestedNextVstartV,
       nextMuCode,
       nextVstartCode,
       muControlDelta,
       vstartCoupledDelta,
       vstartAmplitudeDelta,
+      ampErrorNorm: amplitudeControl.norm,
       vstartTotalDelta,
       muDirection,
       aDirection,
       aDirectionGuardApplied,
+      aOvershootGuardApplied,
+      vstartBoundaryGuardApplied,
       currentACode: currentVstartCode,
       currentAV: currentVstartV,
       nextAV: nextVstartV,
@@ -517,9 +568,13 @@
     if (!plan) return;
     const errorText = plan.fit ? ` ${formatTargetError(gaussianTargetError(plan.fit, plan.target))}.` : "";
     const vstartDelta = Number.isFinite(plan.nextVstartV) && Number.isFinite(plan.currentVstartV) ? plan.nextVstartV - plan.currentVstartV : NaN;
-    const guardText = plan.aDirectionGuardApplied ? ", A dir lock applied" : "";
+    const guardParts = [];
+    if (plan.aDirectionGuardApplied) guardParts.push("A dir lock");
+    if (plan.aOvershootGuardApplied) guardParts.push("A overshoot guard");
+    if (plan.vstartBoundaryGuardApplied) guardParts.push("Vstart limit guard");
+    const guardText = guardParts.length ? `, ${guardParts.join(" + ")} applied` : "";
     const couplingText = plan.mode === "fit" && Number.isFinite(vstartDelta)
-      ? `; Vstart delta ${vstartDelta.toFixed(4)} V = total ${plan.vstartTotalDelta.toFixed(4)} (mu link ${plan.vstartCoupledDelta.toFixed(4)} + A correction ${plan.vstartAmplitudeDelta.toFixed(4)}${guardText})`
+      ? `; Vstart delta ${vstartDelta.toFixed(4)} V = total ${plan.vstartTotalDelta.toFixed(4)} (mu link ${plan.vstartCoupledDelta.toFixed(4)} + A correction ${plan.vstartAmplitudeDelta.toFixed(4)}, A norm ${Number(plan.ampErrorNorm).toFixed(2)}${guardText})`
       : "";
     setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), Vstart ${plan.currentVstartCode}->${plan.nextVstartCode} (${plan.nextVstartV.toFixed(4)} V)${couplingText}.${errorText}`, "ok");
   };

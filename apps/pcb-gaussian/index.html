@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=cc8846739ba6" />
+    <link rel="stylesheet" href="./styles.css?v=f6a7eb63e735" />
   </head>
   <body>
     <header class="app-header">
@@ -214,7 +214,7 @@
               <label class="inline-field">Vstart gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">mu->Vstart <input id="fitMuVstartGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">mu dir <select id="fitMuDirection"><option value="1">+err -> +Vmu</option><option value="-1">+err -> -Vmu</option></select></label>
-              <label class="inline-field">A dir <select id="fitADirection"><option value="1">+err -> +Vstart</option><option value="-1">+err -> -Vstart</option></select></label>
+              <label class="inline-field">A dir <select id="fitADirection"><option value="-1" selected>+err -> -Vstart</option><option value="1">+err -> +Vstart</option></select></label>
               <label class="checkbox inline-check"><input id="fitAerrorGuard" type="checkbox" checked /> A dir lock</label>
               <label class="inline-field">Trace opacity <input id="sweepTraceOpacity" type="number" value="0.45" min="0.1" max="1" step="0.05" /></label>
               <label class="checkbox inline-check"><input id="showFitOverlay" type="checkbox" checked /> Fit overlay</label>
@@ -229,7 +229,7 @@
               <button id="autoFitGmmButton">Auto fit GMM</button>
               <button id="stopAutoFitButton">Stop auto</button>
             </div>
-            <p class="hint" id="fitStatus">Fit uses signed A_amp and mu errors; A dir lock prevents mu->Vstart coupling from overriding the A-error Vstart direction.</p>
+            <p class="hint" id="fitStatus">Fit uses signed A_amp and mu errors; A correction is normalized by A_amp tol and guards Vstart against A overshoot or output-limit saturation.</p>
           </article>
           <article class="panel fit-panel">
             <div class="panel-title">
@@ -547,16 +547,24 @@
             <p class="hint" id="deviceTimeStatus">Time-domain idle.</p>
           </div>
           <div class="button-row tune-row">
-            <label class="inline-field">Samples <input id="deviceTimeSamples" type="number" value="1000" min="10" max="20000" step="10" /></label>
+            <label class="inline-field">Rate Hz <input id="deviceTimeRateHz" type="number" value="20" min="0.1" max="1000" step="1" /></label>
             <label class="inline-field">Oversample <input id="deviceTimeOversample" type="number" value="1" min="1" max="256" step="1" /></label>
-            <label class="inline-field">Interval us <input id="deviceTimeIntervalUs" type="number" value="0" min="0" max="65000" step="10" /></label>
             <label class="inline-field">Y <select id="deviceTimeYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
-            <button id="deviceTimeStartButton" class="primary">Start time plot</button>
+            <button id="deviceTimeStartButton" class="primary">Start monitor</button>
             <button id="deviceTimeStopButton" disabled>Stop</button>
             <button id="deviceTimeClearButton">Clear time plot</button>
           </div>
+          <p class="hint">Rolling plot window is fixed at 10 s; measurement keeps running until Stop.</p>
           <canvas id="deviceTimeCanvas" height="300"></canvas>
           <div id="deviceTimeLegend" class="plot-legend"></div>
+          <div class="button-row tune-row time-bias-row">
+            <label class="inline-field">Device <input id="deviceTimeDevice" type="number" min="1" max="16" value="1" /></label>
+            <label class="inline-field">Gate DAC <select id="deviceTimeDac"><option>D2</option><option>D1</option></select></label>
+            <label class="inline-field">Gate mV <input id="deviceTimeDacMvNumber" type="number" value="0" min="-15000" max="15000" step="10" /></label>
+            <label class="inline-field">Vmu V <input id="deviceTimeMuNumber" type="number" value="0" step="0.01" /></label>
+            <label class="inline-field">Vstart V <input id="deviceTimeVstartNumber" type="number" value="0" step="0.01" /></label>
+            <button id="deviceTimeApplyBiasButton">Apply bias</button>
+          </div>
         </article>
         <article class="panel activity-log">
           <div class="panel-title">
@@ -680,12 +688,12 @@
 
     </main>
 
-    <script src="./app.js?v=d7505bc0ee2a"></script>
-    <script src="./serial_watchdog.js?v=20260528-gate-queue"></script>
-    <script src="./gate_probe_step.js?v=20260528-gate-queue"></script>
-    <script src="./fit_control.js?v=20260528-gate-queue"></script>
-    <script src="./device_tune.js?v=20260528-gate-queue"></script>
-    <script src="./device_time.js?v=20260528-gate-queue"></script>
-    <script src="./dfu.js?v=20260528-gate-queue"></script>
+    <script src="./app.js?v=b8d2f2cf6045"></script>
+    <script src="./serial_watchdog.js?v=20260528-noise-continuous"></script>
+    <script src="./gate_probe_step.js?v=20260528-noise-continuous"></script>
+    <script src="./fit_control.js?v=20260528-noise-continuous"></script>
+    <script src="./device_tune.js?v=20260528-noise-continuous"></script>
+    <script src="./device_time.js?v=20260528-noise-continuous"></script>
+    <script src="./dfu.js?v=20260528-noise-continuous"></script>
   </body>
 </html>

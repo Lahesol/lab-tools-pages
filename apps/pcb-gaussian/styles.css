@@ -269,6 +269,11 @@ input:focus, select:focus {
 .tune-row {
   margin: 14px 0 10px;
 }
+.time-bias-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
 .tune-slider-label {
   display: block;
   margin-top: 10px;
