@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-28-clear-fit-trail";
+const WEB_VERSION = "2026-05-28-adc-device-map";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -58,6 +58,8 @@ const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
 const PROGRAM_REPLY_TIMEOUT_MS = 1500;
 const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653"];
 const ADC_LABELS = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `ADC${idx}`);
+// Current jumper map from bench wiring: ADC0/1/2/3 read devices 5/4/6/1.
+const ADC_DEVICE_MAP = [5, 4, 6, 1, null, null, null, null];
 const PLOT_CONFIGS = {
   D1: {
     title: "DAC1",
@@ -1046,6 +1048,20 @@ function sweepPointCountFromMv(start, stop, step) {
   return count;
 }
 
+function mappedDeviceForAdc(adcIndex) {
+  const device = ADC_DEVICE_MAP[adcIndex];
+  return Number.isFinite(Number(device)) ? Number(device) : null;
+}
+function adcSubLabel(adcIndex) {
+  const device = mappedDeviceForAdc(adcIndex);
+  return device ? `D${device} / TIA${adcIndex + 1}` : `TIA${adcIndex + 1}`;
+}
+function adcIndexFromMappedDevice(device) {
+  const wanted = Number(device);
+  if (!Number.isFinite(wanted)) return null;
+  const index = ADC_DEVICE_MAP.findIndex(item => Number(item) === wanted);
+  return index >= 0 ? index : null;
+}
 function adcIndexFromTia(tiaIndex) {
   const tia = state.tiaStates[tiaIndex - 1];
   const match = String(tia?.adc || "").match(/AIN(\d+)/i);
@@ -1909,7 +1925,7 @@ function renderPlotAdcFilters() {
     host.innerHTML = ADC_LABELS.map((label, idx) => `
       <label class="adc-filter-chip">
         <input class="plot-adc-input" data-dac="${dac}" type="checkbox" value="${idx}" ${selected.has(idx) ? "checked" : ""} />
-        ${label}<span>TIA${idx + 1}</span>
+        ${label}<span>${adcSubLabel(idx)}</span>
       </label>
     `).join("");
   }
@@ -2148,7 +2164,7 @@ function renderDacSweepPlot(xDac) {
   $(config.legendId).innerHTML = labels.map(label => {
     const adcIdx = Number(label.replace("ADC", ""));
     const color = PLOT_COLORS[adcIdx % PLOT_COLORS.length];
-    return `<span><i style="background:${color}"></i>${label} / TIA${adcIdx + 1}</span>`;
+    return `<span><i style="background:${color}"></i>${label} / ${adcSubLabel(adcIdx)}</span>`;
   }).concat(overlayFit ? (() => {
     const color = PLOT_COLORS[overlayFit.adcIndex % PLOT_COLORS.length];
     return `<span><i style="background:repeating-linear-gradient(to right, ${color} 0 7px, transparent 7px 12px)"></i>Fit / ADC${overlayFit.adcIndex}</span>`;
@@ -2183,7 +2199,7 @@ function setGmmStatus(text, kind = "") {
 function renderFitAdcOptions() {
   const select = $("fitAdc");
   if (!select) return;
-  select.innerHTML = ADC_LABELS.map((label, idx) => `<option value="${idx}">${label} / TIA${idx + 1}</option>`).join("");
+  select.innerHTML = ADC_LABELS.map((label, idx) => `<option value="${idx}">${label} / ${adcSubLabel(idx)}</option>`).join("");
 }
 
 function gaussianFitSeries(xDac, adcIndex, yMode) {
@@ -2325,7 +2341,7 @@ function refineGaussianParams(data, seed, minX, maxX, minSigma, maxSigma) {
   const span = Math.max(1e-6, maxX - minX);
   const nonNegativeData = data.every(item => item.y >= 0);
   let params = {
-    A: seed.A,
+    A: nonNegativeData ? Math.max(0, seed.A) : seed.A,
     mu: clamp(seed.mu, minX, maxX),
     sigma: clamp(Math.abs(seed.sigma), minSigma, maxSigma),
     baseline: nonNegativeData ? Math.max(0, seed.baseline) : seed.baseline,
@@ -2344,7 +2360,10 @@ function refineGaussianParams(data, seed, minX, maxX, minSigma, maxSigma) {
         const next = { ...params, [key]: params[key] + dir * steps[key] };
         next.mu = clamp(next.mu, minX, maxX);
         next.sigma = clamp(Math.abs(next.sigma), minSigma, maxSigma);
-        if (nonNegativeData) next.baseline = Math.max(0, next.baseline);
+        if (nonNegativeData) {
+          next.A = Math.max(0, next.A);
+          next.baseline = Math.max(0, next.baseline);
+        }
         const loss = gaussianLoss(data, next);
         if (loss < best) {
           params = next;
@@ -2604,6 +2623,8 @@ function selectedFitAdcs(xDac) {
 }
 
 function adcIndexForDevice(device, fallbackIndex, xDac) {
+  const mapped = adcIndexFromMappedDevice(device);
+  if (mapped !== null) return mapped;
   syncTiaStates();
   for (let adcIndex = 0; adcIndex < state.tiaStates.length; adcIndex++) {
     const devices = state.tiaStates[adcIndex].devices || [];
