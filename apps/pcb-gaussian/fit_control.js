@@ -1,5 +1,8 @@
 (function () {
   const A_ERROR_VSTART_STEP_V = 0.05;
+  const FIT_JACOBIAN_HISTORY_LIMIT = 30;
+  const FIT_JACOBIAN_MIN_CONTROL_DELTA_V = 1e-5;
+  const FIT_JACOBIAN_MAX_STEP_V = 1.2;
 
   function directionValue(id, fallback = 1) {
     const value = Number($(id)?.value);
@@ -34,6 +37,208 @@
       delta: clamp(rawDelta, -1.2, 1.2),
       norm,
     };
+  }
+
+  function fitControlMode() {
+    return $("fitControlMode")?.value || "adaptive";
+  }
+
+  function fitJacobianDamping() {
+    const input = $("fitJacobianDamping");
+    const value = clamp(Number(input?.value) || 0.05, 0.001, 10);
+    if (input) input.value = value;
+    return value;
+  }
+
+  function fitControlScales(target, fit, tolerances = autoFitTolerances()) {
+    const muTol = Number(tolerances?.muTol);
+    const aTol = Number(tolerances?.aTol);
+    const muScale = muTol > 0
+      ? muTol
+      : Math.max(1e-6, Math.abs(Number(target?.mu) || 0), Math.abs(Number(fit?.mu) || 0), 1);
+    const aScale = aTol > 0
+      ? aTol
+      : Math.max(1e-9, Math.abs(Number(target?.A) || 0), Math.abs(Number(fit?.A) || 0), 1);
+    return { muScale, aScale };
+  }
+
+  function fitControlLoss(fit, target, tolerances = autoFitTolerances()) {
+    if (!fit || !target) return NaN;
+    const { muScale, aScale } = fitControlScales(target, fit, tolerances);
+    const eMu = (Number(fit.mu) - Number(target.mu)) / muScale;
+    const eA = (Number(fit.A) - Number(target.A)) / aScale;
+    if (![eMu, eA].every(Number.isFinite)) return NaN;
+    return 0.5 * (eMu * eMu + eA * eA);
+  }
+
+  function ensureFitJacobianState() {
+    if (!state.fitJacobianByKey || typeof state.fitJacobianByKey !== "object") state.fitJacobianByKey = {};
+  }
+
+  function fitJacobianKey(device, fit) {
+    return [device, fit?.xDac || "-", fit?.adcIndex ?? "-", fit?.yMode || "-"].join("|");
+  }
+
+  function fitControlSample(device, fit, muV, vstartV, target, tolerances) {
+    return {
+      device,
+      xDac: fit?.xDac,
+      adcIndex: fit?.adcIndex,
+      yMode: fit?.yMode,
+      muV: Number(muV),
+      vstartV: Number(vstartV),
+      fitMu: Number(fit?.mu),
+      fitA: Number(fit?.A),
+      targetMu: Number(target?.mu),
+      targetA: Number(target?.A),
+      loss: fitControlLoss(fit, target, tolerances),
+      time: Date.now(),
+    };
+  }
+
+  function transitionIsFinite(transition) {
+    return [...transition.du, ...transition.dy].every(Number.isFinite);
+  }
+
+  function sameControlTarget(a, b) {
+    return a && b &&
+      Math.abs(Number(a.targetMu) - Number(b.targetMu)) < 1e-9 &&
+      Math.abs(Number(a.targetA) - Number(b.targetA)) < 1e-12;
+  }
+
+  function lossTrendForTransition(transition) {
+    if (!transition || !sameControlTarget(transition.from, transition.to)) return null;
+    const fromLoss = Number(transition.from.loss);
+    const toLoss = Number(transition.to.loss);
+    if (![fromLoss, toLoss].every(Number.isFinite) || fromLoss <= 0) return null;
+    const ratio = toLoss / fromLoss;
+    return {
+      fromLoss,
+      toLoss,
+      ratio,
+      worsened: ratio > 1.05,
+      improved: ratio < 0.95,
+    };
+  }
+
+  function updateFitJacobianModel(device, fit, muV, vstartV, target, tolerances) {
+    ensureFitJacobianState();
+    const key = fitJacobianKey(device, fit);
+    const model = state.fitJacobianByKey[key] || { key, transitions: [], lastSample: null };
+    const sample = fitControlSample(device, fit, muV, vstartV, target, tolerances);
+    const previous = model.lastSample;
+    model.lastLossTrend = null;
+    if (previous) {
+      const transition = {
+        du: [sample.muV - previous.muV, sample.vstartV - previous.vstartV],
+        dy: [sample.fitMu - previous.fitMu, sample.fitA - previous.fitA],
+        from: previous,
+        to: sample,
+      };
+      const controlNorm = Math.hypot(...transition.du);
+      if (controlNorm > FIT_JACOBIAN_MIN_CONTROL_DELTA_V && transitionIsFinite(transition)) {
+        const last = model.transitions[model.transitions.length - 1];
+        const duplicate = last &&
+          Math.abs(last.from.time - transition.from.time) < 2 &&
+          Math.abs(last.to.time - transition.to.time) < 2;
+        if (!duplicate) model.transitions.push(transition);
+        if (model.transitions.length > FIT_JACOBIAN_HISTORY_LIMIT) {
+          model.transitions.splice(0, model.transitions.length - FIT_JACOBIAN_HISTORY_LIMIT);
+        }
+        model.lastLossTrend = lossTrendForTransition(transition);
+      }
+    }
+    model.lastSample = sample;
+    state.fitJacobianByKey[key] = model;
+    return model;
+  }
+
+  function manualJacobianPrior() {
+    const muDirection = directionValue("fitMuDirection", 1);
+    const aDirection = directionValue("fitADirection", 1);
+    const tolerances = typeof autoFitTolerances === "function" ? autoFitTolerances() : { aTol: 0.002 };
+    const aTol = Math.max(1e-6, Number(tolerances.aTol) || 0.002);
+    return [
+      [muDirection, 0],
+      [0, aDirection * (aTol / A_ERROR_VSTART_STEP_V)],
+    ];
+  }
+
+  function estimateFitJacobian(model, prior, damping) {
+    const lambda = Math.max(1e-6, Number(damping) || 0.05);
+    let xx00 = lambda;
+    let xx01 = 0;
+    let xx11 = lambda;
+    const xyMu = [lambda * prior[0][0], lambda * prior[0][1]];
+    const xyA = [lambda * prior[1][0], lambda * prior[1][1]];
+    for (const transition of model.transitions || []) {
+      const [u0, u1] = transition.du;
+      const [yMu, yA] = transition.dy;
+      xx00 += u0 * u0;
+      xx01 += u0 * u1;
+      xx11 += u1 * u1;
+      xyMu[0] += u0 * yMu;
+      xyMu[1] += u1 * yMu;
+      xyA[0] += u0 * yA;
+      xyA[1] += u1 * yA;
+    }
+    const det = xx00 * xx11 - xx01 * xx01;
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+    const solve = vector => [
+      (xx11 * vector[0] - xx01 * vector[1]) / det,
+      (-xx01 * vector[0] + xx00 * vector[1]) / det,
+    ];
+    return [solve(xyMu), solve(xyA)];
+  }
+
+  function solveDampedJacobian(jacobian, error, damping) {
+    const [[j00, j01], [j10, j11]] = jacobian;
+    const lambda2 = Math.max(1e-8, (Number(damping) || 0.05) ** 2);
+    const a00 = j00 * j00 + j10 * j10 + lambda2;
+    const a01 = j00 * j01 + j10 * j11;
+    const a11 = j01 * j01 + j11 * j11 + lambda2;
+    const b0 = j00 * error[0] + j10 * error[1];
+    const b1 = j01 * error[0] + j11 * error[1];
+    const det = a00 * a11 - a01 * a01;
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+    return [
+      (a11 * b0 - a01 * b1) / det,
+      (-a01 * b0 + a00 * b1) / det,
+    ];
+  }
+
+  function solveLossDampedJacobian(jacobian, error, scales, damping) {
+    const normalizedJ = [
+      [jacobian[0][0] / scales.muScale, jacobian[0][1] / scales.muScale],
+      [jacobian[1][0] / scales.aScale, jacobian[1][1] / scales.aScale],
+    ];
+    const normalizedError = [
+      error[0] / scales.muScale,
+      error[1] / scales.aScale,
+    ];
+    const delta = solveDampedJacobian(normalizedJ, normalizedError, damping);
+    if (!delta) return null;
+    const residualMu = normalizedError[0] - (normalizedJ[0][0] * delta[0] + normalizedJ[0][1] * delta[1]);
+    const residualA = normalizedError[1] - (normalizedJ[1][0] * delta[0] + normalizedJ[1][1] * delta[1]);
+    const currentLoss = 0.5 * (normalizedError[0] ** 2 + normalizedError[1] ** 2);
+    const predictedLoss = 0.5 * (residualMu ** 2 + residualA ** 2);
+    return {
+      delta,
+      currentLoss,
+      predictedLoss,
+      predictedReduction: currentLoss - predictedLoss,
+      normalizedJ,
+      normalizedError,
+    };
+  }
+
+  function lossStepScale(lossTrend) {
+    if (!lossTrend?.worsened) return 1;
+    return clamp(1 / Math.max(2, lossTrend.ratio), 0.2, 0.7);
+  }
+
+  function clampFitStep(delta) {
+    return clamp(Number(delta) || 0, -FIT_JACOBIAN_MAX_STEP_V, FIT_JACOBIAN_MAX_STEP_V);
   }
 
   function finiteNumber(value) {
@@ -291,11 +496,13 @@
         : Number.isFinite(Number(fit?.rmse)) ? Number(fit.rmse) ** 2 : NaN;
     const targetLoss = targetCurveLoss(fit, targetParams);
     const error = fit && target ? gaussianTargetError(fit, target) : null;
+    const controlLoss = fit && target ? fitControlLoss(fit, target) : NaN;
     const targetRmse = Number.isFinite(targetLoss) ? Math.sqrt(targetLoss) : NaN;
     const scale = Math.max(Math.abs(Number(fit?.A) || 0), Math.abs(Number(target?.A) || 0), 1e-12);
     return {
       fitLoss,
       targetLoss,
+      controlLoss,
       error,
       fitSimilarity: clamp01(Number(fit?.r2)),
       targetSimilarity: Number.isFinite(targetRmse) ? clamp01(1 - targetRmse / scale) : NaN,
@@ -317,13 +524,18 @@
     const target = entry.target || readTargetForFit(entry.fit);
     const metrics = fitControlMetrics(entry.fit, target);
     const error = metrics.error || {};
+    const logDevice = Number.isFinite(Number(entry.device)) ? deviceMuxInfo(entry.device).device : "";
+    const controlMuV = logDevice ? potCodeToMuVoltage(logicalMuCodeForDevice(logDevice)) : NaN;
+    const controlVstartV = logDevice ? potCodeToVstartVoltage(logicalVstartCodeForDevice(logDevice)) : NaN;
     const row = {
       id: ++state.fitLogCounter,
       time: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
       mode: entry.mode || "single",
       iter: entry.iter ?? "",
-      device: entry.device ?? "",
+      device: logDevice || entry.device || "",
       trace: `${entry.fit.xDac || "-"} / ADC${entry.fit.adcIndex}`,
+      controlMuV,
+      controlVstartV,
       fitA: entry.fit.A,
       fitMu: entry.fit.mu,
       fitSigma: Math.abs(entry.fit.sigma),
@@ -332,6 +544,7 @@
       targetSigma: target?.sigma,
       fitLoss: metrics.fitLoss,
       targetLoss: metrics.targetLoss,
+      controlLoss: metrics.controlLoss,
       errorA: error.aError,
       errorMu: error.muError,
       r2: entry.fit.r2,
@@ -359,6 +572,8 @@
         row.iter,
         row.device,
         row.trace,
+        formatLogNumber(row.controlMuV),
+        formatLogNumber(row.controlVstartV),
         formatLogNumber(row.fitA),
         formatLogNumber(row.fitMu),
         formatLogNumber(row.fitSigma),
@@ -372,6 +587,7 @@
         formatLogNumber(row.r2, 4),
         Number.isFinite(row.targetSimilarity) ? `${(row.targetSimilarity * 100).toFixed(1)}%` : "",
         formatLogNumber(row.norm, 4),
+        formatLogNumber(row.controlLoss, 4),
       ].forEach(value => {
         const td = document.createElement("td");
         td.textContent = value;
@@ -386,8 +602,9 @@
   function clearFitIterationLog() {
     state.fitIterationLog = [];
     state.fitLogCounter = 0;
+    state.fitJacobianByKey = {};
     renderFitIterationLog();
-    setFitLogStatus("Fit log cleared.");
+    setFitLogStatus("Fit log and adaptive Jacobian history cleared.");
   }
 
   function downloadFitLogCsv() {
@@ -398,10 +615,11 @@
     }
     const fields = [
       "id", "time", "mode", "iter", "device", "trace",
+      "control_Vmu", "control_Vstart",
       "fit_A", "fit_mu", "fit_sigma",
       "target_A", "target_mu", "target_sigma",
       "fit_loss", "target_loss", "error_A", "error_mu",
-      "r2", "target_similarity", "norm", "action",
+      "r2", "target_similarity", "norm", "control_loss", "action",
     ];
     const csv = [
       fields.join(","),
@@ -410,11 +628,14 @@
           fit_A: row.fitA,
           fit_mu: row.fitMu,
           fit_sigma: row.fitSigma,
+          control_Vmu: row.controlMuV,
+          control_Vstart: row.controlVstartV,
           target_A: row.targetA,
           target_mu: row.targetMu,
           target_sigma: row.targetSigma,
           fit_loss: row.fitLoss,
           target_loss: row.targetLoss,
+          control_loss: row.controlLoss,
           error_A: row.errorA,
           error_mu: row.errorMu,
           target_similarity: row.targetSimilarity,
@@ -498,6 +719,92 @@
     const ampError = target.A - fit.A;
     const muDirection = directionValue("fitMuDirection", 1);
     const aDirection = directionValue("fitADirection", 1);
+    const tolerances = typeof autoFitTolerances === "function" ? autoFitTolerances() : { aTol: 0 };
+    const jacobianModel = updateFitJacobianModel(device, fit, currentMuV, currentVstartV, target, tolerances);
+    const aTol = Math.max(0, Number(tolerances.aTol) || 0);
+    const ampErrorNorm = aTol > 0 ? ampError / aTol : ampError;
+    const boundedPlan = (controlMode, muDelta, vstartDelta, extra = {}) => {
+      const requestedNextMuV = currentMuV + muDelta;
+      const requestedNextVstartV = currentVstartV + vstartDelta;
+      const nextMuV = clampParamVoltage("mu", requestedNextMuV);
+      const vstartBounds = paramVoltageBounds("A");
+      let nextVstartV = clampParamVoltage("A", requestedNextVstartV);
+      let vstartTotalDelta = vstartDelta;
+      let vstartBoundaryGuardApplied = false;
+      if ((requestedNextVstartV < vstartBounds.min && vstartDelta < 0) ||
+          (requestedNextVstartV > vstartBounds.max && vstartDelta > 0)) {
+        nextVstartV = currentVstartV;
+        vstartTotalDelta = 0;
+        vstartBoundaryGuardApplied = true;
+      }
+      const nextMuCode = muVoltageToCode(nextMuV);
+      const nextVstartCode = vstartVoltageToCode(nextVstartV);
+      return {
+        mode: "fit",
+        controlMode,
+        device,
+        target,
+        fit,
+        currentMuCode,
+        currentVstartCode,
+        currentMuV,
+        currentVstartV,
+        nextMuV,
+        nextVstartV,
+        requestedNextMuV,
+        requestedNextVstartV,
+        nextMuCode,
+        nextVstartCode,
+        muControlDelta: muDelta,
+        vstartTotalDelta,
+        muDirection,
+        aDirection,
+        vstartBoundaryGuardApplied,
+        currentACode: currentVstartCode,
+        currentAV: currentVstartV,
+        nextAV: nextVstartV,
+        nextACode: nextVstartCode,
+        ...extra,
+      };
+    };
+
+    if (fitControlMode() !== "manual") {
+      const damping = fitJacobianDamping();
+      const prior = manualJacobianPrior();
+      const jacobian = estimateFitJacobian(jacobianModel, prior, damping);
+      const scales = fitControlScales(target, fit, tolerances);
+      const lm = jacobianModel.transitions.length && jacobian
+        ? solveLossDampedJacobian(jacobian, [muError, ampError], scales, damping)
+        : null;
+      if (lm?.delta && lm.delta.every(Number.isFinite)) {
+        const trendScale = lossStepScale(jacobianModel.lastLossTrend);
+        const predictionScale = lm.predictedReduction > 0 ? 1 : 0.25;
+        const stepScale = Math.min(trendScale, predictionScale);
+        const muStep = lm.delta[0] * Math.max(0, Math.abs(Number(muGain) || 1)) * stepScale;
+        const vstartStep = lm.delta[1] * Math.max(0, Math.abs(Number(vstartGain) || 1)) * stepScale;
+        const muControlDelta = clampFitStep(muStep);
+        const vstartTotalDelta = clampFitStep(vstartStep);
+        return boundedPlan("lm", muControlDelta, vstartTotalDelta, {
+          vstartCoupledDelta: 0,
+          vstartAmplitudeDelta: vstartTotalDelta,
+          ampErrorNorm,
+          jacobian,
+          jacobianTransitions: jacobianModel.transitions.length,
+          jacobianDamping: damping,
+          jacobianRawDelta: lm.delta,
+          controlLoss: lm.currentLoss,
+          predictedLoss: lm.predictedLoss,
+          predictedReduction: lm.predictedReduction,
+          lossTrend: jacobianModel.lastLossTrend,
+          lossStepScale: stepScale,
+          lossBackoffApplied: stepScale < 1,
+          lossBackoffReason: predictionScale < 1 ? "no predicted loss reduction" : trendScale < 1 ? "previous loss increased" : "",
+          jacobianStepLimited: Math.abs(muStep) > FIT_JACOBIAN_MAX_STEP_V ||
+            Math.abs(vstartStep) > FIT_JACOBIAN_MAX_STEP_V,
+        });
+      }
+    }
+
     const muControlDelta = muError * muGain * muDirection;
     const vstartCoupledDelta = muControlDelta * muVstartGain;
     const amplitudeControl = normalizedAmplitudeDelta(ampError, vstartGain, aDirection);
@@ -505,63 +812,27 @@
     let vstartTotalDelta = vstartCoupledDelta + vstartAmplitudeDelta;
     let aDirectionGuardApplied = false;
     let aOvershootGuardApplied = false;
-    let vstartBoundaryGuardApplied = false;
 
     if (aDirectionGuardEnabled() && Math.abs(vstartAmplitudeDelta) > 0 && Math.sign(vstartTotalDelta) !== Math.sign(vstartAmplitudeDelta)) {
       vstartTotalDelta = vstartAmplitudeDelta;
       aDirectionGuardApplied = true;
     }
 
-    const tolerances = typeof autoFitTolerances === "function" ? autoFitTolerances() : { aTol: 0 };
-    const aTol = Math.max(0, Number(tolerances.aTol) || 0);
     if (aTol > 0 && ampError < -aTol && vstartTotalDelta < 0) {
       vstartTotalDelta = Math.max(0, vstartAmplitudeDelta);
       aOvershootGuardApplied = true;
     }
 
-    const requestedNextMuV = currentMuV + muControlDelta;
-    const requestedNextVstartV = currentVstartV + vstartTotalDelta;
-    const nextMuV = clampParamVoltage("mu", requestedNextMuV);
-    const vstartBounds = paramVoltageBounds("A");
-    let nextVstartV = clampParamVoltage("A", requestedNextVstartV);
-    if ((requestedNextVstartV < vstartBounds.min && vstartTotalDelta < 0) ||
-        (requestedNextVstartV > vstartBounds.max && vstartTotalDelta > 0)) {
-      nextVstartV = currentVstartV;
-      vstartTotalDelta = 0;
-      vstartBoundaryGuardApplied = true;
-    }
-    const nextMuCode = muVoltageToCode(nextMuV);
-    const nextVstartCode = vstartVoltageToCode(nextVstartV);
-    return {
-      mode: "fit",
-      device,
-      target,
-      fit,
-      currentMuCode,
-      currentVstartCode,
-      currentMuV,
-      currentVstartV,
-      nextMuV,
-      nextVstartV,
-      requestedNextMuV,
-      requestedNextVstartV,
-      nextMuCode,
-      nextVstartCode,
+    return boundedPlan("manual", muControlDelta, vstartTotalDelta, {
       muControlDelta,
       vstartCoupledDelta,
       vstartAmplitudeDelta,
       ampErrorNorm: amplitudeControl.norm,
-      vstartTotalDelta,
-      muDirection,
-      aDirection,
       aDirectionGuardApplied,
       aOvershootGuardApplied,
-      vstartBoundaryGuardApplied,
-      currentACode: currentVstartCode,
-      currentAV: currentVstartV,
-      nextAV: nextVstartV,
-      nextACode: nextVstartCode,
-    };
+      jacobianTransitions: jacobianModel.transitions.length,
+      manualFallbackReason: fitControlMode() === "manual" ? "manual selected" : "waiting for transition history",
+    });
   };
 
   renderGaussianAdjustPlan = function patchedRenderGaussianAdjustPlan(plan) {
@@ -572,10 +843,25 @@
     if (plan.aDirectionGuardApplied) guardParts.push("A dir lock");
     if (plan.aOvershootGuardApplied) guardParts.push("A overshoot guard");
     if (plan.vstartBoundaryGuardApplied) guardParts.push("Vstart limit guard");
+    if (plan.jacobianStepLimited) guardParts.push("J step limit");
     const guardText = guardParts.length ? `, ${guardParts.join(" + ")} applied` : "";
-    const couplingText = plan.mode === "fit" && Number.isFinite(vstartDelta)
-      ? `; Vstart delta ${vstartDelta.toFixed(4)} V = total ${plan.vstartTotalDelta.toFixed(4)} (mu link ${plan.vstartCoupledDelta.toFixed(4)} + A correction ${plan.vstartAmplitudeDelta.toFixed(4)}, A norm ${Number(plan.ampErrorNorm).toFixed(2)}${guardText})`
-      : "";
+    let couplingText = "";
+    if (plan.mode === "fit" && Number.isFinite(vstartDelta)) {
+      const muDelta = Number.isFinite(plan.nextMuV) && Number.isFinite(plan.currentMuV) ? plan.nextMuV - plan.currentMuV : NaN;
+      if (plan.controlMode === "lm") {
+        const j = plan.jacobian || [[NaN, NaN], [NaN, NaN]];
+        const jText = `[${j[0][0].toPrecision(3)}, ${j[0][1].toPrecision(3)}; ${j[1][0].toPrecision(3)}, ${j[1][1].toPrecision(3)}]`;
+        const lossText = Number.isFinite(plan.controlLoss)
+          ? `, loss ${plan.controlLoss.toPrecision(4)} -> pred ${Number(plan.predictedLoss).toPrecision(4)}`
+          : "";
+        const reasonText = plan.lossBackoffReason ? ` ${plan.lossBackoffReason}` : "";
+        const backoffText = plan.lossBackoffApplied ? `, backoff x${Number(plan.lossStepScale).toPrecision(3)}${reasonText}` : "";
+        couplingText = `; adaptive LM delta Vmu ${muDelta.toFixed(4)} V, Vstart ${vstartDelta.toFixed(4)} V (n=${plan.jacobianTransitions || 0}, damping=${Number(plan.jacobianDamping).toPrecision(3)}${lossText}${backoffText}, J=${jText}${guardText})`;
+      } else {
+        const fallbackText = plan.manualFallbackReason ? `, ${plan.manualFallbackReason}` : "";
+        couplingText = `; manual delta Vstart ${vstartDelta.toFixed(4)} V = total ${plan.vstartTotalDelta.toFixed(4)} (mu link ${plan.vstartCoupledDelta.toFixed(4)} + A correction ${plan.vstartAmplitudeDelta.toFixed(4)}, A norm ${Number(plan.ampErrorNorm).toFixed(2)}${fallbackText}${guardText})`;
+      }
+    }
     setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), Vstart ${plan.currentVstartCode}->${plan.nextVstartCode} (${plan.nextVstartV.toFixed(4)} V)${couplingText}.${errorText}`, "ok");
   };
 })();

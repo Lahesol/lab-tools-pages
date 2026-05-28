@@ -213,6 +213,8 @@
               <label class="inline-field">mu gain <input id="fitMuGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">Vstart gain <input id="fitAGain" type="number" value="1" step="0.1" /></label>
               <label class="inline-field">mu->Vstart <input id="fitMuVstartGain" type="number" value="1" step="0.1" /></label>
+              <label class="inline-field">Control <select id="fitControlMode"><option value="adaptive" selected>Adaptive LM</option><option value="manual">Manual dir</option></select></label>
+              <label class="inline-field">J damping <input id="fitJacobianDamping" type="number" value="0.05" min="0.001" max="10" step="0.01" /></label>
               <label class="inline-field">mu dir <select id="fitMuDirection"><option value="1">+err -> +Vmu</option><option value="-1">+err -> -Vmu</option></select></label>
               <label class="inline-field">A dir <select id="fitADirection"><option value="-1" selected>+err -> -Vstart</option><option value="1">+err -> +Vstart</option></select></label>
               <label class="checkbox inline-check"><input id="fitAerrorGuard" type="checkbox" checked /> A dir lock</label>
@@ -229,7 +231,7 @@
               <button id="autoFitGmmButton">Auto fit GMM</button>
               <button id="stopAutoFitButton">Stop auto</button>
             </div>
-            <p class="hint" id="fitStatus">Fit uses signed A_amp and mu errors; A correction is normalized by A_amp tol and guards Vstart against A overshoot or output-limit saturation.</p>
+            <p class="hint" id="fitStatus">Adaptive LM uses tolerance-normalized mu/A_amp loss, estimated local Jacobian, damping, and step backoff when the previous iteration increases loss.</p>
           </article>
           <article class="panel fit-panel">
             <div class="panel-title">
@@ -276,6 +278,8 @@
                     <th>iter</th>
                     <th>device</th>
                     <th>trace</th>
+                    <th>Vmu</th>
+                    <th>Vstart</th>
                     <th>A fit</th>
                     <th>mu fit</th>
                     <th>sigma fit</th>
@@ -289,6 +293,7 @@
                     <th>R2</th>
                     <th>target sim</th>
                     <th>norm</th>
+                    <th>ctrl loss</th>
                   </tr>
                 </thead>
                 <tbody id="fitLogBody"></tbody>
@@ -688,12 +693,12 @@
 
     </main>
 
-    <script src="./app.js?v=8a47c158ca38"></script>
-    <script src="./serial_watchdog.js?v=20260528-gate-mv-step10"></script>
-    <script src="./gate_probe_step.js?v=20260528-gate-mv-step10"></script>
-    <script src="./fit_control.js?v=20260528-gate-mv-step10"></script>
-    <script src="./device_tune.js?v=20260528-gate-mv-step10"></script>
-    <script src="./device_time.js?v=20260528-gate-mv-step10"></script>
-    <script src="./dfu.js?v=20260528-gate-mv-step10"></script>
+    <script src="./app.js?v=172158a20a93"></script>
+    <script src="./serial_watchdog.js?v=20260528-fit-lm-loss"></script>
+    <script src="./gate_probe_step.js?v=20260528-fit-lm-loss"></script>
+    <script src="./fit_control.js?v=20260528-fit-lm-loss"></script>
+    <script src="./device_tune.js?v=20260528-fit-lm-loss"></script>
+    <script src="./device_time.js?v=20260528-fit-lm-loss"></script>
+    <script src="./dfu.js?v=20260528-fit-lm-loss"></script>
   </body>
 </html>
