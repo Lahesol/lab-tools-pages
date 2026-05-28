@@ -775,7 +775,7 @@ Ready for browser UART DFU upload.`
     return lastDfuPackage;
   }
 
-  async function writeDfuObject(client, type, bytes, label, expectedBaseOffset, onProgress) {
+  async function writeDfuObject(client, type, bytes, label, expectedBaseOffset, onProgress, options = {}) {
     await client.createObject(type, bytes.length);
     let packetsSinceReceipt = 0;
     for (let offset = 0; offset < bytes.length; offset += DFU_WRITE_CHUNK_SIZE) {
@@ -800,8 +800,16 @@ Ready for browser UART DFU upload.`
     if (crc.offset !== expectedEnd) {
       throw new Error(`${label} CRC offset mismatch: bootloader ${crc.offset}, expected ${expectedEnd}`);
     }
-    await client.executeObject(type === DFU_OBJ.DATA ? 15000 : 12000);
-    return crc;
+    try {
+      await client.executeObject(type === DFU_OBJ.DATA ? 15000 : 12000);
+    } catch (error) {
+      if (options.allowExecuteTimeoutAsSuccess && /OBJECT_EXECUTE response timeout/i.test(error.message || "")) {
+        dfuLog(`${label} execute ACK timeout after CRC OK; treating as likely reset`);
+        return { ...crc, executeTimedOut: true, likelyReset: true };
+      }
+      throw error;
+    }
+    return { ...crc, executeTimedOut: false, likelyReset: false };
   }
 
   async function uploadDfuZipWithClient(pkg, client) {
@@ -831,14 +839,23 @@ Ready for browser UART DFU upload.`
     const total = pkg.bin.length;
     const startTime = performance.now();
     dfuLog(`data object max=${objectMax} offset=${dataSelect.offset}, mtu=${mtu || "unknown"}`);
+    let finalExecuteTimedOut = false;
 
     while (sent < total) {
       const objectSize = Math.min(objectMax, total - sent);
+      const finalObject = sent + objectSize >= total;
       const objectBytes = pkg.bin.slice(sent, sent + objectSize);
       setDfuStatus(`Uploading application ${formatBytes(sent)} / ${formatBytes(total)}...`);
-      await writeDfuObject(client, DFU_OBJ.DATA, objectBytes, "application", sent, offset => {
-        setDfuProgress(offset, total);
-      });
+      const dataCrc = await writeDfuObject(
+        client,
+        DFU_OBJ.DATA,
+        objectBytes,
+        "application",
+        sent,
+        offset => setDfuProgress(offset, total),
+        { allowExecuteTimeoutAsSuccess: finalObject }
+      );
+      finalExecuteTimedOut ||= !!dataCrc.likelyReset;
       sent += objectSize;
       setDfuProgress(sent, total);
     }
@@ -846,15 +863,16 @@ Ready for browser UART DFU upload.`
     const elapsed = Math.max(0.001, (performance.now() - startTime) / 1000);
     const rate = total / elapsed;
     setDfuInfo(
-`Browser DFU upload complete.
+`${finalExecuteTimedOut ? "Browser DFU upload sent; final reset likely happened before ACK." : "Browser DFU upload complete."}
 Package: ${pkg.fileName}
 Init: ${pkg.datName} (${formatBytes(pkg.dat.length)})
 Application: ${pkg.binName} (${formatBytes(pkg.bin.length)})
 UART rate: ${Math.round(rate)} B/s effective
 Protocol: Nordic secure serial DFU, PRN=${DFU_PRN}, chunk=${DFU_WRITE_CHUNK_SIZE} byte(s)
 
-The bootloader should reset into the updated application. Reconnect Web Serial and run VER?.`
+${finalExecuteTimedOut ? "Reconnect Web Serial and run VER? to verify the updated application." : "The bootloader should reset into the updated application. Reconnect Web Serial and run VER?."}`
     );
+    return { finalExecuteTimedOut };
   }
 
   async function openDfuClientWithBaudProbe(port, requestedBaud) {
@@ -908,8 +926,12 @@ The bootloader should reset into the updated application. Reconnect Web Serial a
       bootPort = await navigator.serial.requestPort();
       client = await openDfuClientWithBaudProbe(bootPort, baud);
       dfuLog(`browser DFU opened @ ${client.baudRate}`);
-      await uploadDfuZipWithClient(pkg, client);
-      setDfuStatus("Browser DFU upload complete. Reconnect to the app.", "ok");
+      const result = await uploadDfuZipWithClient(pkg, client);
+      if (result?.finalExecuteTimedOut) {
+        setDfuStatus("DFU sent; reconnect and verify firmware version.", "ok");
+      } else {
+        setDfuStatus("Browser DFU upload complete. Reconnect to the app.", "ok");
+      }
       return true;
     } finally {
       if (client) await client.close().catch(() => {});
