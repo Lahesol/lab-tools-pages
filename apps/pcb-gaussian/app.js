@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-28-adc-device-map";
+const WEB_VERSION = "2026-05-28-prebias-ms";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -1183,6 +1183,12 @@ function sweepSettleUs() {
   return value;
 }
 
+function sweepPreBiasMs() {
+  const input = $("sweepPreBiasMs");
+  const value = clamp(Math.round(Number(input?.value) || 0), 0, 30000);
+  if (input) input.value = value;
+  return value;
+}
 function sweepRepeatCount() {
   const input = $("sweepRepeats");
   const value = clamp(Math.round(Number(input?.value) || 1), 1, 100);
@@ -1235,6 +1241,7 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
   if (pointCount > 1024) throw new Error(`${prefix} firmware sweep has ${pointCount} points; max is 1024`);
   const avgSamples = adcAvgSamples();
   const settleUs = sweepSettleUs();
+  const preBiasMs = sweepPreBiasMs();
   const reverse = sweepReverseEnabled();
   const requestStart = reverse ? stop : start;
   const requestStop = reverse ? start : stop;
@@ -1243,6 +1250,7 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
     command: `SX${prefix.slice(1)},${encodeBase32(requestStart)},${encodeBase32(requestStop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)},${encodeBase32(avgSamples)},${encodeBase32(settleUs)}`,
     avgSamples,
     settleUs,
+    preBiasMs,
     reverse,
     pointCount,
     startMv: requestStart,
@@ -1250,7 +1258,7 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
     rangeMinMv: Math.min(start, stop),
     rangeMaxMv: Math.max(start, stop),
     stepMv: step,
-    timeoutMs: Math.max(10000, totalMs + Math.ceil(pointCount * settleUs / 1000) + pointCount * 500 + 3000),
+    timeoutMs: Math.max(10000, totalMs + preBiasMs + Math.ceil(pointCount * settleUs / 1000) + pointCount * 500 + 3000),
   };
 }
 
@@ -1285,7 +1293,7 @@ async function startSweep() {
   startSweepCapture(requests, repeatCount);
   state.sweepRunning = true;
   const startedMs = performance.now();
-  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us${req.reverse ? " reverse" : ""}`).join(", ")} x${repeatCount}`;
+  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us prebias=${req.preBiasMs}ms${req.reverse ? " reverse" : ""}`).join(", ")} x${repeatCount}`;
   logLine($("sweepStatus").textContent);
 
   try {
@@ -1294,7 +1302,25 @@ async function startSweep() {
       for (const request of requests) {
         if (!state.sweepRunning) break;
         state.firmwareSweepSelectedTias = request.tias;
-        $("sweepStatus").textContent = `Firmware sweep ${request.dac}: run ${repeatIndex + 1}/${repeatCount}, ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}, avg ${request.avgSamples}, settle ${request.settleUs} us${request.reverse ? ", reverse" : ""}`;
+        $("sweepStatus").textContent = `Firmware sweep ${request.dac}: run ${repeatIndex + 1}/${repeatCount}, ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}, avg ${request.avgSamples}, settle ${request.settleUs} us, pre-bias ${request.preBiasMs} ms${request.reverse ? ", reverse" : ""}`;
+        if (request.preBiasMs > 0) {
+          const dacNumber = request.dac.slice(1);
+          const biasReply = await sendCommand(`V${dacNumber},${request.startMv}`, {
+            waitForReply: true,
+            timeoutMs: PROGRAM_REPLY_TIMEOUT_MS,
+            replyMatcher: text => {
+              const upper = text.toUpperCase();
+              return upper.startsWith(`V${dacNumber},`) || upper.startsWith("V,") || upper.startsWith("OK") || upper.startsWith("ERR");
+            },
+          });
+          if (replyLooksBad(biasReply)) {
+            logLine(`[warn] Pre-bias ${request.dac} ${replySummary(biasReply)}`);
+            state.sweepRunning = false;
+            break;
+          }
+          $("sweepStatus").textContent = `Pre-bias ${request.dac}: ${request.startMv} mV for ${request.preBiasMs} ms`;
+          await new Promise(resolve => setTimeout(resolve, request.preBiasMs));
+        }
         const reply = await sendCommand(request.command, {
           waitForReply: true,
           timeoutMs: request.timeoutMs,
