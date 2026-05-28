@@ -249,6 +249,11 @@ input:focus, select:focus {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+.gate-probe.gate-probe-locked {
+  background: #fff8ec;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(230, 164, 100, 0.45);
+}
 .gate-slider {
   width: 100%;
   height: 28px;
@@ -256,6 +261,10 @@ input:focus, select:focus {
   padding: 0;
   border: 0;
   background: transparent;
+}
+.gate-slider:disabled {
+  cursor: progress;
+  opacity: 0.62;
 }
 .tune-row {
   margin: 14px 0 10px;
@@ -515,6 +524,9 @@ tr:hover td { background: #fbf5ed; }
   gap: 16px;
   margin-top: 16px;
 }
+.fit-log-panel {
+  grid-column: 1 / -1;
+}
 .compact-fit-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -559,6 +571,19 @@ tr:hover td { background: #fbf5ed; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 12px;
+}
+.fit-log-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 280px;
+}
+.fit-log-table {
+  min-width: 1320px;
+}
+.fit-log-table td, .fit-log-table th {
+  font-size: 11px;
+  padding: 7px 8px;
 }
 @media (max-width: 980px) {
   .app-header, .connection-card, .grid.two, .overview, .plot-grid, .fit-grid, .compact-fit-grid {
