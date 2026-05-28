@@ -3,7 +3,7 @@
   const BOOTLOADER_START = 0x78000;
   const FLASH_END = 0x80000;
   const DFU_WRITE_CHUNK_SIZE = 64;
-  const DFU_PRN = 8;
+  const DFU_PRN = 0;
   const DFU_BOOT_DELAY_MS = 1400;
   const LATEST_DFU_MANIFEST_URL = "./firmware/latest.json";
   const DFU_FALLBACK_BAUDS = [230400, 115200, 1000000];
@@ -357,6 +357,9 @@
     if (/already open/i.test(message)) {
       return `${message}\n\nThe selected COM port is still open in this browser tab or another serial terminal. Click Disconnect, close other serial monitors, then retry Program latest firmware.`;
     }
+    if (/^DFU (?!PING\b).+ response timeout/i.test(message)) {
+      return `${message}\n\nThe bootloader responded to the initial probe but stopped during this DFU command. This usually means the selected port reset, the bootloader timed out/restarted, or the browser uploader command sequence differs from nrfutil. Retry once from bootloader mode; if it repeats, use Show command/nrfutil as a control test and report the exact opcode shown here.`;
+    }
     if (/response timeout|No Nordic UART DFU response/i.test(message)) {
       return `${message}\n\n${DFU_TIMEOUT_HELP}`;
     }
@@ -601,7 +604,15 @@ Ready for browser UART DFU upload.`
     }
 
     async response(expectedOp, timeoutMs = 8000) {
-      const packet = await this.readSlipPacket(timeoutMs);
+      let packet;
+      try {
+        packet = await this.readSlipPacket(timeoutMs);
+      } catch (error) {
+        if (/response timeout/i.test(error.message || "")) {
+          throw new Error(`DFU ${this.opName(expectedOp)} response timeout`);
+        }
+        throw error;
+      }
       if (packet[0] !== DFU_OP.RESPONSE) throw new Error(`Unexpected DFU packet 0x${packet[0]?.toString(16)}`);
       if (packet[1] !== expectedOp) {
         throw new Error(`Unexpected DFU response for 0x${packet[1]?.toString(16)}, expected 0x${expectedOp.toString(16)}`);
@@ -772,7 +783,7 @@ Ready for browser UART DFU upload.`
       await client.writeObjectChunk(chunk);
       packetsSinceReceipt += 1;
       const expectedOffset = expectedBaseOffset + offset + chunk.length;
-      if (packetsSinceReceipt >= DFU_PRN) {
+      if (DFU_PRN > 0 && packetsSinceReceipt >= DFU_PRN) {
         const receipt = await client.response(DFU_OP.CRC_GET, 8000);
         const view = new DataView(receipt.buffer, receipt.byteOffset, receipt.byteLength);
         const bootOffset = readU32(view, 3);
@@ -796,7 +807,6 @@ Ready for browser UART DFU upload.`
   async function uploadDfuZipWithClient(pkg, client) {
     setDfuProgress(0);
     setDfuStatus("Opening DFU protocol...");
-    await client.ping();
     let mtu = null;
     try {
       mtu = await client.mtuGet();
