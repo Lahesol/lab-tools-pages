@@ -19,6 +19,13 @@ function absoluteUrl(path) {
   return new URL(path || "", window.location.href).href;
 }
 
+function cacheBustedAppUrl(path) {
+  if (!path || path === "#") return "#";
+  const url = new URL(path, window.location.href);
+  url.searchParams.set("portal_v", Date.now().toString());
+  return url.href;
+}
+
 function formatBytes(bytes) {
   const value = Number(bytes);
   if (!Number.isFinite(value) || value <= 0) return "unknown size";
@@ -65,10 +72,11 @@ function renderApps() {
     status.textContent = app.status || "Ready";
     description.textContent = app.description || "";
     meta.textContent = `${app.group || "General"} | ${app.url || ""}`;
-    openLink.href = app.url || "#";
+    const appUrl = cacheBustedAppUrl(app.url || "#");
+    openLink.href = appUrl;
 
     copyButton.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(absoluteUrl(app.url || ""));
+      await navigator.clipboard.writeText(appUrl === "#" ? absoluteUrl(app.url || "") : appUrl);
       copyButton.textContent = "Copied";
       copyButton.classList.add("copied");
       setTimeout(() => {
