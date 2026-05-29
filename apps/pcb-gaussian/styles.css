@@ -249,6 +249,17 @@ input:focus, select:focus {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+.param-bracket {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.bracket-row .inline-field input {
+  width: 96px;
+}
+.bracket-row .inline-field select {
+  width: 132px;
+}
 .gate-probe.gate-probe-locked {
   background: #fff8ec;
   border-radius: 8px;

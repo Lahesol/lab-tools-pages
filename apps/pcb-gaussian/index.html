@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=f6a7eb63e735" />
+    <link rel="stylesheet" href="./styles.css?v=bc61c405607d" />
   </head>
   <body>
     <header class="app-header">
@@ -154,6 +154,24 @@
               <button id="downloadSweepCsvButton" disabled>Download sweep CSV</button>
             </div>
             <p class="hint" id="sweepStatus">Sweep idle</p>
+            <div class="param-bracket">
+              <div class="button-row bracket-row">
+                <label class="inline-field">Device <input id="bracketDevice" type="number" min="1" max="16" value="5" /></label>
+                <label class="inline-field">Axis <select id="bracketAxis"><option value="muCoupled">Vmu + Vstart</option><option value="vstart">Vstart only</option><option value="mu">Vmu only</option></select></label>
+                <label class="inline-field">Vmu start <input id="bracketMuStart" type="number" value="-0.016" step="0.01" /></label>
+                <label class="inline-field">Vstart start <input id="bracketVstartStart" type="number" value="-6.59" step="0.01" /></label>
+                <label class="inline-field">Step V <input id="bracketStepV" type="number" value="-1" step="0.01" /></label>
+                <label class="inline-field">Count <input id="bracketCount" type="number" value="6" min="2" max="50" step="1" /></label>
+                <label class="inline-field">Settle ms <input id="bracketProgramSettleMs" type="number" value="1000" min="0" max="30000" step="100" /></label>
+              </div>
+              <div class="button-row">
+                <button id="bracketLoadCurrentButton">Load current</button>
+                <button id="startBracketButton" class="primary">Start bracket</button>
+                <button id="stopBracketButton" disabled>Stop bracket</button>
+                <button id="downloadBracketCsvButton" disabled>Download bracket CSV</button>
+              </div>
+              <p class="hint status-line" id="bracketStatus">Parameter bracket idle.</p>
+            </div>
             <div class="gate-probe">
               <div class="button-row">
                 <label class="inline-field">Gate DAC <select id="gateProbeDac"><option>D2</option><option>D1</option></select></label>
@@ -700,7 +718,7 @@
 
     </main>
 
-    <script src="./app.js?v=879685f0adbc"></script>
+    <script src="./app.js?v=6616a1201dd2"></script>
     <script src="./serial_watchdog.js?v=20260528-return-zero"></script>
     <script src="./gate_probe_step.js?v=20260528-return-zero"></script>
     <script src="./fit_control.js?v=20260528-return-zero"></script>

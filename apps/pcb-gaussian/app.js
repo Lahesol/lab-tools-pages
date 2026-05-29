@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-28-return-zero";
+const WEB_VERSION = "2026-05-29-param-bracket";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -325,6 +325,10 @@ const state = {
   firmwareSweepSelectedTias: null,
   activeSweep: null,
   lastSweep: null,
+  lastBracket: null,
+  bracketRuns: [],
+  bracketRunning: false,
+  bracketStopRequested: false,
   sweepCounter: 0,
   plotFramePending: false,
   plotRenderTimer: null,
@@ -1386,6 +1390,218 @@ function stopSweep() {
   state.sweepRunning = false;
   $("sweepStatus").textContent = "Sweep stop requested";
   logLine("Sweep stop requested; firmware sweep will finish the in-progress command before stopping.");
+}
+
+
+function setBracketStatus(text, kind = "") {
+  const status = $("bracketStatus");
+  if (!status) return;
+  status.textContent = text;
+  status.className = `hint status-line ${kind}`.trim();
+}
+
+function setParameterBracketControls(running) {
+  const ids = [
+    "bracketDevice", "bracketAxis", "bracketMuStart", "bracketVstartStart",
+    "bracketStepV", "bracketCount", "bracketProgramSettleMs", "bracketLoadCurrentButton",
+  ];
+  ids.forEach(id => {
+    const element = $(id);
+    if (element) element.disabled = running;
+  });
+  const start = $("startBracketButton");
+  const stop = $("stopBracketButton");
+  const downloadButton = $("downloadBracketCsvButton");
+  if (start) start.disabled = running;
+  if (stop) stop.disabled = !running;
+  if (downloadButton) downloadButton.disabled = running || !state.bracketRuns.length;
+}
+
+function bracketDevice() {
+  const input = $("bracketDevice");
+  const value = clamp(Math.round(Number(input?.value) || 1), 1, 16);
+  if (input) input.value = value;
+  return value;
+}
+
+function bracketNumber(id, fallback, { min = -Infinity, max = Infinity, integer = false } = {}) {
+  const input = $(id);
+  let value = Number(input?.value);
+  if (!Number.isFinite(value)) value = fallback;
+  value = clamp(integer ? Math.round(value) : value, min, max);
+  if (input) input.value = integer ? String(value) : String(Number(value.toFixed(6)));
+  return value;
+}
+
+function loadCurrentBracketBase(showStatus = true) {
+  const device = bracketDevice();
+  const muCode = logicalMuCodeForDevice(device);
+  const vstartCode = logicalVstartCodeForDevice(device);
+  const muV = potCodeToMuVoltage(muCode);
+  const vstartV = potCodeToVstartVoltage(vstartCode);
+  if ($("bracketMuStart")) $("bracketMuStart").value = muV.toFixed(4);
+  if ($("bracketVstartStart")) $("bracketVstartStart").value = vstartV.toFixed(4);
+  if (showStatus) setBracketStatus(`Loaded D${device}: Vmu code ${muCode} (${muV.toFixed(4)} V), Vstart code ${vstartCode} (${vstartV.toFixed(4)} V).`, "ok");
+}
+
+function bracketAxisLabel(axis) {
+  if (axis === "muCoupled") return "Vmu + Vstart";
+  if (axis === "vstart") return "Vstart only";
+  return "Vmu only";
+}
+
+function parameterBracketPlan() {
+  const device = bracketDevice();
+  const axis = $("bracketAxis")?.value || "muCoupled";
+  const muStart = bracketNumber("bracketMuStart", potCodeToMuVoltage(logicalMuCodeForDevice(device)));
+  const vstartStart = bracketNumber("bracketVstartStart", potCodeToVstartVoltage(logicalVstartCodeForDevice(device)));
+  const stepV = bracketNumber("bracketStepV", -1);
+  const count = bracketNumber("bracketCount", 6, { min: 2, max: 50, integer: true });
+  if (!Number.isFinite(stepV) || stepV === 0) throw new Error("Bracket step V must be non-zero.");
+  const plan = [];
+  for (let index = 0; index < count; index++) {
+    const deltaV = stepV * index;
+    const requestedMuV = axis === "vstart" ? muStart : muStart + deltaV;
+    const requestedVstartV = axis === "mu" ? vstartStart : vstartStart + deltaV;
+    const muCode = muVoltageToCode(requestedMuV);
+    const vstartCode = vstartVoltageToCode(requestedVstartV);
+    plan.push({
+      device,
+      axis,
+      axisLabel: bracketAxisLabel(axis),
+      stepIndex: index + 1,
+      count,
+      deltaV,
+      requestedMuV,
+      requestedVstartV,
+      muCode,
+      vstartCode,
+      actualMuV: potCodeToMuVoltage(muCode),
+      actualVstartV: potCodeToVstartVoltage(vstartCode),
+    });
+  }
+  return plan;
+}
+
+function cloneLastSweepForBracket() {
+  if (!state.lastSweep?.points?.length) return null;
+  return JSON.parse(JSON.stringify(state.lastSweep));
+}
+
+async function startParameterBracket() {
+  if (state.bracketRunning || state.sweepRunning) return;
+  if (!state.writer) {
+    setBracketStatus("Connect UART before bracket measurement.", "warn");
+    return;
+  }
+  let plan;
+  try {
+    plan = parameterBracketPlan();
+  } catch (error) {
+    setBracketStatus(error.message, "warn");
+    return;
+  }
+
+  state.bracketRunning = true;
+  state.bracketStopRequested = false;
+  state.bracketRuns = [];
+  state.lastBracket = {
+    id: Date.now(),
+    startedAt: new Date().toISOString(),
+    plan,
+    runs: state.bracketRuns,
+  };
+  setParameterBracketControls(true);
+  const settleMs = bracketNumber("bracketProgramSettleMs", 1000, { min: 0, max: 30000, integer: true });
+  const startedMs = performance.now();
+
+  try {
+    for (const step of plan) {
+      if (!state.bracketRunning || state.bracketStopRequested) break;
+      setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: program D${step.device}, ${step.axisLabel}, Vmu ${step.muCode} (${step.actualMuV.toFixed(4)} V), Vstart ${step.vstartCode} (${step.actualVstartV.toFixed(4)} V).`, "ok");
+      await programLogicalDevice(step.device, step.muCode, step.vstartCode);
+      renderDeviceTable();
+      if (settleMs > 0) await sleep(settleMs);
+      if (!state.bracketRunning || state.bracketStopRequested) break;
+      setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: sweep running after delta ${step.deltaV.toFixed(4)} V.`, "ok");
+      await startSweep();
+      const sweep = cloneLastSweepForBracket();
+      if (sweep?.points?.length) {
+        state.bracketRuns.push({ ...step, sweep });
+        setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: captured ${sweep.points.length} ADC point(s).`, "ok");
+      } else {
+        setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: no ADC points captured.`, "warn");
+      }
+    }
+  } catch (error) {
+    setBracketStatus(error.message, "warn");
+  } finally {
+    state.bracketRunning = false;
+    state.bracketStopRequested = false;
+    if (state.lastBracket) state.lastBracket.finishedAt = new Date().toISOString();
+    setParameterBracketControls(false);
+    const elapsedSeconds = ((performance.now() - startedMs) / 1000).toFixed(2);
+    const captured = state.bracketRuns.reduce((sum, run) => sum + (run.sweep?.points?.length || 0), 0);
+    const kind = state.bracketRuns.length === plan.length ? "ok" : "warn";
+    setBracketStatus(`Bracket finished: ${state.bracketRuns.length}/${plan.length} step(s), ${captured} ADC point(s), ${elapsedSeconds} s.`, kind);
+  }
+}
+
+function stopParameterBracket() {
+  if (!state.bracketRunning) return;
+  state.bracketStopRequested = true;
+  state.bracketRunning = false;
+  if (state.sweepRunning) stopSweep();
+  setBracketStatus("Bracket stop requested; current firmware sweep must finish before the loop stops.", "warn");
+}
+
+function downloadParameterBracketCsv() {
+  const runs = state.bracketRuns || [];
+  if (!runs.length) {
+    alert("No completed bracket data to download.");
+    return;
+  }
+  const labels = ADC_LABELS.slice();
+  const fields = [
+    "bracket_id", "bracket_step", "bracket_axis", "device", "delta_V",
+    "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V",
+    "sweep_id", "repeat", "point", "time", "sweep_dac",
+    "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
+    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
+  ];
+  const rows = [];
+  for (const run of runs) {
+    for (const point of run.sweep?.points || []) {
+      const base = [
+        state.lastBracket?.id || "",
+        run.stepIndex,
+        run.axisLabel,
+        run.device,
+        run.deltaV,
+        run.muCode,
+        run.actualMuV,
+        run.vstartCode,
+        run.actualVstartV,
+        run.sweep?.id || "",
+        point.repeat ?? 1,
+        point.point,
+        point.time,
+        point.sweepDac ?? "",
+        point.dac?.D1?.code ?? "",
+        point.dac?.D1?.vhigh ?? "",
+        point.dac?.D2?.code ?? "",
+        point.dac?.D2?.vhigh ?? "",
+      ];
+      const adcValues = labels.flatMap(label => {
+        const sample = point.adcs?.[label];
+        return sample ? [sample.raw, sample.voltage, sample.current, sample.tia, sample.jumper] : ["", "", "", "", ""];
+      });
+      rows.push([...base, ...adcValues]);
+    }
+  }
+  const csv = [fields.join(","), ...rows.map(row => row.map(csvEscape).join(","))].join("\n");
+  download(`pcb_gaussian_bracket_${state.lastBracket?.id || Date.now()}.csv`, csv, "text/csv;charset=utf-8");
+  setBracketStatus(`Downloaded bracket CSV: ${runs.length} step(s), ${rows.length} row(s).`, "ok");
 }
 
 function gateProbeStatus(text, kind = "") {
@@ -3206,6 +3422,10 @@ function bindEvents() {
   $("plotYMax").addEventListener("input", renderSweepPlot);
   $("sweepTraceOpacity").addEventListener("input", renderSweepPlot);
   $("downloadSweepCsvButton").addEventListener("click", downloadSweepCsv);
+  $("bracketLoadCurrentButton").addEventListener("click", () => loadCurrentBracketBase(true));
+  $("startBracketButton").addEventListener("click", startParameterBracket);
+  $("stopBracketButton").addEventListener("click", stopParameterBracket);
+  $("downloadBracketCsvButton").addEventListener("click", downloadParameterBracketCsv);
   $("fitGaussianButton").addEventListener("click", fitSelectedGaussian);
   $("showFitOverlay").addEventListener("change", renderSweepPlot);
   $("previewGaussianAdjustButton").addEventListener("click", previewGaussianAdjust);
@@ -3264,6 +3484,7 @@ function init() {
   renderGaussianFit(null);
   setAutoFitControlsDisabled(false);
   setGateProbeControls(false);
+  setParameterBracketControls(false);
   gateProbeMv();
   renderSweepPlot();
   updateVersionInfo();
