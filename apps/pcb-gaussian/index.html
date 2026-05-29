@@ -157,10 +157,11 @@
             <div class="param-bracket">
               <div class="button-row bracket-row">
                 <label class="inline-field">Device <input id="bracketDevice" type="number" min="1" max="16" value="5" /></label>
-                <label class="inline-field">Axis <select id="bracketAxis"><option value="muCoupled">Horizontal: Vmu - Vstart</option><option value="vstart">Vstart only</option><option value="mu">Vmu only</option></select></label>
+                <label class="inline-field">Axis <select id="bracketAxis"><option value="muCoupled">Horizontal: Vmu/Vstart</option><option value="vstart">Vstart only</option><option value="mu">Vmu only</option></select></label>
                 <label class="inline-field">Vmu start <input id="bracketMuStart" type="number" value="-0.016" step="0.01" /></label>
                 <label class="inline-field">Vstart start <input id="bracketVstartStart" type="number" value="-6.59" step="0.01" /></label>
-                <label class="inline-field">Step V <input id="bracketStepV" type="number" value="-1" step="0.01" /></label>
+                <label class="inline-field">Vmu step <input id="bracketMuStepV" type="number" value="-1" step="0.01" /></label>
+                <label class="inline-field">Vstart step <input id="bracketVstartStepV" type="number" value="1" step="0.01" /></label>
                 <label class="inline-field">Count <input id="bracketCount" type="number" value="6" min="2" max="50" step="1" /></label>
                 <label class="inline-field">Settle ms <input id="bracketProgramSettleMs" type="number" value="1000" min="0" max="30000" step="100" /></label>
               </div>
@@ -720,7 +721,7 @@
 
     </main>
 
-    <script src="./app.js?v=8df0cce97250"></script>
+    <script src="./app.js?v=6b9e7fe1e071"></script>
     <script src="./serial_watchdog.js?v=20260528-return-zero"></script>
     <script src="./gate_probe_step.js?v=20260528-return-zero"></script>
     <script src="./fit_control.js?v=20260528-return-zero"></script>

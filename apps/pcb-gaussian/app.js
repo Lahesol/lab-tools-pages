@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-29-opposite-mu-vstart";
+const WEB_VERSION = "2026-05-29-independent-bracket-steps";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -1408,7 +1408,7 @@ function setBracketStatus(text, kind = "") {
 function setParameterBracketControls(running) {
   const ids = [
     "bracketDevice", "bracketAxis", "bracketMuStart", "bracketVstartStart",
-    "bracketStepV", "bracketCount", "bracketProgramSettleMs", "bracketLoadCurrentButton",
+    "bracketMuStepV", "bracketVstartStepV", "bracketCount", "bracketProgramSettleMs", "bracketLoadCurrentButton",
   ];
   ids.forEach(id => {
     const element = $(id);
@@ -1450,7 +1450,7 @@ function loadCurrentBracketBase(showStatus = true) {
 }
 
 function bracketAxisLabel(axis) {
-  if (axis === "muCoupled") return "Horizontal: Vmu - Vstart";
+  if (axis === "muCoupled") return "Horizontal: Vmu/Vstart";
   if (axis === "vstart") return "Vstart only";
   return "Vmu only";
 }
@@ -1460,14 +1460,21 @@ function parameterBracketPlan() {
   const axis = $("bracketAxis")?.value || "muCoupled";
   const muStart = bracketNumber("bracketMuStart", potCodeToMuVoltage(logicalMuCodeForDevice(device)));
   const vstartStart = bracketNumber("bracketVstartStart", potCodeToVstartVoltage(logicalVstartCodeForDevice(device)));
-  const stepV = bracketNumber("bracketStepV", -1);
+  const muStepV = bracketNumber("bracketMuStepV", -1);
+  const vstartStepV = bracketNumber("bracketVstartStepV", 1);
   const count = bracketNumber("bracketCount", 6, { min: 2, max: 50, integer: true });
-  if (!Number.isFinite(stepV) || stepV === 0) throw new Error("Bracket step V must be non-zero.");
+  const usesMu = axis !== "vstart";
+  const usesVstart = axis !== "mu";
+  const activeMuStep = usesMu ? muStepV : 0;
+  const activeVstartStep = usesVstart ? vstartStepV : 0;
+  if (!Number.isFinite(activeMuStep) || !Number.isFinite(activeVstartStep)) throw new Error("Bracket step values must be numeric.");
+  if (activeMuStep === 0 && activeVstartStep === 0) throw new Error("At least one selected bracket step must be non-zero.");
   const plan = [];
   for (let index = 0; index < count; index++) {
-    const deltaV = stepV * index;
-    const requestedMuV = axis === "vstart" ? muStart : muStart + deltaV;
-    const requestedVstartV = axis === "mu" ? vstartStart : axis === "muCoupled" ? vstartStart - deltaV : vstartStart + deltaV;
+    const deltaMuV = activeMuStep * index;
+    const deltaVstartV = activeVstartStep * index;
+    const requestedMuV = muStart + deltaMuV;
+    const requestedVstartV = vstartStart + deltaVstartV;
     const muCode = muVoltageToCode(requestedMuV);
     const vstartCode = vstartVoltageToCode(requestedVstartV);
     plan.push({
@@ -1476,7 +1483,11 @@ function parameterBracketPlan() {
       axisLabel: bracketAxisLabel(axis),
       stepIndex: index + 1,
       count,
-      deltaV,
+      deltaV: deltaMuV,
+      deltaMuV,
+      deltaVstartV,
+      muStepV: activeMuStep,
+      vstartStepV: activeVstartStep,
       requestedMuV,
       requestedVstartV,
       muCode,
@@ -1529,7 +1540,7 @@ async function startParameterBracket() {
       renderDeviceTable();
       if (settleMs > 0) await sleep(settleMs);
       if (!state.bracketRunning || state.bracketStopRequested) break;
-      setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: sweep running after delta ${step.deltaV.toFixed(4)} V.`, "ok");
+      setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: sweep running after delta Vmu ${step.deltaMuV.toFixed(4)} V, Vstart ${step.deltaVstartV.toFixed(4)} V.`, "ok");
       await startSweep();
       const sweep = cloneLastSweepForBracket();
       if (sweep?.points?.length) {
@@ -3367,7 +3378,7 @@ function downloadFitCsv() {
   download(`pcb_gaussian_fit_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
 }
 const MATRIX_META_COLUMNS = [
-  "row_type", "bracket_step", "repeat", "device", "axis", "delta_V",
+  "row_type", "bracket_step", "repeat", "device", "axis", "delta_mu_V", "delta_vstart_V",
   "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V", "sweep_id", "trace",
 ];
 
@@ -3461,12 +3472,12 @@ function bracketParameterRows(runs) {
     ["bracket", "finished_at", state.lastBracket?.finishedAt || "", "", ""],
     ["bracket", "completed_steps", runs.length, "", ""],
     [],
-    ["bracket_plan", "step", "axis", "device", "delta_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V", "sweep_id", "captured_points"]
+    ["bracket_plan", "step", "axis", "device", "delta_mu_V", "delta_vstart_V", "Vmu_step_V", "Vstart_step_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V", "sweep_id", "captured_points"]
   );
   for (const run of runs) {
     rows.push([
-      "bracket_plan", run.stepIndex, run.axisLabel || run.axis, run.device, run.deltaV,
-      run.muCode, run.actualMuV, run.vstartCode, run.actualVstartV,
+      "bracket_plan", run.stepIndex, run.axisLabel || run.axis, run.device, run.deltaMuV ?? run.deltaV ?? "", run.deltaVstartV ?? "",
+      run.muStepV ?? "", run.vstartStepV ?? "", run.muCode, run.actualMuV, run.vstartCode, run.actualVstartV,
       run.sweep?.id || "", run.sweep?.points?.length || 0,
     ]);
   }
@@ -3474,7 +3485,7 @@ function bracketParameterRows(runs) {
 }
 
 function runsForSweep(sweep) {
-  return [{ sweep, stepIndex: "", axisLabel: "", device: "", deltaV: "", muCode: "", actualMuV: "", vstartCode: "", actualVstartV: "" }];
+  return [{ sweep, stepIndex: "", axisLabel: "", device: "", deltaV: "", deltaMuV: "", deltaVstartV: "", muStepV: "", vstartStepV: "", muCode: "", actualMuV: "", vstartCode: "", actualVstartV: "" }];
 }
 
 function sweepDacsForRuns(runs) {
@@ -3514,7 +3525,8 @@ function matrixPrefix(rowType, group, trace) {
     group.repeat ?? "",
     run.device ?? "",
     run.axisLabel || run.axis || "",
-    run.deltaV ?? "",
+    run.deltaMuV ?? run.deltaV ?? "",
+    run.deltaVstartV ?? "",
     run.muCode ?? "",
     run.actualMuV ?? "",
     run.vstartCode ?? "",
@@ -3563,7 +3575,7 @@ function matrixSheetsForRuns(runs, prefix) {
 function tidyRowsForRuns(runs, includeBracket) {
   const labels = ADC_LABELS.slice();
   const fields = [
-    ...(includeBracket ? ["bracket_id", "bracket_step", "bracket_axis", "device", "delta_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V"] : []),
+    ...(includeBracket ? ["bracket_id", "bracket_step", "bracket_axis", "device", "delta_mu_V", "delta_vstart_V", "Vmu_step_V", "Vstart_step_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V"] : []),
     "sweep_id", "repeat", "point", "time", "sweep_dac",
     "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
     ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
@@ -3573,7 +3585,8 @@ function tidyRowsForRuns(runs, includeBracket) {
     for (const point of run.sweep?.points || []) {
       const base = [
         ...(includeBracket ? [
-          state.lastBracket?.id || "", run.stepIndex, run.axisLabel || run.axis, run.device, run.deltaV,
+          state.lastBracket?.id || "", run.stepIndex, run.axisLabel || run.axis, run.device,
+          run.deltaMuV ?? run.deltaV ?? "", run.deltaVstartV ?? "", run.muStepV ?? "", run.vstartStepV ?? "",
           run.muCode, run.actualMuV, run.vstartCode, run.actualVstartV,
         ] : []),
         run.sweep?.id || "",
