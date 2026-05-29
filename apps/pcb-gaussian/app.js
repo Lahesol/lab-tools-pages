@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-29-param-bracket";
+const WEB_VERSION = "2026-05-29-xls-ascii-time";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -103,7 +103,12 @@ const MU_CAL_POINTS = [
 
 const $ = id => document.getElementById(id);
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
-const nowTime = () => new Date().toLocaleTimeString("ko-KR", { hour12: false }) + "." + String(new Date().getMilliseconds()).padStart(3, "0");
+function nowTime() {
+  const date = new Date();
+  const pad2 = value => String(value).padStart(2, "0");
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}.${ms}`;
+}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function dacCodeToVDac(code) {
@@ -1511,6 +1516,7 @@ async function startParameterBracket() {
     plan,
     runs: state.bracketRuns,
   };
+  renderSweepPlot();
   setParameterBracketControls(true);
   const settleMs = bracketNumber("bracketProgramSettleMs", 1000, { min: 0, max: 30000, integer: true });
   const startedMs = performance.now();
@@ -1528,6 +1534,7 @@ async function startParameterBracket() {
       const sweep = cloneLastSweepForBracket();
       if (sweep?.points?.length) {
         state.bracketRuns.push({ ...step, sweep });
+        renderSweepPlot();
         setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: captured ${sweep.points.length} ADC point(s).`, "ok");
       } else {
         setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: no ADC points captured.`, "warn");
@@ -1561,47 +1568,14 @@ function downloadParameterBracketCsv() {
     alert("No completed bracket data to download.");
     return;
   }
-  const labels = ADC_LABELS.slice();
-  const fields = [
-    "bracket_id", "bracket_step", "bracket_axis", "device", "delta_V",
-    "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V",
-    "sweep_id", "repeat", "point", "time", "sweep_dac",
-    "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
-    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
+  const sheets = [
+    { name: "parameters", rows: bracketParameterRows(runs) },
+    ...matrixSheetsForRuns(runs, "bracket"),
+    { name: "tidy_raw", rows: tidyRowsForRuns(runs, true) },
   ];
-  const rows = [];
-  for (const run of runs) {
-    for (const point of run.sweep?.points || []) {
-      const base = [
-        state.lastBracket?.id || "",
-        run.stepIndex,
-        run.axisLabel,
-        run.device,
-        run.deltaV,
-        run.muCode,
-        run.actualMuV,
-        run.vstartCode,
-        run.actualVstartV,
-        run.sweep?.id || "",
-        point.repeat ?? 1,
-        point.point,
-        point.time,
-        point.sweepDac ?? "",
-        point.dac?.D1?.code ?? "",
-        point.dac?.D1?.vhigh ?? "",
-        point.dac?.D2?.code ?? "",
-        point.dac?.D2?.vhigh ?? "",
-      ];
-      const adcValues = labels.flatMap(label => {
-        const sample = point.adcs?.[label];
-        return sample ? [sample.raw, sample.voltage, sample.current, sample.tia, sample.jumper] : ["", "", "", "", ""];
-      });
-      rows.push([...base, ...adcValues]);
-    }
-  }
-  const csv = [fields.join(","), ...rows.map(row => row.map(csvEscape).join(","))].join("\n");
-  download(`pcb_gaussian_bracket_${state.lastBracket?.id || Date.now()}.csv`, csv, "text/csv;charset=utf-8");
-  setBracketStatus(`Downloaded bracket CSV: ${runs.length} step(s), ${rows.length} row(s).`, "ok");
+  downloadWorkbook(`pcb_gaussian_bracket_${state.lastBracket?.id || Date.now()}.xls`, sheets);
+  const captured = runs.reduce((sum, run) => sum + (run.sweep?.points?.length || 0), 0);
+  setBracketStatus(`Downloaded bracket XLS: ${runs.length} step(s), ${captured} ADC point(s).`, "ok");
 }
 
 function gateProbeStatus(text, kind = "") {
@@ -2176,6 +2150,81 @@ function plotSweepSource() {
   return state.activeSweep?.points.length ? state.activeSweep : state.lastSweep;
 }
 
+function bracketOverlayEnabled() {
+  const input = $("showBracketOverlay");
+  return !input || input.checked;
+}
+
+function bracketOverlayOpacity() {
+  const input = $("bracketOverlayOpacity");
+  let value = Number(input?.value);
+  if (!Number.isFinite(value)) value = 0.35;
+  value = clamp(value, 0.05, 0.9);
+  if (input) input.value = value.toFixed(2);
+  return value;
+}
+
+function bracketOverlaySeriesForPlot(xDac, yMode, labels, currentSweepId) {
+  if (!bracketOverlayEnabled()) return [];
+  const runs = Array.isArray(state.bracketRuns) ? state.bracketRuns : [];
+  if (!runs.length || !labels.length) return [];
+  const result = [];
+  for (const run of runs) {
+    const sweep = run.sweep;
+    if (!sweep?.points?.length || sweep.id === currentSweepId) continue;
+    const points = sweep.points
+      .filter(point => !point.sweepDac || point.sweepDac === xDac)
+      .slice()
+      .sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
+    if (!points.length) continue;
+    for (const label of labels) {
+      const adcIdx = Number(label.replace("ADC", ""));
+      const values = points
+        .map(point => {
+          const sample = point.adcs?.[label] || point.tias?.[`TIA${adcIdx + 1}`];
+          if (!sample) return null;
+          const x = sweepXValue(point, xDac);
+          const y = sweepYValue(sample, yMode);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+          return { x, y, point: point.point, repeat: point.repeat || 1 };
+        })
+        .filter(Boolean);
+      if (values.length) result.push({ run, label, adcIdx, values });
+    }
+  }
+  return result;
+}
+
+function drawBracketOverlaySeries(ctx, bracketSeries, sx, sy) {
+  if (!bracketSeries.length) return;
+  const alpha = bracketOverlayOpacity();
+  ctx.save();
+  for (const series of bracketSeries) {
+    const color = PLOT_COLORS[series.adcIdx % PLOT_COLORS.length];
+    const stepRatio = series.run.count ? series.run.stepIndex / series.run.count : 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4 + stepRatio * 0.8;
+    ctx.globalAlpha = alpha * (0.45 + 0.55 * stepRatio);
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    series.values.forEach((item, idx) => {
+      const x = sx(item.x);
+      const y = sy(item.y);
+      const previous = series.values[idx - 1];
+      const hasPointGap = previous && (item.repeat !== previous.repeat || Math.abs(Number(item.point) - Number(previous.point)) > 1);
+      if (idx === 0 || hasPointGap) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function bracketOverlayStepCount(bracketSeries) {
+  return new Set(bracketSeries.map(series => series.run.stepIndex)).size;
+}
+
 function selectedPlotAdcs(dac) {
   const inputs = Array.from(document.querySelectorAll(`.plot-adc-input[data-dac="${dac}"]`));
   if (inputs.length) {
@@ -2321,10 +2370,14 @@ function renderDacSweepPlot(xDac) {
     return;
   }
 
-  const { minX, maxX } = sweepXBounds(sweep, xDac, samples);
+  const bracketSeries = bracketOverlaySeriesForPlot(xDac, yMode, labels, sweep.id);
+  const bracketSamples = bracketSeries.flatMap(series => series.values);
+  const { minX, maxX } = sweepXBounds(sweep, xDac, samples.concat(bracketSamples));
   const overlayFit = fitOverlayForPlot(xDac, yMode, labels);
   const overlaySamples = overlayFit ? gaussianOverlaySamples(overlayFit, minX, maxX) : [];
-  const yValues = overlaySamples.length ? samples.map(sample => sample.y).concat(overlaySamples.map(sample => sample.y)) : samples.map(sample => sample.y);
+  const yValues = samples.map(sample => sample.y)
+    .concat(bracketSamples.map(sample => sample.y))
+    .concat(overlaySamples.map(sample => sample.y));
   let minY = Math.min(...yValues);
   let maxY = Math.max(...yValues);
   const fixedY = fixedPlotYBounds();
@@ -2403,6 +2456,8 @@ function renderDacSweepPlot(xDac) {
   ctx.restore();
   ctx.fillText(`${xDac} output (V)`, margin.left + plotW / 2, height - 24);
 
+  drawBracketOverlaySeries(ctx, bracketSeries, sx, sy);
+
   labels.forEach((label, seriesIndex) => {
     const color = PLOT_COLORS[Number(label.replace("ADC", "")) % PLOT_COLORS.length];
     const series = points
@@ -2434,14 +2489,20 @@ function renderDacSweepPlot(xDac) {
 
   drawGaussianOverlay(ctx, overlayFit, overlaySamples, sx, sy);
 
-  $(config.legendId).innerHTML = labels.map(label => {
+  const legendItems = labels.map(label => {
     const adcIdx = Number(label.replace("ADC", ""));
     const color = PLOT_COLORS[adcIdx % PLOT_COLORS.length];
     return `<span><i style="background:${color}"></i>${label} / ${adcSubLabel(adcIdx)}</span>`;
-  }).concat(overlayFit ? (() => {
+  });
+  if (overlayFit) {
     const color = PLOT_COLORS[overlayFit.adcIndex % PLOT_COLORS.length];
-    return `<span><i style="background:repeating-linear-gradient(to right, ${color} 0 7px, transparent 7px 12px)"></i>Fit / ADC${overlayFit.adcIndex}</span>`;
-  })() : []).join("");
+    legendItems.push(`<span><i style="background:repeating-linear-gradient(to right, ${color} 0 7px, transparent 7px 12px)"></i>Fit / ADC${overlayFit.adcIndex}</span>`);
+  }
+  const bracketSteps = bracketOverlayStepCount(bracketSeries);
+  if (bracketSteps) {
+    legendItems.push(`<span><i style="background:repeating-linear-gradient(to right, #17323a 0 5px, transparent 5px 10px)"></i>Bracket overlay ${bracketSteps} step(s)</span>`);
+  }
+  $(config.legendId).innerHTML = legendItems.join("");
   const coverage = sweepCoverageText(sweep, xDac);
   const labelText = labels.length > 3 ? `${labels.length} ADCs` : labels.join("/");
   setPlotStatus(xDac, `Sweep ${sweep.id}: ${sweep.points.length} pts, ${labelText}${coverage ? `, ${coverage}` : ""}.`);
@@ -3305,6 +3366,236 @@ function downloadFitCsv() {
   const csv = [...meta, ...rows].map(row => row.map(csvEscape).join(",")).join("\n");
   download(`pcb_gaussian_fit_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
 }
+const MATRIX_META_COLUMNS = [
+  "row_type", "bracket_step", "repeat", "device", "axis", "delta_V",
+  "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V", "sweep_id", "trace",
+];
+
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function workbookSheetName(name) {
+  return String(name || "Sheet").replace(/[\\/?*:[\]]/g, "_").slice(0, 31) || "Sheet";
+}
+
+function workbookCell(value) {
+  if (value === null || value === undefined) value = "";
+  const numeric = typeof value === "number" && Number.isFinite(value);
+  const type = numeric ? "Number" : "String";
+  const text = numeric ? String(value) : xmlEscape(value);
+  return `<Cell><Data ss:Type="${type}">${text}</Data></Cell>`;
+}
+
+function workbookRow(row) {
+  return `<Row>${(row || []).map(workbookCell).join("")}</Row>`;
+}
+
+function downloadWorkbook(name, sheets) {
+  const safeSheets = sheets.filter(sheet => sheet && Array.isArray(sheet.rows));
+  const worksheets = safeSheets.map(sheet => {
+    const rows = sheet.rows.map(workbookRow).join("\n");
+    return `<Worksheet ss:Name="${xmlEscape(workbookSheetName(sheet.name))}"><Table>${rows}</Table></Worksheet>`;
+  }).join("\n");
+  const xml = `<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n${worksheets}\n</Workbook>`;
+  download(name, xml, "application/vnd.ms-excel;charset=utf-8");
+}
+
+function uiValue(id) {
+  const element = $(id);
+  if (!element) return "";
+  if (element.type === "checkbox") return element.checked ? "yes" : "no";
+  return element.value ?? "";
+}
+
+function exportBaseParameterRows(kind) {
+  const rows = [
+    ["section", "key", "value", "unit", "note"],
+    ["export", "kind", kind, "", "SpreadsheetML workbook; open with Excel or import sheets in Origin"],
+    ["export", "created_at", new Date().toISOString(), "", ""],
+    ["export", "web_version", WEB_VERSION, "", ""],
+    ["firmware", "version", state.firmwareVersion || "", "", ""],
+    ["firmware", "protocol", state.firmwareProtocol || "", "", ""],
+    ["plot", "Y_mode", uiValue("plotYMode"), "", ""],
+    ["sweep_ui", "D1_enable", uiValue("sweepD1Enable"), "", ""],
+    ["sweep_ui", "D1_start", uiValue("sweepD1Start"), "mV", ""],
+    ["sweep_ui", "D1_stop", uiValue("sweepD1Stop"), "mV", ""],
+    ["sweep_ui", "D1_step", uiValue("sweepD1Step"), "mV", ""],
+    ["sweep_ui", "D2_enable", uiValue("sweepD2Enable"), "", ""],
+    ["sweep_ui", "D2_start", uiValue("sweepD2Start"), "mV", ""],
+    ["sweep_ui", "D2_stop", uiValue("sweepD2Stop"), "mV", ""],
+    ["sweep_ui", "D2_step", uiValue("sweepD2Step"), "mV", ""],
+    ["sweep_ui", "dwell", uiValue("sweepDwell"), "ms", ""],
+    ["sweep_ui", "adc_avg", uiValue("adcAvgSamples"), "samples", ""],
+    ["sweep_ui", "settle", uiValue("sweepSettleUs"), "us", "DAC-to-ADC delay"],
+    ["sweep_ui", "pre_bias", uiValue("sweepPreBiasMs"), "ms", "start-voltage pre-bias"],
+    ["sweep_ui", "repeats", uiValue("sweepRepeats"), "", ""],
+    ["sweep_ui", "reverse", uiValue("sweepReverse"), "", ""],
+    [],
+    ["adc_map", "adc", "tia", "device", "label"],
+    ...ADC_LABELS.map((label, idx) => ["adc_map", label, `TIA${idx + 1}`, ADC_DEVICE_MAP[idx] || "", adcSubLabel(idx)]),
+  ];
+  return rows;
+}
+
+function sweepParameterRows(sweep) {
+  const rows = exportBaseParameterRows("sweep_workbook");
+  rows.push([], ["sweep", "id", sweep.id || "", "", ""], ["sweep", "points", sweep.points?.length || 0, "", ""]);
+  for (const dac of ["D1", "D2"]) {
+    const range = sweep.rangeByDac?.[dac];
+    if (range) rows.push(["sweep_range", dac, `${range.min} to ${range.max}`, "V", "fixed plot/sweep x range"]);
+  }
+  return rows;
+}
+
+function bracketParameterRows(runs) {
+  const rows = exportBaseParameterRows("parameter_bracket_workbook");
+  rows.push(
+    [],
+    ["bracket", "id", state.lastBracket?.id || "", "", ""],
+    ["bracket", "started_at", state.lastBracket?.startedAt || "", "", ""],
+    ["bracket", "finished_at", state.lastBracket?.finishedAt || "", "", ""],
+    ["bracket", "completed_steps", runs.length, "", ""],
+    [],
+    ["bracket_plan", "step", "axis", "device", "delta_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V", "sweep_id", "captured_points"]
+  );
+  for (const run of runs) {
+    rows.push([
+      "bracket_plan", run.stepIndex, run.axisLabel || run.axis, run.device, run.deltaV,
+      run.muCode, run.actualMuV, run.vstartCode, run.actualVstartV,
+      run.sweep?.id || "", run.sweep?.points?.length || 0,
+    ]);
+  }
+  return rows;
+}
+
+function runsForSweep(sweep) {
+  return [{ sweep, stepIndex: "", axisLabel: "", device: "", deltaV: "", muCode: "", actualMuV: "", vstartCode: "", actualVstartV: "" }];
+}
+
+function sweepDacsForRuns(runs) {
+  const found = new Set();
+  for (const run of runs) {
+    for (const point of run.sweep?.points || []) {
+      if (point.sweepDac) found.add(point.sweepDac);
+      else for (const dac of ["D1", "D2"]) if (point.dac?.[dac]) found.add(dac);
+    }
+  }
+  return ["D1", "D2"].filter(dac => found.has(dac));
+}
+
+function matrixGroupsForRuns(runs, xDac) {
+  const groups = [];
+  for (const run of runs) {
+    const sweep = run.sweep;
+    if (!sweep?.points?.length) continue;
+    const repeats = Array.from(new Set(sweep.points.map(point => point.repeat || 1))).sort((a, b) => Number(a) - Number(b));
+    for (const repeat of repeats) {
+      const points = sweep.points
+        .filter(point => (point.repeat || 1) === repeat)
+        .filter(point => !point.sweepDac || point.sweepDac === xDac)
+        .slice()
+        .sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
+      if (points.length) groups.push({ run, sweep, repeat, points });
+    }
+  }
+  return groups;
+}
+
+function matrixPrefix(rowType, group, trace) {
+  const run = group.run;
+  return [
+    rowType,
+    run.stepIndex ?? "",
+    group.repeat ?? "",
+    run.device ?? "",
+    run.axisLabel || run.axis || "",
+    run.deltaV ?? "",
+    run.muCode ?? "",
+    run.actualMuV ?? "",
+    run.vstartCode ?? "",
+    run.actualVstartV ?? "",
+    group.sweep?.id || "",
+    trace,
+  ];
+}
+
+function padValues(values, count) {
+  const padded = values.slice(0, count);
+  while (padded.length < count) padded.push("");
+  return padded;
+}
+
+function dataMatrixRowsForRuns(runs, xDac) {
+  const groups = matrixGroupsForRuns(runs, xDac);
+  if (!groups.length) return null;
+  const reference = groups.reduce((best, group) => group.points.length > best.points.length ? group : best, groups[0]);
+  const pointCount = reference.points.length;
+  const rows = [
+    MATRIX_META_COLUMNS.concat(reference.points.map((_, idx) => `p${idx + 1}`)),
+    matrixPrefix("x_DAC_code", reference, `${xDac}_code`).concat(reference.points.map(point => point.dac?.[xDac]?.code ?? "")),
+    matrixPrefix("x_voltage_V", reference, `${xDac}_V`).concat(reference.points.map(point => point.dac?.[xDac]?.vhigh ?? "")),
+    [],
+  ];
+  for (const group of groups) {
+    const labels = ADC_LABELS.filter(label => group.points.some(point => point.adcs?.[label]));
+    for (const label of labels) {
+      const adcIdx = Number(label.replace("ADC", ""));
+      const suffix = adcSubLabel(adcIdx);
+      rows.push(matrixPrefix("ADC_raw", group, `${label}_${suffix}_ADC_raw`).concat(padValues(group.points.map(point => point.adcs?.[label]?.raw ?? ""), pointCount)));
+      rows.push(matrixPrefix("V_AIN", group, `${label}_${suffix}_V_AIN`).concat(padValues(group.points.map(point => point.adcs?.[label]?.voltage ?? ""), pointCount)));
+      rows.push(matrixPrefix("I_uA", group, `${label}_${suffix}_I_uA`).concat(padValues(group.points.map(point => point.adcs?.[label]?.current ?? ""), pointCount)));
+    }
+  }
+  return rows;
+}
+
+function matrixSheetsForRuns(runs, prefix) {
+  return sweepDacsForRuns(runs)
+    .map(dac => ({ name: `data_${dac}`, rows: dataMatrixRowsForRuns(runs, dac) }))
+    .filter(sheet => sheet.rows);
+}
+
+function tidyRowsForRuns(runs, includeBracket) {
+  const labels = ADC_LABELS.slice();
+  const fields = [
+    ...(includeBracket ? ["bracket_id", "bracket_step", "bracket_axis", "device", "delta_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V"] : []),
+    "sweep_id", "repeat", "point", "time", "sweep_dac",
+    "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
+    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
+  ];
+  const rows = [fields];
+  for (const run of runs) {
+    for (const point of run.sweep?.points || []) {
+      const base = [
+        ...(includeBracket ? [
+          state.lastBracket?.id || "", run.stepIndex, run.axisLabel || run.axis, run.device, run.deltaV,
+          run.muCode, run.actualMuV, run.vstartCode, run.actualVstartV,
+        ] : []),
+        run.sweep?.id || "",
+        point.repeat ?? 1,
+        point.point,
+        point.time,
+        point.sweepDac ?? "",
+        point.dac?.D1?.code ?? "",
+        point.dac?.D1?.vhigh ?? "",
+        point.dac?.D2?.code ?? "",
+        point.dac?.D2?.vhigh ?? "",
+      ];
+      const adcValues = labels.flatMap(label => {
+        const sample = point.adcs?.[label];
+        return sample ? [sample.raw, sample.voltage, sample.current, sample.tia, sample.jumper] : ["", "", "", "", ""];
+      });
+      rows.push([...base, ...adcValues]);
+    }
+  }
+  return rows;
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -3332,32 +3623,13 @@ function downloadSweepCsv() {
     alert("No completed sweep ADC data to download.");
     return;
   }
-  const labels = ADC_LABELS.slice();
-  const fields = [
-    "sweep_id", "repeat", "point", "time", "sweep_dac",
-    "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
-    ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
+  const runs = runsForSweep(sweep);
+  const sheets = [
+    { name: "parameters", rows: sweepParameterRows(sweep) },
+    ...matrixSheetsForRuns(runs, "sweep"),
+    { name: "tidy_raw", rows: tidyRowsForRuns(runs, false) },
   ];
-  const rows = sweep.points.map(point => {
-    const base = [
-      sweep.id,
-      point.repeat ?? 1,
-      point.point,
-      point.time,
-      point.sweepDac ?? "",
-      point.dac.D1?.code ?? "",
-      point.dac.D1?.vhigh ?? "",
-      point.dac.D2?.code ?? "",
-      point.dac.D2?.vhigh ?? "",
-    ];
-    const adcValues = labels.flatMap(label => {
-      const sample = point.adcs?.[label];
-      return sample ? [sample.raw, sample.voltage, sample.current, sample.tia, sample.jumper] : ["", "", "", "", ""];
-    });
-    return [...base, ...adcValues];
-  });
-  const csv = [fields.join(","), ...rows.map(row => row.map(csvEscape).join(","))].join("\n");
-  download(`pcb_gaussian_sweep_${sweep.id}_dual_plot_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
+  downloadWorkbook(`pcb_gaussian_sweep_${sweep.id}_matrix_${Date.now()}.xls`, sheets);
 }
 function downloadLog() {
   download(`pcb_gaussian_session_${Date.now()}.txt`, state.commandLog.join("\n"), "text/plain;charset=utf-8");
@@ -3426,6 +3698,8 @@ function bindEvents() {
   $("startBracketButton").addEventListener("click", startParameterBracket);
   $("stopBracketButton").addEventListener("click", stopParameterBracket);
   $("downloadBracketCsvButton").addEventListener("click", downloadParameterBracketCsv);
+  $("showBracketOverlay").addEventListener("change", renderSweepPlot);
+  $("bracketOverlayOpacity").addEventListener("input", renderSweepPlot);
   $("fitGaussianButton").addEventListener("click", fitSelectedGaussian);
   $("showFitOverlay").addEventListener("change", renderSweepPlot);
   $("previewGaussianAdjustButton").addEventListener("click", previewGaussianAdjust);
