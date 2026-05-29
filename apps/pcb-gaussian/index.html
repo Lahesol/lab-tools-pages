@@ -142,7 +142,7 @@
               <label class="inline-field">ADC avg <input id="adcAvgSamples" type="number" value="16" min="1" max="256" step="1" /></label>
               <label class="inline-field">Settle us <input id="sweepSettleUs" type="number" value="2000" min="0" max="65000" step="100" /></label>
               <label class="inline-field">Pre-bias ms <input id="sweepPreBiasMs" type="number" value="2000" min="0" max="30000" step="100" /></label>
-              <label class="inline-field">Repeats <input id="sweepRepeats" type="number" value="1" min="1" max="100" step="1" /></label>
+              <label class="inline-field">Repeats <input id="sweepRepeats" type="number" value="1" min="1" max="10000" step="1" /></label>
               <label class="checkbox inline-check"><input id="sweepReverse" type="checkbox" /> Reverse</label>
               <label class="inline-field">Y <select id="plotYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
               <label class="checkbox inline-check"><input id="fixedPlotRange" type="checkbox" checked /> Fixed X range</label>
@@ -721,7 +721,7 @@
 
     </main>
 
-    <script src="./app.js?v=6b9e7fe1e071"></script>
+    <script src="./app.js?v=4ca9c7a26621"></script>
     <script src="./serial_watchdog.js?v=20260528-return-zero"></script>
     <script src="./gate_probe_step.js?v=20260528-return-zero"></script>
     <script src="./fit_control.js?v=20260528-return-zero"></script>

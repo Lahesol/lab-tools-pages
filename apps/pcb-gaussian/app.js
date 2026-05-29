@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-29-independent-bracket-steps";
+const WEB_VERSION = "2026-05-29-sweep-repeat-10000";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -1200,7 +1200,7 @@ function sweepPreBiasMs() {
 }
 function sweepRepeatCount() {
   const input = $("sweepRepeats");
-  const value = clamp(Math.round(Number(input?.value) || 1), 1, 100);
+  const value = clamp(Math.round(Number(input?.value) || 1), 1, 10000);
   if (input) input.value = value;
   return value;
 }
