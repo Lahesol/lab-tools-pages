@@ -1012,7 +1012,7 @@
     }
 
     const muControlDelta = muError * muGain * muDirection;
-    const vstartCoupledDelta = muControlDelta * muVstartGain;
+    const vstartCoupledDelta = -muControlDelta * muVstartGain;
     const amplitudeControl = normalizedAmplitudeDelta(ampError, vstartGain, aDirection);
     const vstartAmplitudeDelta = amplitudeControl.delta;
     let vstartTotalDelta = vstartCoupledDelta + vstartAmplitudeDelta;
@@ -1065,7 +1065,7 @@
         couplingText = `; adaptive LM delta Vmu ${muDelta.toFixed(4)} V, Vstart ${vstartDelta.toFixed(4)} V (n=${plan.jacobianTransitions || 0}, damping=${Number(plan.jacobianDamping).toPrecision(3)}${lossText}${backoffText}, J=${jText}${guardText})`;
       } else {
         const fallbackText = plan.manualFallbackReason ? `, ${plan.manualFallbackReason}` : "";
-        couplingText = `; manual delta Vstart ${vstartDelta.toFixed(4)} V = total ${plan.vstartTotalDelta.toFixed(4)} (mu link ${plan.vstartCoupledDelta.toFixed(4)} + A correction ${plan.vstartAmplitudeDelta.toFixed(4)}, A norm ${Number(plan.ampErrorNorm).toFixed(2)}${fallbackText}${guardText})`;
+        couplingText = `; manual delta Vstart ${vstartDelta.toFixed(4)} V = total ${plan.vstartTotalDelta.toFixed(4)} (opposite mu link ${plan.vstartCoupledDelta.toFixed(4)} + A correction ${plan.vstartAmplitudeDelta.toFixed(4)}, A norm ${Number(plan.ampErrorNorm).toFixed(2)}${fallbackText}${guardText})`;
       }
     }
     setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), Vstart ${plan.currentVstartCode}->${plan.nextVstartCode} (${plan.nextVstartV.toFixed(4)} V)${couplingText}.${errorText}`, "ok");

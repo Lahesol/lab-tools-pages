@@ -13,7 +13,7 @@ const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-29-xls-ascii-time";
+const WEB_VERSION = "2026-05-29-opposite-mu-vstart";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -1450,7 +1450,7 @@ function loadCurrentBracketBase(showStatus = true) {
 }
 
 function bracketAxisLabel(axis) {
-  if (axis === "muCoupled") return "Vmu + Vstart";
+  if (axis === "muCoupled") return "Horizontal: Vmu - Vstart";
   if (axis === "vstart") return "Vstart only";
   return "Vmu only";
 }
@@ -1467,7 +1467,7 @@ function parameterBracketPlan() {
   for (let index = 0; index < count; index++) {
     const deltaV = stepV * index;
     const requestedMuV = axis === "vstart" ? muStart : muStart + deltaV;
-    const requestedVstartV = axis === "mu" ? vstartStart : vstartStart + deltaV;
+    const requestedVstartV = axis === "mu" ? vstartStart : axis === "muCoupled" ? vstartStart - deltaV : vstartStart + deltaV;
     const muCode = muVoltageToCode(requestedMuV);
     const vstartCode = vstartVoltageToCode(requestedVstartV);
     plan.push({
@@ -2825,7 +2825,7 @@ function adjustmentPlanForFit(device, target, fit, muGain, vstartGain, muVstartG
   const muError = target.mu - fit.mu;
   const ampError = target.A - fit.A;
   const muControlDelta = muError * muGain;
-  const vstartCoupledDelta = muControlDelta * muVstartGain;
+  const vstartCoupledDelta = -muControlDelta * muVstartGain;
   const vstartAmplitudeDelta = ampError * vstartGain;
   const nextMuV = currentMuV + muControlDelta;
   const nextVstartV = currentVstartV + vstartCoupledDelta + vstartAmplitudeDelta;
@@ -2892,7 +2892,7 @@ function renderGaussianAdjustPlan(plan) {
   const errorText = plan.fit ? ` ${formatTargetError(gaussianTargetError(plan.fit, plan.target))}.` : "";
   const vstartDelta = Number.isFinite(plan.nextVstartV) && Number.isFinite(plan.currentVstartV) ? plan.nextVstartV - plan.currentVstartV : NaN;
   const couplingText = plan.mode === "fit" && Number.isFinite(vstartDelta)
-    ? `; Vstart delta ${vstartDelta.toFixed(4)} V = mu link ${plan.vstartCoupledDelta.toFixed(4)} + A_amp correction ${plan.vstartAmplitudeDelta.toFixed(4)}`
+    ? `; Vstart delta ${vstartDelta.toFixed(4)} V = opposite mu link ${plan.vstartCoupledDelta.toFixed(4)} + A_amp correction ${plan.vstartAmplitudeDelta.toFixed(4)}`
     : "";
   setFitStatus(`Device ${plan.device}: mu ${plan.currentMuCode}->${plan.nextMuCode} (${plan.nextMuV.toFixed(4)} V), Vstart ${plan.currentVstartCode}->${plan.nextVstartCode} (${plan.nextVstartV.toFixed(4)} V)${couplingText}.${errorText}`, "ok");
 }
@@ -3289,7 +3289,7 @@ async function autoFitSingle() {
       await programLogicalDevice(plan.device, plan.nextMuCode, plan.nextVstartCode ?? plan.nextACode);
       applyProgrammedPlanToUi(plan);
       const nudgeText = plan.minimumCodeNudgeApplied ? `, ${minimumCodeNudgeText(plan)}` : "";
-      setFitStatus(`Auto single ${iter}/${maxIter}: programmed${nudgeText}, ${formatTargetError(error)}, lr=${gains.learningRate}, mu->Vstart=${gains.muVstartGain}.`, "warn");
+      setFitStatus(`Auto single ${iter}/${maxIter}: programmed${nudgeText}, ${formatTargetError(error)}, lr=${gains.learningRate}, mu->-Vstart=${gains.muVstartGain}.`, "warn");
     }
     if (state.autoFitStopRequested) {
       setFitStatus(`Auto single stopped at ${state.autoFitHistory.length}/${maxIter}.`, "warn");
@@ -3333,7 +3333,7 @@ async function autoFitGmm() {
       for (const item of plan) await programLogicalDevice(item.device, item.nextMuCode, item.nextVstartCode ?? item.nextACode);
       renderDeviceTable();
       loadDeviceState();
-      setGmmStatus(`Auto GMM ${iter}/${maxIter}: programmed ${plan.length} device(s), max norm=${summary.maxNorm.toFixed(3)}, lr=${gains.learningRate}, mu->Vstart=${gains.muVstartGain}.`, "warn");
+      setGmmStatus(`Auto GMM ${iter}/${maxIter}: programmed ${plan.length} device(s), max norm=${summary.maxNorm.toFixed(3)}, lr=${gains.learningRate}, mu->-Vstart=${gains.muVstartGain}.`, "warn");
     }
     if (state.autoFitStopRequested) {
       setGmmStatus(`Auto GMM stopped at ${state.autoFitHistory.length}/${maxIter}.`, "warn");
