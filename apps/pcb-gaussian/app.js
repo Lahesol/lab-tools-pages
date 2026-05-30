@@ -11,9 +11,18 @@ const POT_MAX_CODE = 255;
 const ADC_TIA_COUNT = 8;
 const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
+const MEASUREMENT_MEMORY_ROW_LIMIT = 20000;
+const MEASUREMENT_MEMORY_TRIM_BATCH = 1000;
+const EXPORT_WORKBOOK_POINT_LIMIT = 120000;
+const EXPORT_CSV_CHUNK_POINT_LIMIT = 200000;
+const STREAM_EXPORT_POINT_THRESHOLD = EXPORT_WORKBOOK_POINT_LIMIT;
+const STREAM_EXPORT_CHUNK_POINT_LIMIT = 50000;
+const SWEEP_RETAIN_POINT_LIMIT = 50000;
+const EXPORT_DOWNLOAD_DELAY_MS = 250;
+const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-29-sweep-repeat-10000";
+const WEB_VERSION = "2026-05-30-stable-stream-export";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -961,7 +970,145 @@ function setAllPlotStatus(text) {
   for (const dac of ["D1", "D2"]) setPlotStatus(dac, text);
 }
 
-function startSweepCapture(requests = [], repeatCount = 1) {
+function sweepExpectedTotalPoints(requests = [], repeatCount = 1) {
+  const perRepeat = (requests || []).reduce((sum, request) => sum + Math.max(0, Number(request?.pointCount) || 0), 0);
+  return perRepeat * Math.max(1, Math.round(Number(repeatCount) || 1));
+}
+
+function sweepCapturedPointCount(sweep) {
+  return Number(sweep?.capturedPointCount ?? sweep?.points?.length ?? 0) || 0;
+}
+
+function sweepRetentionSuffix(sweep) {
+  if (!sweep) return "";
+  const captured = sweepCapturedPointCount(sweep);
+  const retained = sweep.points?.length || 0;
+  if (captured > retained) return `, retained ${retained}/${captured} preview pts`;
+  return "";
+}
+
+async function prepareSweepStreamExport(requests, repeatCount) {
+  const expectedPointCount = sweepExpectedTotalPoints(requests, repeatCount);
+  if (expectedPointCount <= STREAM_EXPORT_POINT_THRESHOLD) {
+    return { expectedPointCount, streamDirectoryHandle: null };
+  }
+  if (!window.showDirectoryPicker) {
+    throw new Error(`Large sweep has ${expectedPointCount} point(s). Use Chrome/Edge folder export or reduce repeats below ${STREAM_EXPORT_POINT_THRESHOLD}.`);
+  }
+  const directoryHandle = await chooseExportDirectory(`pcb_gaussian_sweep_${Date.now()}`);
+  if (!directoryHandle) {
+    throw new Error(`Large sweep cancelled: ${expectedPointCount} point(s) requires a save folder to avoid browser memory overflow.`);
+  }
+  return { expectedPointCount, streamDirectoryHandle: directoryHandle };
+}
+
+function createSweepStreamExport(sweep, directoryHandle) {
+  return {
+    enabled: true,
+    directoryHandle,
+    fileStem: safeExportStem(`pcb_gaussian_sweep_${sweep.id}_stream_${Date.now()}`),
+    chunkLimit: STREAM_EXPORT_CHUNK_POINT_LIMIT,
+    rows: [tidyFields(false)],
+    bufferedPoints: 0,
+    totalWritten: 0,
+    chunkIndex: 0,
+    fileCount: 0,
+    flushPromise: Promise.resolve(),
+    error: null,
+    startedAt: new Date().toISOString(),
+    rowRun: { sweep: { id: sweep.id } },
+  };
+}
+
+function queueSweepStreamRows(sweep, fileName, rows) {
+  const stream = sweep?.streamExport;
+  if (!stream?.enabled || stream.error) return;
+  const csv = csvFromRows(rows);
+  stream.fileCount += 1;
+  stream.flushPromise = (stream.flushPromise || Promise.resolve())
+    .then(() => saveTextExportFile(fileName, csv, "text/csv;charset=utf-8", stream.directoryHandle))
+    .catch(error => {
+      stream.error = stream.error || error;
+      state.sweepRunning = false;
+      logLine(`[export error] ${error.message}`);
+    });
+}
+
+function flushSweepStreamChunk(sweep, reason = "chunk") {
+  const stream = sweep?.streamExport;
+  if (!stream?.enabled || stream.rows.length <= 1) return;
+  const rows = stream.rows;
+  const pointCount = stream.bufferedPoints;
+  stream.rows = [tidyFields(false)];
+  stream.bufferedPoints = 0;
+  stream.chunkIndex += 1;
+  stream.totalWritten += pointCount;
+  const part = String(stream.chunkIndex).padStart(4, "0");
+  queueSweepStreamRows(sweep, `${stream.fileStem}_part${part}_tidy_raw.csv`, rows);
+  logLine(`[export] queued ${stream.fileStem}_part${part}_tidy_raw.csv (${pointCount} point(s), ${reason})`);
+}
+
+function queueSweepStreamPoint(sweep, point) {
+  const stream = sweep?.streamExport;
+  if (!stream?.enabled || stream.error) return;
+  stream.rows.push(tidyPointRow(stream.rowRun, point, false));
+  stream.bufferedPoints += 1;
+  if (stream.bufferedPoints >= stream.chunkLimit) flushSweepStreamChunk(sweep);
+}
+
+async function saveSweepStreamParameters(sweep, stage) {
+  const stream = sweep?.streamExport;
+  if (!stream?.enabled) return;
+  await saveRowsCsvExport(`${stream.fileStem}_parameters_${stage}.csv`, sweepStreamParameterRows(sweep, stage), stream.directoryHandle);
+  stream.fileCount += 1;
+}
+
+async function finishSweepStreamExport(sweep) {
+  const stream = sweep?.streamExport;
+  if (!stream?.enabled) return "";
+  flushSweepStreamChunk(sweep, "finish");
+  await stream.flushPromise;
+  if (stream.error) throw stream.error;
+  await saveSweepStreamParameters(sweep, "finish");
+  if (stream.error) throw stream.error;
+  return `streamed ${stream.totalWritten} point(s) to ${stream.chunkIndex} CSV chunk(s)`;
+}
+
+function sweepStreamParameterRows(sweep, stage) {
+  const rows = sweepParameterRows(sweep);
+  const stream = sweep?.streamExport;
+  rows.push(
+    [],
+    ["stream_export", "stage", stage, "", ""],
+    ["stream_export", "enabled", stream?.enabled ? "yes" : "no", "", ""],
+    ["stream_export", "file_stem", stream?.fileStem || "", "", ""],
+    ["stream_export", "expected_points", sweep?.expectedPointCount || "", "points", ""],
+    ["stream_export", "captured_points", sweepCapturedPointCount(sweep), "points", ""],
+    ["stream_export", "retained_preview_points", sweep?.points?.length || 0, "points", "GUI keeps a bounded preview for stability"],
+    ["stream_export", "chunk_limit", stream?.chunkLimit || "", "points/file", ""],
+    ["stream_export", "chunks_written", stream?.chunkIndex || 0, "files", ""],
+    ["stream_export", "points_written", stream?.totalWritten || 0, "points", ""],
+    ["stream_export", "file_count", stream?.fileCount || 0, "files", ""],
+  );
+  return rows;
+}
+
+function retainSweepPreviewPoint(sweep, point) {
+  if (!sweep?.streamExport?.enabled) {
+    sweep.points.push(point);
+    return;
+  }
+  if (sweep.points.length < SWEEP_RETAIN_POINT_LIMIT) {
+    sweep.points.push(point);
+    return;
+  }
+  const idx = sweep.retentionWriteIndex % SWEEP_RETAIN_POINT_LIMIT;
+  sweep.points[idx] = point;
+  sweep.retentionWriteIndex += 1;
+  sweep.droppedPointCount = (sweep.droppedPointCount || 0) + 1;
+}
+
+function startSweepCapture(requests = [], repeatCount = 1, options = {}) {
   const rangeByDac = {};
   for (const request of requests) {
     if (!request?.dac) continue;
@@ -973,6 +1120,11 @@ function startSweepCapture(requests = [], repeatCount = 1) {
     id: ++state.sweepCounter,
     startedAt: new Date().toISOString(),
     points: [],
+    capturedPointCount: 0,
+    droppedPointCount: 0,
+    retentionWriteIndex: 0,
+    expectedPointCount: Number(options.expectedPointCount) || sweepExpectedTotalPoints(requests, repeatCount),
+    streamExport: null,
     adcLabels: ADC_LABELS.slice(),
     expectedByDac: {},
     receivedByDac: {},
@@ -984,6 +1136,7 @@ function startSweepCapture(requests = [], repeatCount = 1) {
     currentRepeat: 1,
     lastStatusMs: 0,
   };
+  if (options.streamDirectoryHandle) state.activeSweep.streamExport = createSweepStreamExport(state.activeSweep, options.streamDirectoryHandle);
   state.pendingAdcContext = null;
   state.lastSweep = null;
   state.lastGaussianFit = null;
@@ -1002,16 +1155,18 @@ function finishSweepCapture() {
     clearTimeout(state.plotRenderTimer);
     state.plotRenderTimer = null;
   }
-  if (state.activeSweep?.points.length) {
-    state.activeSweep.finishedAt = new Date().toISOString();
-    state.lastSweep = state.activeSweep;
+  const active = state.activeSweep;
+  const captured = sweepCapturedPointCount(active);
+  if (captured > 0 || active?.points.length) {
+    active.finishedAt = active.finishedAt || new Date().toISOString();
+    state.lastSweep = active;
     state.activeSweep = null;
     state.pendingAdcContext = null;
     renderMeasurementTableTail();
     renderSweepPlot();
     $("downloadSweepCsvButton").disabled = false;
     const coverage = sweepCoverageSummary(state.lastSweep);
-    setAllPlotStatus(`Sweep ${state.lastSweep.id}: ${state.lastSweep.points.length} pts${coverage ? `, ${coverage}` : ""}.`);
+    setAllPlotStatus(`Sweep ${state.lastSweep.id}: ${captured} pts${sweepRetentionSuffix(state.lastSweep)}${coverage ? `, ${coverage}` : ""}.`);
   } else {
     state.activeSweep = null;
     state.pendingAdcContext = null;
@@ -1327,11 +1482,29 @@ async function startSweep() {
     return;
   }
 
+  let streamOptions;
+  try {
+    streamOptions = await prepareSweepStreamExport(requests, repeatCount);
+  } catch (error) {
+    alert(error.message);
+    $("sweepStatus").textContent = error.message;
+    return;
+  }
+
   state.firmwareSweepSelectedTias = requests[0]?.tias || selectedTias();
-  startSweepCapture(requests, repeatCount);
+  startSweepCapture(requests, repeatCount, streamOptions);
+  try {
+    if (state.activeSweep?.streamExport?.enabled) await saveSweepStreamParameters(state.activeSweep, "start");
+  } catch (error) {
+    alert(`Could not start stream export: ${error.message}`);
+    state.activeSweep = null;
+    state.pendingAdcContext = null;
+    return;
+  }
   state.sweepRunning = true;
   const startedMs = performance.now();
-  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us prebias=${req.preBiasMs}ms${req.reverse ? " reverse" : ""}`).join(", ")} x${repeatCount}`;
+  const streamRunText = state.activeSweep?.streamExport?.enabled ? `, streaming CSV chunks (${STREAM_EXPORT_CHUNK_POINT_LIMIT} pts/file)` : "";
+  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us prebias=${req.preBiasMs}ms${req.reverse ? " reverse" : ""}`).join(", ")} x${repeatCount}${streamRunText}`;
   logLine($("sweepStatus").textContent);
 
   try {
@@ -1381,12 +1554,25 @@ async function startSweep() {
   } finally {
     state.sweepRunning = false;
     state.firmwareSweepSelectedTias = null;
-    const captured = state.activeSweep?.points.length ?? 0;
+    const active = state.activeSweep;
+    const captured = sweepCapturedPointCount(active);
     finishSweepCapture();
     const returnedDacs = await returnSweepDacsToZero(requests);
+    let streamText = "";
+    let streamErrorText = "";
+    if (active?.streamExport?.enabled) {
+      try {
+        const message = await finishSweepStreamExport(active);
+        streamText = message ? `, ${message}` : "";
+      } catch (error) {
+        streamErrorText = `, stream save failed: ${error.message}`;
+        logLine(`[export error] ${error.message}`);
+      }
+    }
     const elapsedSeconds = ((performance.now() - startedMs) / 1000).toFixed(2);
     const returnText = returnedDacs.length ? `, returned ${returnedDacs.join("/")} to 0 V` : "";
-    $("sweepStatus").textContent = `Firmware sweep finished: ${captured} ADC point(s), ${elapsedSeconds} s${returnText}`;
+    const previewText = active ? sweepRetentionSuffix(active) : "";
+    $("sweepStatus").textContent = `Firmware sweep finished: ${captured} ADC point(s)${previewText}, ${elapsedSeconds} s${returnText}${streamText}${streamErrorText}`;
     logLine($("sweepStatus").textContent);
   }
 }
@@ -1501,7 +1687,7 @@ function parameterBracketPlan() {
 
 function cloneLastSweepForBracket() {
   if (!state.lastSweep?.points?.length) return null;
-  return JSON.parse(JSON.stringify(state.lastSweep));
+  return JSON.parse(JSON.stringify(state.lastSweep, (key, value) => key === "streamExport" ? undefined : value));
 }
 
 async function startParameterBracket() {
@@ -1546,7 +1732,7 @@ async function startParameterBracket() {
       if (sweep?.points?.length) {
         state.bracketRuns.push({ ...step, sweep });
         renderSweepPlot();
-        setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: captured ${sweep.points.length} ADC point(s).`, "ok");
+        setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: captured ${sweepCapturedPointCount(sweep)} ADC point(s).`, "ok");
       } else {
         setBracketStatus(`Bracket ${step.stepIndex}/${step.count}: no ADC points captured.`, "warn");
       }
@@ -1559,7 +1745,7 @@ async function startParameterBracket() {
     if (state.lastBracket) state.lastBracket.finishedAt = new Date().toISOString();
     setParameterBracketControls(false);
     const elapsedSeconds = ((performance.now() - startedMs) / 1000).toFixed(2);
-    const captured = state.bracketRuns.reduce((sum, run) => sum + (run.sweep?.points?.length || 0), 0);
+    const captured = state.bracketRuns.reduce((sum, run) => sum + sweepCapturedPointCount(run.sweep), 0);
     const kind = state.bracketRuns.length === plan.length ? "ok" : "warn";
     setBracketStatus(`Bracket finished: ${state.bracketRuns.length}/${plan.length} step(s), ${captured} ADC point(s), ${elapsedSeconds} s.`, kind);
   }
@@ -1573,20 +1759,29 @@ function stopParameterBracket() {
   setBracketStatus("Bracket stop requested; current firmware sweep must finish before the loop stops.", "warn");
 }
 
-function downloadParameterBracketCsv() {
+async function downloadParameterBracketCsv() {
   const runs = state.bracketRuns || [];
   if (!runs.length) {
     alert("No completed bracket data to download.");
     return;
   }
-  const sheets = [
-    { name: "parameters", rows: bracketParameterRows(runs) },
-    ...matrixSheetsForRuns(runs, "bracket"),
-    { name: "tidy_raw", rows: tidyRowsForRuns(runs, true) },
-  ];
-  downloadWorkbook(`pcb_gaussian_bracket_${state.lastBracket?.id || Date.now()}.xls`, sheets);
-  const captured = runs.reduce((sum, run) => sum + (run.sweep?.points?.length || 0), 0);
-  setBracketStatus(`Downloaded bracket XLS: ${runs.length} step(s), ${captured} ADC point(s).`, "ok");
+  const captured = exportPointCountForRuns(runs);
+  const baseName = `pcb_gaussian_bracket_${state.lastBracket?.id || Date.now()}`;
+  try {
+    if (captured > EXPORT_WORKBOOK_POINT_LIMIT) {
+      await downloadSplitCsvSet(baseName, runs, true, bracketParameterRows(runs), text => setBracketStatus(text, "ok"));
+      return;
+    }
+    const sheets = [
+      { name: "parameters", rows: bracketParameterRows(runs) },
+      ...matrixSheetsForRuns(runs, "bracket"),
+      { name: "tidy_raw", rows: tidyRowsForRuns(runs, true) },
+    ];
+    downloadWorkbook(`${baseName}.xls`, sheets);
+    setBracketStatus(`Downloaded bracket XLS: ${runs.length} step(s), ${captured} ADC point(s).`, "ok");
+  } catch (error) {
+    setBracketStatus(`Export failed: ${error.message}`, "warn");
+  }
 }
 
 function gateProbeStatus(text, kind = "") {
@@ -1635,7 +1830,7 @@ function ensureGateProbeCapture(dac) {
 
 function finalizeGateProbeCapture() {
   if (!state.activeSweep?.gateProbe) return;
-  const count = state.activeSweep.points.length;
+  const count = sweepCapturedPointCount(state.activeSweep);
   if (count) {
     finishSweepCapture();
     gateProbeStatus(`Gate map complete: ${count} point(s).`, "ok");
@@ -1924,7 +2119,7 @@ function trackFirmwareSweepBadLine(dac) {
   if (nowMs - (state.lastSweepLogMs || 0) >= SWEEP_STATUS_INTERVAL_MS) {
     state.lastSweepLogMs = nowMs;
     const progress = sweepCoverageSummary(sweep);
-    setAllPlotStatus(`Live ${sweep.id}: ${sweep.points.length} pts${progress ? `, ${progress}` : ""}.`);
+    setAllPlotStatus(`Live ${sweep.id}: ${sweepCapturedPointCount(sweep)} pts${sweepRetentionSuffix(sweep)}${progress ? `, ${progress}` : ""}.`);
   }
 }
 
@@ -2084,7 +2279,7 @@ function addSweepAdcPoint(values, context) {
     adcs[adcLabel] = sample;
     tias[tiaLabel] = sample;
   }
-  state.activeSweep.points.push({
+  const point = {
     point: context.pointIndex,
     repeat: state.activeSweep.currentRepeat || 1,
     time: nowTime(),
@@ -2092,12 +2287,15 @@ function addSweepAdcPoint(values, context) {
     dac: context.dac,
     adcs,
     tias,
-  });
+  };
+  state.activeSweep.capturedPointCount = (state.activeSweep.capturedPointCount || 0) + 1;
+  queueSweepStreamPoint(state.activeSweep, point);
+  retainSweepPreviewPoint(state.activeSweep, point);
   const nowMs = performance.now();
   if (nowMs - (state.activeSweep.lastStatusMs || 0) >= SWEEP_STATUS_INTERVAL_MS) {
     state.activeSweep.lastStatusMs = nowMs;
     const progress = sweepCoverageSummary(state.activeSweep);
-    setAllPlotStatus(`Live ${state.activeSweep.id}: ${state.activeSweep.points.length} pts${progress ? `, ${progress}` : ""}.`);
+    setAllPlotStatus(`Live ${state.activeSweep.id}: ${sweepCapturedPointCount(state.activeSweep)} pts${sweepRetentionSuffix(state.activeSweep)}${progress ? `, ${progress}` : ""}.`);
   }
   scheduleSweepPlotRender();
 }
@@ -2138,6 +2336,8 @@ function renderMeasurementTableTail() {
 
 function addMeasurement(row, render = true) {
   state.measurements.push(row);
+  const overflow = state.measurements.length - MEASUREMENT_MEMORY_ROW_LIMIT;
+  if (overflow > MEASUREMENT_MEMORY_TRIM_BATCH) state.measurements.splice(0, overflow);
   if (render) appendMeasurementRow(row);
 }
 
@@ -2159,6 +2359,31 @@ function yAxisLabel(mode) {
 
 function plotSweepSource() {
   return state.activeSweep?.points.length ? state.activeSweep : state.lastSweep;
+}
+
+function plotPointsForSweep(sweep, xDac) {
+  const points = sweep?.points || [];
+  if (!points.length) return [];
+  const estimatedStep = Math.max(1, Math.ceil(points.length / PLOT_POINT_RENDER_LIMIT));
+  const out = [];
+  let seen = 0;
+  for (const point of points) {
+    if (point.sweepDac && point.sweepDac !== xDac) continue;
+    seen += 1;
+    if (estimatedStep === 1 || seen % estimatedStep === 1 || seen === 1) out.push(point);
+  }
+  if (out.length) {
+    let last = null;
+    for (let idx = points.length - 1; idx >= 0; idx--) {
+      const point = points[idx];
+      if (!point.sweepDac || point.sweepDac === xDac) {
+        last = point;
+        break;
+      }
+    }
+    if (last && out[out.length - 1] !== last) out.push(last);
+  }
+  return out.sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
 }
 
 function bracketOverlayEnabled() {
@@ -2183,10 +2408,7 @@ function bracketOverlaySeriesForPlot(xDac, yMode, labels, currentSweepId) {
   for (const run of runs) {
     const sweep = run.sweep;
     if (!sweep?.points?.length || sweep.id === currentSweepId) continue;
-    const points = sweep.points
-      .filter(point => !point.sweepDac || point.sweepDac === xDac)
-      .slice()
-      .sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
+    const points = plotPointsForSweep(sweep, xDac);
     if (!points.length) continue;
     for (const label of labels) {
       const adcIdx = Number(label.replace("ADC", ""));
@@ -2365,7 +2587,7 @@ function renderDacSweepPlot(xDac) {
   const yMode = $("plotYMode")?.value || "current";
   const adcIndices = selectedPlotAdcs(xDac);
   const labels = adcIndices.map(idx => `ADC${idx}`);
-  const points = sweep.points.filter(point => !point.sweepDac || point.sweepDac === xDac).slice().sort((a, b) => sweepXValue(a, xDac) - sweepXValue(b, xDac));
+  const points = plotPointsForSweep(sweep, xDac);
   const samples = [];
 
   for (const point of points) {
@@ -2516,7 +2738,7 @@ function renderDacSweepPlot(xDac) {
   $(config.legendId).innerHTML = legendItems.join("");
   const coverage = sweepCoverageText(sweep, xDac);
   const labelText = labels.length > 3 ? `${labels.length} ADCs` : labels.join("/");
-  setPlotStatus(xDac, `Sweep ${sweep.id}: ${sweep.points.length} pts, ${labelText}${coverage ? `, ${coverage}` : ""}.`);
+  setPlotStatus(xDac, `Sweep ${sweep.id}: ${sweepCapturedPointCount(sweep)} pts${sweepRetentionSuffix(sweep)}, ${labelText}${coverage ? `, ${coverage}` : ""}.`);
 }
 
 function renderSweepPlot() {
@@ -3455,7 +3677,14 @@ function exportBaseParameterRows(kind) {
 
 function sweepParameterRows(sweep) {
   const rows = exportBaseParameterRows("sweep_workbook");
-  rows.push([], ["sweep", "id", sweep.id || "", "", ""], ["sweep", "points", sweep.points?.length || 0, "", ""]);
+  rows.push(
+    [],
+    ["sweep", "id", sweep.id || "", "", ""],
+    ["sweep", "captured_points", sweepCapturedPointCount(sweep), "points", "total ADC point lines received"],
+    ["sweep", "retained_preview_points", sweep.points?.length || 0, "points", "points retained in GUI memory"],
+    ["sweep", "dropped_preview_points", sweep.droppedPointCount || 0, "points", "streamed data is still saved in chunk CSV files"],
+    ["sweep", "expected_points", sweep.expectedPointCount || "", "points", "estimated before run"],
+  );
   for (const dac of ["D1", "D2"]) {
     const range = sweep.rangeByDac?.[dac];
     if (range) rows.push(["sweep_range", dac, `${range.min} to ${range.max}`, "V", "fixed plot/sweep x range"]);
@@ -3572,39 +3801,45 @@ function matrixSheetsForRuns(runs, prefix) {
     .filter(sheet => sheet.rows);
 }
 
-function tidyRowsForRuns(runs, includeBracket) {
+function tidyFields(includeBracket) {
   const labels = ADC_LABELS.slice();
-  const fields = [
+  return [
     ...(includeBracket ? ["bracket_id", "bracket_step", "bracket_axis", "device", "delta_mu_V", "delta_vstart_V", "Vmu_step_V", "Vstart_step_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V"] : []),
     "sweep_id", "repeat", "point", "time", "sweep_dac",
     "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
     ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
   ];
-  const rows = [fields];
+}
+
+function tidyPointRow(run, point, includeBracket) {
+  const labels = ADC_LABELS.slice();
+  const base = [
+    ...(includeBracket ? [
+      state.lastBracket?.id || "", run.stepIndex, run.axisLabel || run.axis, run.device,
+      run.deltaMuV ?? run.deltaV ?? "", run.deltaVstartV ?? "", run.muStepV ?? "", run.vstartStepV ?? "",
+      run.muCode, run.actualMuV, run.vstartCode, run.actualVstartV,
+    ] : []),
+    run.sweep?.id || "",
+    point.repeat ?? 1,
+    point.point,
+    point.time,
+    point.sweepDac ?? "",
+    point.dac?.D1?.code ?? "",
+    point.dac?.D1?.vhigh ?? "",
+    point.dac?.D2?.code ?? "",
+    point.dac?.D2?.vhigh ?? "",
+  ];
+  const adcValues = labels.flatMap(label => {
+    const sample = point.adcs?.[label];
+    return sample ? [sample.raw, sample.voltage, sample.current, sample.tia, sample.jumper] : ["", "", "", "", ""];
+  });
+  return [...base, ...adcValues];
+}
+
+function tidyRowsForRuns(runs, includeBracket) {
+  const rows = [tidyFields(includeBracket)];
   for (const run of runs) {
-    for (const point of run.sweep?.points || []) {
-      const base = [
-        ...(includeBracket ? [
-          state.lastBracket?.id || "", run.stepIndex, run.axisLabel || run.axis, run.device,
-          run.deltaMuV ?? run.deltaV ?? "", run.deltaVstartV ?? "", run.muStepV ?? "", run.vstartStepV ?? "",
-          run.muCode, run.actualMuV, run.vstartCode, run.actualVstartV,
-        ] : []),
-        run.sweep?.id || "",
-        point.repeat ?? 1,
-        point.point,
-        point.time,
-        point.sweepDac ?? "",
-        point.dac?.D1?.code ?? "",
-        point.dac?.D1?.vhigh ?? "",
-        point.dac?.D2?.code ?? "",
-        point.dac?.D2?.vhigh ?? "",
-      ];
-      const adcValues = labels.flatMap(label => {
-        const sample = point.adcs?.[label];
-        return sample ? [sample.raw, sample.voltage, sample.current, sample.tia, sample.jumper] : ["", "", "", "", ""];
-      });
-      rows.push([...base, ...adcValues]);
-    }
+    for (const point of run.sweep?.points || []) rows.push(tidyPointRow(run, point, includeBracket));
   }
   return rows;
 }
@@ -3624,25 +3859,170 @@ function download(name, content, type) {
   URL.revokeObjectURL(url);
 }
 
+function csvFromRows(rows) {
+  return (rows || []).map(row => (row || []).map(csvEscape).join(",")).join("\n");
+}
+
+function safeExportStem(name) {
+  return String(name || "pcb_gaussian_export")
+    .replace(/\.(xls|csv)$/i, "")
+    .replace(/[^A-Za-z0-9_.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 150) || "pcb_gaussian_export";
+}
+
+function exportPointCountForRuns(runs) {
+  return (runs || []).reduce((sum, run) => sum + (run.sweep?.points?.length || 0), 0);
+}
+
+function repeatPointGroupsForRun(run) {
+  const map = new Map();
+  for (const point of run.sweep?.points || []) {
+    const repeat = Number(point.repeat ?? 1);
+    if (!map.has(repeat)) map.set(repeat, []);
+    map.get(repeat).push(point);
+  }
+  return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
+}
+
+function runCloneWithPoints(run, points) {
+  return {
+    ...run,
+    sweep: {
+      ...(run.sweep || {}),
+      points,
+    },
+  };
+}
+
+function splitRunsForCsvExport(runs, maxPoints = EXPORT_CSV_CHUNK_POINT_LIMIT) {
+  const chunks = [];
+  let currentRuns = [];
+  let currentPoints = 0;
+  const flush = () => {
+    if (!currentRuns.length) return;
+    chunks.push({ index: chunks.length + 1, runs: currentRuns, points: currentPoints });
+    currentRuns = [];
+    currentPoints = 0;
+  };
+  for (const run of runs || []) {
+    for (const [, points] of repeatPointGroupsForRun(run)) {
+      if (!points.length) continue;
+      if (currentPoints > 0 && currentPoints + points.length > maxPoints) flush();
+      currentRuns.push(runCloneWithPoints(run, points));
+      currentPoints += points.length;
+      if (currentPoints >= maxPoints) flush();
+    }
+  }
+  flush();
+  return chunks;
+}
+
+async function exportDelay() {
+  await new Promise(resolve => setTimeout(resolve, EXPORT_DOWNLOAD_DELAY_MS));
+}
+
+async function chooseExportDirectory(preferredName) {
+  if (!window.showDirectoryPicker) return null;
+  try {
+    return await window.showDirectoryPicker({ id: "pcb-gaussian-export", mode: "readwrite", startIn: "downloads" });
+  } catch (error) {
+    logLine(`[export] Folder save skipped for ${preferredName}: ${error.message}`);
+    return null;
+  }
+}
+
+async function saveTextExportFile(name, content, type, directoryHandle = null) {
+  if (directoryHandle) {
+    const fileHandle = await directoryHandle.getFileHandle(name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(new Blob([content], { type }));
+    await writable.close();
+    return;
+  }
+  download(name, content, type);
+  await exportDelay();
+}
+
+async function saveRowsCsvExport(name, rows, directoryHandle = null) {
+  await saveTextExportFile(name, csvFromRows(rows), "text/csv;charset=utf-8", directoryHandle);
+}
+
+async function downloadSplitCsvSet(baseName, runs, includeBracket, parameterRows, statusFn = null) {
+  const stem = safeExportStem(baseName);
+  const totalPoints = exportPointCountForRuns(runs);
+  const chunks = splitRunsForCsvExport(runs);
+  if (!chunks.length) throw new Error("No data available for split export.");
+  const directoryHandle = await chooseExportDirectory(stem);
+  let fileCount = 0;
+  const noteRows = [
+    ["section", "key", "value", "unit", "note"],
+    ["split_export", "base_name", stem, "", "large data exported as CSV chunks to avoid browser XLS overflow"],
+    ["split_export", "created_at", new Date().toISOString(), "", ""],
+    ["split_export", "total_points", totalPoints, "points", ""],
+    ["split_export", "chunks", chunks.length, "filesets", ""],
+    ["split_export", "chunk_point_limit", EXPORT_CSV_CHUNK_POINT_LIMIT, "points", ""],
+    ["split_export", "save_mode", directoryHandle ? "folder" : "browser_downloads", "", "folder mode requires Chrome/Edge File System Access API"],
+    [],
+    ...parameterRows,
+  ];
+  await saveRowsCsvExport(`${stem}_parameters.csv`, noteRows, directoryHandle);
+  fileCount += 1;
+  for (const chunk of chunks) {
+    const part = String(chunk.index).padStart(3, "0");
+    const matrixSheets = matrixSheetsForRuns(chunk.runs, stem);
+    for (const sheet of matrixSheets) {
+      await saveRowsCsvExport(`${stem}_part${part}_${sheet.name}.csv`, sheet.rows, directoryHandle);
+      fileCount += 1;
+    }
+    await saveRowsCsvExport(`${stem}_part${part}_tidy_raw.csv`, tidyRowsForRuns(chunk.runs, includeBracket), directoryHandle);
+    fileCount += 1;
+    if (statusFn) statusFn(`Split export ${chunk.index}/${chunks.length}: saved ${chunk.points} point(s).`);
+  }
+  const locationText = directoryHandle ? "selected folder" : "browser downloads";
+  const message = `Split export complete: ${totalPoints} point(s), ${chunks.length} part(s), ${fileCount} CSV file(s) saved to ${locationText}.`;
+  if (statusFn) statusFn(message);
+  logLine(message);
+  return message;
+}
+
+
 function downloadCsv() {
   const fields = ["time", "dac", "code", "vhigh", "tia", "raw", "voltage", "current", "devices", "source"];
   const csv = [fields.join(","), ...state.measurements.map(row => fields.map(field => csvEscape(field === "devices" ? (row.devices ?? row.jumper) : row[field])).join(","))].join("\n");
   download(`pcb_gaussian_measurements_${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
 }
 
-function downloadSweepCsv() {
+async function downloadSweepCsv() {
   const sweep = state.lastSweep;
   if (!sweep?.points.length) {
     alert("No completed sweep ADC data to download.");
     return;
   }
   const runs = runsForSweep(sweep);
-  const sheets = [
-    { name: "parameters", rows: sweepParameterRows(sweep) },
-    ...matrixSheetsForRuns(runs, "sweep"),
-    { name: "tidy_raw", rows: tidyRowsForRuns(runs, false) },
-  ];
-  downloadWorkbook(`pcb_gaussian_sweep_${sweep.id}_matrix_${Date.now()}.xls`, sheets);
+  const captured = exportPointCountForRuns(runs);
+  const baseName = `pcb_gaussian_sweep_${sweep.id}_matrix_${Date.now()}`;
+  const setStatus = text => {
+    const status = $("sweepStatus");
+    if (status) status.textContent = text;
+  };
+  try {
+    if (captured > EXPORT_WORKBOOK_POINT_LIMIT) {
+      await downloadSplitCsvSet(baseName, runs, false, sweepParameterRows(sweep), setStatus);
+      return;
+    }
+    const sheets = [
+      { name: "parameters", rows: sweepParameterRows(sweep) },
+      ...matrixSheetsForRuns(runs, "sweep"),
+      { name: "tidy_raw", rows: tidyRowsForRuns(runs, false) },
+    ];
+    downloadWorkbook(`${baseName}.xls`, sheets);
+    const fullCaptured = sweepCapturedPointCount(sweep);
+    const suffix = sweep.streamExport?.enabled && fullCaptured > captured ? `retained preview (${captured}/${fullCaptured}); full stream chunks were saved during sweep` : `${captured} ADC point(s)`;
+    setStatus(`Downloaded sweep XLS: ${suffix}.`);
+  } catch (error) {
+    setStatus(`Export failed: ${error.message}`);
+  }
 }
 function downloadLog() {
   download(`pcb_gaussian_session_${Date.now()}.txt`, state.commandLog.join("\n"), "text/plain;charset=utf-8");
