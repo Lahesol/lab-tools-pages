@@ -22,7 +22,7 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-05-31-device-calibration-lut";
+const WEB_VERSION = "2026-06-02-device-cal-convergence-overlay";
 const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
 const APP_VERSION = WEB_VERSION;
@@ -70,8 +70,8 @@ const ADC_LABELS = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `ADC${idx}`
 const DEVICE_CAL_DAC_BY_ADC = ["D2", "D2", "D2", "D2", "D1", "D1", "D1", "D1"];
 const DEVICE_CAL_LUT_STORAGE_KEY = "pcbGaussian.deviceCalLut.v1";
 const DEVICE_CAL_LUT_ROW_LIMIT = 20000;
-// Current jumper map from bench wiring: ADC0/1/2/3 read devices 5/4/6/1.
-const ADC_DEVICE_MAP = [5, 4, 6, 1, null, null, null, null];
+// Current jumper map from bench wiring. Each ADC/TIA can receive two devices.
+const ADC_DEVICE_MAP = [[5, 6], [1, 2], [7, 8], [3, 4], [9, 10], [13, 14], [11, 12], [15, 16]];
 const PLOT_CONFIGS = {
   D1: {
     title: "DAC1",
@@ -1219,18 +1219,25 @@ function sweepPointCountFromMv(start, stop, step) {
   return count;
 }
 
+function mappedDevicesForAdc(adcIndex) {
+  const mapped = ADC_DEVICE_MAP[adcIndex];
+  if (Array.isArray(mapped)) {
+    return mapped.map(Number).filter(Number.isFinite);
+  }
+  const device = Number(mapped);
+  return Number.isFinite(device) ? [device] : [];
+}
 function mappedDeviceForAdc(adcIndex) {
-  const device = ADC_DEVICE_MAP[adcIndex];
-  return Number.isFinite(Number(device)) ? Number(device) : null;
+  return mappedDevicesForAdc(adcIndex)[0] || null;
 }
 function adcSubLabel(adcIndex) {
-  const device = mappedDeviceForAdc(adcIndex);
-  return device ? `D${device} / TIA${adcIndex + 1}` : `TIA${adcIndex + 1}`;
+  const devices = mappedDevicesForAdc(adcIndex);
+  return devices.length ? `${devices.map(device => `D${device}`).join("/")} / TIA${adcIndex + 1}` : `TIA${adcIndex + 1}`;
 }
 function adcIndexFromMappedDevice(device) {
   const wanted = Number(device);
   if (!Number.isFinite(wanted)) return null;
-  const index = ADC_DEVICE_MAP.findIndex(item => Number(item) === wanted);
+  const index = ADC_DEVICE_MAP.findIndex(item => Array.isArray(item) ? item.map(Number).includes(wanted) : Number(item) === wanted);
   return index >= 0 ? index : null;
 }
 function adcIndexFromTia(tiaIndex) {
@@ -3694,13 +3701,18 @@ function deviceCalChannels() {
   }));
 }
 
+function deviceCalObjective() {
+  const value = $("deviceCalObjective")?.value || "shape";
+  return value === "a_mu" ? "a_mu" : "shape";
+}
+
 function deviceCalTarget() {
   const target = {
     A: deviceCalNumber("deviceCalTargetA", 0.015),
     mu: deviceCalNumber("deviceCalTargetMu", 0),
     sigma: Math.abs(deviceCalNumber("deviceCalTargetSigma", 4, { min: 0 })),
   };
-  if (![target.A, target.mu].every(Number.isFinite)) throw new Error("Device calibration target A/mu is invalid.");
+  if (![target.A, target.mu, target.sigma].every(Number.isFinite)) throw new Error("Device calibration target A/mu/sigma is invalid.");
   return target;
 }
 
@@ -3708,7 +3720,31 @@ function deviceCalTolerances() {
   return {
     muTol: deviceCalNumber("deviceCalMuTol", 0.05, { min: 0 }),
     aTol: deviceCalNumber("deviceCalATol", 0.002, { min: 0 }),
+    sigmaTol: deviceCalNumber("deviceCalSigmaTol", 0.35, { min: 0 }),
   };
+}
+
+function deviceCalTargetError(fit, target, tolerances = deviceCalTolerances(), objective = deviceCalObjective()) {
+  const base = gaussianTargetError(fit, target, tolerances);
+  const sigmaError = Number(target.sigma) - Math.abs(Number(fit.sigma));
+  const sigmaScale = tolerances.sigmaTol > 0 ? Math.abs(sigmaError) / tolerances.sigmaTol : Math.abs(sigmaError);
+  if (objective === "shape") {
+    const norm = Math.max(base.aScale, sigmaScale);
+    return { ...base, sigmaError, sigmaScale, norm, objective, converged: norm <= 1 };
+  }
+  return { ...base, sigmaError, sigmaScale, objective };
+}
+
+function formatDeviceCalError(error) {
+  if (!error) return "err -";
+  if (error.objective === "shape") {
+    return `err A=${error.aError.toPrecision(4)}, sigma=${error.sigmaError.toFixed(4)} V, mu diag=${error.muError.toFixed(4)} V, norm(A/sigma)=${error.norm.toFixed(3)}`;
+  }
+  return formatTargetError(error);
+}
+
+function deviceCalPlanTargetForObjective(fit, target, objective) {
+  return objective === "shape" ? { ...target, mu: Number(fit.mu) } : target;
 }
 
 function deviceCalGains() {
@@ -3749,12 +3785,17 @@ function deviceCalFitOneChannel(channel, target, tolerances, gains, iter, option
     const yMode = $("deviceCalYMode")?.value || "current";
     const data = gaussianFitSeries(channel.xDac, channel.adcIndex, yMode);
     const fit = { ...fitGaussianData(data), xDac: channel.xDac, adcIndex: channel.adcIndex, yMode, data };
-    const error = gaussianTargetError(fit, target, tolerances);
-    const makePlan = options.plan !== false;
+    const objective = options.objective || deviceCalObjective();
+    const error = deviceCalTargetError(fit, target, tolerances, objective);
+    const active = !options.activeDevices || options.activeDevices.has(channel.device);
+    const makePlan = options.plan !== false && active;
     let plan = null;
-    let action = error.converged ? "converged" : (makePlan ? "planned" : "measured");
+    let action = error.converged ? "converged" : (makePlan ? "planned" : (active ? "measured" : "held"));
     if (!error.converged && makePlan) {
-      plan = adjustmentPlanForFit(channel.device, target, fit, gains.muGain, gains.vstartGain, gains.muVstartGain);
+      const controlTarget = deviceCalPlanTargetForObjective(fit, target, objective);
+      plan = adjustmentPlanForFit(channel.device, controlTarget, fit, gains.muGain, gains.vstartGain, gains.muVstartGain);
+      plan.target = target;
+      plan.controlTarget = controlTarget;
       if (!planHasCodeChange(plan)) {
         const nudged = planWithMinimumCodeNudge(plan);
         if (nudged) {
@@ -3765,9 +3806,9 @@ function deviceCalFitOneChannel(channel, target, tolerances, gains, iter, option
         }
       }
     }
-    return { iter, channel, target, fit, error, plan, action, converged: error.converged };
+    return { iter, channel, target, fit, error, plan, action, objective, active, converged: error.converged };
   } catch (error) {
-    return { iter, channel, target, fit: null, error: null, plan: null, action: "fit failed", message: error.message, converged: false };
+    return { iter, channel, target, fit: null, error: null, plan: null, action: "fit failed", message: error.message, objective: options.objective || deviceCalObjective(), converged: false };
   }
 }
 
@@ -3775,20 +3816,29 @@ function fitDeviceCalBatch(iter = "", options = {}) {
   const target = deviceCalTarget();
   const tolerances = deviceCalTolerances();
   const gains = deviceCalGains();
+  const objective = options.objective || deviceCalObjective();
   syncDeviceCalSharedFitControls(target, tolerances, gains);
-  const results = deviceCalChannels().map(channel => deviceCalFitOneChannel(channel, target, tolerances, gains, iter, options));
+  const results = deviceCalChannels().map(channel => deviceCalFitOneChannel(channel, target, tolerances, gains, iter, { ...options, objective }));
   state.deviceCalResults = results;
   appendDeviceCalHistory(results);
   renderDeviceCalResults(results);
   return results;
 }
 
+function updateDeviceCalOverlayButtons() {
+  const rows = Array.isArray(state.deviceCalHistory) ? state.deviceCalHistory.filter(row => row.fit?.data?.length) : [];
+  const downloadButton = $("deviceCalOverlayDownloadButton");
+  if (downloadButton) downloadButton.disabled = !rows.length;
+  const logButton = $("deviceCalDownloadButton");
+  if (logButton) logButton.disabled = !state.deviceCalHistory.length;
+}
+
 function appendDeviceCalHistory(results) {
   const time = new Date().toISOString();
   state.deviceCalHistory.push(...results.map(result => ({ time, ...result })));
-  if (state.deviceCalHistory.length > 2000) state.deviceCalHistory.splice(0, state.deviceCalHistory.length - 2000);
-  const button = $("deviceCalDownloadButton");
-  if (button) button.disabled = !state.deviceCalHistory.length;
+  if (state.deviceCalHistory.length > 4000) state.deviceCalHistory.splice(0, state.deviceCalHistory.length - 4000);
+  updateDeviceCalOverlayButtons();
+  drawDeviceCalOverlay();
 }
 
 function deviceCalLutStatus(text, kind = "") {
@@ -4078,10 +4128,10 @@ function deviceCalResultText(result) {
   const plan = result.plan;
   const codeText = plan
     ? `mu ${plan.currentMuCode}->${plan.nextMuCode}, Vstart ${(plan.currentVstartCode ?? plan.currentACode)}->${(plan.nextVstartCode ?? plan.nextACode)}`
-    : "no programming";
+    : (result.action === "held" ? "held after convergence" : "no programming");
   return `<strong>${result.converged ? "within tol" : result.action}</strong><br>` +
     `A ${result.fit.A.toPrecision(4)} / mu ${result.fit.mu.toFixed(3)} V / sigma ${Math.abs(result.fit.sigma).toFixed(3)} V<br>` +
-    `err A ${error.aError.toPrecision(3)}, mu ${error.muError.toFixed(3)} V, norm ${error.norm.toFixed(2)}<br>${codeText}`;
+    `${formatDeviceCalError(error)}<br>${codeText}`;
 }
 
 function renderDeviceCalResults(results = state.deviceCalResults) {
@@ -4222,6 +4272,304 @@ function drawDeviceCalPlot(result) {
   drawLine(targetSamples, "#17323a", [1.5, 5], 2.2, 0.95);
 }
 
+function deviceCalOverlayStatus(text, kind = "") {
+  const status = $("deviceCalOverlayStatus");
+  if (!status) return;
+  status.textContent = text;
+  status.className = `hint status-line ${kind}`.trim();
+}
+
+function deviceCalOverlayRows() {
+  return (Array.isArray(state.deviceCalHistory) ? state.deviceCalHistory : [])
+    .filter(row => row?.fit?.data?.length && row.channel?.device);
+}
+
+function deviceCalSelectedOverlayRows(rows = deviceCalOverlayRows()) {
+  const mode = $("deviceCalOverlayStageMode")?.value || "all";
+  if (mode === "all") return rows.slice();
+  const byDevice = new Map();
+  for (const row of rows) {
+    const device = row.channel.device;
+    if (!byDevice.has(device)) byDevice.set(device, []);
+    byDevice.get(device).push(row);
+  }
+  const selected = [];
+  for (const deviceRows of byDevice.values()) {
+    deviceRows.sort((a, b) => Number(a.iter || 0) - Number(b.iter || 0));
+    if (mode === "latest") {
+      selected.push(deviceRows[deviceRows.length - 1]);
+    } else {
+      selected.push(deviceRows[0]);
+      const latest = deviceRows[deviceRows.length - 1];
+      if (latest !== deviceRows[0]) selected.push(latest);
+    }
+  }
+  return selected;
+}
+
+function deviceCalDeviceColor(device) {
+  const palette = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653", "#00a6d6", "#b56576", "#6a994e", "#bc6c25", "#5a189a", "#0081a7", "#9b2226", "#52796f"];
+  return palette[(clamp(Math.round(Number(device) || 1), 1, 16) - 1) % palette.length];
+}
+
+function deviceCalOverlayPoint(point, fit, xMode) {
+  const x = xMode === "aligned" ? Number(point.x) - Number(fit.mu) : Number(point.x);
+  const y = Number(point.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function deviceCalOverlayBaseline(rows) {
+  const values = rows.map(row => Number(row.fit?.baseline)).filter(Number.isFinite);
+  return values.length ? average(values) : 0;
+}
+
+function drawDeviceCalOverlayEmpty(message = "No convergence curves yet.") {
+  const canvas = $("deviceCalOverlayCanvas");
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(360, Math.round(rect.width || 760));
+  const height = 360;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.height = `${height}px`;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#f8fbfa";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#66737a";
+  ctx.font = "14px Segoe UI, Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(message, width / 2, height / 2);
+  const legend = $("deviceCalOverlayLegend");
+  if (legend) legend.innerHTML = "";
+}
+
+function drawDeviceCalOverlay() {
+  const rows = deviceCalSelectedOverlayRows();
+  if (!rows.length) {
+    drawDeviceCalOverlayEmpty();
+    deviceCalOverlayStatus("Overlay idle.");
+    updateDeviceCalOverlayButtons();
+    return;
+  }
+  const xMode = $("deviceCalOverlayXMode")?.value || "aligned";
+  const target = deviceCalTarget();
+  const series = rows.map(row => ({
+    row,
+    points: (row.fit.data || []).map(point => deviceCalOverlayPoint(point, row.fit, xMode)).filter(Boolean),
+  })).filter(item => item.points.length);
+  if (!series.length) {
+    drawDeviceCalOverlayEmpty("No valid convergence curve points.");
+    return;
+  }
+  const xValues = series.flatMap(item => item.points.map(point => point.x));
+  const yValues = series.flatMap(item => item.points.map(point => point.y));
+  const baseline = deviceCalOverlayBaseline(rows);
+  let minX = Math.min(...xValues);
+  let maxX = Math.max(...xValues);
+  const targetSigma = Math.max(Number(target.sigma) || 4, 1e-6);
+  if ($("deviceCalOverlayTarget")?.checked !== false) {
+    const targetMu = xMode === "aligned" ? 0 : Number(target.mu) || 0;
+    for (let i = 0; i <= 120; i++) {
+      const x = minX + (maxX - minX) * i / 120;
+      yValues.push(gaussianValue({ A: target.A, mu: targetMu, sigma: targetSigma, baseline }, x));
+    }
+  }
+  let minY = Math.min(...yValues);
+  let maxY = Math.max(...yValues);
+  if (minX === maxX) { minX -= 1; maxX += 1; }
+  if (minY === maxY) { minY -= 1; maxY += 1; }
+  const xPad = Math.max(0.05, (maxX - minX) * 0.04);
+  const yPad = Math.max(1e-9, (maxY - minY) * 0.12);
+  minX -= xPad;
+  maxX += xPad;
+  minY -= yPad;
+  maxY += yPad;
+
+  const canvas = $("deviceCalOverlayCanvas");
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(360, Math.round(rect.width || 760));
+  const height = 360;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.height = `${height}px`;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#f8fbfa";
+  ctx.fillRect(0, 0, width, height);
+  const margin = { left: 58, right: 16, top: 18, bottom: 42 };
+  const plotW = width - margin.left - margin.right;
+  const plotH = height - margin.top - margin.bottom;
+  const sx = x => margin.left + (x - minX) / Math.max(1e-12, maxX - minX) * plotW;
+  const sy = y => margin.top + plotH - (y - minY) / Math.max(1e-12, maxY - minY) * plotH;
+
+  ctx.strokeStyle = "#d9e4e2";
+  ctx.lineWidth = 1;
+  ctx.fillStyle = "#66737a";
+  ctx.font = "11px Segoe UI, Arial";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i <= 4; i++) {
+    const y = margin.top + plotH * i / 4;
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(width - margin.right, y);
+    ctx.stroke();
+    ctx.fillText((maxY - (maxY - minY) * i / 4).toPrecision(4), margin.left - 7, y);
+  }
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let i = 0; i <= 5; i++) {
+    const x = margin.left + plotW * i / 5;
+    const value = minX + (maxX - minX) * i / 5;
+    ctx.beginPath();
+    ctx.moveTo(x, margin.top);
+    ctx.lineTo(x, margin.top + plotH);
+    ctx.stroke();
+    ctx.fillText(value.toFixed(2), x, margin.top + plotH + 7);
+  }
+  ctx.strokeStyle = "#17323a";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, margin.top + plotH);
+  ctx.lineTo(width - margin.right, margin.top + plotH);
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(15, margin.top + plotH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = "#17323a";
+  ctx.font = "12px Segoe UI, Arial";
+  ctx.textAlign = "center";
+  ctx.fillText($("deviceCalYMode")?.value || "I_uA", 0, 0);
+  ctx.restore();
+  ctx.fillText(xMode === "aligned" ? "gate voltage - fitted mu (V)" : "gate voltage (V)", margin.left + plotW / 2, height - 16);
+
+  const iterValues = rows.map(row => Number(row.iter) || 0).filter(Number.isFinite);
+  const minIter = iterValues.length ? Math.min(...iterValues) : 0;
+  const maxIter = iterValues.length ? Math.max(...iterValues) : 0;
+  const alphaBase = deviceCalNumber("deviceCalOverlayAlpha", 0.28, { min: 0.05, max: 1 });
+  const drawLine = (points, color, dash = [], widthPx = 1.4, alpha = 1) => {
+    if (!points.length) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = widthPx;
+    if (ctx.setLineDash) ctx.setLineDash(dash);
+    ctx.beginPath();
+    points.forEach((point, idx) => {
+      const x = sx(point.x);
+      const y = sy(point.y);
+      if (idx === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  };
+  for (const item of series) {
+    const device = item.row.channel.device;
+    const color = deviceCalDeviceColor(device);
+    const iter = Number(item.row.iter) || 0;
+    const progress = maxIter > minIter ? (iter - minIter) / (maxIter - minIter) : 1;
+    const isLatest = iter === maxIter;
+    const alpha = Math.min(0.95, alphaBase + progress * 0.45);
+    drawLine(item.points, color, [], isLatest ? 2.1 : 1.25, alpha);
+  }
+  if ($("deviceCalOverlayTarget")?.checked !== false) {
+    const targetMu = xMode === "aligned" ? 0 : Number(target.mu) || 0;
+    const targetPoints = sampledGaussianForPlot({ A: target.A, mu: targetMu, sigma: targetSigma, baseline }, minX, maxX, 180);
+    drawLine(targetPoints, "#17323a", [2, 5], 2.4, 0.9);
+  }
+  const devices = [...new Set(rows.map(row => row.channel.device))].sort((a, b) => a - b);
+  const legend = $("deviceCalOverlayLegend");
+  if (legend) {
+    legend.innerHTML = devices.map(device => `<span><i style="background:${deviceCalDeviceColor(device)}"></i>D${device}</span>`).join("") +
+      ($("deviceCalOverlayTarget")?.checked !== false ? `<span><i style="background:repeating-linear-gradient(to right, #17323a 0 4px, transparent 4px 8px)"></i>Target</span>` : "");
+  }
+  deviceCalOverlayStatus(`${rows.length} curve(s), ${devices.length} device(s), ${xMode === "aligned" ? "mu-aligned" : "raw X"}.`, "ok");
+  updateDeviceCalOverlayButtons();
+}
+
+function clearDeviceCalOverlayHistory() {
+  const count = state.deviceCalHistory.length;
+  state.deviceCalHistory = [];
+  updateDeviceCalOverlayButtons();
+  drawDeviceCalOverlayEmpty();
+  deviceCalOverlayStatus(`Cleared ${count} overlay/log row(s).`, "ok");
+}
+
+function deviceCalOverlayPairRows(rows, xMode) {
+  const selected = deviceCalSelectedOverlayRows(rows);
+  const curves = selected.map(row => {
+    const device = row.channel?.device;
+    const iter = String(row.iter || "").padStart(3, "0");
+    const label = `D${String(device).padStart(2, "0")}_iter${iter}_${row.channel?.xDac || "DAC"}_ADC${row.channel?.adcIndex}`;
+    return {
+      row,
+      label,
+      points: (row.fit?.data || []).map(point => deviceCalOverlayPoint(point, row.fit, xMode)).filter(Boolean),
+    };
+  }).filter(curve => curve.points.length);
+  const maxLen = Math.max(0, ...curves.map(curve => curve.points.length));
+  const header = curves.flatMap(curve => [`${curve.label}_${xMode}_x_V`, `${curve.label}_y`]);
+  const matrix = [header];
+  for (let i = 0; i < maxLen; i++) {
+    matrix.push(curves.flatMap(curve => {
+      const point = curve.points[i];
+      return point ? [point.x, point.y] : ["", ""];
+    }));
+  }
+  return { curves, matrix };
+}
+
+function downloadDeviceCalOverlayCsv() {
+  const rows = deviceCalOverlayRows();
+  if (!rows.length) {
+    deviceCalOverlayStatus("No overlay history to download.", "warn");
+    return;
+  }
+  const xMode = $("deviceCalOverlayXMode")?.value || "aligned";
+  const target = deviceCalTarget();
+  const objective = deviceCalObjective();
+  const selected = deviceCalSelectedOverlayRows(rows);
+  const { curves, matrix } = deviceCalOverlayPairRows(rows, xMode);
+  const paramRows = [
+    ["section", "key", "value", "unit", "note"],
+    ["export", "kind", "device_cal_convergence_overlay", "", "XY-pair matrix for Origin"],
+    ["export", "created_at", new Date().toISOString(), "", ""],
+    ["export", "web_version", WEB_VERSION, "", ""],
+    ["overlay", "x_mode", xMode, "", "aligned means x - fitted mu"],
+    ["overlay", "stage_mode", $("deviceCalOverlayStageMode")?.value || "all", "", ""],
+    ["overlay", "curves", curves.length, "curves", ""],
+    ["target", "objective", objective, "", ""],
+    ["target", "A", target.A, "", ""],
+    ["target", "mu", target.mu, "V", "used only for A/mu objective or raw target overlay"],
+    ["target", "sigma", target.sigma, "V", ""],
+    ["sweep_ui", "D1_start", uiValue("sweepD1Start"), "mV", ""],
+    ["sweep_ui", "D1_stop", uiValue("sweepD1Stop"), "mV", ""],
+    ["sweep_ui", "D1_step", uiValue("sweepD1Step"), "mV", ""],
+    ["sweep_ui", "D2_start", uiValue("sweepD2Start"), "mV", ""],
+    ["sweep_ui", "D2_stop", uiValue("sweepD2Stop"), "mV", ""],
+    ["sweep_ui", "D2_step", uiValue("sweepD2Step"), "mV", ""],
+    [],
+  ];
+  const fitRows = [["fit_params"], ["time", "iter", "device", "dac", "adc", "objective", "A", "mu_V", "sigma_V", "baseline", "r2", "rmse", "err_A", "err_mu_V", "err_sigma_V", "norm", "converged", "action"]];
+  for (const row of selected) {
+    fitRows.push([
+      row.time, row.iter, row.channel?.device, row.channel?.xDac, `ADC${row.channel?.adcIndex}`,
+      row.objective, row.fit?.A, row.fit?.mu, Math.abs(Number(row.fit?.sigma)), row.fit?.baseline, row.fit?.r2, row.fit?.rmse,
+      row.error?.aError, row.error?.muError, row.error?.sigmaError, row.error?.norm, row.converged ? "yes" : "no", row.action,
+    ]);
+  }
+  const csvRows = [...paramRows, ...fitRows, [], ["overlay_xy_pairs"], ...matrix];
+  download(`pcb_gaussian_device_cal_overlay_${Date.now()}.csv`, csvFromRows(csvRows), "text/csv;charset=utf-8");
+  deviceCalOverlayStatus(`Downloaded ${curves.length} overlay curve(s).`, "ok");
+}
 function setDeviceCalControlsRunning(running) {
   state.deviceCalRunning = running;
   ["deviceCalBatch", "deviceCalLoadBatchButton", "deviceCalSweepFitButton", "deviceCalAutoButton", "deviceCalLutStartButton", "deviceCalLutClearButton", "deviceCalLutDownloadButton"].forEach(id => {
@@ -4231,6 +4579,7 @@ function setDeviceCalControlsRunning(running) {
   const stop = $("deviceCalStopButton");
   if (stop) stop.disabled = !running;
   updateDeviceCalLutButtons();
+  updateDeviceCalOverlayButtons();
 }
 
 async function deviceCalSweepAndFitOnce() {
@@ -4266,19 +4615,25 @@ async function autoFitDeviceCalBatch() {
   state.deviceCalStopRequested = false;
   const maxIter = deviceCalNumber("deviceCalMaxIter", 20, { min: 1, max: 100, integer: true });
   const settleMs = deviceCalNumber("deviceCalSettleMs", 1000, { min: 0, max: 30000, integer: true });
+  const objective = deviceCalObjective();
+  const perDeviceIter = $("deviceCalPerDeviceIter")?.checked !== false;
+  let activeDevices = new Set(deviceCalChannels().map(channel => channel.device));
   try {
     for (let iter = 1; iter <= maxIter; iter++) {
       if (state.deviceCalStopRequested) break;
       prepareDeviceCalSweepSelection();
-      deviceCalStatus(`Device calibration ${iter}/${maxIter}: sweeping D1/D2 with ADC0-7.`, "warn");
+      deviceCalStatus(`Device calibration ${iter}/${maxIter}: sweeping D1/D2 with ADC0-7, active ${activeDevices.size}/${ADC_TIA_COUNT}, objective ${objective}.`, "warn");
       await startSweep();
       if (state.deviceCalStopRequested) break;
-      const results = fitDeviceCalBatch(iter);
+      const results = fitDeviceCalBatch(iter, perDeviceIter ? { objective, activeDevices } : { objective });
+      for (const result of results) {
+        if (result.converged) activeDevices.delete(result.channel.device);
+      }
       const okCount = results.filter(result => result.converged).length;
       const validPlans = results
-        .filter(result => !result.converged && result.plan && planHasCodeChange(result.plan))
+        .filter(result => (!perDeviceIter || activeDevices.has(result.channel.device)) && !result.converged && result.plan && planHasCodeChange(result.plan))
         .map(result => result.plan);
-      if (okCount === results.length) {
+      if (okCount === results.length || (perDeviceIter && activeDevices.size === 0)) {
         deviceCalStatus(`Device calibration converged at ${iter}/${maxIter}: ${okCount}/${results.length} devices within tolerance.`, "ok");
         return;
       }
@@ -4292,7 +4647,7 @@ async function autoFitDeviceCalBatch() {
       }
       renderDeviceTable();
       loadDeviceState();
-      deviceCalStatus(`Device calibration ${iter}/${maxIter}: programmed ${validPlans.length} device(s), ${okCount}/${results.length} within tolerance.`, "warn");
+      deviceCalStatus(`Device calibration ${iter}/${maxIter}: programmed ${validPlans.length} device(s), ${okCount}/${results.length} within tolerance, active ${activeDevices.size}.`, "warn");
       if (settleMs > 0 && !state.deviceCalStopRequested) await sleep(settleMs);
     }
     if (state.deviceCalStopRequested) {
@@ -4321,7 +4676,7 @@ function downloadDeviceCalCsv() {
     return;
   }
   const fields = [
-    "time", "iter", "channel", "dac", "adc", "device", "action",
+    "time", "iter", "channel", "dac", "adc", "device", "objective", "active", "action",
     "target_A", "target_mu", "target_sigma",
     "fit_A", "fit_mu", "fit_sigma", "baseline", "r2", "rmse",
     "error_A", "error_mu", "error_sigma", "norm", "converged",
@@ -4341,6 +4696,8 @@ function downloadDeviceCalCsv() {
       dac: channel.xDac,
       adc: `ADC${channel.adcIndex}`,
       device: channel.device,
+      objective: row.objective,
+      active: row.active === false ? "no" : "yes",
       action: row.action,
       target_A: row.target?.A,
       target_mu: row.target?.mu,
@@ -4900,6 +5257,10 @@ function bindEvents() {
   $("deviceCalAutoButton")?.addEventListener("click", autoFitDeviceCalBatch);
   $("deviceCalStopButton")?.addEventListener("click", stopDeviceCal);
   $("deviceCalDownloadButton")?.addEventListener("click", downloadDeviceCalCsv);
+  $("deviceCalOverlayRenderButton")?.addEventListener("click", drawDeviceCalOverlay);
+  $("deviceCalOverlayClearButton")?.addEventListener("click", clearDeviceCalOverlayHistory);
+  $("deviceCalOverlayDownloadButton")?.addEventListener("click", downloadDeviceCalOverlayCsv);
+  ["deviceCalOverlayXMode", "deviceCalOverlayStageMode", "deviceCalOverlayTarget", "deviceCalOverlayAlpha"].forEach(id => $(id)?.addEventListener("input", drawDeviceCalOverlay));
   $("deviceCalLutStartButton")?.addEventListener("click", measureDeviceCalLut);
   $("deviceCalLutClearButton")?.addEventListener("click", clearDeviceCalLut);
   $("deviceCalLutDownloadButton")?.addEventListener("click", downloadDeviceCalLutCsv);
@@ -4949,6 +5310,8 @@ function init() {
   renderPlotAdcFilters();
   renderFitAdcOptions();
   renderDeviceCalCards();
+  drawDeviceCalOverlayEmpty();
+  updateDeviceCalOverlayButtons();
   loadDeviceCalLutRows();
   renderGaussianFit(null);
   setAutoFitControlsDisabled(false);

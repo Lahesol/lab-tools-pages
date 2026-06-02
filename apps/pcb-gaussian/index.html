@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=e58a1782994c" />
+    <link rel="stylesheet" href="./styles.css?v=c9f00657ebc7" />
   </head>
   <body>
     <header class="app-header">
@@ -635,16 +635,19 @@
             <label class="inline-field">Target mu <input id="deviceCalTargetMu" type="number" value="0" step="0.05" /></label>
             <label class="inline-field">Target sigma <input id="deviceCalTargetSigma" type="number" value="4" min="0" step="0.05" /></label>
             <label class="inline-field">Y <select id="deviceCalYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
+            <label class="inline-field">Objective <select id="deviceCalObjective"><option value="shape" selected>Shape A/sigma</option><option value="a_mu">A/mu</option></select></label>
             <label class="inline-field">Max iter <input id="deviceCalMaxIter" type="number" value="20" min="1" max="100" step="1" /></label>
             <label class="inline-field">Learn rate <input id="deviceCalLearningRate" type="number" value="0.5" min="0.01" max="2" step="0.05" /></label>
             <label class="inline-field">mu tol <input id="deviceCalMuTol" type="number" value="0.05" min="0" step="0.01" /></label>
             <label class="inline-field">A tol <input id="deviceCalATol" type="number" value="0.002" min="0" step="0.0005" /></label>
+            <label class="inline-field">sigma tol <input id="deviceCalSigmaTol" type="number" value="0.35" min="0" step="0.05" /></label>
             <label class="inline-field">Settle ms <input id="deviceCalSettleMs" type="number" value="1000" min="0" max="30000" step="100" /></label>
             <label class="inline-field">mu gain <input id="deviceCalMuGain" type="number" value="1" step="0.1" /></label>
             <label class="inline-field">Vstart gain <input id="deviceCalVstartGain" type="number" value="1" step="0.1" /></label>
             <label class="inline-field">mu->-Vstart <input id="deviceCalMuVstartGain" type="number" value="1" step="0.1" /></label>
             <label class="inline-field">Control <select id="deviceCalControlMode"><option value="adaptive" selected>Adaptive LM</option><option value="manual">Manual dir</option></select></label>
             <label class="inline-field">J damping <input id="deviceCalJacobianDamping" type="number" value="0.05" min="0.001" max="10" step="0.01" /></label>
+            <label class="checkbox inline-check"><input id="deviceCalPerDeviceIter" type="checkbox" checked /> Per-device iter</label>
             <button id="deviceCalLoadBatchButton">Load batch map</button>
             <button id="deviceCalSweepFitButton">Sweep + fit once</button>
             <button id="deviceCalAutoButton" class="primary">Auto fit 8 devices</button>
@@ -652,6 +655,26 @@
             <button id="deviceCalDownloadButton" disabled>Download CSV</button>
           </div>
           <div id="deviceCalGrid" class="device-cal-grid"></div>
+        </article>
+        <article class="panel plot-panel device-cal-overlay-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">convergence overlay</p>
+              <h2>16-device fitting trajectory</h2>
+            </div>
+            <p class="hint" id="deviceCalOverlayStatus">Overlay idle.</p>
+          </div>
+          <div class="button-row tune-row device-cal-controls">
+            <label class="inline-field">X <select id="deviceCalOverlayXMode"><option value="aligned" selected>x - fitted mu</option><option value="raw">Gate voltage</option></select></label>
+            <label class="inline-field">Stages <select id="deviceCalOverlayStageMode"><option value="all" selected>All iterations</option><option value="initial_final">Initial + latest</option><option value="latest">Latest only</option></select></label>
+            <label class="inline-field">Opacity <input id="deviceCalOverlayAlpha" type="number" value="0.28" min="0.05" max="1" step="0.05" /></label>
+            <label class="checkbox inline-check"><input id="deviceCalOverlayTarget" type="checkbox" checked /> Target</label>
+            <button id="deviceCalOverlayRenderButton">Render overlay</button>
+            <button id="deviceCalOverlayClearButton">Clear overlay history</button>
+            <button id="deviceCalOverlayDownloadButton" disabled>Download overlay CSV</button>
+          </div>
+          <canvas id="deviceCalOverlayCanvas" height="360"></canvas>
+          <div id="deviceCalOverlayLegend" class="plot-legend"></div>
         </article>
         <article class="panel">
           <div class="panel-title">
@@ -781,12 +804,12 @@
 
     </main>
 
-    <script src="./app.js?v=b86dc592d393"></script>
-    <script src="./serial_watchdog.js?v=20260531-device-cal-lut"></script>
-    <script src="./gate_probe_step.js?v=20260531-device-cal-lut"></script>
-    <script src="./fit_control.js?v=20260531-device-cal-lut"></script>
-    <script src="./device_tune.js?v=20260531-device-cal-lut"></script>
-    <script src="./device_time.js?v=20260531-device-cal-lut"></script>
-    <script src="./dfu.js?v=20260531-device-cal-lut"></script>
+    <script src="./app.js?v=ca432c807bae"></script>
+    <script src="./serial_watchdog.js?v=20260602-device-cal-overlay"></script>
+    <script src="./gate_probe_step.js?v=20260602-device-cal-overlay"></script>
+    <script src="./fit_control.js?v=20260602-device-cal-overlay"></script>
+    <script src="./device_tune.js?v=20260602-device-cal-overlay"></script>
+    <script src="./device_time.js?v=20260602-device-cal-overlay"></script>
+    <script src="./dfu.js?v=20260602-device-cal-overlay"></script>
   </body>
 </html>

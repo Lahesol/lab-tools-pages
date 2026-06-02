@@ -140,6 +140,7 @@ h2 {
 }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+.tab-panel > .panel + .panel { margin-top: 16px; }
 
 button, select, input {
   font: inherit;
