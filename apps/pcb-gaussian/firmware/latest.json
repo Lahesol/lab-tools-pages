@@ -1,12 +1,12 @@
 ﻿{
     "schema":  1,
     "name":  "PCB Gaussian latest UART DFU",
-    "version":  "2026-06-10-adc-1v2",
+    "version":  "2026-06-10-adc-1v2-dac165",
     "protocol":  "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1",
-    "appVersion":  2,
+    "appVersion":  3,
     "package":  "pcb_gaussian_latest_dfu.zip",
     "size":  22463,
-    "sha256":  "c06125056f3f002281771e18ef40b9992fba80079be1911be996e1ce3405e7c6",
+    "sha256":  "801641ed9b7a49861126ff6bebcbc7467920f99ab170f5ad759c688c57429dcf",
     "generatedAt":  "2026-06-10",
     "source":  "pca10040/s132/ses/Output/Release/Exe/Neuro_MS2.hex"
 }

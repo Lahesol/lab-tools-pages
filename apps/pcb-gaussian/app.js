@@ -5,8 +5,8 @@ const TIA_RESISTANCE_OHM = 1_000_000.0;
 const SAADC_INPUT_RANGE_V = 1.2;
 const SAADC_FULL_SCALE_RAW = 16383;
 const DAC_MAX_CODE = 4095;
-const DAC_OUTPUT_MIN_MV = -15000;
-const DAC_OUTPUT_MAX_MV = 15000;
+const DAC_OUTPUT_MIN_MV = -16500;
+const DAC_OUTPUT_MAX_MV = 16500;
 const POT_MAX_CODE = 255;
 const ADC_TIA_COUNT = 8;
 const MAX_DEVICES_PER_TIA = 4;
@@ -22,8 +22,8 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-06-10-inverted-tia-1v03-adc1v2";
-const EXPECTED_FIRMWARE_VERSION = "2026-06-10-adc-1v2";
+const WEB_VERSION = "2026-06-10-inverted-tia-1v03-adc1v2-calv3-dac165";
+const EXPECTED_FIRMWARE_VERSION = "2026-06-10-adc-1v2-dac165";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1";
 const APP_VERSION = WEB_VERSION;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
@@ -41,9 +41,10 @@ const TIA_DEVICE_MAP = [
   [],               // TIA7: unused in 4-TIA GMM wiring
 ];
 const DAC_CAL_STORAGE_KEY = "pcbGaussian.dacCalibration.v1";
-const DAC_CAL_VOLTAGES = [-15, -10, -5, 0, 5, 10, 15];
+const DAC_CAL_VOLTAGES = [-16.5, -15, -10, -5, 0, 5, 10, 15, 16.5];
 const DEFAULT_DAC_CAL = {
   D1: [
+    { voltage: -16.5, code: 0 },
     { voltage: -15, code: 187 },
     { voltage: -10, code: 782 },
     { voltage: -5, code: 1378 },
@@ -51,8 +52,10 @@ const DEFAULT_DAC_CAL = {
     { voltage: 5, code: 2564 },
     { voltage: 10, code: 3156 },
     { voltage: 15, code: 3750 },
+    { voltage: 16.5, code: 4095 },
   ],
   D2: [
+    { voltage: -16.5, code: 0 },
     { voltage: -15, code: 177 },
     { voltage: -10, code: 770 },
     { voltage: -5, code: 1365 },
@@ -60,6 +63,7 @@ const DEFAULT_DAC_CAL = {
     { voltage: 5, code: 2551 },
     { voltage: 10, code: 3144 },
     { voltage: 15, code: 3740 },
+    { voltage: 16.5, code: 4095 },
   ],
 };
 const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.inverted.v2";
@@ -94,14 +98,14 @@ const PLOT_CONFIGS = {
 };
 const A_CAL_POINTS = [
   { code: 0, voltage: 0.0420 },
-  { code: 30, voltage: 2.0230 },
-  { code: 60, voltage: 3.9870 },
-  { code: 90, voltage: 5.9400 },
-  { code: 120, voltage: 7.8900 },
-  { code: 150, voltage: 9.8500 },
-  { code: 180, voltage: 11.8300 },
-  { code: 210, voltage: 13.8200 },
-  { code: 255, voltage: 16.8700 },
+  { code: 30, voltage: 1.5466 },
+  { code: 60, voltage: 3.0512 },
+  { code: 90, voltage: 4.5557 },
+  { code: 120, voltage: 6.0603 },
+  { code: 150, voltage: 7.5649 },
+  { code: 180, voltage: 9.0695 },
+  { code: 210, voltage: 10.5741 },
+  { code: 255, voltage: 12.8309 },
 ];
 const MU_CAL_POINTS = [
   { code: 0, voltage: 0.0160 },
@@ -5375,8 +5379,8 @@ function deviceTargetOptions() {
     fitStages: deviceTargetNumber("deviceTargetFitStages", 1, { min: 0, max: 20, integer: true }),
     threshold: deviceTargetNumber("deviceTargetThreshold", 0.95, { min: 0, max: 1 }),
     metric: $("deviceTargetMetric")?.value === "min_similarity" ? "min_similarity" : "mean_similarity",
-    startMv: deviceTargetNumber("deviceTargetStartMv", -14800, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
-    stopMv: deviceTargetNumber("deviceTargetStopMv", 14800, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
+    startMv: deviceTargetNumber("deviceTargetStartMv", DAC_OUTPUT_MIN_MV, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
+    stopMv: deviceTargetNumber("deviceTargetStopMv", DAC_OUTPUT_MAX_MV, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
     stepMv: deviceTargetNumber("deviceTargetStepMv", 300, { min: 1, max: 30000, integer: true }),
     avg: deviceTargetNumber("deviceTargetAvg", 256, { min: 1, max: 256, integer: true }),
     settleUs: deviceTargetNumber("deviceTargetSettleUs", 30000, { min: 0, max: 65000, integer: true }),

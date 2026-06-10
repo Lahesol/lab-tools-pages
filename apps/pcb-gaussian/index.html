@@ -32,7 +32,7 @@
       <section class="panel overview">
         <div class="metric">
           <span>DAC range</span>
-          <strong>-15 to 15 V</strong>
+          <strong>-16.5 to 16.5 V</strong>
         </div>
         <div class="metric">
           <span>DAC model</span>
@@ -135,15 +135,15 @@
               <input id="sweepD1Enable" type="checkbox" checked />
               <strong>D1</strong>
               <select id="sweepD1Mode"><option>Vhigh mV</option></select>
-              <input id="sweepD1Start" type="number" value="-14800" min="-15000" max="15000" />
-              <input id="sweepD1Stop" type="number" value="14800" min="-15000" max="15000" />
+              <input id="sweepD1Start" type="number" value="-16500" min="-16500" max="16500" />
+              <input id="sweepD1Stop" type="number" value="16500" min="-16500" max="16500" />
               <input id="sweepD1Step" type="number" value="500" />
 
               <input id="sweepD2Enable" type="checkbox" />
               <strong>D2</strong>
               <select id="sweepD2Mode"><option>Vhigh mV</option></select>
-              <input id="sweepD2Start" type="number" value="-14800" min="-15000" max="15000" />
-              <input id="sweepD2Stop" type="number" value="14800" min="-15000" max="15000" />
+              <input id="sweepD2Start" type="number" value="-16500" min="-16500" max="16500" />
+              <input id="sweepD2Stop" type="number" value="16500" min="-16500" max="16500" />
               <input id="sweepD2Step" type="number" value="500" />
             </div>
             <div class="button-row">
@@ -187,14 +187,14 @@
             <div class="gate-probe">
               <div class="button-row">
                 <label class="inline-field">Gate DAC <select id="gateProbeDac"><option>D2</option><option>D1</option></select></label>
-                <label class="inline-field">Gate mV <input id="gateProbeMvNumber" type="number" value="0" min="-15000" max="15000" step="10" /></label>
+                <label class="inline-field">Gate mV <input id="gateProbeMvNumber" type="number" value="0" min="-16500" max="16500" step="10" /></label>
                 <label class="inline-field">Step code <input id="gateProbeRateMs" type="number" value="50" min="1" max="4095" step="1" /></label>
                 <button id="gateProbeStartButton">Live map</button>
                 <button id="gateProbeSampleButton">Sample once</button>
                 <button id="gateProbeStopButton" disabled>Stop live</button>
                 <button id="gateProbeClearButton">Clear map</button>
               </div>
-              <input id="gateProbeSlider" class="gate-slider" type="range" value="0" min="-15000" max="15000" step="10" />
+              <input id="gateProbeSlider" class="gate-slider" type="range" value="0" min="-16500" max="16500" step="10" />
               <p class="hint" id="gateProbeStatus">Gate map idle</p>
             </div>
           </article>
@@ -545,7 +545,7 @@
             </div>
             <div class="button-row tune-row">
               <label class="inline-field">Gate DAC <select id="deviceTuneDac"><option>D2</option><option>D1</option></select></label>
-              <label class="inline-field">Gate mV <input id="deviceTuneDacMvNumber" type="number" value="0" min="-15000" max="15000" step="10" /></label>
+              <label class="inline-field">Gate mV <input id="deviceTuneDacMvNumber" type="number" value="0" min="-16500" max="16500" step="10" /></label>
               <label class="inline-field">Vmu V <input id="deviceTuneMuNumber" type="number" value="0" step="0.01" /></label>
               <label class="inline-field">Vstart V <input id="deviceTuneVstartNumber" type="number" value="0" step="0.01" /></label>
               <label class="inline-field">Rate ms <input id="deviceTuneRateMs" type="number" value="100" min="20" max="2000" step="10" /></label>
@@ -556,7 +556,7 @@
               <button id="deviceTuneClearButton">Clear map</button>
             </div>
             <label class="tune-slider-label">Gate DAC output
-              <input id="deviceTuneDacSlider" class="gate-slider" type="range" min="-15000" max="15000" step="10" value="0" />
+              <input id="deviceTuneDacSlider" class="gate-slider" type="range" min="-16500" max="16500" step="10" value="0" />
             </label>
             <label class="tune-slider-label">Vmu
               <input id="deviceTuneMuSlider" class="gate-slider" type="range" min="0" max="6" step="0.01" value="0" />
@@ -602,7 +602,7 @@
           <div class="button-row tune-row time-bias-row">
             <label class="inline-field">Device <input id="deviceTimeDevice" type="number" min="1" max="16" value="1" /></label>
             <label class="inline-field">Gate DAC <select id="deviceTimeDac"><option>D2</option><option>D1</option></select></label>
-            <label class="inline-field">Gate mV <input id="deviceTimeDacMvNumber" type="number" value="0" min="-15000" max="15000" step="10" /></label>
+            <label class="inline-field">Gate mV <input id="deviceTimeDacMvNumber" type="number" value="0" min="-16500" max="16500" step="10" /></label>
             <label class="inline-field">Vmu V <input id="deviceTimeMuNumber" type="number" value="0" step="0.01" /></label>
             <label class="inline-field">Vstart V <input id="deviceTimeVstartNumber" type="number" value="0" step="0.01" /></label>
             <button id="deviceTimeApplyBiasButton">Apply bias</button>
@@ -724,8 +724,8 @@
             <label class="inline-field">Fit stages <input id="deviceTargetFitStages" type="number" value="1" min="0" max="20" step="1" /></label>
             <label class="inline-field">Threshold <input id="deviceTargetThreshold" type="number" value="0.95" min="0" max="1" step="0.01" /></label>
             <label class="inline-field">Metric <select id="deviceTargetMetric"><option value="mean_similarity" selected>mean similarity</option><option value="min_similarity">min similarity</option></select></label>
-            <label class="inline-field">Start mV <input id="deviceTargetStartMv" type="number" value="-14800" min="-15000" max="15000" step="100" /></label>
-            <label class="inline-field">Stop mV <input id="deviceTargetStopMv" type="number" value="14800" min="-15000" max="15000" step="100" /></label>
+            <label class="inline-field">Start mV <input id="deviceTargetStartMv" type="number" value="-16500" min="-16500" max="16500" step="100" /></label>
+            <label class="inline-field">Stop mV <input id="deviceTargetStopMv" type="number" value="16500" min="-16500" max="16500" step="100" /></label>
             <label class="inline-field">Step mV <input id="deviceTargetStepMv" type="number" value="300" min="1" step="50" /></label>
             <label class="inline-field">ADC avg <input id="deviceTargetAvg" type="number" value="256" min="1" max="256" step="1" /></label>
             <label class="inline-field">Settle us <input id="deviceTargetSettleUs" type="number" value="30000" min="0" max="65000" step="1000" /></label>
@@ -905,7 +905,7 @@
 
     </main>
 
-    <script src="./app.js?v=efcbf28fd833"></script>
+  <script src="./app.js?v=e510102d6e5b"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>
     <script src="./gate_probe_step.js?v=20260602-curve-ml"></script>
     <script src="./fit_control.js?v=20260602-curve-ml"></script>

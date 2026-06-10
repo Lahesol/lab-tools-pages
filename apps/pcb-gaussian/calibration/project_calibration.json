@@ -1,41 +1,45 @@
 ﻿{
   "schema": "pcb-gaussian-calibration-v1",
-  "note": "Positive Vstart/Vmu calibration defaults for the inverted-amplifier MAX5488 path. Browser-local calibrated values are stored separately in localStorage by origin.",
+  "note": "Positive Vstart/Vmu calibration defaults for the inverted-amplifier MAX5488 path. DAC sweep endpoints use the full AD5322 code range: -16.5 V -> code 0 and +16.5 V -> code 4095. Vstart/A was refreshed from the 2026-06-10 local calibration anchor: code 19 -> 0.9949 V. Browser-local calibrated values are stored separately in localStorage by origin.",
   "localStorageKeys": {
     "dac": "pcbGaussian.dacCalibration.v1",
     "parameters": "pcbGaussian.parameterCalibration.inverted.v2"
   },
   "dacCal": {
     "D1": [
+      { "voltage": -16.5, "code": 0 },
       { "voltage": -15, "code": 187 },
       { "voltage": -10, "code": 782 },
       { "voltage": -5, "code": 1378 },
       { "voltage": 0, "code": 1972 },
       { "voltage": 5, "code": 2564 },
       { "voltage": 10, "code": 3156 },
-      { "voltage": 15, "code": 3750 }
+      { "voltage": 15, "code": 3750 },
+      { "voltage": 16.5, "code": 4095 }
     ],
     "D2": [
+      { "voltage": -16.5, "code": 0 },
       { "voltage": -15, "code": 177 },
       { "voltage": -10, "code": 770 },
       { "voltage": -5, "code": 1365 },
       { "voltage": 0, "code": 1958 },
       { "voltage": 5, "code": 2551 },
       { "voltage": 10, "code": 3144 },
-      { "voltage": 15, "code": 3740 }
+      { "voltage": 15, "code": 3740 },
+      { "voltage": 16.5, "code": 4095 }
     ]
   },
   "paramCal": {
     "A": [
       { "code": 0, "voltage": 0.0420 },
-      { "code": 30, "voltage": 2.0230 },
-      { "code": 60, "voltage": 3.9870 },
-      { "code": 90, "voltage": 5.9400 },
-      { "code": 120, "voltage": 7.8900 },
-      { "code": 150, "voltage": 9.8500 },
-      { "code": 180, "voltage": 11.8300 },
-      { "code": 210, "voltage": 13.8200 },
-      { "code": 255, "voltage": 16.8700 }
+      { "code": 30, "voltage": 1.5466 },
+      { "code": 60, "voltage": 3.0512 },
+      { "code": 90, "voltage": 4.5557 },
+      { "code": 120, "voltage": 6.0603 },
+      { "code": 150, "voltage": 7.5649 },
+      { "code": 180, "voltage": 9.0695 },
+      { "code": 210, "voltage": 10.5741 },
+      { "code": 255, "voltage": 12.8309 }
     ],
     "mu": [
       { "code": 0, "voltage": 0.0160 },
