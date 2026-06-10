@@ -715,7 +715,10 @@ Ready for browser UART DFU upload.`
       timeoutMs: 2000,
       replyMatcher: text => text.toUpperCase().startsWith("DFU,ENTERING"),
     });
-    if (reply) setDfuStatus("Board is resetting into UART DFU bootloader.", "ok");
+    if (reply) {
+      setDfuStatus("Board is resetting into UART DFU bootloader.", "ok");
+      if (typeof setDfuBootloaderMode === "function") setDfuBootloaderMode(true, "warn");
+    }
     else setDfuStatus("DFU command sent; waiting for bootloader.", "warn");
     await dfuSleep(300);
     if (state.connected) await disconnectSerial().catch(() => {});
@@ -956,6 +959,7 @@ ${finalExecuteTimedOut ? "Reconnect Web Serial and run VER? to verify the update
       } else {
         setDfuStatus("Browser DFU upload complete. Reconnect to the app.", "ok");
       }
+      if (typeof setDfuBootloaderMode === "function") setDfuBootloaderMode(false);
       return true;
     } finally {
       if (client) await client.close().catch(() => {});

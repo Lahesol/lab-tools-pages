@@ -627,6 +627,34 @@ tr:hover td { background: #fbf5ed; }
   min-height: 44px;
   padding: 12px;
 }
+.all-device-test-table-wrap {
+  margin-top: 10px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfdfc;
+}
+.all-device-test-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+.all-device-test-table th,
+.all-device-test-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.all-device-test-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--primary);
+  background: #eef5f3;
+}
 
 .fit-grid {
   display: grid;

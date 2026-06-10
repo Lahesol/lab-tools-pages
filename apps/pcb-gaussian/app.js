@@ -408,12 +408,16 @@ const state = {
   deviceCalStopRequested: false,
   deviceCalResults: [],
   deviceCalHistory: [],
+  allDeviceTestRunning: false,
+  allDeviceTestStopRequested: false,
+  allDeviceTestRows: [],
   deviceDetectRunning: false,
   deviceDetectStopRequested: false,
   deviceDetectRows: [],
   firmwareVersion: null,
   firmwareProtocol: null,
   firmwareName: null,
+  dfuBootloaderMode: false,
   versionWarningKey: "",
   plotAdcSelection: {
     D1: PLOT_CONFIGS.D1.defaultAdcs.slice(),
@@ -432,6 +436,7 @@ function logLine(text, direction = "") {
 
 function setConnected(connected) {
   state.connected = connected;
+  if (connected) state.dfuBootloaderMode = false;
   $("statusDot").classList.toggle("connected", connected);
   $("connectionState").textContent = connected ? "Connected" : "Disconnected";
   $("connectButton").disabled = connected;
@@ -448,10 +453,25 @@ function setConnected(connected) {
 function updateVersionInfo(extraClass = "") {
   const line = $("versionInfo");
   if (!line) return;
-  const fw = state.firmwareVersion ? `FW ${state.firmwareVersion}` : "FW not checked";
-  const proto = state.firmwareProtocol ? ` / ${state.firmwareProtocol}` : "";
+  const fw = state.dfuBootloaderMode
+    ? "DFU bootloader mode (app FW not available)"
+    : state.firmwareVersion
+      ? `FW ${state.firmwareVersion}`
+      : "FW not checked";
+  const proto = !state.dfuBootloaderMode && state.firmwareProtocol ? ` / ${state.firmwareProtocol}` : "";
   line.textContent = `Web ${WEB_VERSION} / ${fw}${proto}`;
   line.className = `version-line ${extraClass}`.trim();
+}
+
+function setDfuBootloaderMode(active, extraClass = active ? "warn" : "") {
+  state.dfuBootloaderMode = !!active;
+  if (active) {
+    state.firmwareVersion = null;
+    state.firmwareProtocol = null;
+    state.firmwareName = null;
+    state.versionWarningKey = "";
+  }
+  updateVersionInfo(extraClass);
 }
 
 function firmwareSupportsPairProgram() {
@@ -3717,9 +3737,27 @@ async function programGaussianAdjust() {
 }
 
 function parseDeviceList(text) {
-  return String(text || "").split(/[\s,;]+/)
-    .map(value => clamp(Math.round(Number(value) || 0), 1, 16))
-    .filter((value, idx, arr) => value >= 1 && value <= 16 && arr.indexOf(value) === idx);
+  const out = [];
+  const pushDevice = value => {
+    const device = Math.round(Number(value));
+    if (Number.isFinite(device) && device >= 1 && device <= 16 && !out.includes(device)) out.push(device);
+  };
+  for (const token of String(text || "").split(/[\s,;]+/).map(item => item.trim()).filter(Boolean)) {
+    if (/^all$/i.test(token)) {
+      for (let device = 1; device <= 16; device++) pushDevice(device);
+      continue;
+    }
+    const range = token.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (range) {
+      const start = Math.round(Number(range[1]));
+      const stop = Math.round(Number(range[2]));
+      const step = start <= stop ? 1 : -1;
+      for (let device = start; step > 0 ? device <= stop : device >= stop; device += step) pushDevice(device);
+      continue;
+    }
+    pushDevice(token);
+  }
+  return out;
 }
 
 function parseGmmTargetRows(text) {
@@ -5227,9 +5265,349 @@ function downloadDeviceCalOverlayCsv() {
   download(`pcb_gaussian_device_cal_overlay_${Date.now()}.csv`, csvFromRows(csvRows), "text/csv;charset=utf-8");
   deviceCalOverlayStatus(`Downloaded ${curves.length} overlay curve(s).`, "ok");
 }
+function allDeviceTestStatus(text, kind = "") {
+  const status = $("allDeviceTestStatus");
+  if (!status) return;
+  status.textContent = text;
+  status.className = `hint status-line ${kind}`.trim();
+}
+
+function allDeviceTestNumber(id, fallback, options = {}) {
+  const input = $(id);
+  let value = Number(input?.value);
+  if (!Number.isFinite(value)) value = fallback;
+  if (options.integer) value = Math.round(value);
+  if (Number.isFinite(options.min)) value = Math.max(options.min, value);
+  if (Number.isFinite(options.max)) value = Math.min(options.max, value);
+  if (input) input.value = options.integer ? Math.round(value) : value;
+  return value;
+}
+
+function allDeviceTestOptions() {
+  const devices = parseDeviceList($("allDeviceTestDevices")?.value || "1-16");
+  if (!devices.length) throw new Error("Select at least one device for all-device test.");
+  const suspects = new Set(parseDeviceList($("allDeviceTestSuspects")?.value || ""));
+  return {
+    devices,
+    suspects,
+    muCode: allDeviceTestNumber("allDeviceTestMuCode", 0, { min: 0, max: POT_MAX_CODE, integer: true }),
+    vstartCode: allDeviceTestNumber("allDeviceTestVstartCode", 120, { min: 0, max: POT_MAX_CODE, integer: true }),
+    offMuCode: allDeviceTestNumber("allDeviceTestOffMuCode", 0, { min: 0, max: POT_MAX_CODE, integer: true }),
+    offVstartCode: allDeviceTestNumber("allDeviceTestOffVstartCode", 19, { min: 0, max: POT_MAX_CODE, integer: true }),
+    startMv: allDeviceTestNumber("allDeviceTestStartMv", -16500, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
+    stopMv: allDeviceTestNumber("allDeviceTestStopMv", 16500, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
+    stepMv: allDeviceTestNumber("allDeviceTestStepMv", 300, { min: 1, max: 30000, integer: true }),
+    avg: allDeviceTestNumber("allDeviceTestAvg", 256, { min: 1, max: 256, integer: true }),
+    settleUs: allDeviceTestNumber("allDeviceTestSettleUs", 30000, { min: 0, max: 65000, integer: true }),
+    preBiasMs: allDeviceTestNumber("allDeviceTestPreBiasMs", 2000, { min: 0, max: 30000, integer: true }),
+    programSettleMs: allDeviceTestNumber("allDeviceTestProgramSettleMs", 500, { min: 0, max: 30000, integer: true }),
+    yMode: $("allDeviceTestYMode")?.value || "current",
+    reverse: $("allDeviceTestReverse")?.checked !== false,
+  };
+}
+
+function setAllDeviceTestControlsRunning(running) {
+  state.allDeviceTestRunning = running;
+  [
+    "allDeviceTestDevices", "allDeviceTestSuspects", "allDeviceTestMuCode", "allDeviceTestVstartCode",
+    "allDeviceTestOffMuCode", "allDeviceTestOffVstartCode", "allDeviceTestStartMv", "allDeviceTestStopMv",
+    "allDeviceTestStepMv", "allDeviceTestAvg", "allDeviceTestSettleUs", "allDeviceTestPreBiasMs",
+    "allDeviceTestProgramSettleMs", "allDeviceTestYMode", "allDeviceTestReverse",
+  ].forEach(id => {
+    const element = $(id);
+    if (element) element.disabled = running;
+  });
+  const start = $("allDeviceTestStartButton");
+  const stop = $("allDeviceTestStopButton");
+  const downloadButton = $("allDeviceTestDownloadButton");
+  if (start) start.disabled = running;
+  if (stop) stop.disabled = !running;
+  if (downloadButton) downloadButton.disabled = running || !(state.allDeviceTestRows || []).length;
+}
+
+function allDeviceTestDacForDevice(device) {
+  return Number(device) >= 9 ? "D1" : "D2";
+}
+
+function allDeviceTestSweepUiSnapshot() {
+  const ids = [
+    "sweepD1Enable", "sweepD2Enable", "sweepD1Mode", "sweepD2Mode", "sweepD1Start", "sweepD1Stop", "sweepD1Step",
+    "sweepD2Start", "sweepD2Stop", "sweepD2Step", "sweepDwell", "adcAvgSamples", "sweepSettleUs",
+    "sweepPreBiasMs", "sweepRepeats", "sweepReverse", "plotYMode",
+  ];
+  return {
+    fields: Object.fromEntries(ids.map(id => {
+      const element = $(id);
+      return [id, element?.type === "checkbox" ? !!element.checked : element?.value];
+    })),
+    plotAdcSelection: {
+      D1: (state.plotAdcSelection.D1 || []).slice(),
+      D2: (state.plotAdcSelection.D2 || []).slice(),
+    },
+  };
+}
+
+function restoreAllDeviceTestSweepUi(snapshot) {
+  for (const [id, value] of Object.entries(snapshot?.fields || {})) {
+    const element = $(id);
+    if (!element) continue;
+    if (element.type === "checkbox") element.checked = !!value;
+    else if (value !== undefined) element.value = value;
+  }
+  setPlotAdcSelection("D1", snapshot?.plotAdcSelection?.D1 || []);
+  setPlotAdcSelection("D2", snapshot?.plotAdcSelection?.D2 || []);
+  renderSweepPlot();
+}
+
+async function allDeviceTestQuietAll(opt, { ignoreStop = false } = {}) {
+  for (let device = 1; device <= 16; device++) {
+    if (!ignoreStop && state.allDeviceTestStopRequested) break;
+    await programLogicalDevice(device, opt.offMuCode, opt.offVstartCode);
+  }
+  renderDeviceTable();
+  loadDeviceState();
+}
+
+async function allDeviceTestReturnSafe(opt) {
+  if (!state.writer) return;
+  try {
+    await allDeviceTestQuietAll(opt, { ignoreStop: true });
+  } catch (error) {
+    logLine(`[warn] all-device quiet restore failed: ${error.message}`);
+  }
+  for (const command of ["V1,0", "V2,0"]) {
+    try {
+      await sendCommand(command, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+    } catch (error) {
+      logLine(`[warn] ${command} restore failed: ${error.message}`);
+    }
+  }
+}
+
+function allDeviceTestApplySweepOptions(device, adcIndex, opt) {
+  const targetDac = allDeviceTestDacForDevice(device);
+  for (const dac of ["D1", "D2"]) {
+    const enabled = dac === targetDac;
+    if ($(`sweep${dac}Enable`)) $(`sweep${dac}Enable`).checked = enabled;
+    if ($(`sweep${dac}Mode`)) $(`sweep${dac}Mode`).value = "Vhigh mV";
+    if ($(`sweep${dac}Start`)) $(`sweep${dac}Start`).value = opt.startMv;
+    if ($(`sweep${dac}Stop`)) $(`sweep${dac}Stop`).value = opt.stopMv;
+    if ($(`sweep${dac}Step`)) $(`sweep${dac}Step`).value = opt.stepMv;
+    setPlotAdcSelection(dac, enabled ? [adcIndex] : []);
+  }
+  if ($("sweepDwell")) $("sweepDwell").value = 0;
+  if ($("adcAvgSamples")) $("adcAvgSamples").value = opt.avg;
+  if ($("sweepSettleUs")) $("sweepSettleUs").value = opt.settleUs;
+  if ($("sweepPreBiasMs")) $("sweepPreBiasMs").value = opt.preBiasMs;
+  if ($("sweepRepeats")) $("sweepRepeats").value = 1;
+  if ($("sweepReverse")) $("sweepReverse").checked = opt.reverse;
+  if ($("plotYMode")) $("plotYMode").value = opt.yMode;
+  return targetDac;
+}
+
+function allDeviceTestEdgeMetrics(data, fit) {
+  const count = Math.max(1, Math.min(12, Math.floor((data || []).length * 0.08)));
+  const edge = [...(data || []).slice(0, count), ...(data || []).slice(-count)];
+  const amplitude = Math.max(Math.abs(Number(fit?.A) || 0), 1e-12);
+  const baseline = Number(fit?.baseline) || 0;
+  const edgePeak = edge.reduce((max, item) => Math.max(max, Math.abs(Number(item.y) - baseline)), 0);
+  return { edgeRatio: edgePeak / amplitude, edgeCount: edge.length };
+}
+
+function allDeviceTestStatusForResult(result, suspects) {
+  const tags = [];
+  if (suspects?.has(Number(result.device))) tags.push("user-suspect");
+  if (!result.fit) tags.push("fit-failed");
+  else {
+    if (result.fit.edgeLocked || result.edgeRatio > 0.45) tags.push("edge-high");
+    else if (result.edgeRatio > 0.25) tags.push("edge-mid");
+    if (Number(result.fit.r2) < 0.85) tags.push("low-R2");
+  }
+  return tags.length ? tags.join("+") : "good";
+}
+
+function renderAllDeviceTestSummary() {
+  const host = $("allDeviceTestSummary");
+  if (!host) return;
+  const rows = Array.isArray(state.allDeviceTestRows) ? state.allDeviceTestRows : [];
+  if (!rows.length) {
+    host.innerHTML = "No all-device test rows yet.";
+  } else {
+    host.innerHTML = `<div class="all-device-test-table-wrap"><table class="all-device-test-table"><thead><tr>
+      <th>D</th><th>ADC</th><th>DAC</th><th>status</th><th>A amp</th><th>mu V</th><th>sigma V</th><th>baseline</th><th>R2</th><th>edge/A</th><th>pts</th>
+    </tr></thead><tbody>${rows.map(row => `<tr>
+      <td>D${row.device}</td><td>${Number.isFinite(row.adcIndex) ? `ADC${row.adcIndex}` : "-"}</td><td>${row.xDac || ""}</td><td>${deviceCalHtmlEscape(row.status)}</td>
+      <td>${deviceDetectFormat(row.fit?.A, 6)}</td><td>${deviceDetectFormat(row.fit?.mu, 4)}</td><td>${deviceDetectFormat(row.fit?.sigma, 4)}</td>
+      <td>${deviceDetectFormat(row.fit?.baseline, 6)}</td><td>${deviceDetectFormat(row.fit?.r2, 4)}</td><td>${deviceDetectFormat(row.edgeRatio, 3)}</td><td>${row.dataPoints || 0}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+  }
+  const downloadButton = $("allDeviceTestDownloadButton");
+  if (downloadButton) downloadButton.disabled = state.allDeviceTestRunning || rows.length === 0;
+}
+
+function allDeviceTestFitLatest(device, xDac, adcIndex, yMode) {
+  const data = gaussianFitSeries(xDac, adcIndex, yMode);
+  if (data.length < 6) throw new Error(`D${device} ADC${adcIndex} has only ${data.length} point(s).`);
+  const fit = fitGaussianData(data);
+  const metrics = allDeviceTestEdgeMetrics(data, fit);
+  return { data, fit, ...metrics };
+}
+
+async function startAllDeviceTest() {
+  if (state.allDeviceTestRunning || state.sweepRunning) return;
+  if (!state.connected || !state.writer) {
+    allDeviceTestStatus("Connect UART before all-device test.", "warn");
+    return;
+  }
+  let opt;
+  try {
+    opt = allDeviceTestOptions();
+  } catch (error) {
+    allDeviceTestStatus(error.message, "warn");
+    return;
+  }
+  const snapshot = allDeviceTestSweepUiSnapshot();
+  state.allDeviceTestRows = [];
+  state.allDeviceTestStopRequested = false;
+  setAllDeviceTestControlsRunning(true);
+  renderAllDeviceTestSummary();
+  try {
+    allDeviceTestStatus(`All-device test setup: quieting devices to M${opt.offMuCode}/S${opt.offVstartCode}.`, "warn");
+    await allDeviceTestQuietAll(opt);
+    for (let index = 0; index < opt.devices.length; index++) {
+      const device = opt.devices[index];
+      if (state.allDeviceTestStopRequested) break;
+      const adcIndex = adcIndexFromMappedDevice(device);
+      if (!Number.isFinite(adcIndex)) {
+        state.allDeviceTestRows.push({ time: new Date().toISOString(), device, adcIndex: "", xDac: allDeviceTestDacForDevice(device), status: "no-adc-map", message: "No ADC mapping for device", config: { ...opt } });
+        renderAllDeviceTestSummary();
+        continue;
+      }
+      const xDac = allDeviceTestApplySweepOptions(device, adcIndex, opt);
+      allDeviceTestStatus(`All-device test ${index + 1}/${opt.devices.length}: D${device} on ${xDac}/ADC${adcIndex}, program M${opt.muCode}/S${opt.vstartCode}.`, "warn");
+      await allDeviceTestQuietAll(opt);
+      await programLogicalDevice(device, opt.muCode, opt.vstartCode);
+      renderDeviceTable();
+      loadDeviceState();
+      if (opt.programSettleMs > 0) await sleep(opt.programSettleMs);
+      await startSweep();
+      if (state.allDeviceTestStopRequested) break;
+      const row = {
+        time: new Date().toISOString(),
+        device,
+        adcIndex,
+        xDac,
+        config: { ...opt },
+        sweep: state.lastSweep ? JSON.parse(JSON.stringify(state.lastSweep)) : null,
+      };
+      try {
+        const fitted = allDeviceTestFitLatest(device, xDac, adcIndex, opt.yMode);
+        row.fit = fitted.fit;
+        row.edgeRatio = fitted.edgeRatio;
+        row.edgeCount = fitted.edgeCount;
+        row.dataPoints = fitted.data.length;
+      } catch (error) {
+        row.message = error.message;
+      }
+      row.status = allDeviceTestStatusForResult(row, opt.suspects);
+      state.allDeviceTestRows.push(row);
+      renderAllDeviceTestSummary();
+    }
+    const okCount = state.allDeviceTestRows.filter(row => row.status === "good").length;
+    const flaggedCount = state.allDeviceTestRows.length - okCount;
+    allDeviceTestStatus(state.allDeviceTestStopRequested ? `All-device test stopped: ${state.allDeviceTestRows.length}/${opt.devices.length} row(s).` : `All-device test complete: ${state.allDeviceTestRows.length} row(s), ${okCount} good, ${flaggedCount} flagged.`, state.allDeviceTestStopRequested || flaggedCount ? "warn" : "ok");
+  } catch (error) {
+    allDeviceTestStatus(`All-device test failed: ${error.message}`, "warn");
+  } finally {
+    await allDeviceTestReturnSafe(opt);
+    restoreAllDeviceTestSweepUi(snapshot);
+    setAllDeviceTestControlsRunning(false);
+    renderAllDeviceTestSummary();
+  }
+}
+
+function stopAllDeviceTest() {
+  state.allDeviceTestStopRequested = true;
+  if (state.sweepRunning) stopSweep();
+  allDeviceTestStatus("All-device test stop requested; current sweep may finish first.", "warn");
+}
+
+function allDeviceTestParameterRows() {
+  const first = (state.allDeviceTestRows || [])[0];
+  const opt = first?.config || {};
+  return [
+    ["section", "key", "value", "unit", "note"],
+    ["export", "kind", "all_device_isolated_test", "", "one active MAX5488 device per firmware sweep"],
+    ["export", "created_at", new Date().toISOString(), "", ""],
+    ["export", "web_version", WEB_VERSION, "", ""],
+    ["firmware", "version", state.firmwareVersion || "", "", ""],
+    ["firmware", "protocol", state.firmwareProtocol || "", ""],
+    ["test", "devices", (opt.devices || []).join(","), "", ""],
+    ["test", "Vmu_code", opt.muCode, "code", "MAX5488 logical Vmu"],
+    ["test", "Vstart_code", opt.vstartCode, "code", "MAX5488 logical Vstart"],
+    ["test", "off_Vmu_code", opt.offMuCode, "code", "quiet all devices before each sweep"],
+    ["test", "off_Vstart_code", opt.offVstartCode, "code", "quiet/off bias, default about 1 V"],
+    ["sweep", "start", opt.startMv, "mV", ""],
+    ["sweep", "stop", opt.stopMv, "mV", ""],
+    ["sweep", "step", opt.stepMv, "mV", ""],
+    ["sweep", "adc_avg", opt.avg, "samples", ""],
+    ["sweep", "settle", opt.settleUs, "us", ""],
+    ["sweep", "pre_bias", opt.preBiasMs, "ms", ""],
+    ["sweep", "reverse", opt.reverse ? "yes" : "no", "", ""],
+    ...ADC_LABELS.map((label, idx) => ["adc_map", label, `TIA${idx + 1}`, "", adcSubLabel(idx)]),
+  ];
+}
+
+function allDeviceTestSummaryRows() {
+  return [[
+    "time", "device", "adc", "tia_label", "x_dac", "status", "message", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V",
+    "A_amp", "mu_V", "sigma_V", "baseline", "R2", "RMSE", "edge_ratio", "points", "sweep_id",
+  ], ...(state.allDeviceTestRows || []).map(row => [
+    row.time, row.device, row.adcIndex, Number.isFinite(row.adcIndex) ? adcSubLabel(row.adcIndex) : "", row.xDac, row.status, row.message || "",
+    row.config?.muCode, potCodeToMuVoltage(row.config?.muCode), row.config?.vstartCode, potCodeToVstartVoltage(row.config?.vstartCode),
+    row.fit?.A, row.fit?.mu, row.fit?.sigma, row.fit?.baseline, row.fit?.r2, row.fit?.rmse, row.edgeRatio, row.dataPoints, row.sweep?.id,
+  ])];
+}
+
+function allDeviceTestRuns() {
+  return (state.allDeviceTestRows || [])
+    .filter(row => row.sweep?.points?.length)
+    .map(row => ({
+      sweep: row.sweep,
+      stepIndex: row.device,
+      axisLabel: "all-device-test",
+      device: row.device,
+      deltaV: "",
+      deltaMuV: "",
+      deltaVstartV: "",
+      muStepV: "",
+      vstartStepV: "",
+      muCode: row.config?.muCode,
+      actualMuV: potCodeToMuVoltage(row.config?.muCode),
+      vstartCode: row.config?.vstartCode,
+      actualVstartV: potCodeToVstartVoltage(row.config?.vstartCode),
+    }));
+}
+
+function downloadAllDeviceTestCsv() {
+  const rows = state.allDeviceTestRows || [];
+  if (!rows.length) {
+    allDeviceTestStatus("No all-device test rows to download.", "warn");
+    return;
+  }
+  const runs = allDeviceTestRuns();
+  const sheets = [
+    { name: "parameters", rows: allDeviceTestParameterRows() },
+    { name: "summary", rows: allDeviceTestSummaryRows() },
+    ...matrixSheetsForRuns(runs, "all_device_test"),
+    { name: "tidy_raw", rows: tidyRowsForRuns(runs, true) },
+  ];
+  downloadWorkbook(`pcb_gaussian_all_device_test_${Date.now()}.xls`, sheets);
+  allDeviceTestStatus(`Downloaded all-device test XLS: ${rows.length} device row(s), ${exportPointCountForRuns(runs)} ADC point(s).`, "ok");
+}
 function setDeviceCalControlsRunning(running) {
   state.deviceCalRunning = running;
-  ["deviceCalBatch", "deviceCalLoadBatchButton", "deviceCalSweepFitButton", "deviceCalAutoButton", "deviceCalLutStartButton", "deviceCalLutClearButton", "deviceCalLutDownloadButton", "deviceCalObjective", "deviceCalCurveReference", "deviceCalCurveTol", "deviceTargetRunBrowserButton", "deviceTargetCommandButton", "deviceTargetDownloadSeedButton", "deviceTargetDownloadSummaryButton"].forEach(id => {
+  ["deviceCalBatch", "deviceCalLoadBatchButton", "deviceCalSweepFitButton", "deviceCalAutoButton", "deviceCalLutStartButton", "deviceCalLutClearButton", "deviceCalLutDownloadButton", "deviceCalObjective", "deviceCalCurveReference", "deviceCalCurveTol", "deviceTargetRunBrowserButton", "deviceTargetCommandButton", "deviceTargetDownloadSeedButton", "deviceTargetDownloadSummaryButton", "allDeviceTestStartButton", "allDeviceTestDownloadButton"].forEach(id => {
     const element = $(id);
     if (element) element.disabled = running;
   });
@@ -6365,6 +6743,9 @@ function bindEvents() {
   $("previewGmmButton").addEventListener("click", previewGmm);
   $("programGmmButton").addEventListener("click", programGmm);
   $("downloadFitCsvButton").addEventListener("click", downloadFitCsv);
+  $("allDeviceTestStartButton")?.addEventListener("click", startAllDeviceTest);
+  $("allDeviceTestStopButton")?.addEventListener("click", stopAllDeviceTest);
+  $("allDeviceTestDownloadButton")?.addEventListener("click", downloadAllDeviceTestCsv);
   $("deviceCalBatch")?.addEventListener("change", deviceCalLoadBatchMap);
   $("deviceCalLoadBatchButton")?.addEventListener("click", deviceCalLoadBatchMap);
   $("deviceCalSweepFitButton")?.addEventListener("click", deviceCalSweepAndFitOnce);
