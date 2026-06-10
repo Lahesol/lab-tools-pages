@@ -2,7 +2,7 @@ const REF193_V = 3.0;
 const REF194_V = 4.5;
 const A_GAIN = -6.0;
 const TIA_RESISTANCE_OHM = 1_000_000.0;
-const SAADC_INPUT_RANGE_V = 3.0;
+const SAADC_INPUT_RANGE_V = 1.2;
 const SAADC_FULL_SCALE_RAW = 16383;
 const DAC_MAX_CODE = 4095;
 const DAC_OUTPUT_MIN_MV = -15000;
@@ -22,9 +22,9 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-06-10-inverted-tia-baseline";
-const EXPECTED_FIRMWARE_VERSION = "2026-05-27-uart-dfu";
-const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-v1";
+const WEB_VERSION = "2026-06-10-inverted-tia-1v03-adc1v2";
+const EXPECTED_FIRMWARE_VERSION = "2026-06-10-adc-1v2";
+const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1";
 const APP_VERSION = WEB_VERSION;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
 const FIRMWARE_SWEEP_RE = /^(SWEEP|SX|Y),/i;
@@ -63,9 +63,9 @@ const DEFAULT_DAC_CAL = {
   ],
 };
 const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.inverted.v2";
-const ADC_BASELINE_STORAGE_KEY = "pcbGaussian.adcBaseline.v1";
+const ADC_BASELINE_STORAGE_KEY = "pcbGaussian.adcBaseline.1v03.v2";
 const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
-const DEFAULT_ADC_ZERO_CURRENT_V = 3.0;
+const DEFAULT_ADC_ZERO_CURRENT_V = 1.03;
 const PROGRAM_REPLY_TIMEOUT_MS = 1500;
 const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653"];
 const ADC_LABELS = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `ADC${idx}`);
@@ -2244,7 +2244,7 @@ function resetAdcBaseline() {
   try { localStorage.removeItem(ADC_BASELINE_STORAGE_KEY); } catch {}
   renderAdcBaselineControls();
   refreshCurrentDependentViews();
-  setAdcBaselineStatus("ADC baseline reset to 3.000 V, inverted current mode.", "ok");
+  setAdcBaselineStatus("ADC baseline reset to 1.030 V, inverted current mode.", "ok");
 }
 
 async function captureAdcBaselineFromCurrentRead() {

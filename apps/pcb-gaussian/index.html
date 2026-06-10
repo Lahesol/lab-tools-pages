@@ -779,14 +779,14 @@
               <p class="eyebrow">ADC baseline</p>
               <h2>Zero-current reference</h2>
             </div>
-            <p class="hint" id="adcBaselineStatus">Default zero-current baseline is 3.000 V.</p>
+            <p class="hint" id="adcBaselineStatus">Default zero-current baseline is 1.030 V.</p>
           </div>
           <div class="button-row tune-row">
-            <label class="inline-field">Default zero V <input id="adcBaselineDefault" type="number" value="3.000" min="0" max="3" step="0.001" /></label>
+            <label class="inline-field">Default zero V <input id="adcBaselineDefault" type="number" value="1.030" min="0" max="1.2" step="0.001" /></label>
             <label class="checkbox inline-check"><input id="adcBaselineInvert" type="checkbox" checked /> Invert around baseline</label>
             <button id="adcBaselineApplyButton">Apply default to all</button>
             <button id="adcBaselineCaptureButton" class="primary">Capture ADC as zero</button>
-            <button id="adcBaselineResetButton">Reset 3.000 V</button>
+            <button id="adcBaselineResetButton">Reset 1.030 V</button>
           </div>
           <p class="hint">Use this after setting zero-current/TIA bias. Current mode uses I_uA = (zero V - V_AIN) / Rf by default.</p>
           <div class="table-wrap">
@@ -897,7 +897,7 @@
 
     </main>
 
-    <script src="./app.js?v=d194e496cdb6"></script>
+    <script src="./app.js?v=efcbf28fd833"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>
     <script src="./gate_probe_step.js?v=20260602-curve-ml"></script>
     <script src="./fit_control.js?v=20260602-curve-ml"></script>
