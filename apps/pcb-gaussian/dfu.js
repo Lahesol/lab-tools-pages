@@ -11,7 +11,8 @@
   const DFU_TIMEOUT_HELP = [
     "No Nordic UART DFU bootloader responded.",
     "If the MCU is blank, browser DFU cannot install the first bootloader. Flash the initial UART DFU HEX once with J-Link/nrfjprog first.",
-    "If application firmware is running, use Connect -> Enter bootloader or select the bootloader COM port after reset.",
+    "If application firmware is running, connect to the app first, verify FW in the status bar, then use Enter bootloader. Program latest firmware only auto-enters DFU when the app UART is already connected.",
+    "After DFU, select the bootloader COM port after reset. If the board drops back to the app before port selection, retry immediately after Enter bootloader.",
     "Check UART RX/TX are crossed to nRF pins RX=23/TX=24, GND is shared, baud is 230400, and HW flow control is off.",
   ].join("\n");
 
@@ -360,6 +361,9 @@
     }
     if (/^DFU (?!PING\b).+ response timeout/i.test(message)) {
       return `${message}\n\nThe bootloader responded to the initial probe but stopped during this DFU command. This usually means the selected port reset, the bootloader timed out/restarted, or the browser uploader command sequence differs from nrfutil. Retry once from bootloader mode; if it repeats, use Show command/nrfutil as a control test and report the exact opcode shown here.`;
+    }
+    if (/Unexpected DFU response for 0x0, expected 0x9/i.test(message)) {
+      return `${message}\n\nThe selected serial port is probably not the Nordic UART DFU bootloader. In practice this usually means the app UART is still running, stale app bytes were read, or the board returned to the app before the bootloader port was selected. Connect to the app first, confirm the FW version, click Enter bootloader, then select the bootloader port immediately. If the app replies DFU,ENTERING but Nordic PING still times out, the bootloader on the board is not responding and the initial UART DFU image must be reflashed with J-Link/nrfjprog.`;
     }
     if (/response timeout|No Nordic UART DFU response/i.test(message)) {
       return `${message}\n\n${DFU_TIMEOUT_HELP}`;
