@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=b932c0d6c908" />
+    <link rel="stylesheet" href="./styles.css?v=c2cb73f68dad" />
   </head>
   <body>
     <header class="app-header">
@@ -45,6 +45,14 @@
         <div class="metric">
           <span>TIA Rf</span>
           <strong>8 x 1 Mohm</strong>
+        </div>
+        <div class="metric">
+          <span>ADC input</span>
+          <strong>0-1.2 V</strong>
+        </div>
+        <div class="metric">
+          <span>Zero ref</span>
+          <strong>1.030 V</strong>
         </div>
       </section>
 
@@ -779,7 +787,7 @@
               <p class="eyebrow">ADC baseline</p>
               <h2>Zero-current reference</h2>
             </div>
-            <p class="hint" id="adcBaselineStatus">Default zero-current baseline is 1.030 V.</p>
+            <p class="hint" id="adcBaselineStatus">Default zero-current baseline is 1.030 V; SAADC full-scale is 1.2 V.</p>
           </div>
           <div class="button-row tune-row">
             <label class="inline-field">Default zero V <input id="adcBaselineDefault" type="number" value="1.030" min="0" max="1.2" step="0.001" /></label>
@@ -788,7 +796,7 @@
             <button id="adcBaselineCaptureButton" class="primary">Capture ADC as zero</button>
             <button id="adcBaselineResetButton">Reset 1.030 V</button>
           </div>
-          <p class="hint">Use this after setting zero-current/TIA bias. Current mode uses I_uA = (zero V - V_AIN) / Rf by default.</p>
+          <p class="hint">Use this after setting zero-current/TIA bias. Current mode uses I_uA = (zero V - V_AIN) / Rf by default. Values above 1.2 V clip with the current SAADC gain.</p>
           <div class="table-wrap">
             <table>
               <thead><tr><th>ADC</th><th>Zero-current V_AIN</th><th>Current formula</th></tr></thead>
@@ -866,7 +874,7 @@
               </label>
               <label>
                 App version
-                <input id="dfuAppVersion" type="number" min="1" value="1" />
+                <input id="dfuAppVersion" type="number" min="1" value="2" />
               </label>
               <label>
                 Baud

@@ -45,6 +45,11 @@ powershell -ExecutionPolicy Bypass -File .\trust_https_cert_current_user.ps1
 - The DFU tab can program the bundled latest firmware without file selection.
   The bundled package is described by `firmware/latest.json` and stored as
   `firmware/pcb_gaussian_latest_dfu.zip`.
+- Current firmware/GUI ADC scaling is SAADC 14-bit with internal 0.6 V reference
+  and gain 1/2, so raw ADC values are converted over a 0-1.2 V input range.
+- The default zero-current baseline is 1.030 V and current mode uses
+  `I_uA = (zero V - V_AIN) / Rf * 1e6`. With the current gain, V_AIN above
+  1.2 V clips.
 - Commands match the firmware UART protocol: `D1,<code>`, `D2,<code>`, `A<device>,<code>`, `M<device>,<code>`, `INIT`, `ADC`, `PING`.
 - `ADC` is expected to return 8 values: `ADC,v0,v1,v2,v3,v4,v5,v6,v7`.
 - Calibrated DAC output model:

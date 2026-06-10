@@ -2,8 +2,9 @@
   const APP_START = 0x26000;
   const BOOTLOADER_START = 0x78000;
   const FLASH_END = 0x80000;
-  const DFU_WRITE_CHUNK_SIZE = 64;
-  const DFU_PRN = 0;
+  const DFU_WRITE_CHUNK_SIZE = 32;
+  const DFU_PRN = 8;
+  const DFU_WRITE_DELAY_MS = 2;
   const DFU_BOOT_DELAY_MS = 1400;
   const LATEST_DFU_MANIFEST_URL = "./firmware/latest.json";
   const DFU_FALLBACK_BAUDS = [230400, 115200, 1000000];
@@ -411,6 +412,9 @@ Status: downloading package...`
     pkg.release = release;
     pkg.fileName = packageName;
     lastDfuPackage = pkg;
+    if ($("dfuAppVersion") && Number.isFinite(Number(release.appVersion))) {
+      $("dfuAppVersion").value = String(Math.max(1, Math.round(Number(release.appVersion))));
+    }
     lastDfuAnalysis = {
       type: "zip",
       fileName: packageName,
@@ -507,7 +511,7 @@ Ready for browser UART DFU upload.`
   }
 
   function slipEncode(payload) {
-    const out = [];
+    const out = [SLIP_END];
     for (const byte of payload) {
       if (byte === SLIP_END) out.push(SLIP_ESC, SLIP_ESC_END);
       else if (byte === SLIP_ESC) out.push(SLIP_ESC, SLIP_ESC_ESC);
@@ -668,8 +672,8 @@ Ready for browser UART DFU upload.`
       await this.writeSlip(DFU_OP.OBJECT_WRITE, Array.from(bytes));
     }
 
-    async crcGet() {
-      const rsp = await this.request(DFU_OP.CRC_GET, [], 8000);
+    async crcGet(timeoutMs = 15000) {
+      const rsp = await this.request(DFU_OP.CRC_GET, [], timeoutMs);
       const view = new DataView(rsp.buffer, rsp.byteOffset, rsp.byteLength);
       return {
         offset: readU32(view, 3),
@@ -778,8 +782,12 @@ Ready for browser UART DFU upload.`
   async function writeDfuObject(client, type, bytes, label, expectedBaseOffset, onProgress, options = {}) {
     await client.createObject(type, bytes.length);
     let packetsSinceReceipt = 0;
-    for (let offset = 0; offset < bytes.length; offset += DFU_WRITE_CHUNK_SIZE) {
-      const chunk = bytes.slice(offset, Math.min(bytes.length, offset + DFU_WRITE_CHUNK_SIZE));
+    const chunkSize = Math.max(1, Math.min(
+      Number(options.writeChunkSize) || DFU_WRITE_CHUNK_SIZE,
+      DFU_WRITE_CHUNK_SIZE
+    ));
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.slice(offset, Math.min(bytes.length, offset + chunkSize));
       await client.writeObjectChunk(chunk);
       packetsSinceReceipt += 1;
       const expectedOffset = expectedBaseOffset + offset + chunk.length;
@@ -793,7 +801,7 @@ Ready for browser UART DFU upload.`
         packetsSinceReceipt = 0;
       }
       onProgress?.(expectedOffset);
-      await dfuSleep(1);
+      await dfuSleep(DFU_WRITE_DELAY_MS);
     }
     const crc = await client.crcGet();
     const expectedEnd = expectedBaseOffset + bytes.length;
@@ -822,6 +830,10 @@ Ready for browser UART DFU upload.`
       dfuLog(`MTU query skipped: ${error.message}`);
     }
     await client.setPrn(DFU_PRN);
+    const writeChunkSize = Math.max(1, Math.min(
+      DFU_WRITE_CHUNK_SIZE,
+      Number.isFinite(Number(mtu)) && Number(mtu) > 1 ? Number(mtu) - 1 : DFU_WRITE_CHUNK_SIZE
+    ));
 
     const commandSelect = await client.selectObject(DFU_OBJ.COMMAND);
     dfuLog(`command object max=${commandSelect.maxSize} offset=${commandSelect.offset}`);
@@ -830,7 +842,15 @@ Ready for browser UART DFU upload.`
     }
 
     setDfuStatus(`Uploading init packet (${formatBytes(pkg.dat.length)})...`);
-    const commandCrc = await writeDfuObject(client, DFU_OBJ.COMMAND, pkg.dat, "init packet", 0);
+    const commandCrc = await writeDfuObject(
+      client,
+      DFU_OBJ.COMMAND,
+      pkg.dat,
+      "init packet",
+      0,
+      null,
+      { writeChunkSize }
+    );
     dfuLog(`init packet CRC ${hex32(commandCrc.crc)}`);
 
     const dataSelect = await client.selectObject(DFU_OBJ.DATA);
@@ -838,7 +858,7 @@ Ready for browser UART DFU upload.`
     let sent = 0;
     const total = pkg.bin.length;
     const startTime = performance.now();
-    dfuLog(`data object max=${objectMax} offset=${dataSelect.offset}, mtu=${mtu || "unknown"}`);
+    dfuLog(`data object max=${objectMax} offset=${dataSelect.offset}, mtu=${mtu || "unknown"}, prn=${DFU_PRN}, chunk=${writeChunkSize}`);
     let finalExecuteTimedOut = false;
 
     while (sent < total) {
@@ -853,7 +873,7 @@ Ready for browser UART DFU upload.`
         "application",
         sent,
         offset => setDfuProgress(offset, total),
-        { allowExecuteTimeoutAsSuccess: finalObject }
+        { allowExecuteTimeoutAsSuccess: finalObject, writeChunkSize }
       );
       finalExecuteTimedOut ||= !!dataCrc.likelyReset;
       sent += objectSize;
@@ -868,7 +888,7 @@ Package: ${pkg.fileName}
 Init: ${pkg.datName} (${formatBytes(pkg.dat.length)})
 Application: ${pkg.binName} (${formatBytes(pkg.bin.length)})
 UART rate: ${Math.round(rate)} B/s effective
-Protocol: Nordic secure serial DFU, PRN=${DFU_PRN}, chunk=${DFU_WRITE_CHUNK_SIZE} byte(s)
+Protocol: Nordic secure serial DFU, PRN=${DFU_PRN}, chunk=${writeChunkSize} byte(s)
 
 ${finalExecuteTimedOut ? "Reconnect Web Serial and run VER? to verify the updated application." : "The bootloader should reset into the updated application. Reconnect Web Serial and run VER?."}`
     );
