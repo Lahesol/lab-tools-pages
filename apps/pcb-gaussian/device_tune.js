@@ -44,7 +44,7 @@
   }
 
   function voltageRange(param) {
-    const fallback = param === "mu" ? { min: -6, max: 0 } : { min: -17, max: 0 };
+    const fallback = param === "mu" ? { min: 0, max: 6 } : { min: 0, max: 17 };
     const voltages = getParamCalPoints(param)
       .map(point => Number(point.voltage))
       .filter(Number.isFinite);
@@ -242,7 +242,7 @@
       const raw = values[adcIdx];
       if (!Number.isFinite(raw)) continue;
       const voltage = adcRawToVoltage(raw);
-      const current = adcVoltageToCurrentUa(voltage);
+      const current = adcVoltageToCurrentUa(voltage, adcIdx);
       const tiaIndex = tiaIndexForAdc(adcIdx);
       const tia = state.tiaStates[tiaIndex] || state.tiaStates[adcIdx];
       adcs[`ADC${adcIdx}`] = {
@@ -280,7 +280,7 @@
       const rawValue = adcIndex === null ? null : values[adcIndex];
       const hasRaw = Number.isFinite(rawValue);
       const voltage = hasRaw ? adcRawToVoltage(rawValue) : "";
-      const current = hasRaw ? adcVoltageToCurrentUa(voltage) : "";
+      const current = hasRaw ? adcVoltageToCurrentUa(voltage, adcIndex) : "";
       addMeasurement({
         time: nowTime(),
         dac: context.dac || `DEV${context.device}`,

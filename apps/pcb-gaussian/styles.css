@@ -362,6 +362,25 @@ input:focus, select:focus {
   max-height: 360px;
 }
 .table-wrap.tall { max-height: 430px; }
+.device-detect-wrap { max-height: 420px; }
+.device-detect-wrap table { min-width: 1180px; }
+.device-detect-wrap td:nth-child(7),
+.device-detect-wrap td:nth-child(8) {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+.device-detect-controls .inline-field input {
+  width: 130px;
+}
+.device-detect-ok {
+  color: var(--ok);
+  font-weight: 800;
+}
+.device-detect-warn {
+  color: var(--warn);
+  font-weight: 800;
+}
 .cal-table-wrap { max-height: none; }
 table {
   width: 100%;
@@ -675,6 +694,43 @@ tr:hover td { background: #fbf5ed; }
 .fit-log-table td, .fit-log-table th {
   font-size: 11px;
   padding: 7px 8px;
+}
+.target-search-panel {
+  margin-top: 16px;
+}
+.target-search-panel .inline-field input,
+.target-search-panel .inline-field select {
+  min-width: 120px;
+}
+.target-search-text {
+  min-height: 58px;
+}
+.target-search-output {
+  width: 100%;
+  min-height: 132px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #102027;
+  color: #eef7f5;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: #fbfdfc;
+  color: var(--ink);
+  font-weight: 700;
+}
+.file-button input {
+  max-width: 210px;
 }
 @media (max-width: 980px) {
   .app-header, .connection-card, .grid.two, .overview, .plot-grid, .fit-grid, .compact-fit-grid, .device-cal-grid {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=c9f00657ebc7" />
+    <link rel="stylesheet" href="./styles.css?v=b932c0d6c908" />
   </head>
   <body>
     <header class="app-header">
@@ -159,10 +159,10 @@
               <div class="button-row bracket-row">
                 <label class="inline-field">Device <input id="bracketDevice" type="number" min="1" max="16" value="5" /></label>
                 <label class="inline-field">Axis <select id="bracketAxis"><option value="muCoupled">Horizontal: Vmu/Vstart</option><option value="vstart">Vstart only</option><option value="mu">Vmu only</option></select></label>
-                <label class="inline-field">Vmu start <input id="bracketMuStart" type="number" value="-0.016" step="0.01" /></label>
-                <label class="inline-field">Vstart start <input id="bracketVstartStart" type="number" value="-6.59" step="0.01" /></label>
-                <label class="inline-field">Vmu step <input id="bracketMuStepV" type="number" value="-1" step="0.01" /></label>
-                <label class="inline-field">Vstart step <input id="bracketVstartStepV" type="number" value="1" step="0.01" /></label>
+                <label class="inline-field">Vmu start <input id="bracketMuStart" type="number" value="0.016" step="0.01" /></label>
+                <label class="inline-field">Vstart start <input id="bracketVstartStart" type="number" value="6.59" step="0.01" /></label>
+                <label class="inline-field">Vmu step <input id="bracketMuStepV" type="number" value="0.5" step="0.01" /></label>
+                <label class="inline-field">Vstart step <input id="bracketVstartStepV" type="number" value="-0.5" step="0.01" /></label>
                 <label class="inline-field">Count <input id="bracketCount" type="number" value="6" min="2" max="50" step="1" /></label>
                 <label class="inline-field">Settle ms <input id="bracketProgramSettleMs" type="number" value="1000" min="0" max="30000" step="100" /></label>
               </div>
@@ -551,10 +551,10 @@
               <input id="deviceTuneDacSlider" class="gate-slider" type="range" min="-15000" max="15000" step="10" value="0" />
             </label>
             <label class="tune-slider-label">Vmu
-              <input id="deviceTuneMuSlider" class="gate-slider" type="range" min="-6" max="0" step="0.01" value="0" />
+              <input id="deviceTuneMuSlider" class="gate-slider" type="range" min="0" max="6" step="0.01" value="0" />
             </label>
             <label class="tune-slider-label">Vstart
-              <input id="deviceTuneVstartSlider" class="gate-slider" type="range" min="-17" max="0" step="0.01" value="0" />
+              <input id="deviceTuneVstartSlider" class="gate-slider" type="range" min="0" max="17" step="0.01" value="0" />
             </label>
             <p class="hint" id="deviceTuneStatus">Device tune idle</p>
           </article>
@@ -635,7 +635,9 @@
             <label class="inline-field">Target mu <input id="deviceCalTargetMu" type="number" value="0" step="0.05" /></label>
             <label class="inline-field">Target sigma <input id="deviceCalTargetSigma" type="number" value="4" min="0" step="0.05" /></label>
             <label class="inline-field">Y <select id="deviceCalYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
-            <label class="inline-field">Objective <select id="deviceCalObjective"><option value="shape" selected>Shape A/sigma</option><option value="a_mu">A/mu</option></select></label>
+            <label class="inline-field">Objective <select id="deviceCalObjective"><option value="shape" selected>Shape A/sigma</option><option value="a_mu">A/mu</option><option value="curve">Curve ML match</option></select></label>
+            <label class="inline-field">Curve ref <select id="deviceCalCurveReference"><option value="median" selected>Batch median</option><option value="target">Target Gaussian</option></select></label>
+            <label class="inline-field">Curve tol <input id="deviceCalCurveTol" type="number" value="0.001" min="0" step="0.0001" /></label>
             <label class="inline-field">Max iter <input id="deviceCalMaxIter" type="number" value="20" min="1" max="100" step="1" /></label>
             <label class="inline-field">Learn rate <input id="deviceCalLearningRate" type="number" value="0.5" min="0.01" max="2" step="0.05" /></label>
             <label class="inline-field">mu tol <input id="deviceCalMuTol" type="number" value="0.05" min="0" step="0.01" /></label>
@@ -652,7 +654,7 @@
             <button id="deviceCalSweepFitButton">Sweep + fit once</button>
             <button id="deviceCalAutoButton" class="primary">Auto fit 8 devices</button>
             <button id="deviceCalStopButton" disabled>Stop</button>
-            <button id="deviceCalDownloadButton" disabled>Download CSV</button>
+            <button id="deviceCalDownloadButton" disabled>Download log+curves CSV</button>
           </div>
           <div id="deviceCalGrid" class="device-cal-grid"></div>
         </article>
@@ -685,11 +687,11 @@
             <p class="hint" id="deviceCalLutStatus">LUT idle.</p>
           </div>
           <div class="button-row tune-row device-cal-controls">
-            <label class="inline-field">Vmu start V <input id="deviceCalLutMuStart" type="number" value="-5" step="0.05" /></label>
+            <label class="inline-field">Vmu start V <input id="deviceCalLutMuStart" type="number" value="0" step="0.05" /></label>
             <label class="inline-field">Vmu stop V <input id="deviceCalLutMuStop" type="number" value="5" step="0.05" /></label>
             <label class="inline-field">Vmu step V <input id="deviceCalLutMuStep" type="number" value="1" step="0.05" /></label>
-            <label class="inline-field">Vstart start V <input id="deviceCalLutVstartStart" type="number" value="-10" step="0.05" /></label>
-            <label class="inline-field">Vstart stop V <input id="deviceCalLutVstartStop" type="number" value="-4" step="0.05" /></label>
+            <label class="inline-field">Vstart start V <input id="deviceCalLutVstartStart" type="number" value="0" step="0.05" /></label>
+            <label class="inline-field">Vstart stop V <input id="deviceCalLutVstartStop" type="number" value="17" step="0.05" /></label>
             <label class="inline-field">Vstart step V <input id="deviceCalLutVstartStep" type="number" value="1" step="0.05" /></label>
             <label class="inline-field">Settle ms <input id="deviceCalLutSettleMs" type="number" value="1000" min="0" max="30000" step="100" /></label>
             <label class="inline-field">Max grid pts <input id="deviceCalLutMaxGrid" type="number" value="121" min="1" max="512" step="1" /></label>
@@ -699,6 +701,44 @@
           </div>
           <p class="hint">Uses the current batch map and sweep settings. Each Vmu/Vstart grid point is programmed to all 8 mapped devices, swept once, fitted, and saved as a per-device LUT row.</p>
           <div id="deviceCalLutSummary" class="device-cal-lut-summary">No LUT rows saved.</div>
+        </article>
+        <article class="panel target-search-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">target search</p>
+              <h2>Common curve target optimizer</h2>
+            </div>
+            <p class="hint" id="deviceTargetSearchStatus">Target search command idle.</p>
+          </div>
+          <div class="button-row tune-row device-cal-controls">
+            <label class="inline-field">Seed CSV path <input id="deviceTargetSeedPath" value="paper_data\paper_measurements\curve_match_live\run_20260602_171833\update_log.csv" /></label>
+            <label class="inline-field">Fit from <select id="deviceTargetFitFrom"><option value="base" selected>base seed</option><option value="target-shift">target-shift seed</option></select></label>
+            <label class="inline-field">Fit stages <input id="deviceTargetFitStages" type="number" value="1" min="0" max="20" step="1" /></label>
+            <label class="inline-field">Threshold <input id="deviceTargetThreshold" type="number" value="0.95" min="0" max="1" step="0.01" /></label>
+            <label class="inline-field">Metric <select id="deviceTargetMetric"><option value="mean_similarity" selected>mean similarity</option><option value="min_similarity">min similarity</option></select></label>
+            <label class="inline-field">Start mV <input id="deviceTargetStartMv" type="number" value="-14800" min="-15000" max="15000" step="100" /></label>
+            <label class="inline-field">Stop mV <input id="deviceTargetStopMv" type="number" value="14800" min="-15000" max="15000" step="100" /></label>
+            <label class="inline-field">Step mV <input id="deviceTargetStepMv" type="number" value="300" min="1" step="50" /></label>
+            <label class="inline-field">ADC avg <input id="deviceTargetAvg" type="number" value="256" min="1" max="256" step="1" /></label>
+            <label class="inline-field">Settle us <input id="deviceTargetSettleUs" type="number" value="30000" min="0" max="65000" step="1000" /></label>
+            <label class="inline-field">Pre-bias ms <input id="deviceTargetPreBiasMs" type="number" value="2000" min="0" max="30000" step="100" /></label>
+            <label class="checkbox inline-check"><input id="deviceTargetReverse" type="checkbox" checked /> Reverse</label>
+            <label class="checkbox inline-check"><input id="deviceTargetAcceptOnly" type="checkbox" /> Accept improving only</label>
+          </div>
+          <label class="wide-label">Candidate shifts: Vmu_code,Vstart_code
+            <textarea id="deviceTargetShifts" class="gmm-target target-search-text" spellcheck="false">0,0;4,0;-4,0;0,4;0,-4;0,8;-4,4</textarea>
+          </label>
+          <div class="button-row">
+            <button id="deviceTargetLoadSeedButton">Load current seed</button>
+            <button id="deviceTargetDownloadSeedButton">Download seed CSV</button>
+            <button id="deviceTargetCommandButton" class="primary">Generate command</button>
+            <button id="deviceTargetRunBrowserButton" class="primary">Run browser search (8ch)</button>
+            <button id="deviceTargetDownloadSummaryButton">Download browser summary</button>
+            <button id="deviceTargetRecipeButton">Download recipe MD</button>
+            <label class="file-button">Read summary CSV <input id="deviceTargetSummaryFile" type="file" accept=".csv,text/csv" /></label>
+          </div>
+          <textarea id="deviceTargetCommandOutput" class="target-search-output" readonly spellcheck="false">Use Generate command after setting candidate shifts.</textarea>
+          <div id="deviceTargetBestSummary" class="device-cal-lut-summary">No target-search summary loaded.</div>
         </article>
       </section>
 
@@ -732,7 +772,60 @@
               </table>
             </div>
           </article>
-        </div>        <article class="panel activity-log">
+        </div>
+        <article class="panel table-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">ADC baseline</p>
+              <h2>Zero-current reference</h2>
+            </div>
+            <p class="hint" id="adcBaselineStatus">Default zero-current baseline is 3.000 V.</p>
+          </div>
+          <div class="button-row tune-row">
+            <label class="inline-field">Default zero V <input id="adcBaselineDefault" type="number" value="3.000" min="0" max="3" step="0.001" /></label>
+            <label class="checkbox inline-check"><input id="adcBaselineInvert" type="checkbox" checked /> Invert around baseline</label>
+            <button id="adcBaselineApplyButton">Apply default to all</button>
+            <button id="adcBaselineCaptureButton" class="primary">Capture ADC as zero</button>
+            <button id="adcBaselineResetButton">Reset 3.000 V</button>
+          </div>
+          <p class="hint">Use this after setting zero-current/TIA bias. Current mode uses I_uA = (zero V - V_AIN) / Rf by default.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ADC</th><th>Zero-current V_AIN</th><th>Current formula</th></tr></thead>
+              <tbody id="adcBaselineTable"></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel table-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">auto jumper detect</p>
+              <h2>Device to ADC assignment</h2>
+            </div>
+            <p class="hint" id="deviceDetectStatus">Device detect idle.</p>
+          </div>
+          <div class="button-row tune-row device-detect-controls">
+            <label class="inline-field">Vmu V <input id="deviceDetectVmu" type="number" value="0" step="0.01" /></label>
+            <label class="inline-field">Vstart ON V <input id="deviceDetectVstart" type="number" value="4" step="0.05" /></label>
+            <label class="inline-field">Vstart OFF V <input id="deviceDetectVstartOff" type="number" value="0" step="0.05" /></label>
+            <label class="inline-field">Min delta uA <input id="deviceDetectThreshold" type="number" value="0.001" min="0" step="0.0005" /></label>
+            <label class="inline-field">ADC avg <input id="deviceDetectAvg" type="number" value="256" min="1" max="256" step="1" /></label>
+            <label class="inline-field">Settle us <input id="deviceDetectSettleUs" type="number" value="30000" min="0" max="65000" step="1000" /></label>
+            <label class="checkbox inline-check"><input id="deviceDetectQuietOthers" type="checkbox" checked /> Quiet others</label>
+            <button id="deviceDetectStartButton" class="primary">Detect D1-D16</button>
+            <button id="deviceDetectStopButton" disabled>Stop</button>
+            <button id="deviceDetectApplyButton" disabled>Apply detected map</button>
+            <button id="deviceDetectDownloadButton" disabled>Download CSV</button>
+          </div>
+          <p class="hint">Sets D1/D2 gate outputs to 0 mV, sets Vmu to 0 V, turns one device Vstart ON at a time, then reads ADC0-7 and assigns the device to the ADC with the largest current delta.</p>
+          <div class="table-wrap device-detect-wrap">
+            <table>
+              <thead><tr><th>Device</th><th>Detected ADC</th><th>TIA</th><th>Status</th><th>Best delta uA</th><th>Second delta uA</th><th>ADC deltas uA</th><th>ADC currents uA</th></tr></thead>
+              <tbody id="deviceDetectTable"></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel activity-log">
           <div class="panel-title">
             <div>
               <p class="eyebrow">serial monitor</p>
@@ -804,12 +897,13 @@
 
     </main>
 
-    <script src="./app.js?v=ca432c807bae"></script>
-    <script src="./serial_watchdog.js?v=20260602-device-cal-overlay"></script>
-    <script src="./gate_probe_step.js?v=20260602-device-cal-overlay"></script>
-    <script src="./fit_control.js?v=20260602-device-cal-overlay"></script>
-    <script src="./device_tune.js?v=20260602-device-cal-overlay"></script>
-    <script src="./device_time.js?v=20260602-device-cal-overlay"></script>
-    <script src="./dfu.js?v=20260602-device-cal-overlay"></script>
+    <script src="./app.js?v=d194e496cdb6"></script>
+    <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>
+    <script src="./gate_probe_step.js?v=20260602-curve-ml"></script>
+    <script src="./fit_control.js?v=20260602-curve-ml"></script>
+    <script src="./device_tune.js?v=20260610-inverted-tia"></script>
+    <script src="./device_target_search.js?v=20260602-target-search"></script>
+    <script src="./device_time.js?v=20260610-inverted-tia"></script>
+    <script src="./dfu.js?v=20260602-curve-ml"></script>
   </body>
 </html>

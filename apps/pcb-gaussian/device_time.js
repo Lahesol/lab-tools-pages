@@ -84,7 +84,7 @@
   function voltageRange(param) {
     const points = typeof getParamCalPoints === "function" ? getParamCalPoints(param) : [];
     const voltages = points.map(point => Number(point.voltage)).filter(Number.isFinite);
-    if (!voltages.length) return { min: -20, max: 0 };
+    if (!voltages.length) return { min: 0, max: 20 };
     return { min: Math.min(...voltages), max: Math.max(...voltages) };
   }
 
@@ -203,7 +203,7 @@
       adcs[`ADC${adcIdx}`] = {
         raw,
         voltage,
-        current: adcVoltageToCurrentUa(voltage),
+        current: adcVoltageToCurrentUa(voltage, adcIdx),
       };
     }
     const elapsed = captureElapsedSeconds(capture);

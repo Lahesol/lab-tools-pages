@@ -1,9 +1,9 @@
 ﻿{
   "schema": "pcb-gaussian-calibration-v1",
-  "note": "Recovered calibration snapshot from the user's working calibration screenshot. Browser-local calibrated values are stored separately in localStorage by origin.",
+  "note": "Positive Vstart/Vmu calibration defaults for the inverted-amplifier MAX5488 path. Browser-local calibrated values are stored separately in localStorage by origin.",
   "localStorageKeys": {
     "dac": "pcbGaussian.dacCalibration.v1",
-    "parameters": "pcbGaussian.parameterCalibration.v1"
+    "parameters": "pcbGaussian.parameterCalibration.inverted.v2"
   },
   "dacCal": {
     "D1": [
@@ -27,26 +27,26 @@
   },
   "paramCal": {
     "A": [
-      { "code": 0, "voltage": -0.0420 },
-      { "code": 30, "voltage": -2.0230 },
-      { "code": 60, "voltage": -3.9870 },
-      { "code": 90, "voltage": -5.9400 },
-      { "code": 120, "voltage": -7.8900 },
-      { "code": 150, "voltage": -9.8500 },
-      { "code": 180, "voltage": -11.8300 },
-      { "code": 210, "voltage": -13.8200 },
-      { "code": 255, "voltage": -16.8700 }
+      { "code": 0, "voltage": 0.0420 },
+      { "code": 30, "voltage": 2.0230 },
+      { "code": 60, "voltage": 3.9870 },
+      { "code": 90, "voltage": 5.9400 },
+      { "code": 120, "voltage": 7.8900 },
+      { "code": 150, "voltage": 9.8500 },
+      { "code": 180, "voltage": 11.8300 },
+      { "code": 210, "voltage": 13.8200 },
+      { "code": 255, "voltage": 16.8700 }
     ],
     "mu": [
-      { "code": 0, "voltage": -0.0160 },
-      { "code": 30, "voltage": -0.7150 },
-      { "code": 60, "voltage": -1.4100 },
-      { "code": 90, "voltage": -2.1000 },
-      { "code": 120, "voltage": -2.7900 },
-      { "code": 150, "voltage": -3.4900 },
-      { "code": 180, "voltage": -4.1700 },
-      { "code": 210, "voltage": -4.8900 },
-      { "code": 255, "voltage": -5.9800 }
+      { "code": 0, "voltage": 0.0160 },
+      { "code": 30, "voltage": 0.7150 },
+      { "code": 60, "voltage": 1.4100 },
+      { "code": 90, "voltage": 2.1000 },
+      { "code": 120, "voltage": 2.7900 },
+      { "code": 150, "voltage": 3.4900 },
+      { "code": 180, "voltage": 4.1700 },
+      { "code": 210, "voltage": 4.8900 },
+      { "code": 255, "voltage": 5.9800 }
     ]
   }
 }
