@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=cf50792ee6b8" />
+    <link rel="stylesheet" href="./styles.css?v=656d368d0d02" />
   </head>
   <body>
     <header class="app-header">
@@ -813,6 +813,7 @@
                   <option value="seeds_ovr_data_new_optimized">Seeds OVR data_new optimized</option>
                   <option value="seeds_shared_axis_data_new_curves">Seeds shared-axis distinct curves</option>
                   <option value="seeds_2d_system_data_new">Seeds 2D system measured-kernel</option>
+                  <option value="seeds_2d_adc_pair_basis">Seeds 2D 4-ADC pair basis</option>
                   <option value="seeds_lda_classifier">Seeds LDA projection</option>
                   <option value="seeds_additive_1d_kernel_sum">Seeds additive 1D kernel sum</option>
                 </select>
@@ -828,6 +829,10 @@
               <label>
                 Selected kernels CSV
                 <input id="appModelKernelFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label>
+                Fitting target CSV
+                <input id="appModelTargetFile" type="file" accept=".csv,text/csv" />
               </label>
               <label>
                 Metrics CSV
@@ -864,6 +869,14 @@
                   <tr><th>Group</th><th>Rank</th><th>Device</th><th>ADC</th><th>DAC</th><th>Vmu</th><th>Vstart</th><th>mu</th><th>sigma</th><th>R2</th></tr>
                 </thead>
                 <tbody id="appModelKernelTable"></tbody>
+              </table>
+            </div>
+            <div class="table-wrap app-model-target-wrap">
+              <table class="app-model-table">
+                <thead>
+                  <tr><th>Basis</th><th>A_amp</th><th>mu (V)</th><th>sigma (V)</th><th>baseline</th><th>R2</th><th>A_uA est.</th><th>Devices</th></tr>
+                </thead>
+                <tbody id="appModelTargetTable"></tbody>
               </table>
             </div>
           </article>

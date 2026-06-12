@@ -738,6 +738,13 @@ tr:hover td { background: #fbf5ed; }
 .app-model-kernel-wrap table {
   min-width: 900px;
 }
+.app-model-target-wrap {
+  max-height: 220px;
+  margin-top: 12px;
+}
+.app-model-target-wrap table {
+  min-width: 980px;
+}
 .app-model-result-grid {
   margin-top: 16px;
 }

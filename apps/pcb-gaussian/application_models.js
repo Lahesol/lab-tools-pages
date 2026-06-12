@@ -59,6 +59,16 @@
       metricsFile: "application\\data\\processed\\seeds_2d_system_data_new\\metrics.csv",
       scoreHint: "Validation uses a 2D system-level projection. The PCB device array supplies measured 1D kernel terms on two axes; GUI/MCU combines terms by sqrt(term_dim_1 x term_dim_2) and applies argmax."
     },
+    seeds_2d_adc_pair_basis: {
+      label: "Seeds 2D 4-ADC pair basis",
+      kind: "seeds",
+      scoreFile: "application\\data\\processed\\seeds_2d_adc_pair_basis\\seeds_2d_adc_pair_scores.csv",
+      gridFile: "application\\data\\processed\\seeds_2d_adc_pair_basis\\adc_pair_basis_grid.csv",
+      kernelFile: "application\\data\\processed\\seeds_2d_adc_pair_basis\\selected_adc_pairs.csv",
+      targetFile: "application\\data\\processed\\seeds_2d_adc_pair_basis\\adc_pair_basis_fit_targets.csv",
+      metricsFile: "application\\data\\processed\\seeds_2d_adc_pair_basis\\metrics.csv",
+      scoreHint: "Validation uses four ADC pair-summed basis outputs. Load the curve grid to preview the four pair curves, and load the fitting-target CSV to see target A_amp/mu/sigma on the VG axis."
+    },
     seeds_lda_classifier: {
       label: "Seeds LDA projection",
       kind: "seeds",
@@ -118,6 +128,7 @@
     scoreRows: [],
     gridRows: [],
     kernelRows: [],
+    targetRows: [],
     metricsRows: [],
     fitRows: [],
     validationRows: [],
@@ -136,6 +147,7 @@
     bindFile("appModelScoreFile", "scoreRows", "score");
     bindFile("appModelGridFile", "gridRows", "grid");
     bindFile("appModelKernelFile", "kernelRows", "kernels");
+    bindFile("appModelTargetFile", "targetRows", "targets");
     bindFile("appModelMetricsFile", "metricsRows", "metrics");
     $("appModelValidateButton").addEventListener("click", validateModel);
     $("appModelFitButton").addEventListener("click", fitModelCurves);
@@ -167,8 +179,9 @@
         state.fileNames[nameKey] = file.name;
         setStatus(`Loaded ${file.name}: ${state[stateKey].length} rows.`);
         if (stateKey === "kernelRows") renderKernelTable();
+        if (stateKey === "targetRows") renderTargetTable();
         if (stateKey === "metricsRows") renderSummary();
-        if (stateKey === "scoreRows" || stateKey === "gridRows") drawPlot();
+        if (stateKey === "scoreRows" || stateKey === "gridRows" || stateKey === "targetRows") drawPlot();
         renderSummary();
       } catch (error) {
         setStatus(`Failed to read ${file.name}: ${error.message}`, true);
@@ -180,12 +193,13 @@
     state.scoreRows = [];
     state.gridRows = [];
     state.kernelRows = [];
+    state.targetRows = [];
     state.metricsRows = [];
     state.fitRows = [];
     state.validationRows = [];
     state.seeds2dLastResult = null;
     state.fileNames = {};
-    ["appModelScoreFile", "appModelGridFile", "appModelKernelFile", "appModelMetricsFile"].forEach(id => {
+    ["appModelScoreFile", "appModelGridFile", "appModelKernelFile", "appModelTargetFile", "appModelMetricsFile"].forEach(id => {
       const input = $(id);
       if (input) input.value = "";
     });
@@ -250,6 +264,7 @@
       `Validation / score CSV: ${preset.scoreFile}`,
       `Curve grid CSV: ${preset.gridFile}`,
       `Selected kernels CSV: ${preset.kernelFile}`,
+      `Fitting target CSV: ${preset.targetFile || "(optional; use Fit curves to estimate from loaded grid)"}`,
       `Metrics CSV: ${preset.metricsFile}`,
       "",
       preset.scoreHint
@@ -263,6 +278,7 @@
     metrics.push(["Score rows", state.scoreRows.length]);
     metrics.push(["Grid rows", state.gridRows.length]);
     metrics.push(["Kernels", state.kernelRows.length]);
+    metrics.push(["Targets", state.targetRows.length]);
     metrics.push(["Metrics rows", state.metricsRows.length]);
     Object.entries(state.fileNames).forEach(([key, value]) => metrics.push([`${key} file`, value]));
     if (state.metricsRows[0]) {
@@ -274,7 +290,8 @@
       `<div><span>${escapeHtml(key)}</span><strong>${escapeHtml(String(value))}</strong></div>`
     )).join("");
     renderKernelTable();
-    $("appModelDownloadButton").disabled = !(state.fitRows.length || state.validationRows.length);
+    renderTargetTable();
+    $("appModelDownloadButton").disabled = !(state.fitRows.length || state.validationRows.length || state.targetRows.length);
   }
 
   function renderKernelTable() {
@@ -296,6 +313,28 @@
         formatNumber(numberValue(row.fit_mu_V), 3),
         formatNumber(numberValue(row.fit_sigma_V), 3),
         formatNumber(numberValue(row.fit_r2), 3)
+      ];
+      return `<tr>${cells.map(value => `<td>${escapeHtml(String(value))}</td>`).join("")}</tr>`;
+    }).join("");
+  }
+
+  function renderTargetTable() {
+    const tbody = $("appModelTargetTable");
+    if (!tbody) return;
+    if (!state.targetRows.length) {
+      tbody.innerHTML = `<tr><td colspan="8">No fitting-target CSV loaded.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = state.targetRows.slice(0, 36).map(row => {
+      const cells = [
+        row.basis || row.curve || row.group || "",
+        formatNumber(numberValue(row.target_A_amp_norm || row.A_amp), 4),
+        formatNumber(numberValue(row.target_mu_V || row.mu), 4),
+        formatNumber(numberValue(row.target_sigma_V || row.sigma), 4),
+        formatNumber(numberValue(row.target_baseline_norm || row.baseline), 4),
+        formatNumber(numberValue(row.fit_r2 || row.r2), 4),
+        formatNumber(numberValue(row.estimated_pair_A_uA), 4),
+        row.devices || row.device_codes || ""
       ];
       return `<tr>${cells.map(value => `<td>${escapeHtml(String(value))}</td>`).join("")}</tr>`;
     }).join("");
@@ -357,8 +396,8 @@
       if (blacklist.has(column)) return false;
       const lower = column.toLowerCase();
       if (source === "target" && lower.includes("target")) return true;
-      if (source === "measured" && (lower.includes("measured") || lower.includes("normality") || lower.includes("score"))) return true;
-      return lower.includes("target") || lower.includes("measured_kernel") || lower.includes("normality_score");
+      if (source === "measured" && (lower.includes("measured") || lower.includes("normality") || lower.includes("score") || lower.includes("basis_curve"))) return true;
+      return lower.includes("target") || lower.includes("measured_kernel") || lower.includes("normality_score") || lower.includes("basis_curve");
     });
     if (source === "target") {
       const targetOnly = candidates.filter(column => column.toLowerCase().includes("target"));
@@ -367,7 +406,7 @@
     if (source === "measured") {
       const measuredOnly = candidates.filter(column => {
         const lower = column.toLowerCase();
-        return lower.includes("measured") || lower.includes("normality");
+        return lower.includes("measured") || lower.includes("normality") || lower.includes("basis_curve");
       });
       if (measuredOnly.length) candidates = measuredOnly;
     }
@@ -784,9 +823,32 @@
     const scale = plotScale(canvas, minMax(allX), minMax(allY));
     drawAxes(ctx, canvas, scale, xColumn, "score");
     series.forEach(item => drawLine(ctx, item.points, scale, item.color, 2));
+    drawTargetOverlays(ctx, scale, series);
     drawFitOverlays(ctx, scale, series);
     $("appModelPlotStatus").textContent = `Grid plot: ${rows.length} X points, ${series.length} curve(s).`;
     renderLegend(series);
+  }
+
+  function drawTargetOverlays(ctx, scale, series) {
+    if (!state.targetRows.length) return;
+    state.targetRows.forEach((targetRow, index) => {
+      const curveName = targetRow.basis || targetRow.curve || targetRow.group || "";
+      const matching = series.find(item => item.name === curveName);
+      if (!matching || matching.points.length < 2) return;
+      const A = numberValue(targetRow.target_A_amp_norm || targetRow.A_amp);
+      const mu = numberValue(targetRow.target_mu_V || targetRow.mu);
+      const sigma = numberValue(targetRow.target_sigma_V || targetRow.sigma);
+      const baseline = numberValue(targetRow.target_baseline_norm || targetRow.baseline);
+      if (![A, mu, sigma, baseline].every(Number.isFinite)) return;
+      const xs = matching.points.map(point => point[0]);
+      const [xMin, xMax] = minMax(xs);
+      const points = [];
+      for (let i = 0; i < 180; i += 1) {
+        const x = xMin + (xMax - xMin) * i / 179;
+        points.push([x, gaussianValue(x, A, mu, sigma, baseline)]);
+      }
+      drawLine(ctx, points, scale, COLORS[index % COLORS.length], 1.4, [2, 5]);
+    });
   }
 
   function drawFitOverlays(ctx, scale, series) {
@@ -1163,6 +1225,21 @@
         r2: "",
         rmse: "",
         n: ""
+      });
+    });
+    state.targetRows.forEach(row => {
+      rows.push({
+        section: "fit_target",
+        name: row.basis || row.curve || row.group || "",
+        value: row.devices || row.device_codes || "",
+        scope: row.target_note || "VG-axis Gaussian target for curve programming",
+        A_amp: row.target_A_amp_norm || row.A_amp || "",
+        mu: row.target_mu_V || row.mu || "",
+        sigma: row.target_sigma_V || row.sigma || "",
+        baseline: row.target_baseline_norm || row.baseline || "",
+        r2: row.fit_r2 || row.r2 || "",
+        rmse: row.fit_rmse || row.rmse || "",
+        n: row.n_points || row.n || ""
       });
     });
     if (!rows.length) return;
