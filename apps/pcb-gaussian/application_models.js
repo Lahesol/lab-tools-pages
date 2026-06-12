@@ -194,6 +194,7 @@
     fitRows: [],
     validationRows: [],
     seeds2dLastResult: null,
+    generatedCurveCsv: "",
     fileNames: {}
   };
 
@@ -218,6 +219,9 @@
     $("appModelValidateButton").addEventListener("click", validateModel);
     $("appModelFitButton").addEventListener("click", fitModelCurves);
     $("appModelDownloadTargetButton")?.addEventListener("click", downloadPresetTargets);
+    $("appModelRunUartFitButton")?.addEventListener("click", runApplicationUartTargetFit);
+    $("appModelStopUartFitButton")?.addEventListener("click", stopApplicationUartTargetFit);
+    $("appModelDownloadUartCurvesButton")?.addEventListener("click", downloadGeneratedDeviceCurves);
     $("appModelDownloadButton").addEventListener("click", downloadReport);
     $("appModelClearButton").addEventListener("click", clearState);
     $("appModelAssignmentTable")?.addEventListener("click", event => {
@@ -276,6 +280,7 @@
     state.fitRows = [];
     state.validationRows = [];
     state.seeds2dLastResult = null;
+    state.generatedCurveCsv = "";
     state.fileNames = {};
     ["appModelScoreFile", "appModelGridFile", "appModelKernelFile", "appModelTargetFile", "appModelDeviceCurveFile", "appModelMetricsFile"].forEach(id => {
       const input = $(id);
@@ -287,6 +292,7 @@
     renderEmptyTables();
     renderPresetTargetPreview();
     renderSeeds2dResult(null);
+    setUartFitRunning(false);
     setStatus("Application model inputs cleared.");
     drawPlot();
   }
@@ -704,6 +710,109 @@
       toCsv(curveRows)
     ].join("\n");
     downloadText(`application_preset_targets_${state.preset}_${Date.now()}.csv`, sections);
+  }
+
+  function applicationUartFitTargets() {
+    const library = targetLibrary();
+    if (library?.type !== "adc_pair_basis" || !library.pairs?.length) return [];
+    const rows = [];
+    library.pairs.forEach(pair => {
+      pair.devices.forEach(device => {
+        rows.push({
+          preset: state.preset,
+          adcPair: pair.adcPair,
+          basis: pair.basis,
+          device: device.device,
+          label: device.label,
+          target: {
+            A: device.A_uA,
+            mu: device.mu,
+            sigma: Math.abs(Number(device.sigma)),
+            baseline: device.baseline,
+          },
+          seed: {
+            muCode: device.vmuCode,
+            vstartCode: device.vstartCode,
+          },
+        });
+      });
+    });
+    return rows;
+  }
+
+  function setUartFitStatus(message, isError = false) {
+    const status = $("appModelUartFitStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = isError ? "var(--warn)" : "var(--muted)";
+  }
+
+  function setUartFitRunning(running) {
+    const run = $("appModelRunUartFitButton");
+    const stop = $("appModelStopUartFitButton");
+    const download = $("appModelDownloadUartCurvesButton");
+    if (run) run.disabled = running;
+    if (stop) stop.disabled = !running;
+    if (download) download.disabled = running || !state.generatedCurveCsv;
+  }
+
+  async function runApplicationUartTargetFit() {
+    const targets = applicationUartFitTargets();
+    if (!targets.length) {
+      setUartFitStatus("This preset does not define UART application target assignments.", true);
+      return;
+    }
+    const api = window.PCBGaussian;
+    if (!api?.runApplicationTargetFit) {
+      setUartFitStatus("PCB Gaussian UART fitting API is not available. Reload the GUI after updating app.js.", true);
+      return;
+    }
+    setUartFitRunning(true);
+    setUartFitStatus(`Running UART target fitting for ${targets.length} assigned device curve(s). Follow Device Cal status for per-sweep progress.`);
+    try {
+      const result = await api.runApplicationTargetFit(targets, {
+        preset: state.preset,
+        runId: `${state.preset}_${Date.now()}`,
+      });
+      state.generatedCurveCsv = result?.curveCsv || api.getDeviceCalCurveCsv?.() || "";
+      if (!state.generatedCurveCsv) throw new Error("UART fitting completed but returned no curve-point CSV.");
+      state.deviceCurveRows = parseDeviceCurveCsv(state.generatedCurveCsv);
+      state.fileNames["device curves"] = `UART:${result?.runId || "application target fit"}`;
+      buildGeneratedGridFromDeviceCurves(false);
+      renderSummary();
+      renderPresetTargetPreview();
+      drawPlot();
+      if (state.scoreRows.length) validateModel(false);
+      const summary = result?.summary || {};
+      const meanSim = Number(summary.meanSimilarity);
+      const simText = Number.isFinite(meanSim) ? ` mean sim ${(meanSim * 100).toFixed(2)}%` : "";
+      setUartFitStatus(`UART target fitting ${result?.status || "complete"}: ${state.deviceCurveRows.length} curve-point row(s), generated ${state.generatedGridRows.length} VG grid row(s).${simText}`);
+      setStatus(`Generated application curves from UART fitting. Validation now uses generated device curves when available.`);
+    } catch (error) {
+      setUartFitStatus(error.message || String(error), true);
+      setStatus(error.message || String(error), true);
+    } finally {
+      setUartFitRunning(false);
+    }
+  }
+
+  function stopApplicationUartTargetFit() {
+    const api = window.PCBGaussian;
+    if (api?.stopDeviceCal) {
+      api.stopDeviceCal();
+      setUartFitStatus("Stop requested. The current firmware sweep may finish before the loop exits.", true);
+    } else {
+      setUartFitStatus("Stop API is not available from app.js.", true);
+    }
+  }
+
+  function downloadGeneratedDeviceCurves() {
+    if (!state.generatedCurveCsv) {
+      setUartFitStatus("No generated UART curve CSV is available yet.", true);
+      return;
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadText(`application_uart_generated_device_curves_${state.preset}_${stamp}.csv`, state.generatedCurveCsv);
   }
 
   function renderEmptyTables() {

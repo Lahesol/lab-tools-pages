@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=1ad6ac4ab30f" />
+    <link rel="stylesheet" href="./styles.css?v=78258c754e4b" />
   </head>
   <body>
     <header class="app-header">
@@ -897,6 +897,12 @@
           </div>
           <canvas id="appModelTargetCanvas" height="280"></canvas>
           <div id="appModelTargetLegend" class="plot-legend"></div>
+          <div class="button-row app-model-uart-controls">
+            <button id="appModelRunUartFitButton" class="primary">Run UART target fit</button>
+            <button id="appModelStopUartFitButton" disabled>Stop UART fit</button>
+            <button id="appModelDownloadUartCurvesButton" disabled>Download generated curves</button>
+          </div>
+          <p class="hint status-line" id="appModelUartFitStatus">UART target fitting uses the Device Cal sweep settings and writes to the Device Cal log/package.</p>
           <div class="table-wrap app-model-assignment-wrap">
             <table class="app-model-table">
               <thead>
@@ -1140,9 +1146,9 @@
 
     </main>
 
-  <script src="./app.js?v=8d5474e159bc"></script>
+  <script src="./app.js?v=81539e85f27d"></script>
     <script src="./application_model_target_data.js?v=20260612-app-target-grid"></script>
-    <script src="./application_models.js?v=20260612-app-model-targets"></script>
+    <script src="./application_models.js?v=20260612-app-uart-target-fit"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>
     <script src="./gate_probe_step.js?v=20260602-curve-ml"></script>
     <script src="./fit_control.js?v=20260602-curve-ml"></script>

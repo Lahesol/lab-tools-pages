@@ -776,6 +776,12 @@ tr:hover td { background: #fbf5ed; }
 .app-model-assignment-wrap table {
   min-width: 1080px;
 }
+.app-model-uart-controls {
+  margin-top: 10px;
+}
+.app-model-uart-controls button {
+  min-height: 34px;
+}
 .mini-button {
   padding: 4px 8px;
   min-height: 0;

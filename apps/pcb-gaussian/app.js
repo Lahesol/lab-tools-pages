@@ -5645,12 +5645,14 @@ function downloadAllDeviceTestCsv() {
 }
 function setDeviceCalControlsRunning(running) {
   state.deviceCalRunning = running;
-  ["deviceCalBatch", "deviceCalLoadBatchButton", "deviceCalSweepFitButton", "deviceCalMedianFitButton", "deviceCalAutoButton", "deviceCalPackageButton", "deviceCalLutStartButton", "deviceCalLutClearButton", "deviceCalLutDownloadButton", "deviceCalObjective", "deviceCalCurveReference", "deviceCalMatchTarget", "deviceCalCurveTol", "deviceCalSimilarityTarget", "deviceCalInitMuCode", "deviceCalInitVstartCode", "deviceCalOffMuCode", "deviceCalOffVstartCode", "deviceCalDummySweeps", "deviceCalMaxCodeDelta", "deviceTargetRunBrowserButton", "deviceTargetCommandButton", "deviceTargetDownloadSeedButton", "deviceTargetDownloadSummaryButton", "allDeviceTestStartButton", "allDeviceTestDownloadButton"].forEach(id => {
+  ["deviceCalBatch", "deviceCalLoadBatchButton", "deviceCalSweepFitButton", "deviceCalMedianFitButton", "deviceCalAutoButton", "deviceCalPackageButton", "deviceCalLutStartButton", "deviceCalLutClearButton", "deviceCalLutDownloadButton", "deviceCalObjective", "deviceCalCurveReference", "deviceCalMatchTarget", "deviceCalCurveTol", "deviceCalSimilarityTarget", "deviceCalInitMuCode", "deviceCalInitVstartCode", "deviceCalOffMuCode", "deviceCalOffVstartCode", "deviceCalDummySweeps", "deviceCalMaxCodeDelta", "deviceTargetRunBrowserButton", "deviceTargetCommandButton", "deviceTargetDownloadSeedButton", "deviceTargetDownloadSummaryButton", "allDeviceTestStartButton", "allDeviceTestDownloadButton", "appModelRunUartFitButton", "appModelDownloadUartCurvesButton"].forEach(id => {
     const element = $(id);
     if (element) element.disabled = running;
   });
   const stop = $("deviceCalStopButton");
   if (stop) stop.disabled = !running;
+  const appStop = $("appModelStopUartFitButton");
+  if (appStop) appStop.disabled = !running;
   updateDeviceCalLutButtons();
   updateDeviceCalOverlayButtons();
 }
@@ -5950,6 +5952,166 @@ function deviceCalMatchSummaryText(results) {
   return `${summary.validCount} fit(s), mean sim ${Number.isFinite(summary.meanSimilarity) ? (summary.meanSimilarity * 100).toFixed(2) : "n/a"}%, min sim ${Number.isFinite(summary.minSimilarity) ? (summary.minSimilarity * 100).toFixed(2) : "n/a"}%, mean loss ${Number.isFinite(summary.meanLoss) ? summary.meanLoss.toPrecision(4) : "n/a"}`;
 }
 
+function normalizeApplicationTargetFitTargets(targets) {
+  const rows = [];
+  for (const item of Array.isArray(targets) ? targets : []) {
+    const device = clamp(Math.round(Number(item.device)), 1, 16);
+    const target = item.target || {};
+    const seed = item.seed || {};
+    const A = Number(target.A ?? target.A_amp ?? target.A_uA);
+    const mu = Number(target.mu ?? target.mu_V);
+    const sigma = Math.abs(Number(target.sigma ?? target.sigma_V));
+    if (![device, A, mu, sigma].every(Number.isFinite) || sigma <= 0) continue;
+    const muCode = clamp(Math.round(Number(seed.muCode ?? item.vmuCode ?? item.muCode ?? item.seed_vmu_code ?? 0)), 0, POT_MAX_CODE);
+    const vstartCode = clamp(Math.round(Number(seed.vstartCode ?? item.vstartCode ?? item.seed_vstart_code ?? 100)), 0, POT_MAX_CODE);
+    const baseline = Number(target.baseline);
+    rows.push({
+      device,
+      adcPair: item.adcPair ?? item.adc_pair ?? "",
+      basis: item.basis || "",
+      label: item.label || "",
+      target: {
+        A,
+        mu,
+        sigma,
+        baseline: Number.isFinite(baseline) ? baseline : null,
+        referenceMode: "application_target",
+      },
+      seed: { muCode, vstartCode },
+    });
+  }
+  return rows;
+}
+
+function applicationTargetForMeasuredFit(target, fit) {
+  const fallbackBaseline = Number(fit?.baseline);
+  const baseline = Number.isFinite(Number(target.baseline)) ? Number(target.baseline)
+    : Number.isFinite(fallbackBaseline) ? fallbackBaseline : 0;
+  return {
+    A: Number(target.A),
+    mu: Number(target.mu),
+    sigma: Math.max(Math.abs(Number(target.sigma)), 1e-9),
+    baseline,
+    referenceMode: target.referenceMode || "application_target",
+  };
+}
+
+async function runApplicationTargetFit(targets, options = {}) {
+  if (state.deviceCalRunning || state.sweepRunning) {
+    throw new Error("Another sweep or device-calibration run is already active.");
+  }
+  if (!state.writer) {
+    throw new Error("Connect UART before application target fitting.");
+  }
+  let targetRows = normalizeApplicationTargetFitTargets(targets);
+  if (!targetRows.length) throw new Error("No valid application target rows were supplied.");
+  targetRows = targetRows.sort((a, b) => a.device - b.device);
+  const devices = targetRows.map(row => row.device);
+  const minDevice = Math.min(...devices);
+  const maxDevice = Math.max(...devices);
+  if ($("deviceCalBatch")) {
+    $("deviceCalBatch").value = minDevice >= 9 ? "9" : "1";
+    if ((maxDevice <= 8 && minDevice <= 8) || (minDevice >= 9 && maxDevice >= 9)) deviceCalLoadBatchMap();
+  }
+  const opt = {
+    ...deviceCalMatchOptions(),
+    runId: safeExportStem(options.runId || `web_app_target_fit_${Date.now()}`),
+  };
+  ["maxIter", "similarityTarget", "settleMs", "dummySweeps", "maxCodeDelta"].forEach(key => {
+    if (options[key] !== undefined && Number.isFinite(Number(options[key]))) opt[key] = Number(options[key]);
+  });
+  opt.maxIter = clamp(Math.round(opt.maxIter), 1, 100);
+  opt.dummySweeps = clamp(Math.round(opt.dummySweeps), 0, 5);
+  opt.maxCodeDelta = clamp(Math.round(opt.maxCodeDelta), 1, POT_MAX_CODE);
+  opt.settleMs = clamp(Math.round(opt.settleMs), 0, 30000);
+  opt.similarityTarget = clamp(Number(opt.similarityTarget), 0, 1);
+
+  const snapshot = allDeviceTestSweepUiSnapshot();
+  state.deviceCalHistory = [];
+  state.deviceCalResults = [];
+  state.deviceCalPackageRun = {
+    id: opt.runId,
+    startedAt: new Date().toISOString(),
+    options: { ...opt },
+    targetMode: "application_target",
+    applicationPreset: options.preset || "",
+    devices,
+    targets: targetRows.map(row => ({
+      device: row.device,
+      adcPair: row.adcPair,
+      basis: row.basis,
+      label: row.label,
+      target: { ...row.target },
+      seed: { ...row.seed },
+    })),
+  };
+  setDeviceCalControlsRunning(true);
+  state.deviceCalStopRequested = false;
+  if ($("deviceCalObjective")) $("deviceCalObjective").value = "curve";
+  if ($("deviceCalCurveReference")) $("deviceCalCurveReference").value = "target";
+  if ($("deviceCalMatchTarget")) $("deviceCalMatchTarget").value = "manual";
+
+  try {
+    for (let targetIndex = 0; targetIndex < targetRows.length; targetIndex += 1) {
+      if (state.deviceCalStopRequested) break;
+      const spec = targetRows[targetIndex];
+      let code = { mu: spec.seed.muCode, vstart: spec.seed.vstartCode };
+      for (let iter = 1; iter <= opt.maxIter; iter += 1) {
+        if (state.deviceCalStopRequested) break;
+        const prefix = `Application target ${targetIndex + 1}/${targetRows.length}: D${spec.device}`;
+        deviceCalStatus(`${prefix}, iter ${iter}/${opt.maxIter}, seed M${code.mu}/S${code.vstart}.`, "warn");
+        const measured = await deviceCalMatchMeasureDevice(spec.device, code.mu, code.vstart, iter, "application target", opt);
+        const rowTarget = applicationTargetForMeasuredFit(spec.target, measured.fit);
+        let result = deviceCalMatchFinalizeResult(measured, rowTarget, opt, { plan: iter < opt.maxIter, action: "application target fit" });
+        result.applicationTarget = {
+          preset: options.preset || "",
+          adcPair: spec.adcPair,
+          basis: spec.basis,
+          label: spec.label,
+          targetIndex,
+        };
+        if (result.plan && planHasCodeChange(result.plan) && iter < opt.maxIter) {
+          await programLogicalDevice(result.plan.device, result.plan.nextMuCode, result.plan.nextVstartCode ?? result.plan.nextACode);
+          result.plan.programmed = true;
+          result.plan.programmedAt = new Date().toISOString();
+          code = { mu: result.plan.nextMuCode, vstart: result.plan.nextVstartCode ?? result.plan.nextACode };
+          if (opt.settleMs > 0 && !state.deviceCalStopRequested) await sleep(opt.settleMs);
+        }
+        deviceCalMatchAppendRows([result]);
+        const latest = deviceCalMatchLatestByDevice(state.deviceCalHistory);
+        state.deviceCalResults = latest;
+        renderDeviceCalResults([result]);
+        const summaryText = deviceCalMatchSummaryText(latest);
+        deviceCalStatus(`${prefix}, iter ${iter}/${opt.maxIter}: ${summaryText}.`, result.converged ? "ok" : "warn");
+        if (result.converged || !result.plan || !planHasCodeChange(result.plan)) break;
+      }
+    }
+    const latest = deviceCalMatchLatestByDevice(state.deviceCalHistory);
+    state.deviceCalResults = latest;
+    renderDeviceCalResults(latest);
+    state.deviceCalPackageRun.finishedAt = new Date().toISOString();
+    state.deviceCalPackageRun.finalSummary = deviceCalMatchSummary(latest);
+    const finalText = deviceCalMatchSummaryText(latest);
+    const stopped = state.deviceCalStopRequested;
+    deviceCalStatus(`${stopped ? "Application target fit stopped" : "Application target fit complete"}: ${finalText}.`, stopped ? "warn" : "ok");
+    return {
+      status: stopped ? "stopped" : "complete",
+      runId: opt.runId,
+      preset: options.preset || "",
+      summary: deviceCalMatchSummary(latest),
+      results: latest,
+      history: state.deviceCalHistory.slice(),
+      curveCsv: deviceCalCurvePointCsvRows(state.deviceCalHistory).join("\n"),
+    };
+  } catch (error) {
+    deviceCalStatus(error.message, "warn");
+    throw error;
+  } finally {
+    try { await deviceCalMatchProgramAllOff(opt); } catch (error) { logLine(`[warn] application target final off failed: ${error.message}`); }
+    restoreAllDeviceTestSweepUi(snapshot);
+    setDeviceCalControlsRunning(false);
+  }
+}
 async function runDeviceCalMedianTargetFit() {
   if (state.deviceCalRunning || state.sweepRunning) return;
   if (!state.writer) {
@@ -6150,6 +6312,13 @@ async function saveDeviceCalFitPackage() {
   const finalRows = deviceCalMatchLatestByDevice(rows);
   const stem = safeExportStem(`pcb_gaussian_web_device_cal_${state.deviceCalPackageRun?.id || Date.now()}`);
   const target = rows.find(row => row.target)?.target || deviceCalTarget();
+  const targetPayload = Array.isArray(state.deviceCalPackageRun?.targets) && state.deviceCalPackageRun.targets.length
+    ? {
+      mode: state.deviceCalPackageRun.targetMode || "application_target",
+      applicationPreset: state.deviceCalPackageRun.applicationPreset || "",
+      targets: state.deviceCalPackageRun.targets,
+    }
+    : target;
   const manifestRows = [
     ["file", "description"],
     [`${stem}_manifest.csv`, "File list and run metadata"],
@@ -6168,6 +6337,9 @@ async function saveDeviceCalFitPackage() {
     ["web_version", WEB_VERSION],
     ["run_id", state.deviceCalPackageRun?.id || ""],
     ["batch_start", deviceCalBatchStart()],
+    ["target_mode", state.deviceCalPackageRun?.targetMode || "single"],
+    ["application_preset", state.deviceCalPackageRun?.applicationPreset || ""],
+    ["target_count", Array.isArray(state.deviceCalPackageRun?.targets) ? state.deviceCalPackageRun.targets.length : 1],
     ["target_A_uA", target.A],
     ["target_mu_V", target.mu],
     ["target_sigma_V", target.sigma],
@@ -6177,7 +6349,7 @@ async function saveDeviceCalFitPackage() {
   ];
   const directoryHandle = await chooseExportDirectory(stem);
   await saveRowsCsvExport(`${stem}_manifest.csv`, [...manifestRows, [], ...runRows], directoryHandle);
-  await saveTextExportFile(`${stem}_target_curve.json`, JSON.stringify(target, null, 2), "application/json;charset=utf-8", directoryHandle);
+  await saveTextExportFile(`${stem}_target_curve.json`, JSON.stringify(targetPayload, null, 2), "application/json;charset=utf-8", directoryHandle);
   await saveRowsCsvExport(`${stem}_initial_summary.csv`, deviceCalPackageSummaryRows(initialRows, "initial"), directoryHandle);
   await saveRowsCsvExport(`${stem}_final_summary.csv`, deviceCalPackageSummaryRows(finalRows, "final"), directoryHandle);
   await saveRowsCsvExport(`${stem}_iteration_log.csv`, deviceCalPackageSummaryRows(rows, "iteration"), directoryHandle);
@@ -6970,6 +7142,13 @@ function exposePcbGaussianApi() {
     getDeviceSeedRows: currentDeviceSeedRows,
     getDeviceTargetSearchRows: deviceTargetSearchCsvRows,
     runDeviceTargetSearchBrowser,
+    runApplicationTargetFit,
+    stopDeviceCal,
+    getDeviceCalHistory: () => Array.isArray(state.deviceCalHistory) ? state.deviceCalHistory.slice() : [],
+    getDeviceCalResults: () => Array.isArray(state.deviceCalResults) ? state.deviceCalResults.slice() : [],
+    getDeviceCalCurveCsv: () => deviceCalCurvePointCsvRows(state.deviceCalHistory || []).join("\n"),
+    downloadDeviceCalCsv,
+    saveDeviceCalFitPackage,
     csvFromRows,
     download,
   };
