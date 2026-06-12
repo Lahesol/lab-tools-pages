@@ -123,12 +123,73 @@
     }
   };
 
+  const APP_MODEL_TARGET_LIBRARY = {
+    seeds_2d_adc_pair_basis: {
+      label: "Seeds 2D 4-ADC pair basis",
+      type: "adc_pair_basis",
+      xMin: -15,
+      xMax: 15,
+      xStep: 0.05,
+      readoutWeights: {
+        bias: [0.016394217089771023, 1.2315735442942801, -0.24796776138466],
+        pair_1_dim_1: [0.12909878716059067, -1.163148855861455, 1.034050068702565],
+        pair_2_dim_1: [0.6114455938302146, -2.894708190899799, 2.283262597066963],
+        pair_3_dim_1: [-1.0524133292798667, 2.0756973895244464, -1.0232840602412485],
+        pair_4_dim_1: [0.8007748202600368, 0.8615238220130389, -1.6622986422749748],
+        pair_1_dim_2: [1.1961611651114465, -1.5715611759039183, 0.3754000107922128],
+        pair_2_dim_2: [-4.901311750063417, 2.6661002955977002, 2.235211454465781],
+        pair_3_dim_2: [3.675117172102949, -1.7632560082868978, -1.9118611638156848],
+        pair_4_dim_2: [-0.20825252641802844, 0.7955419981139539, -0.5872894716960635]
+      },
+      pairs: [
+        {
+          adcPair: 1,
+          basis: "adc_pair_1_basis_curve",
+          target: { A: 1.0052651539043658, mu: 5.932786183127448, sigma: 4.9034745360195595, baseline: 0.005618365674446961, r2: 0.996796740213462 },
+          devices: [
+            { device: 14, label: "T03_M080_S126", vmuCode: 80, vstartCode: 126, A_uA: 0.0306807889538, mu: 5.27022094934, sigma: 4.75426977083, r2: 0.993383311191 },
+            { device: 12, label: "T04_M119_S143", vmuCode: 119, vstartCode: 143, A_uA: 0.0390388593919, mu: 6.49927081858, sigma: 4.87931862159, r2: 0.994257851787 }
+          ]
+        },
+        {
+          adcPair: 2,
+          basis: "adc_pair_2_basis_curve",
+          target: { A: 0.9841382116886562, mu: 6.063733243975909, sigma: 4.914556721114924, baseline: 0.015538261922915058, r2: 0.9970288850314881 },
+          devices: [
+            { device: 16, label: "T04_M119_S138", vmuCode: 119, vstartCode: 138, A_uA: 0.020702314713, mu: 6.40352954123, sigma: 4.6641614414, r2: 0.993805207366 },
+            { device: 15, label: "T03_M080_S126", vmuCode: 80, vstartCode: 126, A_uA: 0.0321618080136, mu: 5.64951788168, sigma: 5.01670494415, r2: 0.995431387831 }
+          ]
+        },
+        {
+          adcPair: 3,
+          basis: "adc_pair_3_basis_curve",
+          target: { A: 0.9919574135067005, mu: 4.703753712735058, sigma: 5.593132780025486, baseline: 0.0041305673885413865, r2: 0.9915429903555177 },
+          devices: [
+            { device: 11, label: "T01_M001_S099", vmuCode: 1, vstartCode: 99, A_uA: 0.0276732348674, mu: 2.22501352846, sigma: 5.89698151682, r2: 0.992281711706 },
+            { device: 13, label: "T04_M121_S139", vmuCode: 121, vstartCode: 139, A_uA: 0.0374417576091, mu: 6.75731416734, sigma: 4.70122345997, r2: 0.995376863695 }
+          ]
+        },
+        {
+          adcPair: 4,
+          basis: "adc_pair_4_basis_curve",
+          target: { A: 0.9774557186215287, mu: 4.105316164451993, sigma: 5.3863908483029155, baseline: 0.003771421708637153, r2: 0.9959440025759161 },
+          devices: [
+            { device: 9, label: "T01_M000_S101", vmuCode: 0, vstartCode: 101, A_uA: 0.0196504350292, mu: 1.53592901496, sigma: 5.16745899516, r2: 0.993694087911 },
+            { device: 10, label: "T04_M119_S139", vmuCode: 119, vstartCode: 139, A_uA: 0.028245081561, mu: 6.39925039442, sigma: 4.54469643374, r2: 0.996882250765 }
+          ]
+        }
+      ]
+    }
+  };
+
   const state = {
     preset: "nab_machine_temperature",
     scoreRows: [],
     gridRows: [],
     kernelRows: [],
     targetRows: [],
+    deviceCurveRows: [],
+    generatedGridRows: [],
     metricsRows: [],
     fitRows: [],
     validationRows: [],
@@ -140,19 +201,30 @@
     if (!$("appModelPreset")) return;
     $("appModelPreset").addEventListener("change", () => {
       state.preset = $("appModelPreset").value;
+      state.generatedGridRows = [];
+      if (state.deviceCurveRows.length) buildGeneratedGridFromDeviceCurves(false);
       renderFileHint();
       renderSummary();
+      renderPresetTargetPreview();
+      renderAssignmentTable();
       drawPlot();
     });
     bindFile("appModelScoreFile", "scoreRows", "score");
     bindFile("appModelGridFile", "gridRows", "grid");
     bindFile("appModelKernelFile", "kernelRows", "kernels");
     bindFile("appModelTargetFile", "targetRows", "targets");
+    bindFile("appModelDeviceCurveFile", "deviceCurveRows", "device curves");
     bindFile("appModelMetricsFile", "metricsRows", "metrics");
     $("appModelValidateButton").addEventListener("click", validateModel);
     $("appModelFitButton").addEventListener("click", fitModelCurves);
+    $("appModelDownloadTargetButton")?.addEventListener("click", downloadPresetTargets);
     $("appModelDownloadButton").addEventListener("click", downloadReport);
     $("appModelClearButton").addEventListener("click", clearState);
+    $("appModelAssignmentTable")?.addEventListener("click", event => {
+      const button = event.target.closest("[data-app-target-device]");
+      if (!button) return;
+      copyAssignmentTargetToFitPanel(Number(button.dataset.appTargetDevice));
+    });
     $("appModelScoreSource").addEventListener("change", () => {
       validateModel(false);
       fitModelCurves(false);
@@ -164,6 +236,8 @@
     renderFileHint();
     renderSummary();
     renderEmptyTables();
+    renderPresetTargetPreview();
+    renderAssignmentTable();
     renderSeeds2dResult(null);
   }
 
@@ -175,14 +249,16 @@
       if (!file) return;
       try {
         const text = await file.text();
-        state[stateKey] = parseCsv(text);
+        state[stateKey] = stateKey === "deviceCurveRows" ? parseDeviceCurveCsv(text) : parseCsv(text);
         state.fileNames[nameKey] = file.name;
         setStatus(`Loaded ${file.name}: ${state[stateKey].length} rows.`);
         if (stateKey === "kernelRows") renderKernelTable();
         if (stateKey === "targetRows") renderTargetTable();
+        if (stateKey === "deviceCurveRows") buildGeneratedGridFromDeviceCurves(true);
         if (stateKey === "metricsRows") renderSummary();
-        if (stateKey === "scoreRows" || stateKey === "gridRows" || stateKey === "targetRows") drawPlot();
+        if (stateKey === "scoreRows" || stateKey === "gridRows" || stateKey === "targetRows" || stateKey === "deviceCurveRows") drawPlot();
         renderSummary();
+        renderPresetTargetPreview();
       } catch (error) {
         setStatus(`Failed to read ${file.name}: ${error.message}`, true);
       }
@@ -194,18 +270,22 @@
     state.gridRows = [];
     state.kernelRows = [];
     state.targetRows = [];
+    state.deviceCurveRows = [];
+    state.generatedGridRows = [];
     state.metricsRows = [];
     state.fitRows = [];
     state.validationRows = [];
     state.seeds2dLastResult = null;
     state.fileNames = {};
-    ["appModelScoreFile", "appModelGridFile", "appModelKernelFile", "appModelTargetFile", "appModelMetricsFile"].forEach(id => {
+    ["appModelScoreFile", "appModelGridFile", "appModelKernelFile", "appModelTargetFile", "appModelDeviceCurveFile", "appModelMetricsFile"].forEach(id => {
       const input = $(id);
       if (input) input.value = "";
     });
     renderSummary();
     renderKernelTable();
+    renderAssignmentTable();
     renderEmptyTables();
+    renderPresetTargetPreview();
     renderSeeds2dResult(null);
     setStatus("Application model inputs cleared.");
     drawPlot();
@@ -256,6 +336,161 @@
     });
   }
 
+  function parseDeviceCurveCsv(text) {
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = normalized.split("\n");
+    const markerIndex = lines.findIndex(line => line.trim().toLowerCase().startsWith("# curve_points"));
+    if (markerIndex >= 0 && markerIndex + 1 < lines.length) {
+      const curveRows = parseCsv(lines.slice(markerIndex + 1).join("\n"));
+      if (curveRows.length) return curveRows;
+    }
+    return parseCsv(text);
+  }
+
+  function targetLibrary() {
+    return APP_MODEL_TARGET_LIBRARY[state.preset] || null;
+  }
+
+  function targetData() {
+    return window.PCB_GAUSSIAN_APP_MODEL_TARGET_DATA?.[state.preset] || null;
+  }
+
+  function targetXGrid(library = targetLibrary()) {
+    if (!library) return [];
+    const xs = [];
+    const step = library.xStep || 0.05;
+    for (let x = library.xMin; x <= library.xMax + step / 2; x += step) {
+      xs.push(Number(x.toFixed(8)));
+    }
+    return xs;
+  }
+
+  function targetGridRowsFromLibrary(library = targetLibrary()) {
+    if (!library?.pairs?.length) return [];
+    const dataRows = targetData()?.gridRows;
+    if (Array.isArray(dataRows) && dataRows.length) return dataRows;
+    return targetXGrid(library).map(x => {
+      const row = { VG: x };
+      library.pairs.forEach(pair => {
+        row[pair.basis] = gaussianValue(x, pair.target.A, pair.target.mu, pair.target.sigma, pair.target.baseline);
+      });
+      return row;
+    });
+  }
+
+  function parseDeviceNumber(value) {
+    if (value === null || value === undefined) return NaN;
+    const text = String(value).trim();
+    const match = text.match(/D?\s*(\d+)/i);
+    return match ? Number(match[1]) : numberValue(value);
+  }
+
+  function rowXValue(row) {
+    const columns = ["x_V", "x", "VG", "VG_V", "gate_V", "gate_voltage", "dac_V"];
+    for (const column of columns) {
+      const value = numberValue(row[column]);
+      if (Number.isFinite(value)) return value;
+    }
+    return NaN;
+  }
+
+  function rowYValue(row) {
+    const columns = ["measured_y", "I_uA", "current_uA", "current", "y", "fit_y", "value"];
+    for (const column of columns) {
+      const value = numberValue(row[column]);
+      if (Number.isFinite(value)) return value;
+    }
+    return NaN;
+  }
+
+  function latestDeviceCurveRows(device) {
+    const rows = state.deviceCurveRows.filter(row => parseDeviceNumber(row.device) === device);
+    if (!rows.length) return [];
+    const iterValues = rows.map(row => numberValue(row.iter)).filter(Number.isFinite);
+    if (iterValues.length) {
+      const maxIter = Math.max(...iterValues);
+      return rows.filter(row => numberValue(row.iter) === maxIter);
+    }
+    return rows;
+  }
+
+  function deviceCurvePoints(device) {
+    const rows = latestDeviceCurveRows(device);
+    return rows.map(row => [rowXValue(row), rowYValue(row)])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+      .sort((a, b) => a[0] - b[0]);
+  }
+
+  function normalizeArray(values) {
+    const finite = values.filter(Number.isFinite);
+    if (!finite.length) return values.map(() => NaN);
+    const minValue = Math.min(...finite);
+    const shifted = values.map(value => Number.isFinite(value) ? Math.max(0, value - minValue) : NaN);
+    const top = Math.max(...shifted.filter(Number.isFinite), 0);
+    if (top <= 0) return shifted;
+    return shifted.map(value => Number.isFinite(value) ? value / top : NaN);
+  }
+
+  function interpolatePoints(points, x) {
+    if (!points.length) return NaN;
+    if (x <= points[0][0]) return points[0][1];
+    const last = points[points.length - 1];
+    if (x >= last[0]) return last[1];
+    for (let index = 1; index < points.length; index += 1) {
+      const left = points[index - 1];
+      const right = points[index];
+      if (x <= right[0]) {
+        const denom = right[0] - left[0];
+        const t = denom ? (x - left[0]) / denom : 0;
+        return left[1] + t * (right[1] - left[1]);
+      }
+    }
+    return NaN;
+  }
+
+  function buildGeneratedGridFromDeviceCurves(updateStatus = false) {
+    const library = targetLibrary();
+    state.generatedGridRows = [];
+    if (!library?.pairs?.length || !state.deviceCurveRows.length) return [];
+    const xs = targetXGrid(library);
+    const devicePoints = new Map();
+    const missing = [];
+    library.pairs.forEach(pair => {
+      pair.devices.forEach(device => {
+        if (devicePoints.has(device.device)) return;
+        const points = deviceCurvePoints(device.device);
+        if (points.length < 4) missing.push(`D${device.device}`);
+        devicePoints.set(device.device, points);
+      });
+    });
+    const rows = xs.map(x => ({ VG: x }));
+    library.pairs.forEach(pair => {
+      const summed = xs.map(x => {
+        let total = 0;
+        let count = 0;
+        pair.devices.forEach(device => {
+          const points = devicePoints.get(device.device) || [];
+          const y = interpolatePoints(points, x);
+          if (Number.isFinite(y)) {
+            total += y;
+            count += 1;
+          }
+        });
+        return count ? total : NaN;
+      });
+      const normalized = normalizeArray(summed);
+      rows.forEach((row, index) => {
+        row[pair.basis] = normalized[index];
+      });
+    });
+    state.generatedGridRows = rows;
+    if (updateStatus) {
+      const source = missing.length ? `Generated ADC-pair curves with missing/short device curves: ${missing.join(", ")}.` : "Generated ADC-pair curves from loaded device curves.";
+      setStatus(source, Boolean(missing.length));
+    }
+    return rows;
+  }
+
   function renderFileHint() {
     const preset = PRESETS[state.preset] || PRESETS.nab_machine_temperature;
     const hint = [
@@ -265,6 +500,7 @@
       `Curve grid CSV: ${preset.gridFile}`,
       `Selected kernels CSV: ${preset.kernelFile}`,
       `Fitting target CSV: ${preset.targetFile || "(optional; use Fit curves to estimate from loaded grid)"}`,
+      `Generated device curves CSV: ${preset.deviceCurveFile || "(optional; device-cal log with # curve_points section or regular device/x/y CSV)"}`,
       `Metrics CSV: ${preset.metricsFile}`,
       "",
       preset.scoreHint
@@ -279,6 +515,8 @@
     metrics.push(["Grid rows", state.gridRows.length]);
     metrics.push(["Kernels", state.kernelRows.length]);
     metrics.push(["Targets", state.targetRows.length]);
+    metrics.push(["Device curve rows", state.deviceCurveRows.length]);
+    metrics.push(["Generated grid rows", state.generatedGridRows.length]);
     metrics.push(["Metrics rows", state.metricsRows.length]);
     Object.entries(state.fileNames).forEach(([key, value]) => metrics.push([`${key} file`, value]));
     if (state.metricsRows[0]) {
@@ -291,6 +529,7 @@
     )).join("");
     renderKernelTable();
     renderTargetTable();
+    renderAssignmentTable();
     $("appModelDownloadButton").disabled = !(state.fitRows.length || state.validationRows.length || state.targetRows.length);
   }
 
@@ -321,11 +560,12 @@
   function renderTargetTable() {
     const tbody = $("appModelTargetTable");
     if (!tbody) return;
-    if (!state.targetRows.length) {
-      tbody.innerHTML = `<tr><td colspan="8">No fitting-target CSV loaded.</td></tr>`;
+    const rows = effectiveTargetRows();
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="8">No fitting-target CSV loaded or preset target available.</td></tr>`;
       return;
     }
-    tbody.innerHTML = state.targetRows.slice(0, 36).map(row => {
+    tbody.innerHTML = rows.slice(0, 36).map(row => {
       const cells = [
         row.basis || row.curve || row.group || "",
         formatNumber(numberValue(row.target_A_amp_norm || row.A_amp), 4),
@@ -340,11 +580,185 @@
     }).join("");
   }
 
+  function renderAssignmentTable() {
+    const tbody = $("appModelAssignmentTable");
+    if (!tbody) return;
+    const library = APP_MODEL_TARGET_LIBRARY[state.preset];
+    if (!library?.pairs?.length) {
+      tbody.innerHTML = `<tr><td colspan="10">No preset device-to-target assignment for this model.</td></tr>`;
+      return;
+    }
+    const rows = [];
+    library.pairs.forEach(pair => {
+      pair.devices.forEach(device => {
+        rows.push({ pair, device });
+      });
+    });
+    tbody.innerHTML = rows.map(({ pair, device }) => (
+      `<tr>` +
+      `<td>ADC ${escapeHtml(String(pair.adcPair))}</td>` +
+      `<td>D${escapeHtml(String(device.device))}</td>` +
+      `<td>${escapeHtml(device.label || "")}</td>` +
+      `<td>${formatNumber(device.A_uA, 5)}</td>` +
+      `<td>${formatNumber(device.mu, 3)}</td>` +
+      `<td>${formatNumber(device.sigma, 3)}</td>` +
+      `<td>${escapeHtml(String(device.vmuCode))}</td>` +
+      `<td>${escapeHtml(String(device.vstartCode))}</td>` +
+      `<td>${escapeHtml(pair.basis)}</td>` +
+      `<td><button type="button" class="mini-button" data-app-target-device="${escapeHtml(String(device.device))}">Use</button></td>` +
+      `</tr>`
+    )).join("");
+  }
+
+  function effectiveTargetRows() {
+    if (state.targetRows.length) return state.targetRows;
+    const dataRows = targetData()?.targetRows;
+    if (Array.isArray(dataRows) && dataRows.length) return dataRows;
+    const library = APP_MODEL_TARGET_LIBRARY[state.preset];
+    if (!library?.pairs?.length) return [];
+    return library.pairs.map(pair => ({
+      application: state.preset,
+      basis: pair.basis,
+      adc_pair: pair.adcPair,
+      target_A_amp_norm: pair.target.A,
+      target_mu_V: pair.target.mu,
+      target_sigma_V: pair.target.sigma,
+      target_baseline_norm: pair.target.baseline,
+      fit_r2: pair.target.r2,
+      estimated_pair_A_uA: sum(pair.devices.map(device => Number(device.A_uA) || 0)),
+      devices: pair.devices.map(device => `D${device.device}:${device.label}`).join(" + "),
+      device_codes: pair.devices.map(device => `D${device.device}(Vmu=${device.vmuCode},Vstart=${device.vstartCode})`).join(" + "),
+      target_note: "Preset target generated from the model library."
+    }));
+  }
+
+  function findAssignedDevice(deviceNumber) {
+    const library = targetLibrary();
+    if (!library?.pairs) return null;
+    for (const pair of library.pairs) {
+      const device = pair.devices.find(item => Number(item.device) === Number(deviceNumber));
+      if (device) return { pair, device };
+    }
+    return null;
+  }
+
+  function copyAssignmentTargetToFitPanel(deviceNumber) {
+    const found = findAssignedDevice(deviceNumber);
+    if (!found) return;
+    const { pair, device } = found;
+    if ($("fitDevice")) $("fitDevice").value = device.device;
+    if ($("fitTargetA")) $("fitTargetA").value = Number(device.A_uA).toPrecision(8);
+    if ($("fitTargetMu")) $("fitTargetMu").value = Number(device.mu).toFixed(6);
+    if ($("fitTargetSigma")) $("fitTargetSigma").value = Math.abs(Number(device.sigma)).toFixed(6);
+    if ($("deviceCalTargetA")) $("deviceCalTargetA").value = Number(device.A_uA).toPrecision(8);
+    if ($("deviceCalTargetMu")) $("deviceCalTargetMu").value = Number(device.mu).toFixed(6);
+    if ($("deviceCalTargetSigma")) $("deviceCalTargetSigma").value = Math.abs(Number(device.sigma)).toFixed(6);
+    setStatus(`Copied D${device.device} target for ADC ${pair.adcPair}: A ${formatNumber(device.A_uA, 5)} uA, mu ${formatNumber(device.mu, 3)} V, sigma ${formatNumber(device.sigma, 3)} V.`);
+  }
+
+  function downloadPresetTargets() {
+    const library = targetLibrary();
+    if (!library?.pairs?.length) {
+      setStatus("No preset targets are available for this model.", true);
+      return;
+    }
+    const curveRows = targetGridRowsFromLibrary(library).map(row => {
+      const out = { row_type: "adc_pair_target_curve", VG: row.VG };
+      library.pairs.forEach(pair => {
+        out[pair.basis] = row[pair.basis];
+      });
+      return out;
+    });
+    const deviceRows = [];
+    library.pairs.forEach(pair => {
+      deviceRows.push({
+        row_type: "adc_pair_target",
+        adc_pair: pair.adcPair,
+        basis: pair.basis,
+        target_A_norm: pair.target.A,
+        target_mu_V: pair.target.mu,
+        target_sigma_V: pair.target.sigma,
+        target_baseline_norm: pair.target.baseline,
+        target_r2: pair.target.r2
+      });
+      pair.devices.forEach(device => {
+        deviceRows.push({
+          row_type: "device_fit_target",
+          adc_pair: pair.adcPair,
+          device: device.device,
+          label: device.label,
+          target_A_uA: device.A_uA,
+          target_mu_V: device.mu,
+          target_sigma_V: device.sigma,
+          seed_vmu_code: device.vmuCode,
+          seed_vstart_code: device.vstartCode,
+          target_r2: device.r2
+        });
+      });
+    });
+    const sections = [
+      "# device_and_adc_targets",
+      toCsv(deviceRows),
+      "",
+      "# adc_pair_target_curves",
+      toCsv(curveRows)
+    ].join("\n");
+    downloadText(`application_preset_targets_${state.preset}_${Date.now()}.csv`, sections);
+  }
+
   function renderEmptyTables() {
     $("appModelFitTable").innerHTML = `<tr><td colspan="8">No curve fit result yet.</td></tr>`;
     $("appModelValidationTable").innerHTML = `<tr><td colspan="3">No validation result yet.</td></tr>`;
     $("appModelPlotLegend").innerHTML = "";
     $("appModelPlotStatus").textContent = "No application model plotted yet.";
+  }
+
+  function renderPresetTargetPreview() {
+    const canvas = $("appModelTargetCanvas");
+    const status = $("appModelTargetStatus");
+    const legend = $("appModelTargetLegend");
+    if (!canvas) return;
+    const ctx = prepareCanvas(canvas);
+    clearCanvas(ctx, canvas);
+    const library = targetLibrary();
+    if (!library?.pairs?.length) {
+      drawEmptyMessage(ctx, canvas, "This preset does not define ADC target curves.");
+      if (status) status.textContent = "No preset target curves.";
+      if (legend) legend.innerHTML = "";
+      return;
+    }
+    const targetRows = targetGridRowsFromLibrary(library);
+    const generatedRows = state.generatedGridRows.length ? state.generatedGridRows : [];
+    const allX = targetRows.map(row => numberValue(row.VG));
+    const allY = [];
+    library.pairs.forEach(pair => {
+      targetRows.forEach(row => allY.push(numberValue(row[pair.basis])));
+      generatedRows.forEach(row => allY.push(numberValue(row[pair.basis])));
+    });
+    const scale = plotScale(canvas, minMax(allX), minMax(allY));
+    drawAxes(ctx, canvas, scale, "VG (V)", "normalized current");
+    const series = [];
+    library.pairs.forEach((pair, index) => {
+      const color = COLORS[index % COLORS.length];
+      const targetPoints = targetRows.map(row => [numberValue(row.VG), numberValue(row[pair.basis])])
+        .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+      drawLine(ctx, targetPoints, scale, color, 2.2);
+      series.push({ name: `ADC ${pair.adcPair} target`, color });
+      if (generatedRows.length) {
+        const generatedPoints = generatedRows.map(row => [numberValue(row.VG), numberValue(row[pair.basis])])
+          .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+        drawLine(ctx, generatedPoints, scale, color, 1.4, [5, 4]);
+      }
+    });
+    if (status) {
+      status.textContent = generatedRows.length
+        ? `Preset target curves with generated device-curve overlay (${generatedRows.length} VG points).`
+        : `Preset target curves for ${library.pairs.length} ADC pair(s). Load generated device curves to overlay validation curves.`;
+    }
+    if (legend) {
+      legend.innerHTML = series.map(item => `<span><i style="background:${item.color}"></i>${escapeHtml(item.name)}</span>`).join("") +
+        (generatedRows.length ? `<span><i style="background:#17323a"></i>dashed = generated from device curves</span>` : "");
+    }
   }
 
   function fitModelCurves(updateStatus = true) {
@@ -477,6 +891,10 @@
   }
 
   function validateSeeds(updateStatus) {
+    if (state.preset === "seeds_2d_adc_pair_basis" && targetLibrary()?.type === "adc_pair_basis") {
+      validateSeedsAdcPairBasis(updateStatus);
+      return;
+    }
     if (!state.scoreRows.length) {
       if (updateStatus) setStatus("Load a Seeds score CSV before validation.", true);
       return;
@@ -522,6 +940,105 @@
     });
     renderValidationTable();
     if (updateStatus) setStatus(`Seeds validation complete: test accuracy ${formatNumber(testMetrics.accuracy, 4)}.`);
+  }
+
+  function validateSeedsAdcPairBasis(updateStatus) {
+    const library = targetLibrary();
+    if (!state.scoreRows.length) {
+      if (updateStatus) setStatus("Load seeds_2d_adc_pair_scores.csv before ADC-pair validation.", true);
+      return;
+    }
+    let curveRows = state.generatedGridRows.length ? state.generatedGridRows : [];
+    let curveSource = state.generatedGridRows.length ? "generated from loaded device curves" : "";
+    if (!curveRows.length && state.gridRows.length) {
+      curveRows = state.gridRows;
+      curveSource = "loaded curve grid CSV";
+    }
+    if (!curveRows.length) {
+      curveRows = targetGridRowsFromLibrary(library);
+      curveSource = "preset target curves";
+    }
+    if (!curveRows.length) {
+      if (updateStatus) setStatus("No ADC-pair target or generated curve grid available.", true);
+      return;
+    }
+    const classIds = [1, 2, 3];
+    const rows = state.scoreRows.map(row => {
+      const truth = Math.round(numberValue(row.class));
+      const vg1 = numberValue(row.VG_dim_1);
+      const vg2 = numberValue(row.VG_dim_2);
+      const features = {};
+      library.pairs.forEach(pair => {
+        features[`pair_${pair.adcPair}_dim_1`] = interpolateGridColumn(curveRows, pair.basis, vg1);
+        features[`pair_${pair.adcPair}_dim_2`] = interpolateGridColumn(curveRows, pair.basis, vg2);
+      });
+      const scores = adcPairReadoutScores(features, library.readoutWeights);
+      const predicted = classIds.reduce((best, classId) => scores[classId] > scores[best] ? classId : best, 1);
+      return {
+        truth,
+        predicted,
+        split: row.split || "all",
+        scores,
+        vg1,
+        vg2
+      };
+    }).filter(row => Number.isFinite(row.truth) && Number.isFinite(row.predicted));
+    if (!rows.length) {
+      if (updateStatus) setStatus("No usable ADC-pair validation rows found.", true);
+      return;
+    }
+    const allMetrics = classificationMetrics(rows, classIds);
+    const testRows = rows.filter(row => String(row.split).toLowerCase() === "test");
+    const testMetrics = classificationMetrics(testRows.length ? testRows : rows, classIds);
+    const targetRows = targetGridRowsFromLibrary(library);
+    const similarities = library.pairs.map(pair => {
+      const target = targetRows.map(row => numberValue(row[pair.basis]));
+      const generated = curveRows.map(row => numberValue(row[pair.basis]));
+      return { pair: pair.adcPair, similarity: cosineSimilarity(target, generated) };
+    });
+    state.validationRows = [
+      metricRow("Samples", rows.length, "Seeds ADC-pair"),
+      metricRow("Curve source", curveSource, "ADC-pair validation"),
+      metricRow("All accuracy", allMetrics.accuracy, "recomputed from curve grid"),
+      metricRow("Test accuracy", testMetrics.accuracy, testRows.length ? "test split" : "all rows fallback"),
+      metricRow("Test confusion matrix", matrixToText(testMetrics.matrix), "rows true, cols pred"),
+      metricRow("Pair target similarity", similarities.map(item => `ADC${item.pair}:${formatNumber(item.similarity, 4)}`).join(", "), curveSource)
+    ];
+    classIds.forEach((classId, index) => {
+      state.validationRows.push(metricRow(`Class ${classId} recall`, testMetrics.recall[index], "test split"));
+      state.validationRows.push(metricRow(`Class ${classId} precision`, testMetrics.precision[index], "test split"));
+    });
+    renderValidationTable();
+    if (updateStatus) setStatus(`Seeds ADC-pair validation complete from ${curveSource}: test accuracy ${formatNumber(testMetrics.accuracy, 4)}.`);
+  }
+
+  function adcPairReadoutScores(features, weights) {
+    const scores = { 1: weights.bias[0], 2: weights.bias[1], 3: weights.bias[2] };
+    Object.entries(features).forEach(([feature, value]) => {
+      const row = weights[feature];
+      if (!row || !Number.isFinite(value)) return;
+      [1, 2, 3].forEach(classId => {
+        scores[classId] += value * row[classId - 1];
+      });
+    });
+    return scores;
+  }
+
+  function cosineSimilarity(a, b) {
+    const n = Math.min(a.length, b.length);
+    let dot = 0;
+    let aa = 0;
+    let bb = 0;
+    for (let index = 0; index < n; index += 1) {
+      const x = numberValue(a[index]);
+      const y = numberValue(b[index]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      dot += x * y;
+      aa += x * x;
+      bb += y * y;
+    }
+    if (aa <= 0 || bb <= 0) return NaN;
+    return dot / Math.sqrt(aa * bb);
   }
 
   function renderValidationTable() {
@@ -595,13 +1112,29 @@
       predictedName: "",
       planText: ""
     };
-    if (!state.gridRows.length) {
-      state.seeds2dLastResult = result;
-      renderSeeds2dResult(result);
-      setSeeds2dStatus("Projection complete. Load class_axis_score_grid.csv to compute measured-kernel scores.", true);
-      return;
-    }
+    const library = targetLibrary();
     try {
+      if (library?.type === "adc_pair_basis") {
+        const curveRows = state.generatedGridRows.length ? state.generatedGridRows
+          : state.gridRows.length ? state.gridRows
+            : targetGridRowsFromLibrary(library);
+        const pairResult = adcPairScoreForProjection(projection, curveRows, library);
+        result.basisFeatures = pairResult.features;
+        result.scores = pairResult.scores;
+        result.terms = pairResult.terms;
+        result.predictedClass = [1, 2, 3].reduce((best, classId) => result.scores[classId] > result.scores[best] ? classId : best, 1);
+        result.predictedName = SEEDS_2D_MODEL.classNames[result.predictedClass] || "";
+        state.seeds2dLastResult = result;
+        renderSeeds2dResult(result);
+        setSeeds2dStatus(`ADC-pair score complete: predicted class ${result.predictedClass} ${result.predictedName}.`);
+        return;
+      }
+      if (!state.gridRows.length) {
+        state.seeds2dLastResult = result;
+        renderSeeds2dResult(result);
+        setSeeds2dStatus("Projection complete. Load class_axis_score_grid.csv to compute measured-kernel scores.", true);
+        return;
+      }
       [1, 2, 3].forEach(classId => {
         const cols = SEEDS_2D_MODEL.gridColumns[classId];
         const term1 = interpolateGridColumn(state.gridRows, cols[0], projection.vg[0]);
@@ -623,6 +1156,20 @@
     state.seeds2dLastResult = result;
     renderSeeds2dResult(result);
     setSeeds2dStatus(`2D score complete: predicted class ${result.predictedClass} ${result.predictedName}.`);
+  }
+
+  function adcPairScoreForProjection(projection, curveRows, library) {
+    const features = {};
+    const terms = {};
+    library.pairs.forEach(pair => {
+      const dim1 = interpolateGridColumn(curveRows, pair.basis, projection.vg[0]);
+      const dim2 = interpolateGridColumn(curveRows, pair.basis, projection.vg[1]);
+      features[`pair_${pair.adcPair}_dim_1`] = dim1;
+      features[`pair_${pair.adcPair}_dim_2`] = dim2;
+      terms[pair.adcPair] = [dim1, dim2];
+    });
+    const scores = adcPairReadoutScores(features, library.readoutWeights);
+    return { features, terms, scores };
   }
 
   function interpolateGridColumn(rows, column, x) {
@@ -684,6 +1231,10 @@
       setSeeds2dStatus("Run a measured-kernel 2D score first. Load class_axis_score_grid.csv if only projection is available.", true);
       return;
     }
+    if (targetLibrary()?.type === "adc_pair_basis") {
+      generateSeedsAdcPairProgramPlan(result);
+      return;
+    }
     if (!state.kernelRows.length) {
       setSeeds2dStatus("Load selected_kernels.csv to generate the program/readout plan.", true);
       return;
@@ -741,6 +1292,44 @@
     setSeeds2dStatus("Generated Seeds 2D device programming and readout plan.");
   }
 
+  function generateSeedsAdcPairProgramPlan(result) {
+    const library = targetLibrary();
+    const lines = [];
+    lines.push("Seeds 2D 4-ADC pair-basis operation plan");
+    lines.push("");
+    lines.push("1) Fit/program devices to their assigned target contribution curves");
+    library.pairs.forEach(pair => {
+      lines.push(`  ADC ${pair.adcPair} target: ${pair.basis}, A=${formatNumber(pair.target.A, 4)}, mu=${formatNumber(pair.target.mu, 3)} V, sigma=${formatNumber(pair.target.sigma, 3)} V`);
+      pair.devices.forEach(device => {
+        lines.push(`    D${device.device}: target A=${formatNumber(device.A_uA, 5)} uA, mu=${formatNumber(device.mu, 3)} V, sigma=${formatNumber(device.sigma, 3)} V, seed P${device.device},${device.vmuCode},${device.vstartCode}`);
+      });
+    });
+    lines.push("");
+    lines.push("2) Read four ADC pair-summed basis outputs at two projected gate values");
+    [0, 1].forEach(dim => {
+      const dimNumber = dim + 1;
+      const mv = Math.round(result.projection.vg[dim] * 1000);
+      lines.push(`  VG_dim_${dimNumber}: ${formatNumber(result.projection.vg[dim], 3)} V (${mv} mV)`);
+      library.pairs.forEach(pair => {
+        const term = result.terms?.[pair.adcPair]?.[dim] ?? NaN;
+        const devices = pair.devices.map(device => `D${device.device}`).join("+");
+        lines.push(`    ADC ${pair.adcPair}: ${devices}, activation=${formatNumber(term, 4)}`);
+      });
+    });
+    lines.push("");
+    lines.push("3) GUI/MCU readout");
+    [1, 2, 3].forEach(classId => {
+      lines.push(`  class ${classId} score = ${formatNumber(result.scores[classId], 4)}`);
+    });
+    lines.push(`  predicted class = ${result.predictedClass || ""} ${result.predictedName || ""}`);
+    lines.push("");
+    lines.push("Boundary: devices provide pair-summed Gaussian-like basis curves; projection, weighted readout, and argmax are system-level operations.");
+    result.planText = lines.join("\n");
+    const plan = $("seeds2dPlanOutput");
+    if (plan) plan.textContent = result.planText;
+    setSeeds2dStatus("Generated Seeds 2D ADC-pair target fitting and readout plan.");
+  }
+
   function adcMaskForRows(rows) {
     const mask = rows.reduce((acc, row) => {
       const adc = Math.round(numberValue(row.adc));
@@ -761,12 +1350,23 @@
     row.z_dim_2 = result.projection.z[1];
     row.VG_dim_1 = result.projection.vg[0];
     row.VG_dim_2 = result.projection.vg[1];
-    [1, 2, 3].forEach(classId => {
-      const terms = result.terms[classId] || [NaN, NaN];
-      row[`measured_term_dim_1_class_${classId}`] = terms[0];
-      row[`measured_term_dim_2_class_${classId}`] = terms[1];
-      row[`measured_score_class_${classId}`] = result.scores[classId];
-    });
+    if (targetLibrary()?.type === "adc_pair_basis") {
+      (targetLibrary().pairs || []).forEach(pair => {
+        const terms = result.terms[pair.adcPair] || [NaN, NaN];
+        row[`pair_${pair.adcPair}_dim_1`] = terms[0];
+        row[`pair_${pair.adcPair}_dim_2`] = terms[1];
+      });
+      [1, 2, 3].forEach(classId => {
+        row[`measured_score_class_${classId}`] = result.scores[classId];
+      });
+    } else {
+      [1, 2, 3].forEach(classId => {
+        const terms = result.terms[classId] || [NaN, NaN];
+        row[`measured_term_dim_1_class_${classId}`] = terms[0];
+        row[`measured_term_dim_2_class_${classId}`] = terms[1];
+        row[`measured_score_class_${classId}`] = result.scores[classId];
+      });
+    }
     row.predicted_class = result.predictedClass;
     row.predicted_name = result.predictedName;
     row.operation_plan = result.planText || "";
@@ -791,7 +1391,9 @@
     const ctx = prepareCanvas(canvas);
     clearCanvas(ctx, canvas);
     const preset = PRESETS[state.preset] || PRESETS.nab_machine_temperature;
-    if (state.gridRows.length) {
+    if (state.generatedGridRows.length) {
+      drawCurveGrid(ctx, canvas, state.generatedGridRows);
+    } else if (state.gridRows.length) {
       drawCurveGrid(ctx, canvas, state.gridRows);
     } else if (preset.kind === "nab" && state.scoreRows.length) {
       drawNabSeries(ctx, canvas, state.scoreRows);
@@ -1249,7 +1851,7 @@
   }
 
   function toCsv(rows) {
-    const headers = Object.keys(rows[0] || {});
+    const headers = Array.from(new Set(rows.flatMap(row => Object.keys(row || {}))));
     const lines = [headers.join(",")];
     rows.forEach(row => {
       lines.push(headers.map(header => csvCell(row[header])).join(","));

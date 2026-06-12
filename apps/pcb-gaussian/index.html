@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=656d368d0d02" />
+    <link rel="stylesheet" href="./styles.css?v=1ad6ac4ab30f" />
   </head>
   <body>
     <header class="app-header">
@@ -835,6 +835,10 @@
                 <input id="appModelTargetFile" type="file" accept=".csv,text/csv" />
               </label>
               <label>
+                Generated device curves CSV
+                <input id="appModelDeviceCurveFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label>
                 Metrics CSV
                 <input id="appModelMetricsFile" type="file" accept=".csv,text/csv" />
               </label>
@@ -849,6 +853,7 @@
             <div class="button-row app-model-actions">
               <button id="appModelValidateButton" class="primary">Validate model</button>
               <button id="appModelFitButton">Fit curves</button>
+              <button id="appModelDownloadTargetButton">Download preset targets</button>
               <button id="appModelDownloadButton" disabled>Download report CSV</button>
             </div>
             <p class="hint status-line" id="appModelStatus">Load processed application CSV files, then run validation or curve fitting.</p>
@@ -881,6 +886,26 @@
             </div>
           </article>
         </div>
+
+        <article class="panel app-model-target-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">preset target</p>
+              <h2>ADC target curves and assigned devices</h2>
+            </div>
+            <p class="hint" id="appModelTargetStatus">Select a preset with target curves.</p>
+          </div>
+          <canvas id="appModelTargetCanvas" height="280"></canvas>
+          <div id="appModelTargetLegend" class="plot-legend"></div>
+          <div class="table-wrap app-model-assignment-wrap">
+            <table class="app-model-table">
+              <thead>
+                <tr><th>ADC</th><th>Device</th><th>Code label</th><th>A target uA</th><th>mu target V</th><th>sigma target V</th><th>Vmu code</th><th>Vstart code</th><th>ADC target</th><th>Fit panel</th></tr>
+              </thead>
+              <tbody id="appModelAssignmentTable"></tbody>
+            </table>
+          </div>
+        </article>
 
         <article class="panel plot-panel app-model-plot-panel">
           <div class="panel-title">
@@ -1116,7 +1141,8 @@
     </main>
 
   <script src="./app.js?v=8d5474e159bc"></script>
-    <script src="./application_models.js?v=20260611-app-models"></script>
+    <script src="./application_model_target_data.js?v=20260612-app-target-grid"></script>
+    <script src="./application_models.js?v=20260612-app-model-targets"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>
     <script src="./gate_probe_step.js?v=20260602-curve-ml"></script>
     <script src="./fit_control.js?v=20260602-curve-ml"></script>
