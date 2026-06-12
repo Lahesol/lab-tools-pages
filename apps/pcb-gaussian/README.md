@@ -60,3 +60,11 @@ powershell -ExecutionPolicy Bypass -File .\trust_https_cert_current_user.ps1
   - DAC2 X-axis plot shows ADC0-ADC3 by default.
 - MAX4581 is not controlled directly by the GUI. It is enabled only inside firmware during MAX5488 programming.
 - Logs are accumulated in browser memory and can be downloaded as CSV/TXT.
+
+## Device Cal Median Target Fitting
+
+- The `Device cal` tab includes `Run median target fit` for browser-only fitting.
+- This mode measures one device at a time: all devices are set to `Off M/S`, the selected device is programmed, optional dummy sweeps are discarded, then the measured curve is fitted.
+- `Match target = Median from current` first measures the selected batch at the `Init M/S` condition and uses the median fitted A/mu/sigma as the fixed common target.
+- `Match target = Manual A/mu/sigma` uses the target fields directly.
+- `Save fit package` exports Origin-ready CSV files: initial/final summaries, iteration log, curve points, initial/final XY matrices, all-step XY matrix, manifest, and target JSON. In Chrome/Edge it can save to a selected folder; otherwise files are downloaded individually.

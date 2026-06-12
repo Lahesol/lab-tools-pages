@@ -723,6 +723,53 @@ tr:hover td { background: #fbf5ed; }
   font-size: 11px;
   padding: 7px 8px;
 }
+
+.app-model-actions {
+  margin-top: 14px;
+}
+.app-model-hint {
+  min-height: 128px;
+  margin-top: 14px;
+  font-size: 12px;
+}
+.app-model-kernel-wrap {
+  max-height: 295px;
+}
+.app-model-kernel-wrap table {
+  min-width: 900px;
+}
+.app-model-result-grid {
+  margin-top: 16px;
+}
+.app-model-result-wrap {
+  max-height: 310px;
+}
+.app-model-table th,
+.app-model-table td {
+  white-space: nowrap;
+}
+.app-model-plot-panel {
+  margin-top: 16px;
+}
+#appModelPlotCanvas {
+  width: 100%;
+  display: block;
+}
+.app-model-live-panel {
+  margin-top: 16px;
+}
+.seeds-2d-input-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.seeds-2d-result-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.seeds-2d-plan-output {
+  min-height: 180px;
+  margin-top: 12px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
 .target-search-panel {
   margin-top: 16px;
 }
@@ -761,7 +808,7 @@ tr:hover td { background: #fbf5ed; }
   max-width: 210px;
 }
 @media (max-width: 980px) {
-  .app-header, .connection-card, .grid.two, .overview, .plot-grid, .fit-grid, .compact-fit-grid, .device-cal-grid {
+  .app-header, .connection-card, .grid.two, .overview, .plot-grid, .fit-grid, .compact-fit-grid, .device-cal-grid, .seeds-2d-input-grid, .seeds-2d-result-grid {
     grid-template-columns: 1fr;
   }
   .app-header {

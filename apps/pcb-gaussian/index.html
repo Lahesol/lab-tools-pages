@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=f76fd8da9655" />
+    <link rel="stylesheet" href="./styles.css?v=cf50792ee6b8" />
   </head>
   <body>
     <header class="app-header">
@@ -63,6 +63,7 @@
         <button class="tab" data-tab="digipot">MAX5488</button>
         <button class="tab" data-tab="device-tune">Device tune</button>
         <button class="tab" data-tab="device-cal">Device cal</button>
+        <button class="tab" data-tab="applications">Applications</button>
         <button class="tab" data-tab="adc">TIA / ADC</button>
         <button class="tab" data-tab="dfu">DFU</button>
       </section>
@@ -676,13 +677,21 @@
             <label class="inline-field">Y <select id="deviceCalYMode"><option value="current">I_uA</option><option value="voltage">V_AIN</option><option value="raw">ADC raw</option></select></label>
             <label class="inline-field">Objective <select id="deviceCalObjective"><option value="shape" selected>Shape A/sigma</option><option value="a_mu">A/mu</option><option value="curve">Curve ML match</option></select></label>
             <label class="inline-field">Curve ref <select id="deviceCalCurveReference"><option value="median" selected>Batch median</option><option value="target">Target Gaussian</option></select></label>
+            <label class="inline-field">Match target <select id="deviceCalMatchTarget"><option value="median" selected>Median from current</option><option value="manual">Manual A/mu/sigma</option></select></label>
             <label class="inline-field">Curve tol <input id="deviceCalCurveTol" type="number" value="0.001" min="0" step="0.0001" /></label>
+            <label class="inline-field">Sim target <input id="deviceCalSimilarityTarget" type="number" value="0.95" min="0" max="1" step="0.01" /></label>
             <label class="inline-field">Max iter <input id="deviceCalMaxIter" type="number" value="20" min="1" max="100" step="1" /></label>
             <label class="inline-field">Learn rate <input id="deviceCalLearningRate" type="number" value="0.5" min="0.01" max="2" step="0.05" /></label>
             <label class="inline-field">mu tol <input id="deviceCalMuTol" type="number" value="0.05" min="0" step="0.01" /></label>
             <label class="inline-field">A tol <input id="deviceCalATol" type="number" value="0.002" min="0" step="0.0005" /></label>
             <label class="inline-field">sigma tol <input id="deviceCalSigmaTol" type="number" value="0.35" min="0" step="0.05" /></label>
             <label class="inline-field">Settle ms <input id="deviceCalSettleMs" type="number" value="1000" min="0" max="30000" step="100" /></label>
+            <label class="inline-field">Init M <input id="deviceCalInitMuCode" type="number" value="0" min="0" max="255" step="1" /></label>
+            <label class="inline-field">Init S <input id="deviceCalInitVstartCode" type="number" value="100" min="0" max="255" step="1" /></label>
+            <label class="inline-field">Off M <input id="deviceCalOffMuCode" type="number" value="0" min="0" max="255" step="1" /></label>
+            <label class="inline-field">Off S <input id="deviceCalOffVstartCode" type="number" value="20" min="0" max="255" step="1" /></label>
+            <label class="inline-field">Dummy <input id="deviceCalDummySweeps" type="number" value="1" min="0" max="5" step="1" /></label>
+            <label class="inline-field">Max dCode <input id="deviceCalMaxCodeDelta" type="number" value="24" min="1" max="255" step="1" /></label>
             <label class="inline-field">mu gain <input id="deviceCalMuGain" type="number" value="1" step="0.1" /></label>
             <label class="inline-field">Vstart gain <input id="deviceCalVstartGain" type="number" value="1" step="0.1" /></label>
             <label class="inline-field">mu->-Vstart <input id="deviceCalMuVstartGain" type="number" value="1" step="0.1" /></label>
@@ -691,10 +700,13 @@
             <label class="checkbox inline-check"><input id="deviceCalPerDeviceIter" type="checkbox" checked /> Per-device iter</label>
             <button id="deviceCalLoadBatchButton">Load batch map</button>
             <button id="deviceCalSweepFitButton">Sweep + fit once</button>
+            <button id="deviceCalMedianFitButton" class="primary">Run median target fit</button>
             <button id="deviceCalAutoButton" class="primary">Auto fit 8 devices</button>
             <button id="deviceCalStopButton" disabled>Stop</button>
             <button id="deviceCalDownloadButton" disabled>Download log+curves CSV</button>
+            <button id="deviceCalPackageButton" disabled>Save fit package</button>
           </div>
+          <p class="hint">Median target fit measures one device at a time: all devices are set to Off M/S, the selected device is programmed to the working code, dummy sweeps can be discarded, then each iteration is logged for package export.</p>
           <div id="deviceCalGrid" class="device-cal-grid"></div>
         </article>
         <article class="panel plot-panel device-cal-overlay-panel">
@@ -779,6 +791,160 @@
           <textarea id="deviceTargetCommandOutput" class="target-search-output" readonly spellcheck="false">Use Generate command after setting candidate shifts.</textarea>
           <div id="deviceTargetBestSummary" class="device-cal-lut-summary">No target-search summary loaded.</div>
         </article>
+      </section>
+
+      <section id="tab-applications" class="tab-panel">
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">application model</p>
+                <h2>Curve fitting and validation</h2>
+              </div>
+              <button id="appModelClearButton">Clear</button>
+            </div>
+            <div class="form-grid">
+              <label>
+                Model preset
+                <select id="appModelPreset">
+                  <option value="nab_machine_temperature">NAB machine temperature</option>
+                  <option value="nab_machine_temperature_data_new_optimized">NAB data_new optimized mapping</option>
+                  <option value="seeds_ovr_classifier">Seeds OVR class-score</option>
+                  <option value="seeds_ovr_data_new_optimized">Seeds OVR data_new optimized</option>
+                  <option value="seeds_shared_axis_data_new_curves">Seeds shared-axis distinct curves</option>
+                  <option value="seeds_2d_system_data_new">Seeds 2D system measured-kernel</option>
+                  <option value="seeds_lda_classifier">Seeds LDA projection</option>
+                  <option value="seeds_additive_1d_kernel_sum">Seeds additive 1D kernel sum</option>
+                </select>
+              </label>
+              <label>
+                Validation / score CSV
+                <input id="appModelScoreFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label>
+                Curve grid CSV
+                <input id="appModelGridFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label>
+                Selected kernels CSV
+                <input id="appModelKernelFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label>
+                Metrics CSV
+                <input id="appModelMetricsFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label>
+                Score source
+                <select id="appModelScoreSource">
+                  <option value="measured" selected>measured / hardware-like score</option>
+                  <option value="target">target score when available</option>
+                </select>
+              </label>
+            </div>
+            <div class="button-row app-model-actions">
+              <button id="appModelValidateButton" class="primary">Validate model</button>
+              <button id="appModelFitButton">Fit curves</button>
+              <button id="appModelDownloadButton" disabled>Download report CSV</button>
+            </div>
+            <p class="hint status-line" id="appModelStatus">Load processed application CSV files, then run validation or curve fitting.</p>
+            <pre id="appModelFileHint" class="info-box app-model-hint"></pre>
+          </article>
+
+          <article class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">loaded files</p>
+                <h2>Model summary</h2>
+              </div>
+            </div>
+            <div id="appModelMetricGrid" class="fit-result-grid"></div>
+            <div class="table-wrap app-model-kernel-wrap">
+              <table class="app-model-table">
+                <thead>
+                  <tr><th>Group</th><th>Rank</th><th>Device</th><th>ADC</th><th>DAC</th><th>Vmu</th><th>Vstart</th><th>mu</th><th>sigma</th><th>R2</th></tr>
+                </thead>
+                <tbody id="appModelKernelTable"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <article class="panel plot-panel app-model-plot-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">curve / validation view</p>
+              <h2>Application response</h2>
+            </div>
+            <p class="hint" id="appModelPlotStatus">No application model plotted yet.</p>
+          </div>
+          <canvas id="appModelPlotCanvas" height="360"></canvas>
+          <div id="appModelPlotLegend" class="plot-legend"></div>
+        </article>
+
+        <article class="panel app-model-live-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">Seeds 2D system</p>
+              <h2>Input-to-score operation</h2>
+            </div>
+            <p class="hint">Load the 2D curve grid CSV for measured-kernel scoring.</p>
+          </div>
+          <div class="form-grid seeds-2d-input-grid">
+            <label>Area <input id="seeds2dArea" type="number" value="14.88" step="0.001" /></label>
+            <label>Perimeter <input id="seeds2dPerimeter" type="number" value="14.57" step="0.001" /></label>
+            <label>Compactness <input id="seeds2dCompactness" type="number" value="0.8811" step="0.0001" /></label>
+            <label>Kernel length <input id="seeds2dKernelLength" type="number" value="5.554" step="0.001" /></label>
+            <label>Kernel width <input id="seeds2dKernelWidth" type="number" value="3.333" step="0.001" /></label>
+            <label>Asymmetry <input id="seeds2dAsymmetry" type="number" value="1.018" step="0.001" /></label>
+            <label>Groove length <input id="seeds2dGrooveLength" type="number" value="4.956" step="0.001" /></label>
+            <label>Score row index <input id="seeds2dSampleIndex" type="number" value="1" min="0" step="1" /></label>
+          </div>
+          <div class="button-row app-model-actions">
+            <button id="seeds2dLoadSampleButton">Load score row</button>
+            <button id="seeds2dRunButton" class="primary">Run 2D score</button>
+            <button id="seeds2dPlanButton">Generate program plan</button>
+            <button id="seeds2dDownloadButton" disabled>Download result CSV</button>
+          </div>
+          <p class="hint status-line" id="seeds2dStatus">Use the Seeds 2D preset, load class_axis_score_grid.csv and selected_kernels.csv, then run a sample.</p>
+          <div id="seeds2dResultGrid" class="fit-result-grid seeds-2d-result-grid"></div>
+          <pre id="seeds2dPlanOutput" class="info-box seeds-2d-plan-output" spellcheck="false">No 2D system plan generated.</pre>
+        </article>
+
+        <div class="grid two app-model-result-grid">
+          <article class="panel table-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">curve fit</p>
+                <h2>Gaussian-like fit results</h2>
+              </div>
+            </div>
+            <div class="table-wrap app-model-result-wrap">
+              <table class="app-model-table">
+                <thead>
+                  <tr><th>Curve</th><th>A_amp</th><th>mu</th><th>sigma</th><th>baseline</th><th>R2</th><th>RMSE</th><th>N</th></tr>
+                </thead>
+                <tbody id="appModelFitTable"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel table-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow">validation</p>
+                <h2>Application metrics</h2>
+              </div>
+            </div>
+            <div class="table-wrap app-model-result-wrap">
+              <table class="app-model-table">
+                <thead>
+                  <tr><th>Metric</th><th>Value</th><th>Scope</th></tr>
+                </thead>
+                <tbody id="appModelValidationTable"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section id="tab-adc" class="tab-panel">
@@ -936,7 +1102,8 @@
 
     </main>
 
-  <script src="./app.js?v=1c0b131d38b0"></script>
+  <script src="./app.js?v=8d5474e159bc"></script>
+    <script src="./application_models.js?v=20260611-app-models"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>
     <script src="./gate_probe_step.js?v=20260602-curve-ml"></script>
     <script src="./fit_control.js?v=20260602-curve-ml"></script>

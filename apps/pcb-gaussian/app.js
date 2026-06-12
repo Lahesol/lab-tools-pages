@@ -22,7 +22,7 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-06-10-inverted-tia-1v03-adc1v2-calv3-dac165";
+const WEB_VERSION = "2026-06-11-device-cal-web-fit-package";
 const EXPECTED_FIRMWARE_VERSION = "2026-06-10-adc-1v2-dac165";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1";
 const APP_VERSION = WEB_VERSION;
@@ -4198,72 +4198,106 @@ function deviceCalBatchStart() {
   return value >= 9 ? 9 : 1;
 }
 
+function deviceCalBatchDevices(batchStart = deviceCalBatchStart()) {
+  const start = batchStart >= 9 ? 9 : 1;
+  return Array.from({ length: ADC_TIA_COUNT }, (_, index) => start + index);
+}
+
 function deviceCalDefaultDevice(index, batchStart = deviceCalBatchStart()) {
-  return clamp(batchStart + index, 1, 16);
+  return clamp(deviceCalBatchDevices(batchStart)[index] || batchStart + index, 1, 16);
 }
 
 function deviceCalDacForAdc(adcIndex) {
   return DEVICE_CAL_DAC_BY_ADC[adcIndex] || (adcIndex < 4 ? "D2" : "D1");
 }
 
+function deviceCalDacForDevice(device) {
+  return device >= 9 ? "D1" : "D2";
+}
+
+function adcIndexFromMappedDevice(device) {
+  const target = Math.round(Number(device));
+  for (let adcIndex = 0; adcIndex < ADC_DEVICE_MAP.length; adcIndex++) {
+    const devices = ADC_DEVICE_MAP[adcIndex];
+    if (Array.isArray(devices) && devices.includes(target)) return adcIndex;
+    if (Number(devices) === target) return adcIndex;
+  }
+  return NaN;
+}
+
+function deviceCalDeviceForSlot(slot, batchStart = deviceCalBatchStart()) {
+  return clamp(Math.round(Number($(`deviceCalDevice${slot}`)?.value) || deviceCalDefaultDevice(slot, batchStart)), 1, 16);
+}
+
+function deviceCalChannelForSlot(slot, batchStart = deviceCalBatchStart()) {
+  const device = deviceCalDeviceForSlot(slot, batchStart);
+  const mappedAdc = adcIndexFromMappedDevice(device);
+  const adcIndex = Number.isFinite(mappedAdc) ? mappedAdc : clamp(slot, 0, ADC_TIA_COUNT - 1);
+  return {
+    index: slot,
+    slot,
+    adcIndex,
+    label: `ADC${adcIndex}`,
+    xDac: deviceCalDacForDevice(device),
+    device,
+  };
+}
+
 function renderDeviceCalCards() {
   const host = $("deviceCalGrid");
   if (!host) return;
   const batchStart = deviceCalBatchStart();
-  host.innerHTML = Array.from({ length: ADC_TIA_COUNT }, (_, adcIndex) => {
-    const dac = deviceCalDacForAdc(adcIndex);
-    const device = deviceCalDefaultDevice(adcIndex, batchStart);
+  host.innerHTML = Array.from({ length: ADC_TIA_COUNT }, (_, slot) => {
+    const device = deviceCalDefaultDevice(slot, batchStart);
+    const channel = deviceCalChannelForSlot(slot, batchStart);
     return `
-      <article class="device-cal-card" data-channel="${adcIndex}">
+      <article class="device-cal-card" data-channel="${slot}">
         <header>
           <div>
-            <h3 id="deviceCalTitle${adcIndex}">D${device} / ${dac} / ADC${adcIndex}</h3>
-            <small>${adcSubLabel(adcIndex)}</small>
+            <h3 id="deviceCalTitle${slot}">D${device} / ${channel.xDac} / ADC${channel.adcIndex}</h3>
+            <small id="deviceCalSubTitle${slot}">${adcSubLabel(channel.adcIndex)}</small>
           </div>
-          <label>Device <input id="deviceCalDevice${adcIndex}" type="number" min="1" max="16" value="${device}" /></label>
+          <label>Device <input id="deviceCalDevice${slot}" type="number" min="1" max="16" value="${device}" /></label>
         </header>
-        <canvas id="deviceCalCanvas${adcIndex}" height="170"></canvas>
-        <div id="deviceCalResult${adcIndex}" class="device-cal-result">No fit yet.</div>
+        <canvas id="deviceCalCanvas${slot}" height="170"></canvas>
+        <div id="deviceCalResult${slot}" class="device-cal-result">No fit yet.</div>
       </article>
     `;
   }).join("");
-  for (let adcIndex = 0; adcIndex < ADC_TIA_COUNT; adcIndex++) {
-    $(`deviceCalDevice${adcIndex}`)?.addEventListener("input", updateDeviceCalCardTitles);
-    drawDeviceCalEmpty(adcIndex, "No fit yet.");
+  for (let slot = 0; slot < ADC_TIA_COUNT; slot++) {
+    $(`deviceCalDevice${slot}`)?.addEventListener("input", updateDeviceCalCardTitles);
+    drawDeviceCalEmpty(slot, "No fit yet.");
   }
   updateDeviceCalCardTitles();
 }
 
 function deviceCalLoadBatchMap() {
   const batchStart = deviceCalBatchStart();
-  for (let adcIndex = 0; adcIndex < ADC_TIA_COUNT; adcIndex++) {
-    const input = $(`deviceCalDevice${adcIndex}`);
-    if (input) input.value = deviceCalDefaultDevice(adcIndex, batchStart);
+  for (let slot = 0; slot < ADC_TIA_COUNT; slot++) {
+    const input = $(`deviceCalDevice${slot}`);
+    if (input) input.value = deviceCalDefaultDevice(slot, batchStart);
   }
   state.deviceCalResults = [];
   updateDeviceCalCardTitles();
-  for (let adcIndex = 0; adcIndex < ADC_TIA_COUNT; adcIndex++) drawDeviceCalEmpty(adcIndex, "No fit yet.");
-  deviceCalStatus(`Loaded D${batchStart}-D${batchStart + 7} batch map.`, "ok");
+  for (let slot = 0; slot < ADC_TIA_COUNT; slot++) drawDeviceCalEmpty(slot, "No fit yet.");
+  const adcs = [...new Set(deviceCalChannels().map(channel => channel.adcIndex))].sort((a, b) => a - b);
+  deviceCalStatus(`Loaded D${batchStart}-D${batchStart + 7} batch map (ADC${adcs.join("/ADC")} shared TIA).`, "ok");
 }
 
 function updateDeviceCalCardTitles() {
-  for (let adcIndex = 0; adcIndex < ADC_TIA_COUNT; adcIndex++) {
-    const device = clamp(Math.round(Number($(`deviceCalDevice${adcIndex}`)?.value) || deviceCalDefaultDevice(adcIndex)), 1, 16);
-    const title = $(`deviceCalTitle${adcIndex}`);
-    if (title) title.textContent = `D${device} / ${deviceCalDacForAdc(adcIndex)} / ADC${adcIndex}`;
+  for (let slot = 0; slot < ADC_TIA_COUNT; slot++) {
+    const channel = deviceCalChannelForSlot(slot);
+    const title = $(`deviceCalTitle${slot}`);
+    const subTitle = $(`deviceCalSubTitle${slot}`);
+    if (title) title.textContent = `D${channel.device} / ${channel.xDac} / ADC${channel.adcIndex}`;
+    if (subTitle) subTitle.textContent = adcSubLabel(channel.adcIndex);
   }
 }
 
 function deviceCalChannels() {
-  return Array.from({ length: ADC_TIA_COUNT }, (_, adcIndex) => ({
-    index: adcIndex,
-    adcIndex,
-    label: `ADC${adcIndex}`,
-    xDac: deviceCalDacForAdc(adcIndex),
-    device: clamp(Math.round(Number($(`deviceCalDevice${adcIndex}`)?.value) || deviceCalDefaultDevice(adcIndex)), 1, 16),
-  }));
+  const batchStart = deviceCalBatchStart();
+  return Array.from({ length: ADC_TIA_COUNT }, (_, slot) => deviceCalChannelForSlot(slot, batchStart));
 }
-
 function deviceCalObjective() {
   const value = $("deviceCalObjective")?.value || "shape";
   if (value === "curve") return "curve";
@@ -4414,14 +4448,16 @@ function syncDeviceCalSharedFitControls(target, tolerances, gains) {
 }
 
 function prepareDeviceCalSweepSelection(options = {}) {
-  if ($("sweepD1Enable")) $("sweepD1Enable").checked = true;
-  if ($("sweepD2Enable")) $("sweepD2Enable").checked = true;
+  const channels = deviceCalChannels();
+  const d1Adcs = [...new Set(channels.filter(channel => channel.xDac === "D1").map(channel => channel.adcIndex))].sort((a, b) => a - b);
+  const d2Adcs = [...new Set(channels.filter(channel => channel.xDac === "D2").map(channel => channel.adcIndex))].sort((a, b) => a - b);
+  if ($("sweepD1Enable")) $("sweepD1Enable").checked = d1Adcs.length > 0;
+  if ($("sweepD2Enable")) $("sweepD2Enable").checked = d2Adcs.length > 0;
   if (options.singleRepeat && $("sweepRepeats")) $("sweepRepeats").value = "1";
-  setPlotAdcSelection("D2", [0, 1, 2, 3]);
-  setPlotAdcSelection("D1", [4, 5, 6, 7]);
+  setPlotAdcSelection("D2", d2Adcs);
+  setPlotAdcSelection("D1", d1Adcs);
   if ($("plotYMode") && $("deviceCalYMode")) $("plotYMode").value = $("deviceCalYMode").value;
 }
-
 function deviceCalFitForChannel(channel) {
   const yMode = $("deviceCalYMode")?.value || "current";
   const data = gaussianFitSeries(channel.xDac, channel.adcIndex, yMode);
@@ -4505,6 +4541,8 @@ function updateDeviceCalOverlayButtons() {
   if (downloadButton) downloadButton.disabled = !rows.length;
   const logButton = $("deviceCalDownloadButton");
   if (logButton) logButton.disabled = !state.deviceCalHistory.length;
+  const packageButton = $("deviceCalPackageButton");
+  if (packageButton) packageButton.disabled = !rows.length;
 }
 
 function deviceCalCurrentSweepLog() {
@@ -5607,7 +5645,7 @@ function downloadAllDeviceTestCsv() {
 }
 function setDeviceCalControlsRunning(running) {
   state.deviceCalRunning = running;
-  ["deviceCalBatch", "deviceCalLoadBatchButton", "deviceCalSweepFitButton", "deviceCalAutoButton", "deviceCalLutStartButton", "deviceCalLutClearButton", "deviceCalLutDownloadButton", "deviceCalObjective", "deviceCalCurveReference", "deviceCalCurveTol", "deviceTargetRunBrowserButton", "deviceTargetCommandButton", "deviceTargetDownloadSeedButton", "deviceTargetDownloadSummaryButton", "allDeviceTestStartButton", "allDeviceTestDownloadButton"].forEach(id => {
+  ["deviceCalBatch", "deviceCalLoadBatchButton", "deviceCalSweepFitButton", "deviceCalMedianFitButton", "deviceCalAutoButton", "deviceCalPackageButton", "deviceCalLutStartButton", "deviceCalLutClearButton", "deviceCalLutDownloadButton", "deviceCalObjective", "deviceCalCurveReference", "deviceCalMatchTarget", "deviceCalCurveTol", "deviceCalSimilarityTarget", "deviceCalInitMuCode", "deviceCalInitVstartCode", "deviceCalOffMuCode", "deviceCalOffVstartCode", "deviceCalDummySweeps", "deviceCalMaxCodeDelta", "deviceTargetRunBrowserButton", "deviceTargetCommandButton", "deviceTargetDownloadSeedButton", "deviceTargetDownloadSummaryButton", "allDeviceTestStartButton", "allDeviceTestDownloadButton"].forEach(id => {
     const element = $(id);
     if (element) element.disabled = running;
   });
@@ -5715,6 +5753,440 @@ async function autoFitDeviceCalBatch() {
   }
 }
 
+function deviceCalMatchNumber(id, fallback, options = {}) {
+  return deviceCalNumber(id, fallback, options);
+}
+
+function deviceCalMatchOptions() {
+  return {
+    runId: `web_device_cal_${Date.now()}`,
+    matchTarget: $("deviceCalMatchTarget")?.value || "median",
+    initMuCode: deviceCalMatchNumber("deviceCalInitMuCode", 0, { min: 0, max: POT_MAX_CODE, integer: true }),
+    initVstartCode: deviceCalMatchNumber("deviceCalInitVstartCode", 100, { min: 0, max: POT_MAX_CODE, integer: true }),
+    offMuCode: deviceCalMatchNumber("deviceCalOffMuCode", 0, { min: 0, max: POT_MAX_CODE, integer: true }),
+    offVstartCode: deviceCalMatchNumber("deviceCalOffVstartCode", 20, { min: 0, max: POT_MAX_CODE, integer: true }),
+    dummySweeps: deviceCalMatchNumber("deviceCalDummySweeps", 1, { min: 0, max: 5, integer: true }),
+    maxCodeDelta: deviceCalMatchNumber("deviceCalMaxCodeDelta", 24, { min: 1, max: POT_MAX_CODE, integer: true }),
+    similarityTarget: deviceCalMatchNumber("deviceCalSimilarityTarget", 0.95, { min: 0, max: 1 }),
+    maxIter: deviceCalMatchNumber("deviceCalMaxIter", 20, { min: 1, max: 100, integer: true }),
+    settleMs: deviceCalMatchNumber("deviceCalSettleMs", 1000, { min: 0, max: 30000, integer: true }),
+    yMode: $("deviceCalYMode")?.value || "current",
+  };
+}
+
+function deviceCalChannelForDevice(device) {
+  const target = Math.round(Number(device));
+  const channels = deviceCalChannels();
+  const found = channels.find(channel => channel.device === target);
+  if (found) return found;
+  const adcIndex = adcIndexFromMappedDevice(target);
+  return {
+    index: clamp(target - deviceCalBatchStart(), 0, ADC_TIA_COUNT - 1),
+    slot: clamp(target - deviceCalBatchStart(), 0, ADC_TIA_COUNT - 1),
+    adcIndex: Number.isFinite(adcIndex) ? adcIndex : 0,
+    label: Number.isFinite(adcIndex) ? `ADC${adcIndex}` : "ADC0",
+    xDac: deviceCalDacForDevice(target),
+    device: target,
+  };
+}
+
+function deviceCalMatchDevices() {
+  return [...new Set(deviceCalChannels().map(channel => channel.device))].sort((a, b) => a - b);
+}
+
+async function deviceCalMatchProgramAllOff(opt) {
+  for (let device = 1; device <= 16; device++) {
+    if (state.deviceCalStopRequested) break;
+    await programLogicalDevice(device, opt.offMuCode, opt.offVstartCode);
+  }
+  renderDeviceTable();
+  loadDeviceState();
+}
+
+function deviceCalMatchApplySweepOptions(channel) {
+  const targetDac = channel.xDac;
+  for (const dac of ["D1", "D2"]) {
+    const enabled = dac === targetDac;
+    if ($(`sweep${dac}Enable`)) $(`sweep${dac}Enable`).checked = enabled;
+    if ($(`sweep${dac}Mode`)) $(`sweep${dac}Mode`).value = "Vhigh mV";
+    setPlotAdcSelection(dac, enabled ? [channel.adcIndex] : []);
+  }
+  if ($("sweepDwell")) $("sweepDwell").value = 0;
+  if ($("sweepRepeats")) $("sweepRepeats").value = 1;
+  if ($("plotYMode")) $("plotYMode").value = $("deviceCalYMode")?.value || "current";
+}
+
+function deviceCalMatchSweepLog() {
+  const sweep = deviceCalCurrentSweepLog();
+  return sweep ? { ...sweep } : null;
+}
+
+async function deviceCalMatchMeasureDevice(device, muCode, vstartCode, iter, phase, opt) {
+  const channel = deviceCalChannelForDevice(device);
+  await deviceCalMatchProgramAllOff(opt);
+  if (state.deviceCalStopRequested) throw new Error("Device matching stopped.");
+  await programLogicalDevice(device, muCode, vstartCode);
+  renderDeviceTable();
+  loadDeviceState();
+  if (opt.settleMs > 0 && !state.deviceCalStopRequested) await sleep(opt.settleMs);
+  deviceCalMatchApplySweepOptions(channel);
+  for (let dummy = 0; dummy < opt.dummySweeps; dummy++) {
+    if (state.deviceCalStopRequested) throw new Error("Device matching stopped.");
+    deviceCalStatus(`D${device} ${phase}: dummy sweep ${dummy + 1}/${opt.dummySweeps}.`, "warn");
+    await startSweep();
+  }
+  if (state.deviceCalStopRequested) throw new Error("Device matching stopped.");
+  deviceCalStatus(`D${device} ${phase}: sweep-fit at M${muCode}/S${vstartCode}.`, "warn");
+  await startSweep();
+  const sweep = deviceCalMatchSweepLog();
+  const data = gaussianFitSeries(channel.xDac, channel.adcIndex, opt.yMode);
+  const fit = { ...fitGaussianData(data), xDac: channel.xDac, adcIndex: channel.adcIndex, yMode: opt.yMode, data };
+  return {
+    time: new Date().toISOString(),
+    iter,
+    channel,
+    target: null,
+    fit,
+    error: null,
+    plan: null,
+    action: phase,
+    objective: "curve",
+    active: true,
+    converged: false,
+    matchPhase: phase,
+    sweep,
+    measuredMuCode: muCode,
+    measuredVstartCode: vstartCode,
+  };
+}
+
+function deviceCalMatchConverged(error, opt) {
+  const similarity = Number(error?.curve?.similarity);
+  return Boolean(error?.converged) || (Number.isFinite(similarity) && similarity >= opt.similarityTarget);
+}
+
+function deviceCalMatchFinalizeResult(result, target, opt, options = {}) {
+  const error = deviceCalTargetError(result.fit, target, deviceCalTolerances(), "curve");
+  const converged = deviceCalMatchConverged(error, opt);
+  let plan = null;
+  let action = options.action || result.action || "measured";
+  if (options.plan !== false && !converged) {
+    const gains = deviceCalGains();
+    plan = adjustmentPlanForFit(result.channel.device, target, result.fit, gains.muGain, gains.vstartGain, gains.muVstartGain);
+    plan = deviceCalLimitPlanCodeDelta(plan, opt.maxCodeDelta);
+    plan.target = target;
+    plan.controlTarget = target;
+    plan.programCommand = deviceCalProgramCommand(plan);
+    if (!planHasCodeChange(plan)) {
+      const nudged = planWithMinimumCodeNudge(plan);
+      if (nudged) {
+        plan = deviceCalLimitPlanCodeDelta(nudged, opt.maxCodeDelta);
+        plan.target = target;
+        plan.controlTarget = target;
+        plan.programCommand = deviceCalProgramCommand(plan);
+        action = "minimum code nudge";
+      } else {
+        action = "no code change";
+      }
+    } else {
+      action = "planned";
+    }
+  } else if (converged) {
+    action = "converged";
+  }
+  return { ...result, target, error, plan, action, converged };
+}
+
+function deviceCalLimitPlanCodeDelta(plan, maxDelta) {
+  if (!plan || !Number.isFinite(Number(maxDelta))) return plan;
+  const limited = { ...plan };
+  const limitAxis = (current, next) => current + clamp(next - current, -maxDelta, maxDelta);
+  const currentMu = Number(plan.currentMuCode);
+  const currentVs = Number(plan.currentVstartCode ?? plan.currentACode);
+  const requestedMu = Number(plan.nextMuCode);
+  const requestedVs = Number(plan.nextVstartCode ?? plan.nextACode);
+  if ([currentMu, currentVs, requestedMu, requestedVs].every(Number.isFinite)) {
+    limited.nextMuCode = clamp(Math.round(limitAxis(currentMu, requestedMu)), 0, POT_MAX_CODE);
+    limited.nextVstartCode = clamp(Math.round(limitAxis(currentVs, requestedVs)), 0, POT_MAX_CODE);
+    limited.nextACode = limited.nextVstartCode;
+    limited.nextMuV = potCodeToMuVoltage(limited.nextMuCode);
+    limited.nextVstartV = potCodeToVstartVoltage(limited.nextVstartCode);
+    limited.nextAV = limited.nextVstartV;
+    limited.codeDeltaLimited = limited.nextMuCode !== requestedMu || limited.nextVstartCode !== requestedVs;
+  }
+  return limited;
+}
+
+function deviceCalMatchAppendRows(rows) {
+  if (!Array.isArray(state.deviceCalHistory)) state.deviceCalHistory = [];
+  state.deviceCalHistory.push(...rows);
+  if (state.deviceCalHistory.length > 4000) state.deviceCalHistory.splice(0, state.deviceCalHistory.length - 4000);
+  updateDeviceCalOverlayButtons();
+  drawDeviceCalOverlay();
+}
+
+function deviceCalMatchLatestByDevice(rows) {
+  const latest = new Map();
+  for (const row of rows || []) {
+    if (row?.fit && row.channel?.device) latest.set(row.channel.device, row);
+  }
+  return Array.from(latest.values()).sort((a, b) => (a.channel?.index ?? 0) - (b.channel?.index ?? 0));
+}
+
+function deviceCalMatchSummary(results) {
+  const valid = (results || []).filter(result => result?.fit && result?.error);
+  const similarities = valid.map(result => Number(result.error?.curve?.similarity)).filter(Number.isFinite);
+  const losses = valid.map(result => Number(result.error?.curve?.loss ?? result.error?.norm)).filter(Number.isFinite);
+  return {
+    validCount: valid.length,
+    meanSimilarity: similarities.length ? average(similarities) : NaN,
+    minSimilarity: similarities.length ? Math.min(...similarities) : NaN,
+    meanLoss: losses.length ? average(losses) : NaN,
+  };
+}
+
+function deviceCalMatchSummaryText(results) {
+  const summary = deviceCalMatchSummary(results);
+  return `${summary.validCount} fit(s), mean sim ${Number.isFinite(summary.meanSimilarity) ? (summary.meanSimilarity * 100).toFixed(2) : "n/a"}%, min sim ${Number.isFinite(summary.minSimilarity) ? (summary.minSimilarity * 100).toFixed(2) : "n/a"}%, mean loss ${Number.isFinite(summary.meanLoss) ? summary.meanLoss.toPrecision(4) : "n/a"}`;
+}
+
+async function runDeviceCalMedianTargetFit() {
+  if (state.deviceCalRunning || state.sweepRunning) return;
+  if (!state.writer) {
+    deviceCalStatus("Connect UART before median target fitting.", "warn");
+    return;
+  }
+  let opt;
+  try {
+    opt = deviceCalMatchOptions();
+  } catch (error) {
+    deviceCalStatus(error.message, "warn");
+    return;
+  }
+  const devices = deviceCalMatchDevices();
+  if (!devices.length) {
+    deviceCalStatus("No Device cal devices are configured.", "warn");
+    return;
+  }
+  const snapshot = allDeviceTestSweepUiSnapshot();
+  state.deviceCalHistory = [];
+  state.deviceCalResults = [];
+  state.deviceCalPackageRun = { id: opt.runId, startedAt: new Date().toISOString(), options: { ...opt }, devices };
+  setDeviceCalControlsRunning(true);
+  state.deviceCalStopRequested = false;
+  if ($("deviceCalObjective")) $("deviceCalObjective").value = "curve";
+  if ($("deviceCalCurveReference")) $("deviceCalCurveReference").value = "target";
+  const codes = new Map(devices.map(device => [device, { mu: opt.initMuCode, vstart: opt.initVstartCode }]));
+  try {
+    const initialRaw = [];
+    for (let idx = 0; idx < devices.length; idx++) {
+      if (state.deviceCalStopRequested) break;
+      const device = devices[idx];
+      deviceCalStatus(`Initial target scan ${idx + 1}/${devices.length}: D${device}.`, "warn");
+      initialRaw.push(await deviceCalMatchMeasureDevice(device, opt.initMuCode, opt.initVstartCode, 0, "initial", opt));
+    }
+    if (state.deviceCalStopRequested) throw new Error("Device matching stopped.");
+    const target = opt.matchTarget === "manual"
+      ? deviceCalTarget()
+      : deviceCalReferenceFromFits(initialRaw, deviceCalTarget(), "median");
+    if (![target.A, target.mu, target.sigma].every(value => Number.isFinite(Number(value)))) throw new Error("Could not build a valid median target.");
+    if ($("deviceCalTargetA")) $("deviceCalTargetA").value = Number(target.A).toPrecision(8);
+    if ($("deviceCalTargetMu")) $("deviceCalTargetMu").value = Number(target.mu).toFixed(6);
+    if ($("deviceCalTargetSigma")) $("deviceCalTargetSigma").value = Math.abs(Number(target.sigma)).toFixed(6);
+    state.deviceCalPackageRun.target = { ...target };
+    const initial = initialRaw.map(row => deviceCalMatchFinalizeResult(row, target, opt, { plan: false, action: "initial" }));
+    deviceCalMatchAppendRows(initial);
+    renderDeviceCalResults(initial);
+    let activeDevices = new Set(devices);
+    let latest = deviceCalMatchLatestByDevice(initial);
+    for (let iter = 1; iter <= opt.maxIter; iter++) {
+      if (state.deviceCalStopRequested || !activeDevices.size) break;
+      const iterRows = [];
+      for (const device of devices) {
+        if (state.deviceCalStopRequested) break;
+        if (!activeDevices.has(device)) continue;
+        const code = codes.get(device) || { mu: opt.initMuCode, vstart: opt.initVstartCode };
+        deviceCalStatus(`Median target fit ${iter}/${opt.maxIter}: D${device} at M${code.mu}/S${code.vstart}.`, "warn");
+        const measured = await deviceCalMatchMeasureDevice(device, code.mu, code.vstart, iter, "fit", opt);
+        let result = deviceCalMatchFinalizeResult(measured, target, opt, { plan: iter < opt.maxIter });
+        if (result.converged) activeDevices.delete(device);
+        if (result.plan && planHasCodeChange(result.plan) && iter < opt.maxIter) {
+          await programLogicalDevice(result.plan.device, result.plan.nextMuCode, result.plan.nextVstartCode ?? result.plan.nextACode);
+          result.plan.programmed = true;
+          result.plan.programmedAt = new Date().toISOString();
+          codes.set(device, { mu: result.plan.nextMuCode, vstart: result.plan.nextVstartCode ?? result.plan.nextACode });
+          if (opt.settleMs > 0 && !state.deviceCalStopRequested) await sleep(opt.settleMs);
+        } else if (!result.converged && (!result.plan || !planHasCodeChange(result.plan))) {
+          activeDevices.delete(device);
+        }
+        iterRows.push(result);
+        latest = deviceCalMatchLatestByDevice([...latest, result]);
+        state.deviceCalResults = latest;
+        renderDeviceCalResults([result]);
+      }
+      if (iterRows.length) deviceCalMatchAppendRows(iterRows);
+      const summaryText = deviceCalMatchSummaryText(latest);
+      deviceCalStatus(`Median target fit ${iter}/${opt.maxIter}: ${summaryText}, active ${activeDevices.size}/${devices.length}.`, activeDevices.size ? "warn" : "ok");
+    }
+    latest = deviceCalMatchLatestByDevice(state.deviceCalHistory);
+    state.deviceCalResults = latest;
+    renderDeviceCalResults(latest);
+    state.deviceCalPackageRun.finishedAt = new Date().toISOString();
+    state.deviceCalPackageRun.finalSummary = deviceCalMatchSummary(latest);
+    const finalText = deviceCalMatchSummaryText(latest);
+    deviceCalStatus(`Median target fit complete: ${finalText}.`, "ok");
+  } catch (error) {
+    deviceCalStatus(error.message, "warn");
+  } finally {
+    try { await deviceCalMatchProgramAllOff(opt); } catch (error) { logLine(`[warn] device match final off failed: ${error.message}`); }
+    restoreAllDeviceTestSweepUi(snapshot);
+    setDeviceCalControlsRunning(false);
+  }
+}
+
+function deviceCalPackageRows() {
+  return (Array.isArray(state.deviceCalHistory) ? state.deviceCalHistory : []).filter(row => row?.fit?.data?.length);
+}
+
+function deviceCalPackageSummaryRows(rows, phaseLabel) {
+  const fields = [
+    "phase", "time", "iter", "device", "dac", "adc", "mu_code", "vstart_code", "A_uA", "mu_V", "sigma_V", "baseline_uA", "r2", "rmse_fit",
+    "target_A_uA", "target_mu_V", "target_sigma_V", "target_baseline_uA", "curve_rmse", "curve_mae", "curve_similarity", "loss", "converged", "action", "program_command",
+  ];
+  const out = [fields];
+  for (const row of rows) {
+    const fit = row.fit || {};
+    const error = row.error || {};
+    const curve = error.curve || {};
+    const plan = row.plan || {};
+    out.push(fields.map(field => ({
+      phase: phaseLabel || row.matchPhase || row.action,
+      time: row.time,
+      iter: row.iter,
+      device: row.channel?.device,
+      dac: row.channel?.xDac,
+      adc: `ADC${row.channel?.adcIndex}`,
+      mu_code: row.measuredMuCode ?? plan.currentMuCode,
+      vstart_code: row.measuredVstartCode ?? (plan.currentVstartCode ?? plan.currentACode),
+      A_uA: fit.A,
+      mu_V: fit.mu,
+      sigma_V: Math.abs(Number(fit.sigma)),
+      baseline_uA: fit.baseline,
+      r2: fit.r2,
+      rmse_fit: fit.rmse,
+      target_A_uA: row.target?.A,
+      target_mu_V: row.target?.mu,
+      target_sigma_V: row.target?.sigma,
+      target_baseline_uA: row.target?.baseline,
+      curve_rmse: curve.rmse,
+      curve_mae: curve.mae,
+      curve_similarity: curve.similarity,
+      loss: curve.loss ?? error.norm,
+      converged: row.converged ? "yes" : "no",
+      action: row.action,
+      program_command: plan.programCommand,
+    }[field])));
+  }
+  return out;
+}
+
+function deviceCalPackageCurvePointRows(rows) {
+  const fields = ["phase", "time", "iter", "device", "dac", "adc", "point", "x_V", "I_uA", "fit_I_uA", "target_I_uA", "residual_fit", "residual_target", "mu_code", "vstart_code"];
+  const out = [fields];
+  for (const row of rows) {
+    const reference = deviceCalReferenceParamsForRow(row);
+    for (const point of row.fit?.data || []) {
+      const x = Number(point.x);
+      const y = Number(point.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const fitY = gaussianValue(row.fit, x);
+      const targetY = gaussianValue(reference, x);
+      const values = {
+        phase: row.matchPhase || row.action,
+        time: row.time,
+        iter: row.iter,
+        device: row.channel?.device,
+        dac: row.channel?.xDac,
+        adc: `ADC${row.channel?.adcIndex}`,
+        point: point.point,
+        x_V: x,
+        I_uA: y,
+        fit_I_uA: fitY,
+        target_I_uA: targetY,
+        residual_fit: y - fitY,
+        residual_target: y - targetY,
+        mu_code: row.measuredMuCode ?? row.plan?.currentMuCode,
+        vstart_code: row.measuredVstartCode ?? (row.plan?.currentVstartCode ?? row.plan?.currentACode),
+      };
+      out.push(fields.map(field => values[field]));
+    }
+  }
+  return out;
+}
+
+function deviceCalPackageOriginRows(rows, labelMode = "device") {
+  const target = rows.find(row => row.target)?.target || deviceCalTarget();
+  const xs = Array.from(new Set(rows.flatMap(row => (row.fit?.data || []).map(point => Number(point.x)).filter(Number.isFinite)))).sort((a, b) => a - b);
+  const series = rows.map(row => {
+    const device = String(row.channel?.device || "").padStart(2, "0");
+    const label = labelMode === "device" ? `D${device}_I_uA` : `D${device}_i${String(row.iter || 0).padStart(3, "0")}_${row.matchPhase || row.action}_I_uA`;
+    const byX = new Map((row.fit?.data || []).map(point => [Number(point.x), Number(point.y)]));
+    return { label, byX };
+  });
+  const out = [["point", "x_V", "target_I_uA", ...series.map(item => item.label)]];
+  xs.forEach((x, index) => {
+    out.push([index, x, gaussianValue(target, x), ...series.map(item => item.byX.has(x) ? item.byX.get(x) : "")]);
+  });
+  return out;
+}
+
+async function saveDeviceCalFitPackage() {
+  const rows = deviceCalPackageRows();
+  if (!rows.length) {
+    deviceCalStatus("No Device cal fitting rows to package.", "warn");
+    return;
+  }
+  const initialRows = rows.filter(row => row.matchPhase === "initial");
+  const finalRows = deviceCalMatchLatestByDevice(rows);
+  const stem = safeExportStem(`pcb_gaussian_web_device_cal_${state.deviceCalPackageRun?.id || Date.now()}`);
+  const target = rows.find(row => row.target)?.target || deviceCalTarget();
+  const manifestRows = [
+    ["file", "description"],
+    [`${stem}_manifest.csv`, "File list and run metadata"],
+    [`${stem}_target_curve.json`, "Target Gaussian parameters"],
+    [`${stem}_initial_summary.csv`, "Initial same-condition fit summary"],
+    [`${stem}_final_summary.csv`, "Latest fit summary per device"],
+    [`${stem}_iteration_log.csv`, "All fitting rows with error and commands"],
+    [`${stem}_curve_points.csv`, "Long-form measured, fit, target, residual data"],
+    [`${stem}_origin_initial_xy_pairs.csv`, "Origin-ready initial XY matrix"],
+    [`${stem}_origin_final_xy_pairs.csv`, "Origin-ready final XY matrix"],
+    [`${stem}_origin_all_steps_xy_pairs.csv`, "Origin-ready iteration curve matrix"],
+  ];
+  const runRows = [
+    ["key", "value"],
+    ["created_at", new Date().toISOString()],
+    ["web_version", WEB_VERSION],
+    ["run_id", state.deviceCalPackageRun?.id || ""],
+    ["batch_start", deviceCalBatchStart()],
+    ["target_A_uA", target.A],
+    ["target_mu_V", target.mu],
+    ["target_sigma_V", target.sigma],
+    ["target_baseline_uA", target.baseline ?? ""],
+    ["rows", rows.length],
+    ["final_summary", deviceCalMatchSummaryText(finalRows)],
+  ];
+  const directoryHandle = await chooseExportDirectory(stem);
+  await saveRowsCsvExport(`${stem}_manifest.csv`, [...manifestRows, [], ...runRows], directoryHandle);
+  await saveTextExportFile(`${stem}_target_curve.json`, JSON.stringify(target, null, 2), "application/json;charset=utf-8", directoryHandle);
+  await saveRowsCsvExport(`${stem}_initial_summary.csv`, deviceCalPackageSummaryRows(initialRows, "initial"), directoryHandle);
+  await saveRowsCsvExport(`${stem}_final_summary.csv`, deviceCalPackageSummaryRows(finalRows, "final"), directoryHandle);
+  await saveRowsCsvExport(`${stem}_iteration_log.csv`, deviceCalPackageSummaryRows(rows, "iteration"), directoryHandle);
+  await saveRowsCsvExport(`${stem}_curve_points.csv`, deviceCalPackageCurvePointRows(rows), directoryHandle);
+  await saveRowsCsvExport(`${stem}_origin_initial_xy_pairs.csv`, deviceCalPackageOriginRows(initialRows, "device"), directoryHandle);
+  await saveRowsCsvExport(`${stem}_origin_final_xy_pairs.csv`, deviceCalPackageOriginRows(finalRows, "device"), directoryHandle);
+  await saveRowsCsvExport(`${stem}_origin_all_steps_xy_pairs.csv`, deviceCalPackageOriginRows(rows, "step"), directoryHandle);
+  deviceCalStatus(`Saved Device cal fit package: ${rows.length} row(s), ${finalRows.length} final device(s).`, "ok");
+}
 
 function deviceTargetSearchStatus(text, kind = "") {
   const status = $("deviceTargetSearchStatus");
@@ -6749,9 +7221,11 @@ function bindEvents() {
   $("deviceCalBatch")?.addEventListener("change", deviceCalLoadBatchMap);
   $("deviceCalLoadBatchButton")?.addEventListener("click", deviceCalLoadBatchMap);
   $("deviceCalSweepFitButton")?.addEventListener("click", deviceCalSweepAndFitOnce);
+  $("deviceCalMedianFitButton")?.addEventListener("click", runDeviceCalMedianTargetFit);
   $("deviceCalAutoButton")?.addEventListener("click", autoFitDeviceCalBatch);
   $("deviceCalStopButton")?.addEventListener("click", stopDeviceCal);
   $("deviceCalDownloadButton")?.addEventListener("click", downloadDeviceCalCsv);
+  $("deviceCalPackageButton")?.addEventListener("click", saveDeviceCalFitPackage);
   $("deviceCalOverlayRenderButton")?.addEventListener("click", drawDeviceCalOverlay);
   $("deviceCalOverlayClearButton")?.addEventListener("click", clearDeviceCalOverlayHistory);
   $("deviceCalOverlayDownloadButton")?.addEventListener("click", downloadDeviceCalOverlayCsv);
