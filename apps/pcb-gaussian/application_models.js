@@ -822,6 +822,39 @@
     $("appModelPlotStatus").textContent = "No application model plotted yet.";
   }
 
+  function componentColumnName(pair, device) {
+    return `${pair.basis}_D${device.device}_component`;
+  }
+
+  function targetComponentSynthesisRows(library = targetLibrary()) {
+    if (!library?.pairs?.length) return { rows: [], components: [] };
+    const xs = targetXGrid(library);
+    const rows = xs.map(x => ({ VG: x }));
+    const components = [];
+    library.pairs.forEach(pair => {
+      const componentValues = pair.devices.map(device => {
+        const A = numberValue(device.A_uA);
+        const mu = numberValue(device.mu);
+        const sigma = numberValue(device.sigma);
+        const baseline = numberValue(device.baseline);
+        return xs.map(x => gaussianValue(x, A, mu, sigma, Number.isFinite(baseline) ? baseline : 0));
+      });
+      const pairSum = xs.map((_, index) => sum(componentValues.map(values => values[index]).filter(Number.isFinite)));
+      const maxSum = Math.max(...pairSum.map(value => Math.abs(value)).filter(Number.isFinite), 1e-12);
+      rows.forEach((row, index) => {
+        row[`${pair.basis}_component_sum`] = pairSum[index] / maxSum;
+      });
+      pair.devices.forEach((device, deviceIndex) => {
+        const column = componentColumnName(pair, device);
+        components.push({ pair, device, column });
+        rows.forEach((row, index) => {
+          row[column] = componentValues[deviceIndex][index] / maxSum;
+        });
+      });
+    });
+    return { rows, components };
+  }
+
   function renderPresetTargetPreview() {
     const canvas = $("appModelTargetCanvas");
     const status = $("appModelTargetStatus");
@@ -837,11 +870,16 @@
       return;
     }
     const targetRows = targetGridRowsFromLibrary(library);
+    const componentSynthesis = targetComponentSynthesisRows(library);
     const generatedRows = state.generatedGridRows.length ? state.generatedGridRows : [];
     const allX = targetRows.map(row => numberValue(row.VG));
     const allY = [];
     library.pairs.forEach(pair => {
       targetRows.forEach(row => allY.push(numberValue(row[pair.basis])));
+      componentSynthesis.rows.forEach(row => {
+        allY.push(numberValue(row[`${pair.basis}_component_sum`]));
+        pair.devices.forEach(device => allY.push(numberValue(row[componentColumnName(pair, device)])));
+      });
       generatedRows.forEach(row => allY.push(numberValue(row[pair.basis])));
     });
     const scale = plotScale(canvas, minMax(allX), minMax(allY));
@@ -853,20 +891,30 @@
         .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
       drawLine(ctx, targetPoints, scale, color, 2.2);
       series.push({ name: `ADC ${pair.adcPair} target`, color });
+      pair.devices.forEach(device => {
+        const column = componentColumnName(pair, device);
+        const componentPoints = componentSynthesis.rows.map(row => [numberValue(row.VG), numberValue(row[column])])
+          .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+        ctx.save();
+        ctx.globalAlpha = 0.68;
+        drawLine(ctx, componentPoints, scale, color, 1.2, [2, 4]);
+        ctx.restore();
+      });
       if (generatedRows.length) {
         const generatedPoints = generatedRows.map(row => [numberValue(row.VG), numberValue(row[pair.basis])])
           .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-        drawLine(ctx, generatedPoints, scale, color, 1.4, [5, 4]);
+        drawLine(ctx, generatedPoints, scale, color, 1.4, [9, 4]);
       }
     });
     if (status) {
       status.textContent = generatedRows.length
-        ? `Preset target curves with generated device-curve overlay (${generatedRows.length} VG points).`
-        : `Preset target curves for ${library.pairs.length} ADC pair(s). Load generated device curves to overlay validation curves.`;
+        ? `Solid = ADC-pair target; short dash = component Gaussian curves; long dash = generated device-curve overlay (${generatedRows.length} VG points).`
+        : `Solid = ADC-pair target; short dash = component Gaussian curves to synthesize each target kernel.`;
     }
     if (legend) {
       legend.innerHTML = series.map(item => `<span><i style="background:${item.color}"></i>${escapeHtml(item.name)}</span>`).join("") +
-        (generatedRows.length ? `<span><i style="background:#17323a"></i>dashed = generated from device curves</span>` : "");
+        `<span><i style="background:#7c8790"></i>short dash = component Gaussian curves</span>` +
+        (generatedRows.length ? `<span><i style="background:#17323a"></i>long dash = generated from device curves</span>` : "");
     }
   }
 
