@@ -1,0 +1,349 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nRF52 BLE Plotter</title>
+    <link rel="stylesheet" href="./styles.css?v=c2c7d20ee72d" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M7 7.2 12.4 12 7 16.8V7.2Z" />
+              <path d="M12.4 12 18 7.2v9.6L12.4 12Z" />
+              <path d="M12.4 12V3.8L18 7.2" />
+              <path d="M12.4 12v8.2L18 16.8" />
+            </svg>
+          </div>
+          <div>
+            <h1>nRF52 BLE Plotter</h1>
+            <p id="deviceLabel">No device selected</p>
+          </div>
+        </div>
+
+        <div class="top-actions" aria-label="connection controls">
+          <span id="secureBadge" class="status-badge neutral">Secure context</span>
+          <span id="apiBadge" class="status-badge neutral">Web Bluetooth</span>
+          <button id="connectButton" class="primary-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7.2 12.4 12 7 16.8V7.2Z" />
+              <path d="M12.4 12 18 7.2v9.6L12.4 12Z" />
+              <path d="M12.4 12V3.8L18 7.2" />
+              <path d="M12.4 12v8.2L18 16.8" />
+            </svg>
+            Connect
+          </button>
+          <button id="disconnectButton" class="secondary-button" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6 18 18" />
+              <path d="M7 7.2 12.4 12 7 16.8V7.2Z" />
+              <path d="M12.4 12 18 7.2v9.6L12.4 12Z" />
+            </svg>
+            Disconnect
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="control-panel" aria-label="device and parser settings">
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Bluetooth</h2>
+              <span id="connectionState" class="dot-label idle">Idle</span>
+            </div>
+
+            <label class="field">
+              <span>Device name prefix</span>
+              <input id="namePrefixInput" type="text" value="nRF" autocomplete="off" />
+            </label>
+
+            <label class="field">
+              <span>UART service UUID</span>
+              <input id="serviceUuidInput" type="text" value="6e400001-b5a3-f393-e0a9-e50e24dcca9e" spellcheck="false" />
+            </label>
+
+            <div class="two-col uuid-grid">
+              <label class="field">
+                <span>RX write UUID</span>
+                <input id="rxUuidInput" type="text" value="6e400002-b5a3-f393-e0a9-e50e24dcca9e" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span>TX notify UUID</span>
+                <input id="txUuidInput" type="text" value="6e400003-b5a3-f393-e0a9-e50e24dcca9e" spellcheck="false" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Baudrate</h2>
+              <span id="baudrateState" class="dot-label idle">Local</span>
+            </div>
+
+            <label class="field">
+              <span>Baudrate</span>
+              <select id="baudrateSelect">
+                <option value="9600">9600</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="57600">57600</option>
+                <option value="115200" selected>115200</option>
+                <option value="230400">230400</option>
+                <option value="460800">460800</option>
+                <option value="921600">921600</option>
+                <option value="1000000">1000000</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Apply command</span>
+              <input id="baudrateCommandInput" type="text" value="BAUD {baud}\n" spellcheck="false" />
+            </label>
+
+            <button id="applyBaudrateButton" class="full-button" type="button" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h12" />
+                <path d="m13 6 6 6-6 6" />
+              </svg>
+              Apply baudrate
+            </button>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Parser</h2>
+              <span id="parserState" class="dot-label ok">Ready</span>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span>Delimiter</span>
+                <select id="delimiterSelect">
+                  <option value="lf" selected>LF 0x0A</option>
+                  <option value="crlf">CRLF 0x0D 0x0A</option>
+                  <option value="cr">CR 0x0D</option>
+                  <option value="semicolon">Semicolon ;</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Custom delimiter</span>
+                <input id="customDelimiterInput" type="text" value="\\n" spellcheck="false" disabled />
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span>Escape char</span>
+                <select id="escapeSelect">
+                  <option value="backslash" selected>Backslash 0x5C</option>
+                  <option value="esc">ESC 0x1B</option>
+                  <option value="none">None</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Custom escape</span>
+                <input id="customEscapeInput" type="text" value="\\" spellcheck="false" disabled />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Field separator</span>
+              <select id="separatorSelect">
+                <option value="auto" selected>Auto</option>
+                <option value="comma">Comma ,</option>
+                <option value="tab">Tab \t</option>
+                <option value="space">Space</option>
+                <option value="semicolon">Semicolon ;</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Rolling Plot</h2>
+              <span id="plotModeState" class="dot-label ok">Rolling</span>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span>Window time (s)</span>
+                <input id="plotWindowInput" type="number" min="0.2" max="600" step="0.1" value="5.0" />
+              </label>
+              <label class="field">
+                <span>Sampling rate (Hz)</span>
+                <input id="samplingRateInput" type="number" min="0.1" max="200000" step="0.1" value="200" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Digital Filters</h2>
+              <span id="filterState" class="dot-label idle">Bypass</span>
+            </div>
+
+            <label class="check-row">
+              <input id="lpfEnableInput" type="checkbox" />
+              <span>IIR LPF</span>
+            </label>
+
+            <label class="field">
+              <span>LPF cutoff (Hz)</span>
+              <input id="lpfCutoffInput" type="number" min="0.01" max="100000" step="0.1" value="5" />
+            </label>
+
+            <label class="check-row">
+              <input id="notchEnableInput" type="checkbox" />
+              <span>Notch</span>
+            </label>
+
+            <div class="two-col">
+              <label class="field">
+                <span>Notch freq (Hz)</span>
+                <input id="notchFrequencyInput" type="number" min="0.01" max="100000" step="0.1" value="60" />
+              </label>
+              <label class="field">
+                <span>Notch Q</span>
+                <input id="notchQInput" type="number" min="0.1" max="500" step="0.1" value="30" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>TX Command</h2>
+              <span id="txState" class="dot-label idle">Standby</span>
+            </div>
+
+            <label class="field">
+              <span>Command</span>
+              <textarea id="txCommandInput" rows="3" spellcheck="false">START\n</textarea>
+            </label>
+
+            <button id="sendCommandButton" class="full-button" type="button" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12 20 4l-4 16-4-6-8-2Z" />
+              </svg>
+              Send
+            </button>
+          </section>
+        </aside>
+
+        <section class="plot-area" aria-label="live plot">
+          <div class="plot-toolbar">
+            <div>
+              <h2>Live Plot</h2>
+              <p id="plotSubtitle">Waiting for frames</p>
+            </div>
+            <div class="plot-actions">
+              <button id="startButton" class="icon-button active" type="button" title="Start">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 5v14l11-7-11-7Z" />
+                </svg>
+                Start
+              </button>
+              <button id="stopButton" class="icon-button" type="button" title="Stop">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 7h10v10H7z" />
+                </svg>
+                Stop
+              </button>
+              <button id="clearButton" class="icon-button" type="button" title="Clear">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7h16" />
+                  <path d="M9 7V5h6v2" />
+                  <path d="M8 10v8" />
+                  <path d="M12 10v8" />
+                  <path d="M16 10v8" />
+                  <path d="M6 7l1 14h10l1-14" />
+                </svg>
+                Clear
+              </button>
+              <button id="demoButton" class="icon-button" type="button" title="Demo stream">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 17c3-8 6 8 9 0s4-3 5-1" />
+                  <path d="M4 6h16" />
+                </svg>
+                Demo
+              </button>
+            </div>
+          </div>
+
+          <div class="plot-frame">
+            <canvas id="plotCanvas" width="1200" height="620" aria-label="sensor data plot"></canvas>
+            <div id="emptyPlot" class="empty-plot">No numeric samples</div>
+          </div>
+
+          <div class="stats-grid" aria-label="runtime statistics">
+            <div class="stat-item">
+              <span>Samples/sec</span>
+              <strong id="samplesPerSecond">0.0</strong>
+            </div>
+            <div class="stat-item">
+              <span>Frames</span>
+              <strong id="frameCount">0</strong>
+            </div>
+            <div class="stat-item">
+              <span>Bytes RX</span>
+              <strong id="bytesReceived">0</strong>
+            </div>
+            <div class="stat-item">
+              <span>Channels</span>
+              <strong id="channelCount">0</strong>
+            </div>
+            <div class="stat-item">
+              <span>Window</span>
+              <strong id="windowLabel">5.0s</strong>
+            </div>
+          </div>
+        </section>
+
+        <aside class="log-panel" aria-label="receive log and parser status">
+          <section class="panel-section log-section">
+            <div class="section-title">
+              <h2>RX Log</h2>
+              <button id="clearLogButton" class="text-button" type="button">Clear</button>
+            </div>
+            <div id="rxLog" class="rx-log" role="log" aria-live="polite"></div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Parser</h2>
+              <span id="errorCount" class="dot-label idle">0 errors</span>
+            </div>
+            <dl class="detail-list">
+              <div>
+                <dt>Last frame</dt>
+                <dd id="lastFrame">-</dd>
+              </div>
+              <div>
+                <dt>Parsed values</dt>
+                <dd id="lastValues">-</dd>
+              </div>
+              <div>
+                <dt>Delimiter</dt>
+                <dd id="activeDelimiter">LF 0x0A</dd>
+              </div>
+              <div>
+                <dt>Escape char</dt>
+                <dd id="activeEscape">Backslash 0x5C</dd>
+              </div>
+              <div>
+                <dt>Filters</dt>
+                <dd id="activeFilters">Bypass</dd>
+              </div>
+            </dl>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script src="./app.js?v=6acbbf05cdc6"></script>
+  </body>
+</html>

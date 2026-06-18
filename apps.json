@@ -30,5 +30,13 @@
         "group":  "Scheduling",
         "status":  "Ready",
         "accent":  "#8b5e34"
+    },
+    {
+        "name":  "nRF52 BLE UART Plotter",
+        "description":  "Web Bluetooth NUS plotter for nRF52 UART streaming and baudrate/parser testing.",
+        "url":  "apps/nrf52-ble-uart-plotter/",
+        "group":  "Firmware",
+        "status":  "Ready",
+        "accent":  "#0e8fa3"
     }
 ]
