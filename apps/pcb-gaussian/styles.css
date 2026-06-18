@@ -765,9 +765,79 @@ tr:hover td { background: #fbf5ed; }
 .app-model-target-panel {
   margin-top: 16px;
 }
+.app-model-workflow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+.app-model-workflow-step {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdfc;
+  padding: 9px 10px;
+  min-height: 62px;
+}
+.app-model-workflow-step strong {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.app-model-workflow-step span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.app-model-workflow-step.ok {
+  border-color: rgba(42, 157, 143, 0.45);
+  background: #f1fbf8;
+}
+.app-model-workflow-step.warn {
+  border-color: rgba(231, 111, 81, 0.45);
+  background: #fff8f5;
+}
+.app-model-workflow-step.running {
+  border-color: rgba(69, 123, 157, 0.45);
+  background: #f4f8fb;
+}
 #appModelTargetCanvas {
   width: 100%;
   display: block;
+}
+.app-model-routing-status {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--muted);
+  background: #fbfdfc;
+  font-size: 12px;
+}
+.app-model-routing-status.ok {
+  border-color: rgba(42, 157, 143, 0.45);
+  color: var(--ink);
+  background: #f1fbf8;
+}
+.app-model-routing-status.warn {
+  border-color: rgba(231, 111, 81, 0.45);
+  color: var(--warn);
+  background: #fff8f5;
+}
+.app-model-routing-status div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.app-model-routing-status span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 2px 7px;
+  font-size: 11px;
 }
 .app-model-assignment-wrap {
   max-height: 285px;
@@ -775,6 +845,25 @@ tr:hover td { background: #fbf5ed; }
 }
 .app-model-assignment-wrap table {
   min-width: 1080px;
+}
+.app-model-fit-progress {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.compact-title {
+  margin-bottom: 4px;
+}
+#appModelFitProgressCanvas {
+  width: 100%;
+  display: block;
+}
+.app-model-fit-progress-wrap {
+  max-height: 260px;
+  margin-top: 8px;
+}
+.app-model-fit-progress-wrap table {
+  min-width: 1060px;
 }
 .app-model-uart-controls {
   margin-top: 10px;
@@ -840,7 +929,7 @@ tr:hover td { background: #fbf5ed; }
   max-width: 210px;
 }
 @media (max-width: 980px) {
-  .app-header, .connection-card, .grid.two, .overview, .plot-grid, .fit-grid, .compact-fit-grid, .device-cal-grid, .seeds-2d-input-grid, .seeds-2d-result-grid {
+  .app-header, .connection-card, .grid.two, .overview, .plot-grid, .fit-grid, .compact-fit-grid, .device-cal-grid, .seeds-2d-input-grid, .seeds-2d-result-grid, .app-model-workflow {
     grid-template-columns: 1fr;
   }
   .app-header {

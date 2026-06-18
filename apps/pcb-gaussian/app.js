@@ -9,6 +9,8 @@ const DAC_OUTPUT_MIN_MV = -16500;
 const DAC_OUTPUT_MAX_MV = 16500;
 const POT_MAX_CODE = 255;
 const ADC_TIA_COUNT = 8;
+const ADC_AVG_MAX = 4096;
+const SWEEP_POINT_REPEATS_MAX = 64;
 const MAX_DEVICES_PER_TIA = 4;
 const MEASUREMENT_TABLE_ROW_LIMIT = 1000;
 const MEASUREMENT_MEMORY_ROW_LIMIT = 20000;
@@ -22,10 +24,11 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-06-11-device-cal-web-fit-package";
-const EXPECTED_FIRMWARE_VERSION = "2026-06-10-adc-1v2-dac165";
+const WEB_VERSION = "2026-06-15-dacramp-noise";
+const EXPECTED_FIRMWARE_VERSION = "2026-06-15-dacramp-noise";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1";
 const APP_VERSION = WEB_VERSION;
+window.PCB_GAUSSIAN_ADC_AVG_MAX = ADC_AVG_MAX;
 const BASE32_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUV";
 const FIRMWARE_SWEEP_RE = /^(SWEEP|SX|Y),/i;
 const DEVICE_TO_MUX_ADDR = [0, 1, 2, 3, 4, 5, 6, 7, 1, 0, 3, 2, 5, 4, 7, 6];
@@ -1204,6 +1207,7 @@ function startSweepCapture(requests = [], repeatCount = 1, options = {}) {
       avgSamples: request.avgSamples,
       settleUs: request.settleUs,
       preBiasMs: request.preBiasMs,
+      pointRepeats: request.pointRepeats,
       reverse: request.reverse,
       startMv: request.startMv,
       stopMv: request.stopMv,
@@ -1426,14 +1430,14 @@ function parseCompactBase32AdcFields(parts, mask) {
 
 function adcAvgSamples() {
   const input = $("adcAvgSamples");
-  const value = clamp(Math.round(Number(input?.value) || 16), 1, 256);
+  const value = clamp(Math.round(Number(input?.value) || 256), 1, ADC_AVG_MAX);
   if (input) input.value = value;
   return value;
 }
 
 function sweepSettleUs() {
   const input = $("sweepSettleUs");
-  const value = clamp(Math.round(Number(input?.value) || 2000), 0, 65000);
+  const value = clamp(Math.round(Number(input?.value) || 65000), 0, 65000);
   if (input) input.value = value;
   return value;
 }
@@ -1444,7 +1448,12 @@ function sweepPreBiasMs() {
   if (input) input.value = value;
   return value;
 }
-function sweepRepeatCount() {
+function sweepPointRepeats() {
+  const input = $("sweepPointRepeats");
+  const value = clamp(Math.round(Number(input?.value) || 8), 1, SWEEP_POINT_REPEATS_MAX);
+  if (input) input.value = value;
+  return value;
+}function sweepRepeatCount() {
   const input = $("sweepRepeats");
   const value = clamp(Math.round(Number(input?.value) || 1), 1, 10000);
   if (input) input.value = value;
@@ -1526,15 +1535,17 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
   const avgSamples = adcAvgSamples();
   const settleUs = sweepSettleUs();
   const preBiasMs = sweepPreBiasMs();
+  const pointRepeats = sweepPointRepeats();
   const reverse = sweepReverseEnabled();
   const requestStart = reverse ? stop : start;
   const requestStop = reverse ? start : stop;
   return {
     dac: prefix,
-    command: `SX${prefix.slice(1)},${encodeBase32(requestStart)},${encodeBase32(requestStop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)},${encodeBase32(avgSamples)},${encodeBase32(settleUs)}`,
+    command: `SX${prefix.slice(1)},${encodeBase32(requestStart)},${encodeBase32(requestStop)},${encodeBase32(step)},${encodeBase32(totalMs)},${encodeBase32(adcMask)},${encodeBase32(avgSamples)},${encodeBase32(settleUs)},${encodeBase32(pointRepeats)}`,
     avgSamples,
     settleUs,
     preBiasMs,
+    pointRepeats,
     reverse,
     pointCount,
     startMv: requestStart,
@@ -1542,7 +1553,7 @@ function firmwareSweepRequest(prefix, totalMs, adcMask) {
     rangeMinMv: Math.min(start, stop),
     rangeMaxMv: Math.max(start, stop),
     stepMv: step,
-    timeoutMs: Math.max(10000, totalMs + preBiasMs + Math.ceil(pointCount * settleUs / 1000) + pointCount * 500 + 3000),
+    timeoutMs: Math.max(10000, totalMs + preBiasMs + Math.ceil(pointCount * settleUs / 1000) + pointCount * 500 * pointRepeats + 3000),
   };
 }
 
@@ -1595,7 +1606,7 @@ async function startSweep() {
   state.sweepRunning = true;
   const startedMs = performance.now();
   const streamRunText = state.activeSweep?.streamExport?.enabled ? `, streaming CSV chunks (${STREAM_EXPORT_CHUNK_POINT_LIMIT} pts/file)` : "";
-  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us prebias=${req.preBiasMs}ms${req.reverse ? " reverse" : ""}`).join(", ")} x${repeatCount}${streamRunText}`;
+  $("sweepStatus").textContent = `Firmware sweep running: ${requests.map(req => `${req.dac}:${req.pointCount} mask=0x${req.adcMask.toString(16).padStart(2, "0")} avg=${req.avgSamples} settle=${req.settleUs}us prebias=${req.preBiasMs}ms pointReps=${req.pointRepeats}${req.reverse ? " reverse" : ""}`).join(", ")} x${repeatCount}${streamRunText}`;
   logLine($("sweepStatus").textContent);
 
   try {
@@ -1604,7 +1615,7 @@ async function startSweep() {
       for (const request of requests) {
         if (!state.sweepRunning) break;
         state.firmwareSweepSelectedTias = request.tias;
-        $("sweepStatus").textContent = `Firmware sweep ${request.dac}: run ${repeatIndex + 1}/${repeatCount}, ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}, avg ${request.avgSamples}, settle ${request.settleUs} us, pre-bias ${request.preBiasMs} ms${request.reverse ? ", reverse" : ""}`;
+        $("sweepStatus").textContent = `Firmware sweep ${request.dac}: run ${repeatIndex + 1}/${repeatCount}, ${request.pointCount} point(s), total ${totalMs} ms, ADC mask 0x${request.adcMask.toString(16).padStart(2, "0")}, avg ${request.avgSamples}, settle ${request.settleUs} us, pre-bias ${request.preBiasMs} ms, point reps ${request.pointRepeats}${request.reverse ? ", reverse" : ""}`;
         if (request.preBiasMs > 0) {
           const dacNumber = request.dac.slice(1);
           const biasReply = await sendCommand(`V${dacNumber},${request.startMv}`, {
@@ -2337,7 +2348,7 @@ function deviceDetectConfig() {
   const vstartOnV = deviceDetectNumber("deviceDetectVstart", 4);
   const vstartOffV = deviceDetectNumber("deviceDetectVstartOff", 0);
   const thresholdUa = deviceDetectNumber("deviceDetectThreshold", 0.001, { min: 0 });
-  const avg = deviceDetectNumber("deviceDetectAvg", 256, { min: 1, max: 256, integer: true });
+  const avg = deviceDetectNumber("deviceDetectAvg", 256, { min: 1, max: ADC_AVG_MAX, integer: true });
   const settleUs = deviceDetectNumber("deviceDetectSettleUs", 30000, { min: 0, max: 65000, integer: true });
   return {
     vmuV,
@@ -2750,6 +2761,7 @@ function parseFirmwareSweepReply(text) {
     dac: snapshot,
     selectedTias: state.firmwareSweepSelectedTias || selectedTias(),
     sweepDac: kind,
+    pointRepeat: state.activeSweep.requests?.find(req => req.dac === kind)?.pointRepeats || 1,
   };
   recordAdcValues(values, text);
   state.pendingAdcContext = previousContext;
@@ -2834,6 +2846,7 @@ function addSweepAdcPoint(values, context) {
   const point = {
     point: context.pointIndex,
     repeat: state.activeSweep.currentRepeat || 1,
+    pointRepeat: state.pendingAdcContext?.pointRepeat || 1,
     time: nowTime(),
     sweepDac: context.sweepDac || null,
     dac: context.dac,
@@ -5331,13 +5344,14 @@ function allDeviceTestOptions() {
     muCode: allDeviceTestNumber("allDeviceTestMuCode", 0, { min: 0, max: POT_MAX_CODE, integer: true }),
     vstartCode: allDeviceTestNumber("allDeviceTestVstartCode", 120, { min: 0, max: POT_MAX_CODE, integer: true }),
     offMuCode: allDeviceTestNumber("allDeviceTestOffMuCode", 0, { min: 0, max: POT_MAX_CODE, integer: true }),
-    offVstartCode: allDeviceTestNumber("allDeviceTestOffVstartCode", 19, { min: 0, max: POT_MAX_CODE, integer: true }),
+    offVstartCode: allDeviceTestNumber("allDeviceTestOffVstartCode", 20, { min: 0, max: POT_MAX_CODE, integer: true }),
     startMv: allDeviceTestNumber("allDeviceTestStartMv", -16500, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
     stopMv: allDeviceTestNumber("allDeviceTestStopMv", 16500, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
-    stepMv: allDeviceTestNumber("allDeviceTestStepMv", 300, { min: 1, max: 30000, integer: true }),
-    avg: allDeviceTestNumber("allDeviceTestAvg", 256, { min: 1, max: 256, integer: true }),
-    settleUs: allDeviceTestNumber("allDeviceTestSettleUs", 30000, { min: 0, max: 65000, integer: true }),
-    preBiasMs: allDeviceTestNumber("allDeviceTestPreBiasMs", 2000, { min: 0, max: 30000, integer: true }),
+    stepMv: allDeviceTestNumber("allDeviceTestStepMv", 1000, { min: 1, max: 30000, integer: true }),
+    avg: allDeviceTestNumber("allDeviceTestAvg", 256, { min: 1, max: ADC_AVG_MAX, integer: true }),
+    pointRepeats: allDeviceTestNumber("allDeviceTestPointRepeats", 8, { min: 1, max: SWEEP_POINT_REPEATS_MAX, integer: true }),
+    settleUs: allDeviceTestNumber("allDeviceTestSettleUs", 65000, { min: 0, max: 65000, integer: true }),
+    preBiasMs: allDeviceTestNumber("allDeviceTestPreBiasMs", 0, { min: 0, max: 30000, integer: true }),
     programSettleMs: allDeviceTestNumber("allDeviceTestProgramSettleMs", 500, { min: 0, max: 30000, integer: true }),
     yMode: $("allDeviceTestYMode")?.value || "current",
     reverse: $("allDeviceTestReverse")?.checked !== false,
@@ -5349,7 +5363,7 @@ function setAllDeviceTestControlsRunning(running) {
   [
     "allDeviceTestDevices", "allDeviceTestSuspects", "allDeviceTestMuCode", "allDeviceTestVstartCode",
     "allDeviceTestOffMuCode", "allDeviceTestOffVstartCode", "allDeviceTestStartMv", "allDeviceTestStopMv",
-    "allDeviceTestStepMv", "allDeviceTestAvg", "allDeviceTestSettleUs", "allDeviceTestPreBiasMs",
+    "allDeviceTestStepMv", "allDeviceTestAvg", "allDeviceTestPointRepeats", "allDeviceTestSettleUs", "allDeviceTestPreBiasMs",
     "allDeviceTestProgramSettleMs", "allDeviceTestYMode", "allDeviceTestReverse",
   ].forEach(id => {
     const element = $(id);
@@ -5371,7 +5385,7 @@ function allDeviceTestSweepUiSnapshot() {
   const ids = [
     "sweepD1Enable", "sweepD2Enable", "sweepD1Mode", "sweepD2Mode", "sweepD1Start", "sweepD1Stop", "sweepD1Step",
     "sweepD2Start", "sweepD2Stop", "sweepD2Step", "sweepDwell", "adcAvgSamples", "sweepSettleUs",
-    "sweepPreBiasMs", "sweepRepeats", "sweepReverse", "plotYMode",
+    "sweepPreBiasMs", "sweepPointRepeats", "sweepRepeats", "sweepReverse", "plotYMode",
   ];
   return {
     fields: Object.fromEntries(ids.map(id => {
@@ -5435,6 +5449,7 @@ function allDeviceTestApplySweepOptions(device, adcIndex, opt) {
   }
   if ($("sweepDwell")) $("sweepDwell").value = 0;
   if ($("adcAvgSamples")) $("adcAvgSamples").value = opt.avg;
+  if ($("sweepPointRepeats")) $("sweepPointRepeats").value = opt.pointRepeats;
   if ($("sweepSettleUs")) $("sweepSettleUs").value = opt.settleUs;
   if ($("sweepPreBiasMs")) $("sweepPreBiasMs").value = opt.preBiasMs;
   if ($("sweepRepeats")) $("sweepRepeats").value = 1;
@@ -5589,6 +5604,7 @@ function allDeviceTestParameterRows() {
     ["sweep", "stop", opt.stopMv, "mV", ""],
     ["sweep", "step", opt.stepMv, "mV", ""],
     ["sweep", "adc_avg", opt.avg, "samples", ""],
+    ["sweep", "point_repeats", opt.pointRepeats, "reads/point", "repeated ADC readouts averaged per gate point"],
     ["sweep", "settle", opt.settleUs, "us", ""],
     ["sweep", "pre_bias", opt.preBiasMs, "ms", ""],
     ["sweep", "reverse", opt.reverse ? "yes" : "no", "", ""],
@@ -6404,7 +6420,7 @@ function deviceTargetOptions() {
     startMv: deviceTargetNumber("deviceTargetStartMv", DAC_OUTPUT_MIN_MV, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
     stopMv: deviceTargetNumber("deviceTargetStopMv", DAC_OUTPUT_MAX_MV, { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV, integer: true }),
     stepMv: deviceTargetNumber("deviceTargetStepMv", 300, { min: 1, max: 30000, integer: true }),
-    avg: deviceTargetNumber("deviceTargetAvg", 256, { min: 1, max: 256, integer: true }),
+    avg: deviceTargetNumber("deviceTargetAvg", 256, { min: 1, max: ADC_AVG_MAX, integer: true }),
     settleUs: deviceTargetNumber("deviceTargetSettleUs", 30000, { min: 0, max: 65000, integer: true }),
     preBiasMs: deviceTargetNumber("deviceTargetPreBiasMs", 2000, { min: 0, max: 30000, integer: true }),
     reverse: $("deviceTargetReverse")?.checked !== false,
@@ -6457,6 +6473,7 @@ function deviceTargetApplySweepOptions(opt) {
   if ($("sweepD2Stop")) $("sweepD2Stop").value = opt.stopMv;
   if ($("sweepD2Step")) $("sweepD2Step").value = opt.stepMv;
   if ($("adcAvgSamples")) $("adcAvgSamples").value = opt.avg;
+  if ($("sweepPointRepeats")) $("sweepPointRepeats").value = opt.pointRepeats;
   if ($("sweepSettleUs")) $("sweepSettleUs").value = opt.settleUs;
   if ($("sweepPreBiasMs")) $("sweepPreBiasMs").value = opt.preBiasMs;
   if ($("sweepReverse")) $("sweepReverse").checked = opt.reverse;
@@ -6921,6 +6938,7 @@ function exportBaseParameterRows(kind) {
     ["sweep_ui", "adc_avg", uiValue("adcAvgSamples"), "samples", ""],
     ["sweep_ui", "settle", uiValue("sweepSettleUs"), "us", "DAC-to-ADC delay"],
     ["sweep_ui", "pre_bias", uiValue("sweepPreBiasMs"), "ms", "start-voltage pre-bias"],
+    ["sweep_ui", "point_repeats", uiValue("sweepPointRepeats"), "", "per-gate repeated ADC readouts averaged in firmware"],
     ["sweep_ui", "repeats", uiValue("sweepRepeats"), "", ""],
     ["sweep_ui", "reverse", uiValue("sweepReverse"), "", ""],
     [],
@@ -7060,7 +7078,7 @@ function tidyFields(includeBracket) {
   const labels = ADC_LABELS.slice();
   return [
     ...(includeBracket ? ["bracket_id", "bracket_step", "bracket_axis", "device", "delta_mu_V", "delta_vstart_V", "Vmu_step_V", "Vstart_step_V", "Vmu_code", "Vmu_V", "Vstart_code", "Vstart_V"] : []),
-    "sweep_id", "repeat", "point", "time", "sweep_dac",
+    "sweep_id", "repeat", "point_repeat", "point", "time", "sweep_dac",
     "D1_code", "D1_vhigh", "D2_code", "D2_vhigh",
     ...labels.flatMap(label => [`${label}_raw`, `${label}_V_AIN`, `${label}_I_uA`, `${label}_tia`, `${label}_devices`]),
   ];
@@ -7076,6 +7094,7 @@ function tidyPointRow(run, point, includeBracket) {
     ] : []),
     run.sweep?.id || "",
     point.repeat ?? 1,
+    point.pointRepeat ?? 1,
     point.point,
     point.time,
     point.sweepDac ?? "",
@@ -7135,12 +7154,66 @@ function currentDeviceSeedRows() {
   return rows;
 }
 
+function getConnectionStatus() {
+  return {
+    connected: Boolean(state.connected),
+    hasWriter: Boolean(state.writer),
+    sweepRunning: Boolean(state.sweepRunning),
+    deviceCalRunning: Boolean(state.deviceCalRunning),
+    appVersion: APP_VERSION,
+  };
+}
+
+function getApplicationTargetFitReadiness(targets = []) {
+  const messages = [];
+  const rows = normalizeApplicationTargetFitTargets(targets);
+  const connected = Boolean(state.connected && state.writer);
+  const busy = Boolean(state.deviceCalRunning || state.sweepRunning);
+  if (!connected) messages.push("UART is not connected.");
+  if (busy) messages.push("Another sweep or device-calibration run is active.");
+  if (!rows.length) messages.push("No valid application target rows were supplied.");
+
+  const deviceStatuses = rows.map(row => {
+    const mappedAdc = adcIndexFromMappedDevice(row.device);
+    const hasMappedAdc = Number.isFinite(mappedAdc);
+    const channel = deviceCalChannelForDevice(row.device);
+    const adcIndex = hasMappedAdc ? mappedAdc : channel.adcIndex;
+    return {
+      device: row.device,
+      adcPair: row.adcPair,
+      basis: row.basis,
+      label: row.label,
+      adc: Number.isFinite(adcIndex) ? `ADC${adcIndex}` : "",
+      adcIndex: Number.isFinite(adcIndex) ? adcIndex : null,
+      dac: channel.xDac,
+      hasMappedAdc,
+      status: hasMappedAdc ? "ready" : "no mapped ADC",
+    };
+  });
+  const missing = deviceStatuses.filter(item => !item.hasMappedAdc).map(item => `D${item.device}`);
+  if (missing.length) messages.push(`Missing ADC mapping for ${missing.join(", ")}.`);
+  const batches = new Set(deviceStatuses.map(item => Number(item.device) >= 9 ? "D9-D16" : "D1-D8"));
+  if (batches.size > 1) messages.push("Assigned devices span both D1-D8 and D9-D16 batches; fit them as separate presets/runs.");
+
+  return {
+    ok: connected && !busy && rows.length > 0 && !missing.length && batches.size <= 1,
+    connected,
+    busy,
+    targetCount: rows.length,
+    devices: rows.map(row => row.device),
+    requiredAdcs: [...new Set(deviceStatuses.map(item => item.adc).filter(Boolean))],
+    deviceStatuses,
+    messages,
+  };
+}
 function exposePcbGaussianApi() {
   window.PCBGaussian = {
     ...(window.PCBGaussian || {}),
     appVersion: APP_VERSION,
     getDeviceSeedRows: currentDeviceSeedRows,
     getDeviceTargetSearchRows: deviceTargetSearchCsvRows,
+    getConnectionStatus,
+    getApplicationTargetFitReadiness,
     runDeviceTargetSearchBrowser,
     runApplicationTargetFit,
     stopDeviceCal,

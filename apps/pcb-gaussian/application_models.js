@@ -69,6 +69,16 @@
       metricsFile: "application\\data\\processed\\seeds_2d_adc_pair_basis\\metrics.csv",
       scoreHint: "Validation uses four ADC pair-summed basis outputs. Load the curve grid to preview the four pair curves, and load the fitting-target CSV to see target A_amp/mu/sigma on the VG axis."
     },
+    seeds_2d_adc_physical_basis: {
+      label: "Seeds 2D physical ADC basis",
+      kind: "seeds",
+      scoreFile: "application\\data\\processed\\seeds_2d_adc_physical_basis\\seeds_2d_adc_physical_scores.csv",
+      gridFile: "application\\data\\processed\\seeds_2d_adc_physical_basis\\adc_physical_basis_grid.csv",
+      kernelFile: "application\\data\\processed\\seeds_2d_adc_physical_basis\\selected_adc_physical_groups.csv",
+      targetFile: "application\\data\\processed\\seeds_2d_adc_physical_basis\\adc_physical_basis_fit_targets.csv",
+      metricsFile: "application\\data\\processed\\seeds_2d_adc_physical_basis\\metrics.csv",
+      scoreHint: "Validation uses physical ADC/TIA basis outputs. Each basis is one real ADC current sum of one to four devices, sampled at two projected VG values, then classified by the system readout."
+    },
     seeds_lda_classifier: {
       label: "Seeds LDA projection",
       kind: "seeds",
@@ -195,6 +205,11 @@
     validationRows: [],
     seeds2dLastResult: null,
     generatedCurveCsv: "",
+    appFitHistory: [],
+    appFitResults: [],
+    appFitReadiness: null,
+    appFitRunning: false,
+    appFitPollTimer: null,
     fileNames: {}
   };
 
@@ -203,11 +218,22 @@
     $("appModelPreset").addEventListener("change", () => {
       state.preset = $("appModelPreset").value;
       state.generatedGridRows = [];
+      state.appFitHistory = [];
+      state.appFitResults = [];
+      state.appFitReadiness = null;
+      state.generatedCurveCsv = "";
+      state.fitRows = [];
+      state.validationRows = [];
       if (state.deviceCurveRows.length) buildGeneratedGridFromDeviceCurves(false);
       renderFileHint();
       renderSummary();
       renderPresetTargetPreview();
       renderAssignmentTable();
+      renderApplicationWorkflow();
+      renderApplicationFitProgress();
+      renderRoutingStatus(null);
+      renderFitTable();
+      renderValidationTable();
       drawPlot();
     });
     bindFile("appModelScoreFile", "scoreRows", "score");
@@ -219,8 +245,10 @@
     $("appModelValidateButton").addEventListener("click", validateModel);
     $("appModelFitButton").addEventListener("click", fitModelCurves);
     $("appModelDownloadTargetButton")?.addEventListener("click", downloadPresetTargets);
+    $("appModelCheckRoutingButton")?.addEventListener("click", () => checkApplicationTargetReadiness(true));
     $("appModelRunUartFitButton")?.addEventListener("click", runApplicationUartTargetFit);
     $("appModelStopUartFitButton")?.addEventListener("click", stopApplicationUartTargetFit);
+    $("appModelValidateGeneratedButton")?.addEventListener("click", validateGeneratedApplicationCurves);
     $("appModelDownloadUartCurvesButton")?.addEventListener("click", downloadGeneratedDeviceCurves);
     $("appModelDownloadButton").addEventListener("click", downloadReport);
     $("appModelClearButton").addEventListener("click", clearState);
@@ -242,6 +270,9 @@
     renderEmptyTables();
     renderPresetTargetPreview();
     renderAssignmentTable();
+    renderApplicationWorkflow();
+    renderApplicationFitProgress();
+    renderRoutingStatus(null);
     renderSeeds2dResult(null);
   }
 
@@ -263,6 +294,7 @@
         if (stateKey === "scoreRows" || stateKey === "gridRows" || stateKey === "targetRows" || stateKey === "deviceCurveRows") drawPlot();
         renderSummary();
         renderPresetTargetPreview();
+        renderApplicationWorkflow();
       } catch (error) {
         setStatus(`Failed to read ${file.name}: ${error.message}`, true);
       }
@@ -281,6 +313,11 @@
     state.validationRows = [];
     state.seeds2dLastResult = null;
     state.generatedCurveCsv = "";
+    state.appFitHistory = [];
+    state.appFitResults = [];
+    state.appFitReadiness = null;
+    state.appFitRunning = false;
+    stopApplicationFitPolling();
     state.fileNames = {};
     ["appModelScoreFile", "appModelGridFile", "appModelKernelFile", "appModelTargetFile", "appModelDeviceCurveFile", "appModelMetricsFile"].forEach(id => {
       const input = $(id);
@@ -291,6 +328,9 @@
     renderAssignmentTable();
     renderEmptyTables();
     renderPresetTargetPreview();
+    renderApplicationWorkflow();
+    renderApplicationFitProgress();
+    renderRoutingStatus(null);
     renderSeeds2dResult(null);
     setUartFitRunning(false);
     setStatus("Application model inputs cleared.");
@@ -354,7 +394,15 @@
   }
 
   function targetLibrary() {
-    return APP_MODEL_TARGET_LIBRARY[state.preset] || null;
+    const staticLibrary = APP_MODEL_TARGET_LIBRARY[state.preset] || null;
+    const dynamicLibrary = targetData()?.library || null;
+    if (!dynamicLibrary) return staticLibrary;
+    return {
+      ...(staticLibrary || {}),
+      ...dynamicLibrary,
+      readoutWeights: dynamicLibrary.readoutWeights || staticLibrary?.readoutWeights || {},
+      pairs: dynamicLibrary.pairs || staticLibrary?.pairs || []
+    };
   }
 
   function targetData() {
@@ -375,6 +423,11 @@
     if (!library?.pairs?.length) return [];
     const dataRows = targetData()?.gridRows;
     if (Array.isArray(dataRows) && dataRows.length) return dataRows;
+    return idealTargetGridRowsFromLibrary(library);
+  }
+
+  function idealTargetGridRowsFromLibrary(library = targetLibrary()) {
+    if (!library?.pairs?.length) return [];
     return targetXGrid(library).map(x => {
       const row = { VG: x };
       library.pairs.forEach(pair => {
@@ -668,8 +721,8 @@
       setStatus("No preset targets are available for this model.", true);
       return;
     }
-    const curveRows = targetGridRowsFromLibrary(library).map(row => {
-      const out = { row_type: "adc_pair_target_curve", VG: row.VG };
+    const curveRows = idealTargetGridRowsFromLibrary(library).map(row => {
+      const out = { row_type: "ideal_adc_pair_target_curve", VG: row.VG };
       library.pairs.forEach(pair => {
         out[pair.basis] = row[pair.basis];
       });
@@ -678,7 +731,7 @@
     const deviceRows = [];
     library.pairs.forEach(pair => {
       deviceRows.push({
-        row_type: "adc_pair_target",
+        row_type: "ideal_adc_pair_target",
         adc_pair: pair.adcPair,
         basis: pair.basis,
         target_A_norm: pair.target.A,
@@ -706,7 +759,7 @@
       "# device_and_adc_targets",
       toCsv(deviceRows),
       "",
-      "# adc_pair_target_curves",
+      "# ideal_adc_pair_target_curves",
       toCsv(curveRows)
     ].join("\n");
     downloadText(`application_preset_targets_${state.preset}_${Date.now()}.csv`, sections);
@@ -740,6 +793,119 @@
     return rows;
   }
 
+  function renderApplicationWorkflow() {
+    const host = $("appModelWorkflow");
+    const library = targetLibrary();
+    const hasTarget = Boolean(library?.pairs?.length);
+    const routingChecked = Boolean(state.appFitReadiness);
+    const routingOk = Boolean(state.appFitReadiness?.ok);
+    const hasGenerated = Boolean(state.generatedGridRows.length);
+    const hasValidation = Boolean(state.validationRows.length);
+    const validate = $("appModelValidateGeneratedButton");
+    const download = $("appModelDownloadUartCurvesButton");
+    if (validate) validate.disabled = state.appFitRunning || !hasGenerated;
+    if (download) download.disabled = state.appFitRunning || !state.generatedCurveCsv;
+    if (!host) return;
+    const steps = [
+      {
+        label: "1. Target",
+        text: hasTarget ? `${library.label}: ${library.pairs.length} ADC target curve(s)` : "No preset target",
+        status: hasTarget ? "ok" : "pending",
+      },
+      {
+        label: "2. Routing",
+        text: routingChecked ? (routingOk ? `${state.appFitReadiness.targetCount} device target(s) ready` : "Check required") : "Not checked",
+        status: routingChecked ? (routingOk ? "ok" : "warn") : "pending",
+      },
+      {
+        label: "3. Fit",
+        text: state.appFitRunning ? "UART fitting running" : hasGenerated ? `${state.generatedGridRows.length} generated VG point(s)` : "No fitted device curves",
+        status: state.appFitRunning ? "running" : hasGenerated ? "ok" : "pending",
+      },
+      {
+        label: "4. Validate",
+        text: hasValidation ? `${state.validationRows.length} validation metric row(s)` : "Waiting for score CSV and fitted curves",
+        status: hasValidation ? "ok" : "pending",
+      },
+    ];
+    host.innerHTML = steps.map(step => (
+      `<div class="app-model-workflow-step ${step.status}">` +
+      `<strong>${escapeHtml(step.label)}</strong>` +
+      `<span>${escapeHtml(step.text)}</span>` +
+      `</div>`
+    )).join("");
+  }
+
+  function renderRoutingStatus(readiness = state.appFitReadiness) {
+    const host = $("appModelRoutingStatus");
+    if (!host) return;
+    if (!readiness) {
+      host.className = "app-model-routing-status";
+      host.textContent = "Routing check not run.";
+      return;
+    }
+    const message = readiness.ok
+      ? `Ready: ${readiness.targetCount} target device(s), ${readiness.requiredAdcs.join(", ")}.`
+      : `Not ready: ${(readiness.messages || []).join(" ") || "check target assignment and UART connection."}`;
+    const rows = (readiness.deviceStatuses || []).map(item => (
+      `<span>D${escapeHtml(String(item.device))} -> ${escapeHtml(item.adc || "ADC?")} / ${escapeHtml(item.dac || "DAC?")} (${escapeHtml(item.status || "")})</span>`
+    )).join("");
+    host.className = `app-model-routing-status ${readiness.ok ? "ok" : "warn"}`;
+    host.innerHTML = `<strong>${escapeHtml(message)}</strong><div>${rows}</div>`;
+  }
+
+  function checkApplicationTargetReadiness(showStatus = true) {
+    const targets = applicationUartFitTargets();
+    const api = window.PCBGaussian;
+    let readiness;
+    if (!targets.length) {
+      readiness = {
+        ok: false,
+        connected: false,
+        busy: false,
+        targetCount: 0,
+        devices: [],
+        requiredAdcs: [],
+        deviceStatuses: [],
+        messages: ["This preset does not define application target device assignments."],
+      };
+    } else if (api?.getApplicationTargetFitReadiness) {
+      try {
+        readiness = api.getApplicationTargetFitReadiness(targets);
+      } catch (error) {
+        readiness = {
+          ok: false,
+          connected: false,
+          busy: false,
+          targetCount: targets.length,
+          devices: targets.map(row => row.device),
+          requiredAdcs: [],
+          deviceStatuses: [],
+          messages: [error.message || String(error)],
+        };
+      }
+    } else {
+      const connection = api?.getConnectionStatus?.();
+      readiness = {
+        ok: false,
+        connected: Boolean(connection?.connected && connection?.hasWriter),
+        busy: Boolean(connection?.sweepRunning || connection?.deviceCalRunning),
+        targetCount: targets.length,
+        devices: targets.map(row => row.device),
+        requiredAdcs: [],
+        deviceStatuses: targets.map(row => ({ device: row.device, adcPair: row.adcPair, basis: row.basis, adc: "", dac: "", status: "API unavailable" })),
+        messages: ["Reload the GUI after updating app.js; routing-check API is unavailable."],
+      };
+    }
+    state.appFitReadiness = readiness;
+    renderRoutingStatus(readiness);
+    renderApplicationWorkflow();
+    if (showStatus) {
+      setUartFitStatus(readiness.ok ? "ADC/device routing check passed." : (readiness.messages || []).join(" "), !readiness.ok);
+    }
+    return readiness;
+  }
+
   function setUartFitStatus(message, isError = false) {
     const status = $("appModelUartFitStatus");
     if (!status) return;
@@ -748,12 +914,52 @@
   }
 
   function setUartFitRunning(running) {
+    state.appFitRunning = Boolean(running);
     const run = $("appModelRunUartFitButton");
     const stop = $("appModelStopUartFitButton");
+    const check = $("appModelCheckRoutingButton");
+    const validate = $("appModelValidateGeneratedButton");
     const download = $("appModelDownloadUartCurvesButton");
     if (run) run.disabled = running;
     if (stop) stop.disabled = !running;
+    if (check) check.disabled = running;
+    if (validate) validate.disabled = running || !state.generatedGridRows.length;
     if (download) download.disabled = running || !state.generatedCurveCsv;
+    renderApplicationWorkflow();
+  }
+
+  function startApplicationFitPolling() {
+    stopApplicationFitPolling();
+    syncApplicationFitProgress();
+    state.appFitPollTimer = window.setInterval(syncApplicationFitProgress, 1200);
+  }
+
+  function stopApplicationFitPolling() {
+    if (state.appFitPollTimer) {
+      window.clearInterval(state.appFitPollTimer);
+      state.appFitPollTimer = null;
+    }
+  }
+
+  function syncApplicationFitProgress() {
+    const api = window.PCBGaussian;
+    if (!api) return;
+    const history = api.getDeviceCalHistory?.() || [];
+    const results = api.getDeviceCalResults?.() || [];
+    if (Array.isArray(history)) state.appFitHistory = history;
+    if (Array.isArray(results)) state.appFitResults = results;
+    const curveCsv = api.getDeviceCalCurveCsv?.() || "";
+    if (curveCsv && curveCsv !== state.generatedCurveCsv) {
+      state.generatedCurveCsv = curveCsv;
+      state.deviceCurveRows = parseDeviceCurveCsv(curveCsv);
+      state.fileNames["device curves"] = "UART: application target fit";
+      buildGeneratedGridFromDeviceCurves(false);
+      renderSummary();
+      renderPresetTargetPreview();
+      drawPlot();
+    }
+    renderApplicationFitProgress();
+    renderApplicationWorkflow();
   }
 
   async function runApplicationUartTargetFit() {
@@ -767,13 +973,31 @@
       setUartFitStatus("PCB Gaussian UART fitting API is not available. Reload the GUI after updating app.js.", true);
       return;
     }
+    const readiness = checkApplicationTargetReadiness(true);
+    if (!readiness?.ok) {
+      setStatus("Application target fitting stopped before measurement because routing/readiness check failed.", true);
+      return;
+    }
+    state.appFitHistory = [];
+    state.appFitResults = [];
+    state.validationRows = [];
+    state.deviceCurveRows = [];
+    state.generatedGridRows = [];
+    state.generatedCurveCsv = "";
+    renderValidationTable();
+    renderApplicationFitProgress();
+    renderPresetTargetPreview();
+    renderSummary();
     setUartFitRunning(true);
-    setUartFitStatus(`Running UART target fitting for ${targets.length} assigned device curve(s). Follow Device Cal status for per-sweep progress.`);
+    startApplicationFitPolling();
+    setUartFitStatus(`Running UART target fitting for ${targets.length} assigned device curve(s). Iteration progress is shown below.`);
     try {
       const result = await api.runApplicationTargetFit(targets, {
         preset: state.preset,
         runId: `${state.preset}_${Date.now()}`,
       });
+      state.appFitHistory = Array.isArray(result?.history) ? result.history : api.getDeviceCalHistory?.() || [];
+      state.appFitResults = Array.isArray(result?.results) ? result.results : api.getDeviceCalResults?.() || [];
       state.generatedCurveCsv = result?.curveCsv || api.getDeviceCalCurveCsv?.() || "";
       if (!state.generatedCurveCsv) throw new Error("UART fitting completed but returned no curve-point CSV.");
       state.deviceCurveRows = parseDeviceCurveCsv(state.generatedCurveCsv);
@@ -781,17 +1005,21 @@
       buildGeneratedGridFromDeviceCurves(false);
       renderSummary();
       renderPresetTargetPreview();
+      renderApplicationFitProgress();
       drawPlot();
       if (state.scoreRows.length) validateModel(false);
       const summary = result?.summary || {};
       const meanSim = Number(summary.meanSimilarity);
       const simText = Number.isFinite(meanSim) ? ` mean sim ${(meanSim * 100).toFixed(2)}%` : "";
-      setUartFitStatus(`UART target fitting ${result?.status || "complete"}: ${state.deviceCurveRows.length} curve-point row(s), generated ${state.generatedGridRows.length} VG grid row(s).${simText}`);
+      const validationText = state.scoreRows.length ? " Validation was recomputed from generated device curves." : " Load the score CSV, then run validation.";
+      setUartFitStatus(`UART target fitting ${result?.status || "complete"}: ${state.deviceCurveRows.length} curve-point row(s), generated ${state.generatedGridRows.length} VG grid row(s).${simText}.${validationText}`);
       setStatus(`Generated application curves from UART fitting. Validation now uses generated device curves when available.`);
     } catch (error) {
       setUartFitStatus(error.message || String(error), true);
       setStatus(error.message || String(error), true);
     } finally {
+      stopApplicationFitPolling();
+      syncApplicationFitProgress();
       setUartFitRunning(false);
     }
   }
@@ -813,6 +1041,127 @@
     }
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     downloadText(`application_uart_generated_device_curves_${state.preset}_${stamp}.csv`, state.generatedCurveCsv);
+  }
+
+  function validateGeneratedApplicationCurves() {
+    if (!state.generatedGridRows.length) {
+      setUartFitStatus("No fitted/generated device curves are available. Run UART target fit or load generated device curves first.", true);
+      renderApplicationWorkflow();
+      return;
+    }
+    validateModel(true);
+    renderApplicationWorkflow();
+  }
+
+  function rowFitDevice(row) {
+    return Number(row?.channel?.device ?? row?.device);
+  }
+
+  function rowFitAdc(row) {
+    const adc = row?.channel?.adcIndex;
+    return Number.isFinite(Number(adc)) ? `ADC${adc}` : "";
+  }
+
+  function rowFitSimilarity(row) {
+    return numberValue(row?.error?.curve?.similarity);
+  }
+
+  function rowFitLoss(row) {
+    const curveLoss = numberValue(row?.error?.curve?.loss);
+    if (Number.isFinite(curveLoss)) return curveLoss;
+    return numberValue(row?.error?.norm);
+  }
+
+  function rowFitNextCode(row) {
+    const plan = row?.plan;
+    if (!plan) return "";
+    const currentMu = plan.currentMuCode;
+    const nextMu = plan.nextMuCode;
+    const currentVs = plan.currentVstartCode ?? plan.currentACode;
+    const nextVs = plan.nextVstartCode ?? plan.nextACode;
+    if ([currentMu, nextMu, currentVs, nextVs].some(value => value === undefined || value === null || value === "")) return plan.programCommand || "";
+    return `M${currentMu}->${nextMu}, S${currentVs}->${nextVs}`;
+  }
+
+  function renderApplicationFitProgress() {
+    const status = $("appModelFitProgressStatus");
+    const tbody = $("appModelFitProgressTable");
+    const history = (state.appFitHistory || []).filter(row => row?.fit);
+    if (status) {
+      if (state.appFitRunning) status.textContent = `Running: ${history.length} sweep-fit iteration row(s).`;
+      else if (history.length) status.textContent = `Latest run: ${history.length} sweep-fit iteration row(s).`;
+      else status.textContent = "No UART target fitting run yet.";
+    }
+    if (tbody) {
+      if (!history.length) {
+        tbody.innerHTML = `<tr><td colspan="10">No application target-fit iteration history yet.</td></tr>`;
+      } else {
+        tbody.innerHTML = history.slice(-96).map(row => {
+          const fit = row.fit || {};
+          const cells = [
+            row.iter ?? "",
+            `D${rowFitDevice(row) || ""}`,
+            rowFitAdc(row),
+            formatNumber(fit.A, 5),
+            formatNumber(fit.mu, 3),
+            formatNumber(Math.abs(numberValue(fit.sigma)), 3),
+            formatNumber(rowFitSimilarity(row), 4),
+            formatNumber(rowFitLoss(row), 5),
+            rowFitNextCode(row),
+            row.action || "",
+          ];
+          return `<tr>${cells.map(value => `<td>${escapeHtml(String(value))}</td>`).join("")}</tr>`;
+        }).join("");
+      }
+    }
+    drawApplicationFitProgressPlot(history);
+  }
+
+  function drawApplicationFitProgressPlot(history) {
+    const canvas = $("appModelFitProgressCanvas");
+    const legend = $("appModelFitProgressLegend");
+    if (!canvas) return;
+    const ctx = prepareCanvas(canvas);
+    clearCanvas(ctx, canvas);
+    const rows = (history || []).filter(row => Number.isFinite(numberValue(row.iter)) && Number.isFinite(rowFitSimilarity(row)));
+    if (!rows.length) {
+      drawEmptyMessage(ctx, canvas, "No target-fit similarity history yet.");
+      if (legend) legend.innerHTML = "";
+      return;
+    }
+    const groups = new Map();
+    rows.forEach(row => {
+      const device = rowFitDevice(row);
+      if (!Number.isFinite(device)) return;
+      if (!groups.has(device)) groups.set(device, []);
+      groups.get(device).push([numberValue(row.iter), rowFitSimilarity(row)]);
+    });
+    const allX = rows.map(row => numberValue(row.iter));
+    const simTarget = numberValue($("deviceCalSimilarityTarget")?.value || 0.95);
+    const scale = plotScale(canvas, [0, Math.max(...allX, 1)], [0, 1]);
+    drawAxes(ctx, canvas, scale, "iteration", "target similarity");
+    if (Number.isFinite(simTarget)) {
+      drawLine(ctx, [[scale.xMin, simTarget], [scale.xMax, simTarget]], scale, "#7c8790", 1.2, [6, 4]);
+    }
+    const series = [];
+    Array.from(groups.entries()).sort((a, b) => a[0] - b[0]).forEach(([device, points], index) => {
+      const color = COLORS[index % COLORS.length];
+      const sorted = points.sort((a, b) => a[0] - b[0]);
+      drawLine(ctx, sorted, scale, color, 1.8);
+      ctx.save();
+      ctx.fillStyle = color;
+      sorted.forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(scale.x(x), scale.y(y), 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+      series.push({ name: `D${device}`, color });
+    });
+    if (legend) {
+      legend.innerHTML = series.map(item => `<span><i style="background:${item.color}"></i>${escapeHtml(item.name)}</span>`).join("") +
+        `<span><i style="background:#7c8790"></i>similarity target</span>`;
+    }
   }
 
   function renderEmptyTables() {
@@ -869,7 +1218,7 @@
       if (legend) legend.innerHTML = "";
       return;
     }
-    const targetRows = targetGridRowsFromLibrary(library);
+    const targetRows = idealTargetGridRowsFromLibrary(library);
     const componentSynthesis = targetComponentSynthesisRows(library);
     const generatedRows = state.generatedGridRows.length ? state.generatedGridRows : [];
     const allX = targetRows.map(row => numberValue(row.VG));
@@ -908,8 +1257,8 @@
     });
     if (status) {
       status.textContent = generatedRows.length
-        ? `Solid = ADC-pair target; short dash = component Gaussian curves; long dash = generated device-curve overlay (${generatedRows.length} VG points).`
-        : `Solid = ADC-pair target; short dash = component Gaussian curves to synthesize each target kernel.`;
+        ? `Solid = ideal ADC-pair target; short dash = component Gaussian curves; long dash = generated device-curve overlay (${generatedRows.length} VG points).`
+        : `Solid = ideal ADC-pair target; short dash = component Gaussian curves to synthesize each target kernel.`;
     }
     if (legend) {
       legend.innerHTML = series.map(item => `<span><i style="background:${item.color}"></i>${escapeHtml(item.name)}</span>`).join("") +
@@ -1005,6 +1354,7 @@
     }
     renderSummary();
     drawPlot();
+    renderApplicationWorkflow();
   }
 
   function validateNab(updateStatus) {
@@ -1048,7 +1398,7 @@
   }
 
   function validateSeeds(updateStatus) {
-    if (state.preset === "seeds_2d_adc_pair_basis" && targetLibrary()?.type === "adc_pair_basis") {
+    if (targetLibrary()?.type === "adc_pair_basis") {
       validateSeedsAdcPairBasis(updateStatus);
       return;
     }

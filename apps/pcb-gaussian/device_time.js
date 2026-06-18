@@ -36,7 +36,8 @@
 
   function deviceTimeOversample() {
     const input = $("deviceTimeOversample");
-    const value = clamp(Math.round(Number(input?.value) || 1), 1, 256);
+    const maxAvg = window.PCB_GAUSSIAN_ADC_AVG_MAX || 4096;
+    const value = clamp(Math.round(Number(input?.value) || 1), 1, maxAvg);
     if (input) input.value = value;
     return value;
   }
