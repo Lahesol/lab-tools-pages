@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=fb28b819aaf0" />
+    <link rel="stylesheet" href="./styles.css?v=475188fc6712" />
   </head>
   <body>
     <div class="app-shell">
@@ -77,6 +77,31 @@
             <div class="panel-heading">
               <h2>Commands</h2>
               <span id="bitModeStatus" class="mode-pill is-muted">Bit mode off</span>
+            </div>
+            <div class="subpanel">
+              <div class="panel-heading compact-heading">
+                <h3>ADC Input</h3>
+                <span id="adcSourceStatus" class="mode-pill">ADC3 device A</span>
+              </div>
+              <div class="quick-grid">
+                <button class="button secondary command-button" data-adc-source="ADC3" data-command="ADC3" type="button" title="Select ADC3 / AIN3 / P0.05 discrete device path">
+                  <span class="command-code">ADC3</span>
+                  <span class="command-label">Device A · AIN3/P0.05</span>
+                </button>
+                <button class="button secondary command-button" data-adc-source="ADC2" data-command="ADC2" type="button" title="Select ADC2 / AIN2 / P0.04 discrete device path">
+                  <span class="command-code">ADC2</span>
+                  <span class="command-label">Device B · AIN2/P0.04</span>
+                </button>
+                <button class="button secondary command-button" data-adc-source="ADC0" data-command="ADC0" type="button" title="Select ADC0 / AIN0 / P0.02 commercial PPG sensor">
+                  <span class="command-code">ADC0</span>
+                  <span class="command-label">Commercial PPG · AIN0/P0.02</span>
+                </button>
+                <button class="button secondary command-button" data-command="ADC?" type="button" title="Query active ADC input">
+                  <span class="command-code">ADC?</span>
+                  <span class="command-label">Query active ADC</span>
+                </button>
+              </div>
+              <p class="command-note">ADC3/ADC2 are discrete device paths. ADC0 is the commercial PPG sensor path.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-command="9999" type="button" title="Toggle random bit mode">
@@ -339,7 +364,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=495448a2eaa2" defer></script>
+    <script src="./app.js?v=46bac7988c37" defer></script>
     <script src="./dfu.js" defer></script>
   </body>
 </html>

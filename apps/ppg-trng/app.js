@@ -14,6 +14,7 @@ const els = {
   liveSend: document.querySelector("#liveSend"),
   bitModeButton: document.querySelector("#bitModeButton"),
   bitModeStatus: document.querySelector("#bitModeStatus"),
+  adcSourceStatus: document.querySelector("#adcSourceStatus"),
   log: document.querySelector("#log"),
   clearLogButton: document.querySelector("#clearLogButton"),
   latestValue: document.querySelector("#latestValue"),
@@ -73,6 +74,7 @@ const state = {
   totalSamples: 0,
   latest: null,
   latestChannel: "ADC",
+  adcSource: "ADC3",
   dacValues: { A: 2048, B: 2056 },
   bitMode: false,
   bits: [],
@@ -120,6 +122,24 @@ const CHANNEL_COLORS = {
   I: "#5b5bd6",
   R: "#d64545",
   A: "#5c6f82",
+};
+
+const ADC_SOURCE_INFO = {
+  ADC3: {
+    command: "ADC3",
+    label: "ADC3 device A",
+    detail: "Discrete device A · AIN3/P0.05",
+  },
+  ADC2: {
+    command: "ADC2",
+    label: "ADC2 device B",
+    detail: "Discrete device B · AIN2/P0.04",
+  },
+  ADC0: {
+    command: "ADC0",
+    label: "ADC0 commercial",
+    detail: "Commercial PPG · AIN0/P0.02",
+  },
 };
 
 const plot = {
@@ -259,6 +279,43 @@ function resetReceiveState() {
   state.binaryBuffer = [];
 }
 
+function normalizeAdcSource(value) {
+  const match = String(value || "").toUpperCase().match(/(?:ADC|AIN)?\s*([023])\b/);
+  return match ? `ADC${match[1]}` : null;
+}
+
+function getAdcSourceInfo(source = state.adcSource) {
+  return ADC_SOURCE_INFO[normalizeAdcSource(source)] || ADC_SOURCE_INFO.ADC3;
+}
+
+function getAdcSourceDescription(source = state.adcSource) {
+  return getAdcSourceInfo(source).detail;
+}
+
+function setAdcSource(source, options = {}) {
+  const normalized = normalizeAdcSource(source);
+  if (!normalized) return;
+  state.adcSource = normalized;
+  resetNoiseExtractor();
+  updateAdcSourceUi(options);
+  updateStats();
+  state.needsDraw = true;
+}
+
+function updateAdcSourceUi(options = {}) {
+  const info = getAdcSourceInfo();
+  const pending = Boolean(options.pending);
+  if (els.adcSourceStatus) {
+    els.adcSourceStatus.textContent = pending ? `${info.label} pending` : info.label;
+    els.adcSourceStatus.classList.toggle("is-muted", pending);
+  }
+
+  document.querySelectorAll("[data-adc-source]").forEach((button) => {
+    const active = normalizeAdcSource(button.dataset.adcSource) === state.adcSource;
+    button.classList.toggle("is-active", active);
+  });
+}
+
 function setConnectedUi(connected) {
   els.connectButton.textContent = connected ? "Disconnect" : "Connect";
   updateTransportControls();
@@ -266,6 +323,14 @@ function setConnectedUi(connected) {
     connected ? `${getActiveTransportName()} connected` : "Disconnected",
     connected ? "ok" : "muted",
   );
+}
+
+function queryDeviceStateSoon() {
+  window.setTimeout(async () => {
+    if (!isConnected()) return;
+    await sendCommand("VER?");
+    await sendCommand("ADC?");
+  }, 250);
 }
 
 async function connectSelectedTransport() {
@@ -308,6 +373,7 @@ async function connectSerial() {
     setConnectedUi(true);
     addLog("SYS", `Serial opened at ${baudRate}`);
     readLoop();
+    queryDeviceStateSoon();
   } catch (error) {
     addLog("ERR", error.message || error, true);
     try {
@@ -390,6 +456,7 @@ async function connectBluetooth() {
     resetReceiveState();
     setConnectedUi(true);
     addLog("SYS", `Bluetooth connected to ${device.name || "NUS device"}`);
+    queryDeviceStateSoon();
   } catch (error) {
     addLog("ERR", error.message || error, true);
     await disconnectBluetooth({ silent: true });
@@ -499,6 +566,7 @@ function isTextPayload(bytes) {
     byte === 46 ||
     byte === 59 ||
     byte === 58 ||
+    byte === 95 ||
     (byte >= 48 && byte <= 57) ||
     (byte >= 65 && byte <= 90) ||
     (byte >= 97 && byte <= 122)
@@ -552,7 +620,7 @@ function ingestText(text) {
 
 function parseSegment(segment) {
   if (!segment) return;
-  parseFirmwareInfoSegment(segment);
+  if (parseStatusSegment(segment)) return;
 
   if (state.bitMode) {
     parseBitSegment(segment);
@@ -593,12 +661,34 @@ function parseTaggedSegment(segment) {
   return parsed;
 }
 
+function parseStatusSegment(segment) {
+  if (parseFirmwareInfoSegment(segment)) return true;
+  if (parseAdcStatusSegment(segment)) return true;
+
+  if (/^(DFU|PONG)\b/i.test(segment)) {
+    addLog("RX", segment);
+    return true;
+  }
+
+  return false;
+}
+
 function parseFirmwareInfoSegment(segment) {
-  if (!/^VER\b/i.test(segment)) return;
+  if (!/^VER\b/i.test(segment)) return false;
   const match = segment.match(/\bFW\s*,\s*([^,\s;]+)/i);
   if (match) {
     state.firmwareVersion = match[1];
   }
+  addLog("RX", segment);
+  return true;
+}
+
+function parseAdcStatusSegment(segment) {
+  const match = segment.match(/^ADC\s*[,=:]\s*(?:ACTIVE|SOURCE|SELECTED)\s*[,=:]\s*([023])\b/i);
+  if (!match) return false;
+  setAdcSource(`ADC${match[1]}`);
+  addLog("RX", segment);
+  return true;
 }
 
 function parseBitSegment(segment) {
@@ -612,7 +702,12 @@ function addSample(value, channel = "ADC") {
   if (state.paused) return;
 
   const normalizedChannel = normalizeChannel(channel) || "ADC";
-  const sample = { t: performance.now(), value, channel: normalizedChannel };
+  const sample = {
+    t: performance.now(),
+    value,
+    channel: normalizedChannel,
+    adcSource: state.adcSource,
+  };
   state.latest = value;
   state.latestChannel = normalizedChannel;
   state.samples.push(sample);
@@ -708,13 +803,13 @@ function updateStats() {
   const rate = displaySamples.length > 1 ? (displaySamples.length - 1) / elapsed : 0;
 
   const latest = displaySamples.at(-1);
-  els.latestValue.textContent = `${formatNumber(latest.value)} ${latest.channel || "ADC"}`;
+  els.latestValue.textContent = `${formatNumber(latest.value)} ${latest.channel || "ADC"} · ${getAdcSourceInfo(latest.adcSource).label}`;
   els.minValue.textContent = formatNumber(min);
   els.maxValue.textContent = formatNumber(max);
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
   els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getFilterDescription()}`;
+  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcSourceDescription()} | ${getFilterDescription()}`;
 }
 
 function setBitMode(enabled) {
@@ -901,6 +996,7 @@ function getDisplaySamples(channel = getSelectedChannel()) {
   return samples.map((sample, index) => ({
     t: sample.t,
     channel: sample.channel || "ADC",
+    adcSource: sample.adcSource || state.adcSource,
     rawValue: sample.value,
     value: filteredValues[index],
   }));
@@ -1099,14 +1195,15 @@ function exportCsv() {
   const settings = getFilterSettings();
   const displaySamples = getDisplaySamples();
   const rows = settings.mode === "raw"
-    ? ["time_ms,channel,value"]
-    : ["time_ms,channel,raw_value,filtered_value"];
+    ? ["time_ms,channel,adc_input,value"]
+    : ["time_ms,channel,adc_input,raw_value,filtered_value"];
   displaySamples.forEach((sample) => {
     const time = (sample.t - start).toFixed(3);
+    const adcSource = sample.adcSource || state.adcSource;
     if (settings.mode === "raw") {
-      rows.push(`${time},${sample.channel || "ADC"},${sample.value}`);
+      rows.push(`${time},${sample.channel || "ADC"},${adcSource},${sample.value}`);
     } else {
-      rows.push(`${time},${sample.channel || "ADC"},${sample.rawValue},${sample.value}`);
+      rows.push(`${time},${sample.channel || "ADC"},${adcSource},${sample.rawValue},${sample.value}`);
     }
   });
 
@@ -1482,6 +1579,9 @@ function bindEvents() {
         toggleBitModeCommand();
         return;
       }
+      if (button.dataset.adcSource && isConnected()) {
+        setAdcSource(button.dataset.adcSource, { pending: true });
+      }
       applyPpgCommandPreset(button.dataset.command);
       sendCommand(button.dataset.command);
     });
@@ -1559,6 +1659,7 @@ function init() {
   setDacValue(2056, "init");
   updateTransportControls();
   setConnectedUi(false);
+  updateAdcSourceUi();
   updateFilterUi();
   updateBitStats();
   resizeCanvas();

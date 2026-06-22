@@ -17,6 +17,10 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - DAC set: ASCII number followed by `\r`, for example `2056\r`
 - DAC A set: `A2048\r`
 - DAC B set: `B2056\r`
+- Discrete device path A select: `ADC3\r`
+- Discrete device path B select: `ADC2\r`
+- Commercial PPG sensor select: `ADC0\r`
+- Active ADC input query: `ADC?\r`
 - TRNG bit mode toggle: `9999\r`
 - DAC sweep/reset: `0000\r`
 - Green-only PPG mode toggle: `7761\r`
@@ -43,6 +47,8 @@ In PPG measurement modes, the firmware samples ambient light with LEDs off, disc
 PPG timing displayed in the GUI follows the current firmware constants: 5 ms phase tick, 50 Hz output for single-channel Green/IR/Red PPG, and 16.7 Hz per optical channel for alternating Green/IR/Red PPG.
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
+
+The current PCB analog mapping is ADC3/ADC2 for the discrete PPG device paths and ADC0 for the commercial PPG sensor path. The GUI sends `ADC3`, `ADC2`, or `ADC0` to switch the firmware input, and `ADC?` returns `ADC,ACTIVE,<n>,ROLE,...` for the active route.
 
 ## DFU
 

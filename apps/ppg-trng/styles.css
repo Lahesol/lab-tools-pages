@@ -150,6 +150,23 @@ h2 {
   letter-spacing: 0;
 }
 
+h3 {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.compact-heading {
+  margin-bottom: 8px;
+}
+
+.subpanel {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
 output {
   font-family: var(--mono);
   font-size: 24px;
