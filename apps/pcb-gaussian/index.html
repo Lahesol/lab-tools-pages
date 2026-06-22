@@ -391,6 +391,13 @@
                 <h2>Vstart / mu code map</h2>
               </div>
               <div class="button-row compact">
+                <label class="inline-field">Profile
+                  <select id="paramCalProfile">
+                    <option value="default">D1-D14 default</option>
+                    <option value="D15">D15 special</option>
+                    <option value="D16">D16 special</option>
+                  </select>
+                </label>
                 <button id="loadProjectParamCalButton">Load project cal</button>
                 <button id="resetParamCalButton">Reset defaults</button>
                 <button id="saveParamCalButton" class="primary">Save Vstart/mu cal</button>
@@ -1149,7 +1156,7 @@
 
     </main>
 
-  <script src="./app.js?v=2694b4dc41c5"></script>
+  <script src="./app.js?v=b987575bbd87"></script>
     <script src="./application_model_target_data.js?v=20260612-app-target-grid"></script>
     <script src="./application_models.js?v=20260612-target-component-overlay"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>

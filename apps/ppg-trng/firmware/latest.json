@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "project": "YM-PPG",
+  "available": true,
+  "version": "2026-06-21-3led-dfu",
+  "protocol": "ppg-trng-3led-dfu-v1",
+  "appVersion": 1,
+  "package": "./ppg_trng_latest_dfu.zip",
+  "size": 73461,
+  "sha256": "099412a59f1e9c9374ecdc7affa3e12fbb710d06e1d84bcdfbcff877fc05fac8",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-21."
+}

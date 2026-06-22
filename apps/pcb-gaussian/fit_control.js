@@ -17,15 +17,15 @@
     return !input || input.checked;
   }
 
-  function paramVoltageBounds(param) {
-    const points = typeof getParamCalPoints === "function" ? getParamCalPoints(param) : [];
+  function paramVoltageBounds(param, device = null) {
+    const points = typeof getParamCalPoints === "function" ? getParamCalPoints(param, device) : [];
     const voltages = points.map(point => Number(point.voltage)).filter(Number.isFinite);
     if (!voltages.length) return { min: -Infinity, max: Infinity };
     return { min: Math.min(...voltages), max: Math.max(...voltages) };
   }
 
-  function clampParamVoltage(param, voltage) {
-    const bounds = paramVoltageBounds(param);
+  function clampParamVoltage(param, voltage, device = null) {
+    const bounds = paramVoltageBounds(param, device);
     return clamp(Number(voltage), bounds.min, bounds.max);
   }
 
@@ -663,8 +663,8 @@
     const metrics = fitControlMetrics(entry.fit, target);
     const error = metrics.error || {};
     const logDevice = Number.isFinite(Number(entry.device)) ? deviceMuxInfo(entry.device).device : "";
-    const controlMuV = logDevice ? potCodeToMuVoltage(logicalMuCodeForDevice(logDevice)) : NaN;
-    const controlVstartV = logDevice ? potCodeToVstartVoltage(logicalVstartCodeForDevice(logDevice)) : NaN;
+    const controlMuV = logDevice ? potCodeToMuVoltage(logicalMuCodeForDevice(logDevice), logDevice) : NaN;
+    const controlVstartV = logDevice ? potCodeToVstartVoltage(logicalVstartCodeForDevice(logDevice), logDevice) : NaN;
     const row = {
       id: ++state.fitLogCounter,
       time: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
@@ -919,8 +919,8 @@
   adjustmentPlanForFit = function patchedAdjustmentPlanForFit(device, target, fit, muGain, vstartGain, muVstartGain = 1) {
     const currentMuCode = logicalMuCodeForDevice(device);
     const currentVstartCode = logicalVstartCodeForDevice(device);
-    const currentMuV = potCodeToMuVoltage(currentMuCode);
-    const currentVstartV = potCodeToVstartVoltage(currentVstartCode);
+    const currentMuV = potCodeToMuVoltage(currentMuCode, device);
+    const currentVstartV = potCodeToVstartVoltage(currentVstartCode, device);
     const muError = target.mu - fit.mu;
     const ampError = target.A - fit.A;
     const muDirection = directionValue("fitMuDirection", 1);
@@ -932,9 +932,9 @@
     const boundedPlan = (controlMode, muDelta, vstartDelta, extra = {}) => {
       const requestedNextMuV = currentMuV + muDelta;
       const requestedNextVstartV = currentVstartV + vstartDelta;
-      const nextMuV = clampParamVoltage("mu", requestedNextMuV);
-      const vstartBounds = paramVoltageBounds("A");
-      let nextVstartV = clampParamVoltage("A", requestedNextVstartV);
+      const nextMuV = clampParamVoltage("mu", requestedNextMuV, device);
+      const vstartBounds = paramVoltageBounds("A", device);
+      let nextVstartV = clampParamVoltage("A", requestedNextVstartV, device);
       let vstartTotalDelta = vstartDelta;
       let vstartBoundaryGuardApplied = false;
       if ((requestedNextVstartV < vstartBounds.min && vstartDelta < 0) ||
@@ -943,8 +943,8 @@
         vstartTotalDelta = 0;
         vstartBoundaryGuardApplied = true;
       }
-      const nextMuCode = muVoltageToCode(nextMuV);
-      const nextVstartCode = vstartVoltageToCode(nextVstartV);
+      const nextMuCode = muVoltageToCode(nextMuV, device);
+      const nextVstartCode = vstartVoltageToCode(nextVstartV, device);
       return {
         mode: "fit",
         controlMode,

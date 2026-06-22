@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=51a15c1746ad" />
+    <link rel="stylesheet" href="./styles.css?v=fb28b819aaf0" />
   </head>
   <body>
     <div class="app-shell">
@@ -52,9 +52,10 @@
             </div>
             <label class="field-label" for="dacTarget">Target</label>
             <select id="dacTarget">
-              <option value="B" selected>DAC B · TIA side</option>
-              <option value="A">DAC A · Buffer side</option>
+              <option value="B" selected>DAC B · bias amp CH B</option>
+              <option value="A">DAC A · bias amp CH A</option>
             </select>
+            <p class="command-note dac-note">TIA bias: Vref 1.65 V. DAC A/B drive the ± bias amp inputs.</p>
             <input id="dacSlider" type="range" min="0" max="4095" step="1" value="2056" />
             <div class="dac-grid">
               <button class="button ghost" data-step="-100" type="button">-100</button>
@@ -90,36 +91,52 @@
                 <span class="command-code">8881</span>
                 <span class="command-label">Green LED</span>
               </button>
-              <button class="button secondary command-button" data-command="8882" type="button" title="Toggle Red LED">
+              <button class="button secondary command-button" data-command="8882" type="button" title="Toggle IR LED">
                 <span class="command-code">8882</span>
+                <span class="command-label">IR LED</span>
+              </button>
+              <button class="button secondary command-button" data-command="8883" type="button" title="Toggle Red LED">
+                <span class="command-code">8883</span>
                 <span class="command-label">Red LED</span>
               </button>
-              <button class="button secondary command-button" data-command="8880" type="button" title="Turn both LEDs off">
+              <button class="button secondary command-button" data-command="8880" type="button" title="Turn all LEDs off">
                 <span class="command-code">8880</span>
                 <span class="command-label">LED 모두 off</span>
+              </button>
+              <button class="button secondary command-button" data-command="8888" type="button" title="Toggle all LEDs">
+                <span class="command-code">8888</span>
+                <span class="command-label">LED 모두 toggle</span>
+              </button>
+              <button class="button secondary command-button" data-command="8889" type="button" title="Turn all LEDs on">
+                <span class="command-code">8889</span>
+                <span class="command-label">LED 모두 on</span>
               </button>
               <button class="button secondary command-button" data-command="7761" type="button" title="Green-only PPG sampling">
                 <span class="command-code">7761</span>
                 <span class="command-label">Green PPG · 50 Hz</span>
               </button>
-              <button class="button secondary command-button" data-command="7762" type="button" title="Red-only PPG sampling">
+              <button class="button secondary command-button" data-command="7762" type="button" title="IR-only PPG sampling">
                 <span class="command-code">7762</span>
+                <span class="command-label">IR PPG · 50 Hz</span>
+              </button>
+              <button class="button secondary command-button" data-command="7763" type="button" title="Red-only PPG sampling">
+                <span class="command-code">7763</span>
                 <span class="command-label">Red PPG · 50 Hz</span>
               </button>
-              <button class="button secondary command-button" data-command="7763" type="button" title="Alternating Green/Red PPG sampling">
-                <span class="command-code">7763</span>
-                <span class="command-label">G/R PPG · 25 Hz/ch</span>
+              <button class="button secondary command-button" data-command="7764" type="button" title="Alternating Green/IR/Red PPG sampling">
+                <span class="command-code">7764</span>
+                <span class="command-label">G/I/R PPG · 16.7 Hz/ch</span>
               </button>
               <button class="button secondary command-button" data-command="7769" type="button" title="Raw ambient and LED diagnostic stream">
                 <span class="command-code">7769</span>
-                <span class="command-label">Raw 진단 · 25 Hz/ch</span>
+                <span class="command-label">Raw 진단 · 16.7 Hz/ch</span>
               </button>
-              <button class="button secondary command-button" data-command="7777" type="button" title="Legacy toggle for alternating Green/Red PPG sampling">
+              <button class="button secondary command-button" data-command="7777" type="button" title="Legacy toggle for alternating Green/IR/Red PPG sampling">
                 <span class="command-code">7777</span>
-                <span class="command-label">호환 PPG · 25 Hz/ch</span>
+                <span class="command-label">호환 PPG · 16.7 Hz/ch</span>
               </button>
             </div>
-            <p class="command-note">PPG phase tick: 5 ms</p>
+            <p class="command-note">PPG phase tick: 5 ms. 3-channel alternating output: 16.7 Hz/ch.</p>
           </section>
 
           <section class="panel log-panel">
@@ -181,6 +198,7 @@
                   <select id="channelMode">
                     <option value="all" selected>All</option>
                     <option value="G">Green</option>
+                    <option value="I">IR</option>
                     <option value="R">Red</option>
                     <option value="A">Ambient</option>
                     <option value="ADC">ADC</option>
@@ -279,10 +297,49 @@
               <canvas id="bitCanvas" aria-label="Random bit bitmap"></canvas>
             </div>
           </section>
+
+          <section class="dfu-panel">
+            <div class="plot-toolbar">
+              <div>
+                <h2>Serial DFU</h2>
+                <p>Nordic UART package upload</p>
+              </div>
+              <button id="dfuCheckButton" class="button secondary" type="button">DFU?</button>
+            </div>
+            <div class="dfu-grid">
+              <label class="compact-field" for="dfuFile">
+                <span>Firmware</span>
+                <input id="dfuFile" type="file" accept=".hex,.zip,application/zip" />
+              </label>
+              <label class="compact-field" for="dfuPort">
+                <span>COM port</span>
+                <input id="dfuPort" placeholder="COM7" />
+              </label>
+              <label class="compact-field" for="dfuAppVersion">
+                <span>App ver</span>
+                <input id="dfuAppVersion" type="number" min="1" value="1" />
+              </label>
+              <label class="compact-field" for="dfuBaud">
+                <span>DFU baud</span>
+                <input id="dfuBaud" type="number" min="9600" step="9600" value="230400" />
+              </label>
+            </div>
+            <div class="dfu-actions">
+              <button id="dfuAnalyzeButton" class="button secondary" type="button">Analyze file</button>
+              <button id="dfuEnterButton" class="button secondary" type="button">Enter bootloader</button>
+              <button id="dfuLatestButton" class="button primary" type="button">Program latest</button>
+              <button id="dfuUploadButton" class="button primary" type="button">Upload ZIP</button>
+              <button id="dfuCommandButton" class="button secondary" type="button">Show command</button>
+            </div>
+            <progress id="dfuProgress" class="dfu-progress" value="0" max="100"></progress>
+            <p id="dfuStatus" class="command-note status-line">DFU idle.</p>
+            <pre id="dfuInfo" class="info-box">Running app: connect first, then Enter bootloader. Blank MCU: flash the initial UART DFU HEX once with a programmer. Browser upload requires a signed Nordic DFU ZIP package.</pre>
+          </section>
         </section>
       </main>
     </div>
 
-    <script src="./app.js?v=e2a1abd3f723" defer></script>
+    <script src="./app.js?v=495448a2eaa2" defer></script>
+    <script src="./dfu.js" defer></script>
   </body>
 </html>

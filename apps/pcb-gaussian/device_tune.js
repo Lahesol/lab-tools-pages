@@ -43,9 +43,9 @@
     return protocol.includes("device-dac") || version.includes("device-dac-probe");
   }
 
-  function voltageRange(param) {
+  function voltageRange(param, device = null) {
     const fallback = param === "mu" ? { min: 0, max: 6 } : { min: 0, max: 17 };
-    const voltages = getParamCalPoints(param)
+    const voltages = getParamCalPoints(param, device)
       .map(point => Number(point.voltage))
       .filter(Number.isFinite);
     if (!voltages.length) return fallback;
@@ -120,12 +120,14 @@
 
   function deviceTuneXRange(mode = deviceTuneXMode()) {
     if (mode === "dac") return { min: DAC_OUTPUT_MIN_MV / 1000, max: DAC_OUTPUT_MAX_MV / 1000 };
-    return mode === "vstart" ? voltageRange("A") : voltageRange("mu");
+    const device = deviceTuneDevice();
+    return mode === "vstart" ? voltageRange("A", device) : voltageRange("mu", device);
   }
 
   function setDeviceTuneVoltages(muV, vstartV) {
-    const muRange = voltageRange("mu");
-    const vstartRange = voltageRange("A");
+    const device = deviceTuneDevice();
+    const muRange = voltageRange("mu", device);
+    const vstartRange = voltageRange("A", device);
     const safeMu = clamp(Number(muV) || 0, muRange.min, muRange.max);
     const safeVstart = clamp(Number(vstartV) || 0, vstartRange.min, vstartRange.max);
     const muSlider = $("deviceTuneMuSlider");
@@ -153,7 +155,7 @@
     if (!ensureDeviceTuneState()) return;
     const device = deviceTuneDevice();
     const st = state.deviceStates[device] || { a: 0, mu: 0 };
-    setDeviceTuneVoltages(potCodeToMuVoltage(st.a), potCodeToVstartVoltage(st.mu));
+    setDeviceTuneVoltages(potCodeToMuVoltage(st.a, device), potCodeToVstartVoltage(st.mu, device));
     syncDeviceTuneDacFromState();
     renderDeviceTunePlot();
   }
@@ -161,10 +163,11 @@
   function setupDeviceTuneSliders() {
     setRange($("deviceTuneDacSlider"), { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV });
     setRange($("deviceTuneDacMvNumber"), { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV });
-    setRange($("deviceTuneMuSlider"), voltageRange("mu"));
-    setRange($("deviceTuneMuNumber"), voltageRange("mu"));
-    setRange($("deviceTuneVstartSlider"), voltageRange("A"));
-    setRange($("deviceTuneVstartNumber"), voltageRange("A"));
+    const device = deviceTuneDevice();
+    setRange($("deviceTuneMuSlider"), voltageRange("mu", device));
+    setRange($("deviceTuneMuNumber"), voltageRange("mu", device));
+    setRange($("deviceTuneVstartSlider"), voltageRange("A", device));
+    setRange($("deviceTuneVstartNumber"), voltageRange("A", device));
     syncDeviceTuneFromState();
   }
 
@@ -512,8 +515,8 @@
         const dacMv = readDeviceTuneDacMv();
         const dacCode = vhighToDacCode(dac, dacMv / 1000);
         const { muV, vstartV } = readDeviceTuneVoltages();
-        const muCode = muVoltageToCode(muV);
-        const vstartCode = vstartVoltageToCode(vstartV);
+        const muCode = muVoltageToCode(muV, device);
+        const vstartCode = vstartVoltageToCode(vstartV, device);
         const xAxis = deviceTuneXMode();
         const pointIndex = state.deviceTunePointIndex++;
         applyDeviceTuneState(device, muCode, vstartCode);
@@ -635,7 +638,7 @@
   }
 
   function bindDeviceTuneEvents() {
-    $("deviceTuneDevice")?.addEventListener("input", syncDeviceTuneFromState);
+    $("deviceTuneDevice")?.addEventListener("input", setupDeviceTuneSliders);
     $("deviceTuneXAxis")?.addEventListener("change", renderDeviceTunePlot);
     $("deviceTuneYMode")?.addEventListener("change", renderDeviceTunePlot);
     $("deviceTuneDac")?.addEventListener("change", () => {

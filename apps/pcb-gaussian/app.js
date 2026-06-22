@@ -24,7 +24,7 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-06-15-dacramp-noise";
+const WEB_VERSION = "2026-06-21-d15d16-adc7-cal";
 const EXPECTED_FIRMWARE_VERSION = "2026-06-15-dacramp-noise";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1";
 const APP_VERSION = WEB_VERSION;
@@ -39,9 +39,9 @@ const TIA_DEVICE_MAP = [
   [],               // TIA2: unused in 4-TIA GMM wiring
   [],               // TIA3: unused in 4-TIA GMM wiring
   [9, 10, 11, 12],  // TIA4: hardware dev8-dev11
-  [13, 14, 15, 16], // TIA5: hardware dev12-dev15
+  [13, 14],         // TIA5: hardware dev12-dev13
   [],               // TIA6: unused in 4-TIA GMM wiring
-  [],               // TIA7: unused in 4-TIA GMM wiring
+  [15, 16],         // TIA7: restored D15/D16 circuit, opposite current polarity
 ];
 const DAC_CAL_STORAGE_KEY = "pcbGaussian.dacCalibration.v1";
 const DAC_CAL_VOLTAGES = [-16.5, -15, -10, -5, 0, 5, 10, 15, 16.5];
@@ -70,6 +70,7 @@ const DEFAULT_DAC_CAL = {
   ],
 };
 const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.inverted.v2";
+const DEVICE_PARAM_CAL_STORAGE_KEY = "pcbGaussian.deviceParameterCalibration.d15d16.v1";
 const ADC_BASELINE_STORAGE_KEY = "pcbGaussian.adcBaseline.1v03.v2";
 const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
 const DEFAULT_ADC_ZERO_CURRENT_V = 1.03;
@@ -79,8 +80,10 @@ const ADC_LABELS = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `ADC${idx}`
 const DEVICE_CAL_DAC_BY_ADC = ["D2", "D2", "D2", "D2", "D1", "D1", "D1", "D1"];
 const DEVICE_CAL_LUT_STORAGE_KEY = "pcbGaussian.deviceCalLut.v1";
 const DEVICE_CAL_LUT_ROW_LIMIT = 20000;
+const SPECIAL_PARAM_CAL_DEVICES = new Set([15, 16]);
+const ADC_CURRENT_NON_INVERTED = new Set([7]);
 // Current jumper map from bench wiring. Each active ADC/TIA sums four devices.
-const ADC_DEVICE_MAP = [[5, 6, 7, 8], [1, 2, 3, 4], [], [], [9, 10, 11, 12], [13, 14, 15, 16], [], []];
+const ADC_DEVICE_MAP = [[5, 6, 7, 8], [1, 2, 3, 4], [], [], [9, 10, 11, 12], [13, 14], [], [15, 16]];
 const PLOT_CONFIGS = {
   D1: {
     title: "DAC1",
@@ -88,7 +91,7 @@ const PLOT_CONFIGS = {
     legendId: "plotD1Legend",
     statusId: "plotD1Status",
     filterId: "plotD1AdcFilters",
-    defaultAdcs: [4, 5],
+    defaultAdcs: [4, 5, 7],
   },
   D2: {
     title: "DAC2",
@@ -239,22 +242,54 @@ function defaultLogicalAVoltage(code) {
 function defaultLogicalMuVoltage(code) {
   return piecewiseCodeToVoltage(MU_CAL_POINTS, code);
 }
-function cloneParamCalibration() {
-  return {
+function linearParamCalPoints(startVoltage, stopVoltage) {
+  return PARAM_CAL_CODES.map(code => ({
+    code,
+    voltage: startVoltage + (stopVoltage - startVoltage) * code / POT_MAX_CODE,
+  }));
+}
+function cloneParamCalibration(source = null) {
+  const base = source || {
     A: PARAM_CAL_CODES.map(code => ({ code, voltage: defaultLogicalAVoltage(code) })),
     mu: PARAM_CAL_CODES.map(code => ({ code, voltage: defaultLogicalMuVoltage(code) })),
   };
+  return {
+    A: PARAM_CAL_CODES.map(code => {
+      const point = base.A?.find(item => Number(item.code) === code);
+      return { code, voltage: Number.isFinite(Number(point?.voltage)) ? Number(point.voltage) : defaultLogicalAVoltage(code) };
+    }),
+    mu: PARAM_CAL_CODES.map(code => {
+      const point = base.mu?.find(item => Number(item.code) === code);
+      return { code, voltage: Number.isFinite(Number(point?.voltage)) ? Number(point.voltage) : defaultLogicalMuVoltage(code) };
+    }),
+  };
+}
+function defaultDeviceParamCalibration() {
+  const special = {
+    A: linearParamCalPoints(0, -9.9),
+    mu: linearParamCalPoints(0.016, 6.0),
+  };
+  return {
+    D15: cloneParamCalibration(special),
+    D16: cloneParamCalibration(special),
+  };
+}
+function deviceParamProfileKey(device) {
+  const dev = Math.round(Number(device) || 0);
+  return SPECIAL_PARAM_CAL_DEVICES.has(dev) ? `D${dev}` : "";
+}
+function paramCalProfileKey() {
+  const value = $("paramCalProfile")?.value || "default";
+  return value === "D15" || value === "D16" ? value : "default";
 }
 function sanitizeParamCalibration(source) {
-  const fallback = cloneParamCalibration();
-  const result = { A: [], mu: [] };
-  for (const param of ["A", "mu"]) {
-    for (const code of PARAM_CAL_CODES) {
-      const saved = source?.[param]?.find(point => Number(point.code) === code);
-      const fallbackPoint = fallback[param].find(point => point.code === code);
-      const voltage = Number.isFinite(Number(saved?.voltage)) ? Number(saved.voltage) : fallbackPoint.voltage;
-      result[param].push({ code, voltage });
-    }
+  return cloneParamCalibration(source);
+}
+function sanitizeDeviceParamCalibration(source) {
+  const fallback = defaultDeviceParamCalibration();
+  const result = {};
+  for (const key of ["D15", "D16"]) {
+    result[key] = cloneParamCalibration(source?.[key] || fallback[key]);
   }
   return result;
 }
@@ -266,6 +301,14 @@ function loadParamCalibration() {
     return cloneParamCalibration();
   }
 }
+function loadDeviceParamCalibration() {
+  try {
+    const saved = localStorage.getItem(DEVICE_PARAM_CAL_STORAGE_KEY);
+    return saved ? sanitizeDeviceParamCalibration(JSON.parse(saved)) : defaultDeviceParamCalibration();
+  } catch {
+    return defaultDeviceParamCalibration();
+  }
+}
 function persistParamCalibration() {
   try {
     localStorage.setItem(PARAM_CAL_STORAGE_KEY, JSON.stringify(state.paramCal));
@@ -275,48 +318,72 @@ function persistParamCalibration() {
     return false;
   }
 }
-function getParamCalPoints(param) {
-  return (state.paramCal?.[param] || cloneParamCalibration()[param])
+function persistDeviceParamCalibration() {
+  try {
+    localStorage.setItem(DEVICE_PARAM_CAL_STORAGE_KEY, JSON.stringify(state.deviceParamCal));
+    return true;
+  } catch (error) {
+    logLine(`[storage error] D15/D16 Vstart / mu calibration not saved: ${error.message}`);
+    return false;
+  }
+}
+function paramCalibrationForDevice(device = null) {
+  const key = deviceParamProfileKey(device);
+  if (key) return state?.deviceParamCal?.[key] || defaultDeviceParamCalibration()[key];
+  return state?.paramCal || cloneParamCalibration();
+}
+function getParamCalPoints(param, device = null) {
+  const cal = paramCalibrationForDevice(device);
+  return (cal?.[param] || cloneParamCalibration()[param])
     .map(point => ({ code: clamp(Math.round(Number(point.code)), 0, POT_MAX_CODE), voltage: Number(point.voltage) }));
 }
-function paramCodeToVoltage(param, code) {
-  return interpolatePointList(clamp(Number(code) || 0, 0, POT_MAX_CODE), getParamCalPoints(param), "code", "voltage");
+function paramCodeToVoltage(param, code, device = null) {
+  return interpolatePointList(clamp(Number(code) || 0, 0, POT_MAX_CODE), getParamCalPoints(param, device), "code", "voltage");
 }
-function paramVoltageToCode(param, voltage) {
-  const points = getParamCalPoints(param).filter(point => Number.isFinite(point.voltage));
+function paramVoltageToCode(param, voltage, device = null) {
+  const points = getParamCalPoints(param, device).filter(point => Number.isFinite(point.voltage));
   const voltages = points.map(point => point.voltage);
   const safeV = clamp(Number(voltage) || 0, Math.min(...voltages), Math.max(...voltages));
   return clamp(Math.round(interpolatePointList(safeV, points, "voltage", "code")), 0, POT_MAX_CODE);
 }
-function potCodeToAVoltage(code) {
-  return paramCodeToVoltage("A", code);
+function potCodeToAVoltage(code, device = null) {
+  return paramCodeToVoltage("A", code, device);
 }
-function potCodeToMuVoltage(code) {
-  return paramCodeToVoltage("mu", code);
+function potCodeToMuVoltage(code, device = null) {
+  return paramCodeToVoltage("mu", code, device);
 }
-function aVoltageToCode(voltage) {
-  return paramVoltageToCode("A", voltage);
+function aVoltageToCode(voltage, device = null) {
+  return paramVoltageToCode("A", voltage, device);
 }
-function potCodeToVstartVoltage(code) {
-  return potCodeToAVoltage(code);
+function potCodeToVstartVoltage(code, device = null) {
+  return potCodeToAVoltage(code, device);
 }
-function vstartVoltageToCode(voltage) {
-  return aVoltageToCode(voltage);
+function vstartVoltageToCode(voltage, device = null) {
+  return aVoltageToCode(voltage, device);
 }
-function muVoltageToCode(voltage) {
-  return paramVoltageToCode("mu", voltage);
+function muVoltageToCode(voltage, device = null) {
+  return paramVoltageToCode("mu", voltage, device);
 }
 function adcRawToVoltage(raw) {
   return Number(raw) * SAADC_INPUT_RANGE_V / SAADC_FULL_SCALE_RAW;
 }
+function defaultAdcInvert(adcIndex, globalInvert = true) {
+  return !!globalInvert && !ADC_CURRENT_NON_INVERTED.has(clamp(Math.round(Number(adcIndex) || 0), 0, ADC_TIA_COUNT - 1));
+}
 function cloneAdcBaselineConfig(source = null) {
+  const globalInvert = source?.invertCurrent !== false;
   const zeroVoltages = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => {
     const value = Number(source?.zeroVoltages?.[idx]);
     return Number.isFinite(value) ? clamp(value, 0, SAADC_INPUT_RANGE_V) : DEFAULT_ADC_ZERO_CURRENT_V;
   });
+  const invertByAdc = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => {
+    const saved = source?.invertByAdc?.[idx];
+    return typeof saved === "boolean" ? saved : defaultAdcInvert(idx, globalInvert);
+  });
   return {
     zeroVoltages,
-    invertCurrent: source?.invertCurrent !== false,
+    invertCurrent: globalInvert,
+    invertByAdc,
   };
 }
 function loadAdcBaselineConfig() {
@@ -341,14 +408,22 @@ function adcZeroVoltage(adcIndex = 0) {
   const value = Number(state?.adcBaseline?.zeroVoltages?.[idx]);
   return Number.isFinite(value) ? value : DEFAULT_ADC_ZERO_CURRENT_V;
 }
+function adcCurrentInverted(adcIndex = 0) {
+  const idx = clamp(Math.round(Number(adcIndex) || 0), 0, ADC_TIA_COUNT - 1);
+  if (state?.adcBaseline?.invertCurrent === false) return false;
+  const perAdc = state?.adcBaseline?.invertByAdc?.[idx];
+  return typeof perAdc === "boolean" ? perAdc : defaultAdcInvert(idx, true);
+}
+function adcBaselineFormulaText(adcIndex = 0) {
+  return adcCurrentInverted(adcIndex) ? "I = (zero - V_AIN) / Rf" : "I = (V_AIN - zero) / Rf";
+}
 function adcVoltageToCurrentUa(voltage, adcIndex = 0) {
   const measured = Number(voltage);
   if (!Number.isFinite(measured)) return NaN;
   const zero = adcZeroVoltage(adcIndex);
-  const delta = state?.adcBaseline?.invertCurrent === false ? measured - zero : zero - measured;
+  const delta = adcCurrentInverted(adcIndex) ? zero - measured : measured - zero;
   return delta / TIA_RESISTANCE_OHM * 1_000_000.0;
-}
-function deviceMuxInfo(device) {
+}function deviceMuxInfo(device) {
   const dev = clamp(Math.round(Number(device) || 1), 1, 16);
   const addr = DEVICE_TO_MUX_ADDR[dev - 1];
   return {
@@ -373,9 +448,10 @@ const state = {
   dacCodes: { D1: 0, D2: 0 },
   dacCal: loadDacCalibration(),
   paramCal: loadParamCalibration(),
+  deviceParamCal: loadDeviceParamCalibration(),
   adcBaseline: loadAdcBaselineConfig(),
   tiaStates: Array.from({ length: ADC_TIA_COUNT }, (_, i) => ({
-    enabled: [0, 1, 4, 5].includes(i),
+    enabled: [0, 1, 4, 5, 7].includes(i),
     adc: `AIN${i}`,
     devices: (TIA_DEVICE_MAP[i] || []).map(String),
     jumper: "",
@@ -872,7 +948,30 @@ function validateParamCalibration(calibration) {
   }
   return "";
 }
-
+function paramCalibrationForProfile(profile = paramCalProfileKey()) {
+  if (profile === "D15" || profile === "D16") {
+    const defaults = defaultDeviceParamCalibration();
+    return state.deviceParamCal?.[profile] || defaults[profile];
+  }
+  return state.paramCal;
+}
+function setParamCalibrationForProfile(profile, calibration) {
+  if (profile === "D15" || profile === "D16") {
+    if (!state.deviceParamCal) state.deviceParamCal = defaultDeviceParamCalibration();
+    state.deviceParamCal[profile] = calibration;
+  } else {
+    state.paramCal = calibration;
+  }
+}
+function persistParamCalibrationForProfile(profile) {
+  return profile === "D15" || profile === "D16" ? persistDeviceParamCalibration() : persistParamCalibration();
+}
+function profileDevice(profile = paramCalProfileKey()) {
+  return profile === "D15" ? 15 : profile === "D16" ? 16 : null;
+}
+function profileLabel(profile = paramCalProfileKey()) {
+  return profile === "D15" || profile === "D16" ? profile : "D1-D14 default";
+}
 function readParamCalibrationInputs() {
   const next = { A: [], mu: [] };
   for (const param of ["A", "mu"]) {
@@ -884,14 +983,15 @@ function readParamCalibrationInputs() {
   }
   return next;
 }
-
 function renderParamCalibration() {
   const table = $("paramCalTable");
   if (!table) return;
+  const profile = paramCalProfileKey();
+  const cal = paramCalibrationForProfile(profile);
   table.innerHTML = "";
   for (const code of PARAM_CAL_CODES) {
-    const aVoltage = state.paramCal.A.find(point => point.code === code)?.voltage ?? 0;
-    const muVoltage = state.paramCal.mu.find(point => point.code === code)?.voltage ?? 0;
+    const aVoltage = cal.A.find(point => point.code === code)?.voltage ?? 0;
+    const muVoltage = cal.mu.find(point => point.code === code)?.voltage ?? 0;
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${code}</td>
@@ -909,21 +1009,22 @@ function renderParamCalibration() {
   });
   updateParamCalPreview();
 }
-
 async function sendParamCalPoint(button, codeValue) {
+  const profile = paramCalProfileKey();
   const next = readParamCalibrationInputs();
   const error = validateParamCalibration(next);
   if (error) {
     setParamCalStatus(error, "warn");
     return;
   }
-  state.paramCal = next;
+  setParamCalibrationForProfile(profile, next);
   const code = clamp(Math.round(Number(codeValue) || 0), 0, POT_MAX_CODE);
   $("aCode").value = code;
   $("muCode").value = code;
-  updatePotReadout();
-  const device = deviceMuxInfo($("potDevice").value).device;
+  const forcedDevice = profileDevice(profile);
+  const device = forcedDevice || deviceMuxInfo($("potDevice").value).device;
   $("potDevice").value = device;
+  updatePotReadout();
   state.deviceStates[device].a = code;
   state.deviceStates[device].mu = code;
   renderDeviceTable();
@@ -932,70 +1033,82 @@ async function sendParamCalPoint(button, codeValue) {
     const replyA = await sendCommand(`A${device},${code}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
     const replyM = await sendCommand(`M${device},${code}`, { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
     const kind = replyLooksBad(replyA) || replyLooksBad(replyM) ? "warn" : "ok";
-    setParamCalStatus(`Sent code ${code} to device ${device}. Replies: A=${replySummary(replyA)}, M=${replySummary(replyM)}.`, kind);
+    setParamCalStatus(`Sent ${profileLabel(profile)} code ${code} to device ${device}. Replies: A=${replySummary(replyA)}, M=${replySummary(replyM)}.`, kind);
   } finally {
     if (button) button.disabled = false;
   }
 }
-
 function updateParamCalPreview() {
+  const profile = paramCalProfileKey();
   const next = readParamCalibrationInputs();
   const error = validateParamCalibration(next);
   if (error) {
     setParamCalStatus(error, "warn");
     return;
   }
-  const aZero = next.A.find(point => point.code === 0)?.voltage;
-  const muZero = next.mu.find(point => point.code === 0)?.voltage;
-  setParamCalStatus(`Pending calibration is valid. Vstart@0=${aZero.toFixed(3)} V, mu@0=${muZero.toFixed(3)} V.`, "ok");
+  const aVoltages = next.A.map(point => point.voltage).filter(Number.isFinite);
+  const muVoltages = next.mu.map(point => point.voltage).filter(Number.isFinite);
+  setParamCalStatus(
+    `${profileLabel(profile)} pending calibration valid. Vstart ${Math.min(...aVoltages).toFixed(3)} to ${Math.max(...aVoltages).toFixed(3)} V, mu ${Math.min(...muVoltages).toFixed(3)} to ${Math.max(...muVoltages).toFixed(3)} V.`,
+    "ok"
+  );
 }
-
 function saveParamCalibrationFromInputs() {
+  const profile = paramCalProfileKey();
   const next = readParamCalibrationInputs();
   const error = validateParamCalibration(next);
   if (error) {
     setParamCalStatus(error, "warn");
     return;
   }
-  state.paramCal = next;
-  const saved = persistParamCalibration();
+  setParamCalibrationForProfile(profile, next);
+  const saved = persistParamCalibrationForProfile(profile);
   updatePotReadout();
   renderDeviceTable();
   if (saved) {
-    setParamCalStatus("Vstart / mu calibration saved locally.", "ok");
-    logLine("Vstart / mu calibration saved locally");
+    setParamCalStatus(`${profileLabel(profile)} Vstart / mu calibration saved locally.`, "ok");
+    logLine(`${profileLabel(profile)} Vstart / mu calibration saved locally`);
   } else {
-    setParamCalStatus("Vstart / mu calibration could not be saved in this browser.", "warn");
+    setParamCalStatus(`${profileLabel(profile)} Vstart / mu calibration could not be saved in this browser.`, "warn");
   }
 }
-
 function loadProjectParamCalibration() {
-  state.paramCal = cloneParamCalibration();
-  const saved = persistParamCalibration();
+  const profile = paramCalProfileKey();
+  if (profile === "D15" || profile === "D16") {
+    state.deviceParamCal = sanitizeDeviceParamCalibration(state.deviceParamCal);
+    state.deviceParamCal[profile] = defaultDeviceParamCalibration()[profile];
+  } else {
+    state.paramCal = cloneParamCalibration();
+  }
+  const saved = persistParamCalibrationForProfile(profile);
   renderParamCalibration();
   updatePotReadout();
   renderDeviceTable();
   if (saved) {
-    setParamCalStatus("Project Vstart / mu calibration loaded and saved locally.", "ok");
-    logLine("Project Vstart / mu calibration loaded and saved locally");
+    setParamCalStatus(`${profileLabel(profile)} project Vstart / mu calibration loaded and saved locally.`, "ok");
+    logLine(`${profileLabel(profile)} project Vstart / mu calibration loaded and saved locally`);
   } else {
-    setParamCalStatus("Project Vstart / mu calibration loaded, but local save failed.", "warn");
+    setParamCalStatus(`${profileLabel(profile)} project Vstart / mu calibration loaded, but local save failed.`, "warn");
   }
 }
-
 function resetParamCalibration() {
-  state.paramCal = cloneParamCalibration();
-  try {
-    localStorage.removeItem(PARAM_CAL_STORAGE_KEY);
-  } catch {}
+  const profile = paramCalProfileKey();
+  if (profile === "D15" || profile === "D16") {
+    state.deviceParamCal = sanitizeDeviceParamCalibration(state.deviceParamCal);
+    state.deviceParamCal[profile] = defaultDeviceParamCalibration()[profile];
+    persistDeviceParamCalibration();
+  } else {
+    state.paramCal = cloneParamCalibration();
+    try {
+      localStorage.removeItem(PARAM_CAL_STORAGE_KEY);
+    } catch {}
+  }
   renderParamCalibration();
   updatePotReadout();
   renderDeviceTable();
-  setParamCalStatus("Vstart / mu calibration reset to defaults.", "ok");
-  logLine("Vstart / mu calibration reset to defaults");
-}
-
-function calculateDacTarget() {
+  setParamCalStatus(`${profileLabel(profile)} Vstart / mu calibration reset to defaults.`, "ok");
+  logLine(`${profileLabel(profile)} Vstart / mu calibration reset to defaults`);
+}function calculateDacTarget() {
   const dac = $("dacSelect").value;
   const mv = Number($("dacTargetMv").value) || 0;
   const kind = $("dacTargetKind").value;
@@ -1730,8 +1843,8 @@ function loadCurrentBracketBase(showStatus = true) {
   const device = bracketDevice();
   const muCode = logicalMuCodeForDevice(device);
   const vstartCode = logicalVstartCodeForDevice(device);
-  const muV = potCodeToMuVoltage(muCode);
-  const vstartV = potCodeToVstartVoltage(vstartCode);
+  const muV = potCodeToMuVoltage(muCode, device);
+  const vstartV = potCodeToVstartVoltage(vstartCode, device);
   if ($("bracketMuStart")) $("bracketMuStart").value = muV.toFixed(4);
   if ($("bracketVstartStart")) $("bracketVstartStart").value = vstartV.toFixed(4);
   if (showStatus) setBracketStatus(`Loaded D${device}: Vmu code ${muCode} (${muV.toFixed(4)} V), Vstart code ${vstartCode} (${vstartV.toFixed(4)} V).`, "ok");
@@ -1746,8 +1859,8 @@ function bracketAxisLabel(axis) {
 function parameterBracketPlan() {
   const device = bracketDevice();
   const axis = $("bracketAxis")?.value || "muCoupled";
-  const muStart = bracketNumber("bracketMuStart", potCodeToMuVoltage(logicalMuCodeForDevice(device)));
-  const vstartStart = bracketNumber("bracketVstartStart", potCodeToVstartVoltage(logicalVstartCodeForDevice(device)));
+  const muStart = bracketNumber("bracketMuStart", potCodeToMuVoltage(logicalMuCodeForDevice(device), device));
+  const vstartStart = bracketNumber("bracketVstartStart", potCodeToVstartVoltage(logicalVstartCodeForDevice(device), device));
   const muStepV = bracketNumber("bracketMuStepV", -1);
   const vstartStepV = bracketNumber("bracketVstartStepV", 1);
   const count = bracketNumber("bracketCount", 6, { min: 2, max: 50, integer: true });
@@ -1763,8 +1876,8 @@ function parameterBracketPlan() {
     const deltaVstartV = activeVstartStep * index;
     const requestedMuV = muStart + deltaMuV;
     const requestedVstartV = vstartStart + deltaVstartV;
-    const muCode = muVoltageToCode(requestedMuV);
-    const vstartCode = vstartVoltageToCode(requestedVstartV);
+    const muCode = muVoltageToCode(requestedMuV, device);
+    const vstartCode = vstartVoltageToCode(requestedVstartV, device);
     plan.push({
       device,
       axis,
@@ -1780,8 +1893,8 @@ function parameterBracketPlan() {
       requestedVstartV,
       muCode,
       vstartCode,
-      actualMuV: potCodeToMuVoltage(muCode),
-      actualVstartV: potCodeToVstartVoltage(vstartCode),
+      actualMuV: potCodeToMuVoltage(muCode, device),
+      actualVstartV: potCodeToVstartVoltage(vstartCode, device),
     });
   }
   return plan;
@@ -2096,11 +2209,12 @@ function readPotCodes() {
 
 function updatePotReadout() {
   const { a, mu } = readPotCodes();
+  const device = deviceMuxInfo($("potDevice")?.value).device;
+  const profile = deviceParamProfileKey(device) || "default";
   $("potReadout").innerHTML =
-    `<div>Vstart: code ${mu}, wiper ${potCodeToVWiper(mu).toFixed(4)} V, output ${potCodeToVstartVoltage(mu).toFixed(4)} V</div>` +
-    `<div>mu: code ${a}, wiper ${potCodeToVWiper(a).toFixed(4)} V, output ${potCodeToMuVoltage(a).toFixed(4)} V</div>`;
+    `<div>Vstart: code ${mu}, wiper ${potCodeToVWiper(mu).toFixed(4)} V, output ${potCodeToVstartVoltage(mu, device).toFixed(4)} V (${profile})</div>` +
+    `<div>mu: code ${a}, wiper ${potCodeToVWiper(a).toFixed(4)} V, output ${potCodeToMuVoltage(a, device).toFixed(4)} V (${profile})</div>`;
 }
-
 function loadDeviceState() {
   const device = deviceMuxInfo($("potDevice").value).device;
   $("potDevice").value = device;
@@ -2156,7 +2270,7 @@ function renderDeviceTable() {
     const info = deviceMuxInfo(device);
     const st = state.deviceStates[device];
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${device}</td><td>${info.group} addr ${info.addr} / ${info.cs}</td><td>${st.mu}</td><td>${potCodeToVstartVoltage(st.mu).toFixed(3)}</td><td>${st.a}</td><td>${potCodeToMuVoltage(st.a).toFixed(3)}</td>`;
+    tr.innerHTML = `<td>${device}</td><td>${info.group} addr ${info.addr} / ${info.cs}</td><td>${st.mu}</td><td>${potCodeToVstartVoltage(st.mu, device).toFixed(3)}</td><td>${st.a}</td><td>${potCodeToMuVoltage(st.a, device).toFixed(3)}</td>`;
     tr.addEventListener("click", () => {
       $("potDevice").value = device;
       loadDeviceState();
@@ -2209,9 +2323,6 @@ function setAdcBaselineStatus(text, kind = "") {
   status.className = `hint status-line ${kind}`.trim();
 }
 
-function adcBaselineFormulaText() {
-  return state.adcBaseline?.invertCurrent === false ? "I = (V_AIN - zero) / Rf" : "I = (zero - V_AIN) / Rf";
-}
 
 function renderAdcBaselineControls() {
   const table = $("adcBaselineTable");
@@ -2226,17 +2337,18 @@ function renderAdcBaselineControls() {
     <tr>
       <td>ADC${adcIndex}</td>
       <td><input class="adc-baseline-input" data-adc="${adcIndex}" type="number" min="0" max="${SAADC_INPUT_RANGE_V}" step="0.001" value="${zero.toFixed(4)}" /></td>
-      <td>${adcBaselineFormulaText()}</td>
+      <td>${adcBaselineFormulaText(adcIndex)}</td>
     </tr>
   `).join("");
   table.querySelectorAll(".adc-baseline-input").forEach(input => {
     input.addEventListener("change", saveAdcBaselineFromInputs);
     input.addEventListener("input", saveAdcBaselineFromInputs);
   });
-  setAdcBaselineStatus(`Zero-current baseline ready: ${adcBaselineFormulaText()}, default ${DEFAULT_ADC_ZERO_CURRENT_V.toFixed(3)} V.`, "ok");
+  setAdcBaselineStatus(`Zero-current baseline ready. ADC7 uses non-inverted current; other ADCs follow the invert checkbox. Default ${DEFAULT_ADC_ZERO_CURRENT_V.toFixed(3)} V.`, "ok");
 }
 
 function readAdcBaselineInputs() {
+  const invertCurrent = $("adcBaselineInvert")?.checked !== false;
   const zeroVoltages = Array.from({ length: ADC_TIA_COUNT }, (_, adcIndex) => {
     const input = document.querySelector(`.adc-baseline-input[data-adc="${adcIndex}"]`);
     const value = Number(input?.value);
@@ -2244,7 +2356,8 @@ function readAdcBaselineInputs() {
   });
   return {
     zeroVoltages,
-    invertCurrent: $("adcBaselineInvert")?.checked !== false,
+    invertCurrent,
+    invertByAdc: Array.from({ length: ADC_TIA_COUNT }, (_, adcIndex) => defaultAdcInvert(adcIndex, invertCurrent)),
   };
 }
 
@@ -2258,15 +2371,17 @@ function refreshCurrentDependentViews() {
 function saveAdcBaselineFromInputs() {
   state.adcBaseline = readAdcBaselineInputs();
   const saved = persistAdcBaselineConfig();
-  if (saved) setAdcBaselineStatus(`ADC baseline saved: ${adcBaselineFormulaText()}.`, "ok");
+  if (saved) setAdcBaselineStatus("ADC baseline saved. ADC7 remains non-inverted unless global invert is off.", "ok");
   refreshCurrentDependentViews();
 }
 
 function applyDefaultAdcBaseline() {
   const value = clamp(Number($("adcBaselineDefault")?.value) || DEFAULT_ADC_ZERO_CURRENT_V, 0, SAADC_INPUT_RANGE_V);
+  const invertCurrent = $("adcBaselineInvert")?.checked !== false;
   state.adcBaseline = {
     zeroVoltages: Array.from({ length: ADC_TIA_COUNT }, () => value),
-    invertCurrent: $("adcBaselineInvert")?.checked !== false,
+    invertCurrent,
+    invertByAdc: Array.from({ length: ADC_TIA_COUNT }, (_, adcIndex) => defaultAdcInvert(adcIndex, invertCurrent)),
   };
   persistAdcBaselineConfig();
   renderAdcBaselineControls();
@@ -2364,6 +2479,13 @@ function deviceDetectConfig() {
   };
 }
 
+function deviceDetectCodesForDevice(config, device) {
+  return {
+    muCode: muVoltageToCode(config.vmuV, device),
+    vstartOnCode: vstartVoltageToCode(config.vstartOnV, device),
+    vstartOffCode: vstartVoltageToCode(config.vstartOffV, device),
+  };
+}
 function deviceDetectReplyMatcher(text) {
   const upper = String(text || "").trim().toUpperCase();
   return upper.startsWith("ADC,") || upper.startsWith("Q,") || /^Q\d+,/.test(upper) || upper.startsWith("ERR") || upper.startsWith("ADC,ERR");
@@ -2474,7 +2596,8 @@ async function setDeviceDetectDacsZero() {
 async function quietDevicesForDetect(config, { ignoreStop = false } = {}) {
   for (let device = 1; device <= 16; device++) {
     if (!ignoreStop && state.deviceDetectStopRequested) break;
-    await programLogicalDevice(device, config.muCode, config.vstartOffCode);
+    const codes = deviceDetectCodesForDevice(config, device);
+    await programLogicalDevice(device, codes.muCode, codes.vstartOffCode);
   }
 }
 function deviceDetectRankDeltas(deltas) {
@@ -2515,12 +2638,13 @@ async function detectDeviceAdcMap() {
       if (state.deviceDetectStopRequested) break;
       deviceDetectStatus(`Detecting D${device}/16: Vmu ${config.vmuV.toFixed(3)} V, Vstart ${config.vstartOnV.toFixed(3)} V.`, "warn");
       let reply = null;
-      let usedCommand = `Q${device},${config.muCode},${config.vstartOnCode},255,${config.avg},${config.settleUs}`;
+      const codes = deviceDetectCodesForDevice(config, device);
+      let usedCommand = `Q${device},${codes.muCode},${codes.vstartOnCode},255,${config.avg},${config.settleUs}`;
       try {
         reply = await readAdcForDeviceDetect(usedCommand, Math.max(5000, Math.ceil(config.settleUs / 1000) + 3000));
       } catch (error) {
         logLine(`[warn] ${usedCommand} failed: ${error.message}; falling back to P + ADC`);
-        await programLogicalDevice(device, config.muCode, config.vstartOnCode);
+        await programLogicalDevice(device, codes.muCode, codes.vstartOnCode);
         if (config.settleUs > 0) await sleep(Math.ceil(config.settleUs / 1000));
         usedCommand = `P${device}+ADC`;
         reply = await readAdcForDeviceDetect("ADC", 5000);
@@ -2547,11 +2671,12 @@ async function detectDeviceAdcMap() {
         baselineCurrents,
         command: usedCommand,
         reply,
-        config: { ...config },
+        config: { ...config, ...codes },
       });
       renderDeviceDetectRows();
       if (config.quietOthers && !state.deviceDetectStopRequested) {
-        await programLogicalDevice(device, config.muCode, config.vstartOffCode);
+        const offCodes = deviceDetectCodesForDevice(config, device);
+        await programLogicalDevice(device, offCodes.muCode, offCodes.vstartOffCode);
       }
     }
 
@@ -3635,8 +3760,8 @@ function logicalACodeForDevice(device) {
 function adjustmentPlanForFit(device, target, fit, muGain, vstartGain, muVstartGain = 1) {
   const currentMuCode = logicalMuCodeForDevice(device);
   const currentVstartCode = logicalVstartCodeForDevice(device);
-  const currentMuV = potCodeToMuVoltage(currentMuCode);
-  const currentVstartV = potCodeToVstartVoltage(currentVstartCode);
+  const currentMuV = potCodeToMuVoltage(currentMuCode, device);
+  const currentVstartV = potCodeToVstartVoltage(currentVstartCode, device);
   const muError = target.mu - fit.mu;
   const ampError = target.A - fit.A;
   const muControlDelta = muError * muGain;
@@ -3644,8 +3769,8 @@ function adjustmentPlanForFit(device, target, fit, muGain, vstartGain, muVstartG
   const vstartAmplitudeDelta = ampError * vstartGain;
   const nextMuV = currentMuV + muControlDelta;
   const nextVstartV = currentVstartV + vstartCoupledDelta + vstartAmplitudeDelta;
-  const nextMuCode = muVoltageToCode(nextMuV);
-  const nextVstartCode = vstartVoltageToCode(nextVstartV);
+  const nextMuCode = muVoltageToCode(nextMuV, device);
+  const nextVstartCode = vstartVoltageToCode(nextVstartV, device);
   return {
     mode: "fit",
     device,
@@ -3670,8 +3795,8 @@ function adjustmentPlanForFit(device, target, fit, muGain, vstartGain, muVstartG
 }
 
 function directPlanForTarget(device, target) {
-  const nextMuCode = muVoltageToCode(target.mu);
-  const nextVstartCode = vstartVoltageToCode(target.A);
+  const nextMuCode = muVoltageToCode(target.mu, device);
+  const nextVstartCode = vstartVoltageToCode(target.A, device);
   const currentVstartCode = logicalVstartCodeForDevice(device);
   return {
     mode: "direct",
@@ -3951,12 +4076,12 @@ function planHasCodeChange(plan) {
   return plan.currentMuCode !== plan.nextMuCode || (plan.currentVstartCode ?? plan.currentACode) !== (plan.nextVstartCode ?? plan.nextACode);
 }
 
-function localParamCodeStepVoltage(param, code) {
+function localParamCodeStepVoltage(param, code, device = null) {
   const safeCode = clamp(Math.round(Number(code) || 0), 0, POT_MAX_CODE);
-  const here = paramCodeToVoltage(param, safeCode);
+  const here = paramCodeToVoltage(param, safeCode, device);
   const candidates = [];
-  if (safeCode > 0) candidates.push(Math.abs(here - paramCodeToVoltage(param, safeCode - 1)));
-  if (safeCode < POT_MAX_CODE) candidates.push(Math.abs(paramCodeToVoltage(param, safeCode + 1) - here));
+  if (safeCode > 0) candidates.push(Math.abs(here - paramCodeToVoltage(param, safeCode - 1, device)));
+  if (safeCode < POT_MAX_CODE) candidates.push(Math.abs(paramCodeToVoltage(param, safeCode + 1, device) - here));
   const finite = candidates.filter(value => Number.isFinite(value) && value > 0);
   return finite.length ? Math.min(...finite) : NaN;
 }
@@ -3976,8 +4101,8 @@ function unchangedPlanDetails(plan) {
   const requestedVstartDelta = Number(plan.requestedNextVstartV) - Number(plan.currentVstartV);
   const appliedMuDelta = Number(plan.nextMuV) - Number(plan.currentMuV);
   const appliedVstartDelta = Number(plan.nextVstartV) - Number(plan.currentVstartV);
-  const muCodeStep = localParamCodeStepVoltage("mu", plan.currentMuCode);
-  const vstartCodeStep = localParamCodeStepVoltage("A", currentVstartCode);
+  const muCodeStep = localParamCodeStepVoltage("mu", plan.currentMuCode, plan.device);
+  const vstartCodeStep = localParamCodeStepVoltage("A", currentVstartCode, plan.device);
   const reasons = [];
   const vstartClamped = plan.vstartBoundaryGuardApplied || (Number.isFinite(Number(plan.requestedNextVstartV)) && Number.isFinite(Number(plan.nextVstartV)) && Math.abs(Number(plan.requestedNextVstartV) - Number(plan.nextVstartV)) > 1e-9);
   const muClamped = Number.isFinite(Number(plan.requestedNextMuV)) && Number.isFinite(Number(plan.nextMuV)) && Math.abs(Number(plan.requestedNextMuV) - Number(plan.nextMuV)) > 1e-9;
@@ -3999,15 +4124,15 @@ function unchangedPlanStopMessage(prefix, plan, error) {
   return `${prefix} stopped: code unchanged (${unchangedPlanDetails(plan)}). ${formatTargetError(error)}.`;
 }
 
-function adjacentParamCodeForVoltageDelta(param, currentCode, desiredDeltaV) {
+function adjacentParamCodeForVoltageDelta(param, currentCode, desiredDeltaV, device = null) {
   const safeCode = clamp(Math.round(Number(currentCode) || 0), 0, POT_MAX_CODE);
   const desired = Number(desiredDeltaV);
   if (!Number.isFinite(desired) || Math.abs(desired) < 1e-12) return safeCode;
-  const currentV = paramCodeToVoltage(param, safeCode);
+  const currentV = paramCodeToVoltage(param, safeCode, device);
   const candidates = [];
   for (const code of [safeCode - 1, safeCode + 1]) {
     if (code < 0 || code > POT_MAX_CODE) continue;
-    const voltage = paramCodeToVoltage(param, code);
+    const voltage = paramCodeToVoltage(param, code, device);
     const delta = voltage - currentV;
     if (Number.isFinite(delta) && Math.sign(delta) === Math.sign(desired)) {
       candidates.push({ code, delta, distance: Math.abs(delta - desired) });
@@ -4022,19 +4147,19 @@ function planWithMinimumCodeNudge(plan) {
   const nudged = { ...plan };
   const axes = [];
   const requestedMuDelta = Number(plan.requestedNextMuV) - Number(plan.currentMuV);
-  const muCode = adjacentParamCodeForVoltageDelta("mu", plan.currentMuCode, requestedMuDelta);
+  const muCode = adjacentParamCodeForVoltageDelta("mu", plan.currentMuCode, requestedMuDelta, plan.device);
   if (muCode !== plan.currentMuCode) {
     nudged.nextMuCode = muCode;
-    nudged.nextMuV = paramCodeToVoltage("mu", muCode);
+    nudged.nextMuV = paramCodeToVoltage("mu", muCode, plan.device);
     axes.push("Vmu");
   }
   const currentVstartCode = plan.currentVstartCode ?? plan.currentACode;
   const requestedVstartDelta = Number(plan.requestedNextVstartV) - Number(plan.currentVstartV);
-  const vstartCode = adjacentParamCodeForVoltageDelta("A", currentVstartCode, requestedVstartDelta);
+  const vstartCode = adjacentParamCodeForVoltageDelta("A", currentVstartCode, requestedVstartDelta, plan.device);
   if (vstartCode !== currentVstartCode) {
     nudged.nextVstartCode = vstartCode;
     nudged.nextACode = vstartCode;
-    nudged.nextVstartV = paramCodeToVoltage("A", vstartCode);
+    nudged.nextVstartV = paramCodeToVoltage("A", vstartCode, plan.device);
     nudged.nextAV = nudged.nextVstartV;
     axes.push("Vstart");
   }
@@ -5618,7 +5743,7 @@ function allDeviceTestSummaryRows() {
     "A_amp", "mu_V", "sigma_V", "baseline", "R2", "RMSE", "edge_ratio", "points", "sweep_id",
   ], ...(state.allDeviceTestRows || []).map(row => [
     row.time, row.device, row.adcIndex, Number.isFinite(row.adcIndex) ? adcSubLabel(row.adcIndex) : "", row.xDac, row.status, row.message || "",
-    row.config?.muCode, potCodeToMuVoltage(row.config?.muCode), row.config?.vstartCode, potCodeToVstartVoltage(row.config?.vstartCode),
+    row.config?.muCode, potCodeToMuVoltage(row.config?.muCode, row.device), row.config?.vstartCode, potCodeToVstartVoltage(row.config?.vstartCode, row.device),
     row.fit?.A, row.fit?.mu, row.fit?.sigma, row.fit?.baseline, row.fit?.r2, row.fit?.rmse, row.edgeRatio, row.dataPoints, row.sweep?.id,
   ])];
 }
@@ -5637,9 +5762,9 @@ function allDeviceTestRuns() {
       muStepV: "",
       vstartStepV: "",
       muCode: row.config?.muCode,
-      actualMuV: potCodeToMuVoltage(row.config?.muCode),
+      actualMuV: potCodeToMuVoltage(row.config?.muCode, row.device),
       vstartCode: row.config?.vstartCode,
-      actualVstartV: potCodeToVstartVoltage(row.config?.vstartCode),
+      actualVstartV: potCodeToVstartVoltage(row.config?.vstartCode, row.device),
     }));
 }
 
@@ -5927,8 +6052,8 @@ function deviceCalLimitPlanCodeDelta(plan, maxDelta) {
     limited.nextMuCode = clamp(Math.round(limitAxis(currentMu, requestedMu)), 0, POT_MAX_CODE);
     limited.nextVstartCode = clamp(Math.round(limitAxis(currentVs, requestedVs)), 0, POT_MAX_CODE);
     limited.nextACode = limited.nextVstartCode;
-    limited.nextMuV = potCodeToMuVoltage(limited.nextMuCode);
-    limited.nextVstartV = potCodeToVstartVoltage(limited.nextVstartCode);
+    limited.nextMuV = potCodeToMuVoltage(limited.nextMuCode, plan.device);
+    limited.nextVstartV = potCodeToVstartVoltage(limited.nextVstartCode, plan.device);
     limited.nextAV = limited.nextVstartV;
     limited.codeDeltaLimited = limited.nextMuCode !== requestedMu || limited.nextVstartCode !== requestedVs;
   }
@@ -7147,8 +7272,8 @@ function currentDeviceSeedRows() {
       muCode,
       vstartCode,
       `P${device},${muCode},${vstartCode}`,
-      potCodeToMuVoltage(muCode),
-      potCodeToVstartVoltage(vstartCode),
+      potCodeToMuVoltage(muCode, device),
+      potCodeToVstartVoltage(vstartCode, device),
     ]);
   }
   return rows;
@@ -7495,6 +7620,7 @@ function bindEvents() {
   $("saveParamCalButton").addEventListener("click", saveParamCalibrationFromInputs);
   $("loadProjectParamCalButton").addEventListener("click", loadProjectParamCalibration);
   $("resetParamCalButton").addEventListener("click", resetParamCalibration);
+  $("paramCalProfile")?.addEventListener("change", renderParamCalibration);
 
   $("switchDevice").addEventListener("input", updateSwitchInfo);
   $("switchWriteButton").addEventListener("click", switchTestWrite);
@@ -7503,9 +7629,9 @@ function bindEvents() {
   $("aCode").addEventListener("input", updatePotReadout);
   $("muCode").addEventListener("input", updatePotReadout);
   $("setACodeButton").addEventListener("click", setAFromCode);
-  $("setAVoltageButton").addEventListener("click", async () => { $("aCode").value = muVoltageToCode($("aTarget").value); await setAFromCode(); });
+  $("setAVoltageButton").addEventListener("click", async () => { const device = deviceMuxInfo($("potDevice").value).device; $("aCode").value = muVoltageToCode($("aTarget").value, device); await setAFromCode(); });
   $("setMuCodeButton").addEventListener("click", setMuFromCode);
-  $("setMuVoltageButton").addEventListener("click", async () => { $("muCode").value = vstartVoltageToCode($("muTarget").value); await setMuFromCode(); });
+  $("setMuVoltageButton").addEventListener("click", async () => { const device = deviceMuxInfo($("potDevice").value).device; $("muCode").value = vstartVoltageToCode($("muTarget").value, device); await setMuFromCode(); });
   $("applyPotButton").addEventListener("click", async () => { await setAFromCode(); await setMuFromCode(); });
   $("applyPotAllButton").addEventListener("click", applyPotAllDevices);
 

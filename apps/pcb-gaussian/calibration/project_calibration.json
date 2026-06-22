@@ -1,9 +1,10 @@
-﻿{
+{
   "schema": "pcb-gaussian-calibration-v1",
-  "note": "Positive Vstart/Vmu calibration defaults for the inverted-amplifier MAX5488 path. DAC sweep endpoints use the full AD5322 code range: -16.5 V -> code 0 and +16.5 V -> code 4095. Vstart/A was refreshed from the 2026-06-10 local calibration anchor: code 19 -> 0.9949 V. Browser-local calibrated values are stored separately in localStorage by origin.",
+  "note": "Positive Vstart/Vmu calibration defaults for the inverted-amplifier MAX5488 path. DAC sweep endpoints use the full AD5322 code range: -16.5 V -> code 0 and +16.5 V -> code 4095. Vstart/A was refreshed from the 2026-06-10 local calibration anchor: code 19 -> 0.9949 V. D15/D16 use a restored original-path MAX5488 calibration profile with A 0 to -9.9 V and mu 0.016 to 6.0 V defaults. Browser-local calibrated values are stored separately in localStorage by origin.",
   "localStorageKeys": {
     "dac": "pcbGaussian.dacCalibration.v1",
-    "parameters": "pcbGaussian.parameterCalibration.inverted.v2"
+    "parameters": "pcbGaussian.parameterCalibration.inverted.v2",
+    "deviceParameters": "pcbGaussian.deviceParameterCalibration.d15d16.v1"
   },
   "dacCal": {
     "D1": [
@@ -52,5 +53,55 @@
       { "code": 210, "voltage": 4.8900 },
       { "code": 255, "voltage": 5.9800 }
     ]
+  },
+  "deviceParamCal": {
+    "D15": {
+      "A": [
+        { "code": 0, "voltage": 0.0000 },
+        { "code": 30, "voltage": -1.1647 },
+        { "code": 60, "voltage": -2.3294 },
+        { "code": 90, "voltage": -3.4941 },
+        { "code": 120, "voltage": -4.6588 },
+        { "code": 150, "voltage": -5.8235 },
+        { "code": 180, "voltage": -6.9882 },
+        { "code": 210, "voltage": -8.1529 },
+        { "code": 255, "voltage": -9.9000 }
+      ],
+      "mu": [
+        { "code": 0, "voltage": 0.0160 },
+        { "code": 30, "voltage": 0.7200 },
+        { "code": 60, "voltage": 1.4240 },
+        { "code": 90, "voltage": 2.1280 },
+        { "code": 120, "voltage": 2.8320 },
+        { "code": 150, "voltage": 3.5360 },
+        { "code": 180, "voltage": 4.2400 },
+        { "code": 210, "voltage": 4.9440 },
+        { "code": 255, "voltage": 6.0000 }
+      ]
+    },
+    "D16": {
+      "A": [
+        { "code": 0, "voltage": 0.0000 },
+        { "code": 30, "voltage": -1.1647 },
+        { "code": 60, "voltage": -2.3294 },
+        { "code": 90, "voltage": -3.4941 },
+        { "code": 120, "voltage": -4.6588 },
+        { "code": 150, "voltage": -5.8235 },
+        { "code": 180, "voltage": -6.9882 },
+        { "code": 210, "voltage": -8.1529 },
+        { "code": 255, "voltage": -9.9000 }
+      ],
+      "mu": [
+        { "code": 0, "voltage": 0.0160 },
+        { "code": 30, "voltage": 0.7200 },
+        { "code": 60, "voltage": 1.4240 },
+        { "code": 90, "voltage": 2.1280 },
+        { "code": 120, "voltage": 2.8320 },
+        { "code": 150, "voltage": 3.5360 },
+        { "code": 180, "voltage": 4.2400 },
+        { "code": 210, "voltage": 4.9440 },
+        { "code": 255, "voltage": 6.0000 }
+      ]
+    }
   }
 }

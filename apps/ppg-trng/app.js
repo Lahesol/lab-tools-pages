@@ -63,6 +63,8 @@ const state = {
   bleServer: null,
   bleWriteCharacteristic: null,
   bleNotifyCharacteristic: null,
+  writer: null,
+  firmwareVersion: "",
   keepReading: false,
   decoder: new TextDecoder(),
   parseBuffer: "",
@@ -104,16 +106,18 @@ const NUS_RX_WRITE_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_TX_NOTIFY_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const NOISE_BASELINE_ALPHA = 0.02;
 const NOISE_WARMUP_SAMPLES = 12;
-const CHANNEL_ORDER = ["ADC", "G", "R", "A"];
+const CHANNEL_ORDER = ["ADC", "G", "I", "R", "A"];
 const CHANNEL_LABELS = {
   ADC: "ADC",
   G: "Green",
+  I: "IR",
   R: "Red",
   A: "Ambient",
 };
 const CHANNEL_COLORS = {
   ADC: "#087f72",
   G: "#149447",
+  I: "#5b5bd6",
   R: "#d64545",
   A: "#5c6f82",
 };
@@ -175,6 +179,26 @@ function addLog(type, message, isError = false) {
 
   while (els.log.childElementCount > 80) {
     els.log.removeChild(els.log.lastElementChild);
+  }
+}
+
+function $(id) {
+  return document.getElementById(id);
+}
+
+function logLine(message) {
+  addLog("SYS", message);
+}
+
+function setConnected(connected) {
+  setConnectedUi(Boolean(connected));
+}
+
+function setDfuBootloaderMode(active, kind = "warn") {
+  if (active) {
+    setConnectionStatus("DFU bootloader mode requested", kind);
+  } else {
+    setConnectedUi(isConnected());
   }
 }
 
@@ -307,6 +331,16 @@ async function disconnectSerial() {
       await state.reader.cancel();
     }
   } catch (error) {
+    addLog("ERR", error.message || error, true);
+  }
+
+  try {
+    if (state.writer) {
+      state.writer.releaseLock();
+      state.writer = null;
+    }
+  } catch (error) {
+    state.writer = null;
     addLog("ERR", error.message || error, true);
   }
 
@@ -518,6 +552,8 @@ function ingestText(text) {
 
 function parseSegment(segment) {
   if (!segment) return;
+  parseFirmwareInfoSegment(segment);
+
   if (state.bitMode) {
     parseBitSegment(segment);
     return;
@@ -534,6 +570,7 @@ function parseSegment(segment) {
 function normalizeChannel(channel) {
   const key = String(channel || "ADC").trim().toUpperCase();
   if (key === "GREEN") return "G";
+  if (key === "IR" || key === "INFRARED") return "I";
   if (key === "RED") return "R";
   if (key === "AMBIENT") return "A";
   if (CHANNEL_ORDER.includes(key)) return key;
@@ -541,7 +578,7 @@ function normalizeChannel(channel) {
 }
 
 function parseTaggedSegment(segment) {
-  const matches = [...segment.matchAll(/\b(ADC|GREEN|RED|AMBIENT|[AGR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
+  const matches = [...segment.matchAll(/\b(ADC|GREEN|IR|INFRARED|RED|AMBIENT|[AGIR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
   if (!matches.length) return false;
 
   let parsed = false;
@@ -554,6 +591,14 @@ function parseTaggedSegment(segment) {
     }
   });
   return parsed;
+}
+
+function parseFirmwareInfoSegment(segment) {
+  if (!/^VER\b/i.test(segment)) return;
+  const match = segment.match(/\bFW\s*,\s*([^,\s;]+)/i);
+  if (match) {
+    state.firmwareVersion = match[1];
+  }
 }
 
 function parseBitSegment(segment) {
@@ -943,6 +988,7 @@ async function sendCommand(value) {
             return;
           }
           writer = state.port.writable.getWriter();
+          state.writer = writer;
           await writer.write(payload);
           addLog("TX", command);
         } catch (error) {
@@ -951,6 +997,7 @@ async function sendCommand(value) {
           if (writer) {
             try {
               writer.releaseLock();
+              if (state.writer === writer) state.writer = null;
             } catch (error) {
               addLog("ERR", error.message || error, true);
             }
@@ -1012,8 +1059,13 @@ function applyPpgCommandPreset(command) {
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
+    els.channelMode.value = "I";
+  } else if (command === "7763") {
+    els.filterMode.value = "band-pass";
+    els.highCutoff.value = "0.5";
+    els.lowCutoff.value = "5";
     els.channelMode.value = "R";
-  } else if (command === "7763" || command === "7777") {
+  } else if (command === "7764" || command === "7777") {
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
@@ -1124,6 +1176,7 @@ function toggleDemo() {
     const ppg = Math.sin(state.demoPhase) * 160 + Math.sin(state.demoPhase * 0.31) * 38;
     const noise = (Math.random() - 0.5) * 42;
     addSample(Math.round(ppg + noise), "G");
+    addSample(Math.round(ppg * 0.82 + Math.sin(state.demoPhase * 0.73) * 22 + noise * 0.45), "I");
     addSample(Math.round(ppg * 0.62 + noise * 0.55), "R");
     addSample(Math.round(baseline + noise * 0.2), "A");
   }, 33);

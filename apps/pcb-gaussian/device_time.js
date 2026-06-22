@@ -82,8 +82,8 @@
     return protocol.includes("time") || version.includes("time-domain");
   }
 
-  function voltageRange(param) {
-    const points = typeof getParamCalPoints === "function" ? getParamCalPoints(param) : [];
+  function voltageRange(param, device = null) {
+    const points = typeof getParamCalPoints === "function" ? getParamCalPoints(param, device) : [];
     const voltages = points.map(point => Number(point.voltage)).filter(Number.isFinite);
     if (!voltages.length) return { min: 0, max: 20 };
     return { min: Math.min(...voltages), max: Math.max(...voltages) };
@@ -96,9 +96,10 @@
   }
 
   function syncDeviceTimeVoltageRanges() {
+    const device = deviceMuxInfo($("deviceTimeDevice")?.value ?? $("deviceTuneDevice")?.value).device;
     setNumberRange($("deviceTimeDacMvNumber"), { min: DAC_OUTPUT_MIN_MV, max: DAC_OUTPUT_MAX_MV });
-    setNumberRange($("deviceTimeMuNumber"), voltageRange("mu"));
-    setNumberRange($("deviceTimeVstartNumber"), voltageRange("A"));
+    setNumberRange($("deviceTimeMuNumber"), voltageRange("mu", device));
+    setNumberRange($("deviceTimeVstartNumber"), voltageRange("A", device));
   }
 
   function syncDeviceTimeBiasFromDeviceTune() {
@@ -118,12 +119,12 @@
     const device = deviceMuxInfo($("deviceTimeDevice")?.value ?? $("deviceTuneDevice")?.value).device;
     const dac = $("deviceTimeDac")?.value === "D1" ? "D1" : "D2";
     const dacMv = snapDeviceTimeDacMv($("deviceTimeDacMvNumber")?.value);
-    const muRange = voltageRange("mu");
-    const vstartRange = voltageRange("A");
+    const muRange = voltageRange("mu", device);
+    const vstartRange = voltageRange("A", device);
     const muV = clamp(Number($("deviceTimeMuNumber")?.value) || 0, muRange.min, muRange.max);
     const vstartV = clamp(Number($("deviceTimeVstartNumber")?.value) || 0, vstartRange.min, vstartRange.max);
-    const muCode = muVoltageToCode(muV);
-    const vstartCode = vstartVoltageToCode(vstartV);
+    const muCode = muVoltageToCode(muV, device);
+    const vstartCode = vstartVoltageToCode(vstartV, device);
     if ($("deviceTimeDacMvNumber")) $("deviceTimeDacMvNumber").value = dacMv;
     if ($("deviceTimeMuNumber")) $("deviceTimeMuNumber").value = muV;
     if ($("deviceTimeVstartNumber")) $("deviceTimeVstartNumber").value = vstartV;
@@ -609,6 +610,7 @@
     $("deviceTimeStopButton")?.addEventListener("click", stopDeviceTimePlot);
     $("deviceTimeClearButton")?.addEventListener("click", clearDeviceTimePlot);
     $("deviceTimeApplyBiasButton")?.addEventListener("click", applyDeviceTimeBiasNow);
+    $("deviceTimeDevice")?.addEventListener("input", syncDeviceTimeVoltageRanges);
     window.addEventListener("resize", renderDeviceTimePlot);
   }
 

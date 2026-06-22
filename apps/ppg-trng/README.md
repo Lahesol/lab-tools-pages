@@ -20,24 +20,49 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - TRNG bit mode toggle: `9999\r`
 - DAC sweep/reset: `0000\r`
 - Green-only PPG mode toggle: `7761\r`
-- Red-only PPG mode toggle: `7762\r`
-- Alternating Green/Red PPG mode toggle: `7763\r`
+- IR-only PPG mode toggle: `7762\r`
+- Red-only PPG mode toggle: `7763\r`
+- Alternating Green/IR/Red PPG mode toggle: `7764\r`
 - Raw diagnostic mode toggle: `7769\r`
 - Green LED toggle: `8881\r`
-- Red LED toggle: `8882\r`
-- Both LEDs off: `8880\r`
-- Both LEDs on: `8883\r`
-- Legacy both-LED toggle: `8888\r`
+- IR LED toggle: `8882\r`
+- Red LED toggle: `8883\r`
+- All LEDs off: `8880\r`
+- All LEDs toggle: `8888\r`
+- All LEDs on: `8889\r`
 - Legacy PPG measurement toggle: `7777\r`
+- DFU capability query: `DFU?\r`
+- Enter UART DFU bootloader: `DFU\r`
+- Firmware version query: `VER?\r`
 - ADC receive format: UART text numeric stream, for example `7568\n;`
-- Tagged PPG receive format: `G,-123\n;`, `R,85\n;`, or `A,7340\n;`
+- Tagged PPG receive format: `G,-123\n;`, `I,-71\n;`, `R,85\n;`, or `A,7340\n;`
 - Random bit receive format in `9999` mode: `0` and `1` text stream
 
 In PPG measurement modes, the firmware samples ambient light with LEDs off, discards one LED-on settling sample, averages two LED-on samples, then streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
 
-PPG timing displayed in the GUI follows the current firmware constants: 5 ms phase tick, 50 Hz output for Green-only or Red-only PPG, and 25 Hz per optical channel for alternating Green/Red PPG.
+PPG timing displayed in the GUI follows the current firmware constants: 5 ms phase tick, 50 Hz output for single-channel Green/IR/Red PPG, and 16.7 Hz per optical channel for alternating Green/IR/Red PPG.
 
 The inspected firmware uses UART RX `31`, TX `30`, and `115200` baud.
+
+## DFU
+
+The running app accepts `DFU` and resets with GPREGRET `0xB1` for Nordic UART DFU bootloader entry. Browser DFU upload requires a signed Nordic DFU `.zip`; raw `.hex` files must be packaged first:
+
+```powershell
+.\tools\dfu\uart_dfu_from_hex.ps1 -HexPath "C:\path\to\Stimulation_2emg.hex" -SkipUpload
+```
+
+For a blank MCU, flash a merged SoftDevice + app + UART bootloader image once with a programmer:
+
+```powershell
+.\tools\dfu\build_ym_ppg_uart_bootloader.ps1
+.\tools\dfu\create_initial_uart_dfu_image.ps1
+.\tools\dfu\flash_initial_jlink.ps1 -ChipErase
+```
+
+The bootloader helper temporarily patches the shared SDK bootloader example for YM-PPG UART RX `31`, TX `30`, no hardware flow control, then restores the SDK config after build.
+
+If nRF Connect Programmer creates a failing batch task for serial `123456`, use the helper above instead of forcing `--snr 123456`; it lets `nrfjprog` connect to the available probe automatically.
 
 ## Bluetooth LE
 
