@@ -42,7 +42,7 @@ In PPG measurement modes, the firmware samples ambient light with LEDs off, disc
 
 PPG timing displayed in the GUI follows the current firmware constants: 5 ms phase tick, 50 Hz output for single-channel Green/IR/Red PPG, and 16.7 Hz per optical channel for alternating Green/IR/Red PPG.
 
-The inspected firmware uses UART RX `31`, TX `30`, and `115200` baud.
+The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 
 ## DFU
 
@@ -57,10 +57,10 @@ For a blank MCU, flash a merged SoftDevice + app + UART bootloader image once wi
 ```powershell
 .\tools\dfu\build_ym_ppg_uart_bootloader.ps1
 .\tools\dfu\create_initial_uart_dfu_image.ps1
-.\tools\dfu\flash_initial_jlink.ps1 -ChipErase
+.\tools\dfu\flash_initial_jlink.ps1 -Recover -ChipErase
 ```
 
-The bootloader helper temporarily patches the shared SDK bootloader example for YM-PPG UART RX `31`, TX `30`, no hardware flow control, then restores the SDK config after build.
+The bootloader helper temporarily patches the shared SDK bootloader example for YM-PPG UART RX `25`, TX `26`, no hardware flow control, then restores the SDK config after build.
 
 If nRF Connect Programmer creates a failing batch task for serial `123456`, use the helper above instead of forcing `--snr 123456`; it lets `nrfjprog` connect to the available probe automatically.
 

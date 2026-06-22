@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-06-21-3led-dfu",
+  "version": "2026-06-22-3led-dfu-uart25-26",
   "protocol": "ppg-trng-3led-dfu-v1",
   "appVersion": 1,
   "package": "./ppg_trng_latest_dfu.zip",
   "size": 73461,
-  "sha256": "099412a59f1e9c9374ecdc7affa3e12fbb710d06e1d84bcdfbcff877fc05fac8",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-21."
+  "sha256": "05c70270eb63221350d7e33c39c378150ebc91c37c162ae71eac85171a7658c3",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-22 for UART RX=P0.25/TX=P0.26."
 }

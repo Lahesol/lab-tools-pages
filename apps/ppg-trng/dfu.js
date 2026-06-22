@@ -13,7 +13,7 @@
     "If the MCU is blank, browser DFU cannot install the first bootloader. Flash the initial UART DFU HEX once with J-Link/nrfjprog first.",
     "If application firmware is running, connect to the app first, send DFU, then select the bootloader COM port after reset.",
     "After DFU, select the bootloader COM port after reset. If the board drops back to the app before port selection, retry immediately after Enter bootloader.",
-    "Check the UART bootloader is built for the YM-PPG UART pins RX=P0.31/TX=P0.30, GND is shared, baud is 230400 or 115200, and HW flow control is off.",
+    "Check the UART bootloader is built for the YM-PPG UART pins RX=P0.25/TX=P0.26, GND is shared, baud is 230400 or 115200, and HW flow control is off.",
   ].join("\n");
 
   const DFU_OP = {
