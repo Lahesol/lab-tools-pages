@@ -229,6 +229,15 @@
                     <option value="ADC">ADC</option>
                   </select>
                 </label>
+                <label class="compact-field" for="adcPlotMode">
+                  <span>ADC Input</span>
+                  <select id="adcPlotMode">
+                    <option value="all" selected>All ADCs</option>
+                    <option value="ADC3">ADC3 device A</option>
+                    <option value="ADC2">ADC2 device B</option>
+                    <option value="ADC0">ADC0 commercial</option>
+                  </select>
+                </label>
                 <label class="switch">
                   <input id="autoScale" type="checkbox" checked />
                   <span>Auto</span>
@@ -364,7 +373,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=46bac7988c37" defer></script>
+    <script src="./app.js?v=61522584ffb2" defer></script>
     <script src="./dfu.js" defer></script>
   </body>
 </html>

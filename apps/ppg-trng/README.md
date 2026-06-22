@@ -48,7 +48,7 @@ PPG timing displayed in the GUI follows the current firmware constants: 5 ms pha
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 
-The current PCB analog mapping is ADC3/ADC2 for the discrete PPG device paths and ADC0 for the commercial PPG sensor path. The GUI sends `ADC3`, `ADC2`, or `ADC0` to switch the firmware input, and `ADC?` returns `ADC,ACTIVE,<n>,ROLE,...` for the active route.
+The current PCB analog mapping is ADC3/ADC2 for the discrete PPG device paths and ADC0 for the commercial PPG sensor path. The GUI sends `ADC3`, `ADC2`, or `ADC0` to switch the firmware input, and `ADC?` returns `ADC,ACTIVE,<n>,ROLE,...` for the active route. The plot toolbar has a separate ADC Input filter, so recorded samples can be viewed as all ADC inputs or only ADC3, ADC2, or ADC0.
 
 ## DFU
 

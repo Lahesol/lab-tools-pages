@@ -25,6 +25,7 @@ const els = {
   sampleCount: document.querySelector("#sampleCount"),
   windowSize: document.querySelector("#windowSize"),
   channelMode: document.querySelector("#channelMode"),
+  adcPlotMode: document.querySelector("#adcPlotMode"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
@@ -790,7 +791,7 @@ function updateStats() {
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
     els.sampleCount.textContent = String(state.totalSamples);
-    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getFilterDescription()}`;
+    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getFilterDescription()}`;
     return;
   }
 
@@ -809,7 +810,7 @@ function updateStats() {
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
   els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcSourceDescription()} | ${getFilterDescription()}`;
+  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcPlotDescription()} | ${getFilterDescription()}`;
 }
 
 function setBitMode(enabled) {
@@ -952,9 +953,27 @@ function getSelectedChannel() {
   return normalizeChannel(els.channelMode?.value) || "all";
 }
 
+function getSelectedAdcPlotSource() {
+  const value = els.adcPlotMode?.value || "all";
+  if (value === "all") return "all";
+  return normalizeAdcSource(value) || "all";
+}
+
+function getSamplesForAdcSource(samples = state.samples, source = getSelectedAdcPlotSource()) {
+  if (source === "all") return samples;
+  return samples.filter((sample) => (sample.adcSource || state.adcSource) === source);
+}
+
+function getAdcPlotDescription() {
+  const source = getSelectedAdcPlotSource();
+  if (source === "all") return "All ADC inputs";
+  return getAdcSourceInfo(source).detail;
+}
+
 function getSamplesForChannel(channel = getSelectedChannel()) {
-  if (channel === "all") return state.samples;
-  return state.samples.filter((sample) => (sample.channel || "ADC") === channel);
+  const samples = getSamplesForAdcSource();
+  if (channel === "all") return samples;
+  return samples.filter((sample) => (sample.channel || "ADC") === channel);
 }
 
 function getChannelsInSamples(samples) {
@@ -981,7 +1000,8 @@ function updateFilterUi() {
 
 function getDisplaySamples(channel = getSelectedChannel()) {
   if (channel === "all") {
-    return getChannelsInSamples(state.samples)
+    const samples = getSamplesForChannel("all");
+    return getChannelsInSamples(samples)
       .flatMap((visibleChannel) => getDisplaySamples(visibleChannel))
       .sort((left, right) => left.t - right.t);
   }
@@ -1601,6 +1621,11 @@ function bindEvents() {
   });
 
   els.channelMode.addEventListener("change", () => {
+    updateStats();
+    state.needsDraw = true;
+  });
+
+  els.adcPlotMode.addEventListener("change", () => {
     updateStats();
     state.needsDraw = true;
   });
