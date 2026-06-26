@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-06-26-rawavg-restore",
+  "version": "2026-06-26-single-adc-switchfix",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 11,
+  "appVersion": 14,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 76185,
-  "sha256": "7ad6143d125ebaf112385198f2d9486a43034e97ca6e1b41141895c45cb5f644",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-26 with app UART on P0.25/P0.26, 3-channel ADC3/ADC2/ADC0 scan, raw ADC 8-sample software averaging to restore steadier plots, SAADC hardware oversampling disabled because nRF52 asserts with multi-channel scans, short stream pause during control responses, reliable UART retry for control responses, UART boot beacon, runtime heartbeat, tagged TRNG bits, residual/delta mixing, and Von Neumann extraction."
+  "size": 76969,
+  "sha256": "b51f91525e2af30285cc92be4c9264daddcfcaef770f61a6e00272c84348d63c",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-26 with app UART on P0.25/P0.26, active single ADC streaming, selectable ADC3/ADC2/ADC0 input, SAADC abort plus channel uninit/init when switching the active ADC, SAADC hardware 8x oversampling restored for the one active channel, single-channel raw ADC plot, single-source 9999 bitmap, reliable UART retry for control responses, UART boot beacon, runtime heartbeat, residual/delta TRNG mixing, and Von Neumann extraction."
 }

@@ -38,9 +38,9 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - DFU capability query: `DFU?\r`
 - Enter UART DFU bootloader: `DFU\r`
 - Firmware version query: `VER?\r`
-- Raw ADC receive format: tagged UART text stream, for example `ADC3,7568\n;`, `ADC2,7559\n;`, and `ADC0,10820\n;`
+- Raw ADC receive format: tagged UART text stream from the active ADC only, for example `ADC3,7568\n;`, `ADC2,7559\n;`, or `ADC0,10820\n;`
 - Tagged PPG receive format: `G,-123\n;`, `I,-71\n;`, `R,85\n;`, or `A,7340\n;`
-- Random bit receive format in `9999` mode: tagged ADC bit stream, for example `BIT3,0\n;`, `BIT2,1\n;`, and `BIT0,0\n;`
+- Random bit receive format in `9999` mode: tagged ADC bit stream from the active ADC only, for example `BIT3,0\n;`, `BIT2,1\n;`, or `BIT0,0\n;`
 
 In PPG measurement modes, the firmware samples ambient light with LEDs off, discards one LED-on settling sample, averages two LED-on samples, then streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
 
@@ -48,7 +48,7 @@ PPG timing displayed in the GUI follows the current firmware constants: 5 ms pha
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 
-The current PCB analog mapping is ADC3/ADC2 for the discrete PPG device paths and ADC0 for the commercial PPG sensor path. In raw mode the firmware scans ADC3, ADC2, and ADC0 together and the GUI plots them as separate series. In `9999` mode the firmware extracts bits from ADC3, ADC2, and ADC0 simultaneously and the GUI renders separate bitmap lanes. Current firmware uses a high-pass residual and sample-delta raw bit mixer followed by Von Neumann pair extraction. The GUI sends `ADC3`, `ADC2`, or `ADC0` only to choose the active PPG input, and `ADC?` returns `ADC,ACTIVE,<n>,ROLE,...` for that active route.
+The current PCB analog mapping is ADC3/ADC2 for the discrete PPG device paths and ADC0 for the commercial PPG sensor path. The GUI sends `ADC3`, `ADC2`, or `ADC0` to choose the active input. Raw mode, PPG mode, and `9999` bit mode use that one active ADC instead of scanning all ADCs together. Current firmware uses a high-pass residual and sample-delta raw bit mixer followed by Von Neumann pair extraction. `ADC?` returns `ADC,ACTIVE,<n>,ROLE,...,STREAM,SINGLE` for the active route.
 
 ## DFU
 
@@ -88,7 +88,7 @@ Tagged firmware streams are plotted as separate ADC, Green, Red, and Ambient cha
 
 ## Bit Extraction
 
-Pressing `9999` toggles the local random bit mode indicator and sends the firmware command. While bit mode is active, incoming `BIT3`, `BIT2`, and `BIT0` tagged bits are stored separately from ADC samples and rendered as ADC-specific bitmap lanes.
+Pressing `9999` toggles the local random bit mode indicator and sends the firmware command. While bit mode is active, incoming tagged bits from the active ADC are stored separately from ADC samples and rendered in one bitmap plane.
 
 When `9999` bit mode is not active, ADC samples still produce bitmap bits from the signal noise component. The browser estimates a slow baseline with an exponential moving average, uses the high-frequency residual sign as a raw bit source, then applies a Von Neumann pair extractor to reduce sign bias.
 

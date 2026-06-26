@@ -25,7 +25,6 @@ const els = {
   sampleCount: document.querySelector("#sampleCount"),
   windowSize: document.querySelector("#windowSize"),
   channelMode: document.querySelector("#channelMode"),
-  adcPlotSources: document.querySelectorAll("[data-adc-plot-source]"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
@@ -133,8 +132,6 @@ const ADC_SOURCE_COLORS = {
   ADC2: "#7c4dff",
   ADC0: "#b86800",
 };
-
-const BIT_SOURCE_ORDER = ["ADC3", "ADC2", "ADC0"];
 
 const ADC_SOURCE_INFO = {
   ADC3: {
@@ -307,11 +304,23 @@ function getAdcSourceDescription(source = state.adcSource) {
 function setAdcSource(source, options = {}) {
   const normalized = normalizeAdcSource(source);
   if (!normalized) return;
+  const changed = state.adcSource !== normalized;
   state.adcSource = normalized;
+  if (changed) {
+    state.samples = [];
+    state.totalSamples = 0;
+    state.latest = null;
+    state.bits = [];
+    state.totalBits = 0;
+    state.bitLanes = {};
+    state.bitPlaneCapacity = 0;
+  }
   resetNoiseExtractor();
   updateAdcSourceUi(options);
   updateStats();
+  updateBitStats();
   state.needsDraw = true;
+  state.needsBitDraw = true;
 }
 
 function updateAdcSourceUi(options = {}) {
@@ -727,6 +736,7 @@ function addSample(value, channel = "ADC", options = {}) {
 
   const normalizedChannel = normalizeChannel(channel) || "ADC";
   const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
+  if (normalizedChannel === "ADC" && adcSource !== state.adcSource) return;
   const sample = {
     t: performance.now(),
     value,
@@ -816,14 +826,19 @@ function ensureBitLane(source) {
   return state.bitLanes[normalized];
 }
 
+function getBitSourceOrder() {
+  return [state.adcSource];
+}
+
 function getBitLanes() {
-  return BIT_SOURCE_ORDER.map((source) => [source, ensureBitLane(source)]);
+  return getBitSourceOrder().map((source) => [source, ensureBitLane(source)]);
 }
 
 function addBits(bits, adcSource = state.adcSource, source = state.bitMode ? "9999 mode" : "ADC noise") {
   if (state.paused || !bits.length) return;
 
   const normalizedSource = normalizeAdcSource(adcSource) || state.adcSource;
+  if (normalizedSource !== state.adcSource) return;
   const normalizedBits = bits.map((bit) => (bit ? 1 : 0));
   const now = performance.now();
   state.bits.push(...normalizedBits.map((bit) => ({
@@ -905,7 +920,7 @@ function updateBitStats() {
   const ones = planeBits.reduce((sum, bit) => sum + bit, 0);
   const zeros = planeBits.length - ones;
   const ratio = planeBits.length ? ones / planeBits.length : null;
-  const capacity = (state.bitPlaneCapacity || getBitPlaneGeometry().capacity) * BIT_SOURCE_ORDER.length;
+  const capacity = (state.bitPlaneCapacity || getBitPlaneGeometry().capacity) * lanes.length;
   const source = state.bitMode ? "9999 mode" : "ADC noise";
 
   const filled = lanes.reduce((sum, [, lane]) => sum + lane.filled, 0);
@@ -914,7 +929,7 @@ function updateBitStats() {
   els.zeroCount.textContent = String(zeros);
   els.onesRatio.textContent = ratio === null ? "--" : ratio.toFixed(4);
   els.bitCaption.textContent = planeBits.length
-    ? `${source} | ADC3 + ADC2 + ADC0 | total ${state.totalBits}`
+    ? `${source} | ${getAdcSourceInfo(state.adcSource).label} | total ${state.totalBits}`
     : state.bitMode
       ? "Waiting for bits"
       : "Waiting for ADC noise bits";
@@ -930,7 +945,7 @@ function getBitPlaneGeometry() {
   const rect = els.bitCanvas.getBoundingClientRect();
   const width = bitMap.width || Math.floor(rect.width);
   const height = bitMap.height || Math.floor(rect.height);
-  const laneHeight = Math.max(80, Math.floor(height / BIT_SOURCE_ORDER.length));
+  const laneHeight = Math.max(80, Math.floor(height / Math.max(1, getBitSourceOrder().length)));
   const labelHeight = 22;
 
   if (!width || !height) {
@@ -947,7 +962,7 @@ function ensureBitPlaneCapacity() {
   if (capacity <= 0 || state.bitPlaneCapacity === capacity) return;
 
   state.bitPlaneCapacity = capacity;
-  BIT_SOURCE_ORDER.forEach((source) => {
+  getBitSourceOrder().forEach((source) => {
     state.bitLanes[source] = createBitLane(capacity);
   });
 }
@@ -1025,11 +1040,7 @@ function getSelectedChannel() {
 }
 
 function getSelectedAdcPlotSources() {
-  const sources = [...els.adcPlotSources]
-    .filter((input) => input.checked)
-    .map((input) => normalizeAdcSource(input.dataset.adcPlotSource))
-    .filter(Boolean);
-  return [...new Set(sources)];
+  return [state.adcSource];
 }
 
 function getSamplesForAdcSource(samples = state.samples, sources = getSelectedAdcPlotSources()) {
@@ -1039,9 +1050,7 @@ function getSamplesForAdcSource(samples = state.samples, sources = getSelectedAd
 }
 
 function getAdcPlotDescription() {
-  const sources = getSelectedAdcPlotSources();
-  if (!sources.length) return "No ADC inputs";
-  return sources.map((source) => getAdcSourceInfo(source).label).join(" + ");
+  return getAdcSourceInfo(state.adcSource).label;
 }
 
 function getSamplesForChannel(channel = getSelectedChannel()) {
@@ -1375,10 +1384,8 @@ function toggleDemo() {
 
   state.demoTimer = window.setInterval(() => {
     if (state.bitMode) {
-      BIT_SOURCE_ORDER.forEach((source) => {
-        const batch = Array.from({ length: 4 }, () => (Math.random() > 0.5 ? 1 : 0));
-        addBits(batch, source, "demo");
-      });
+      const batch = Array.from({ length: 4 }, () => (Math.random() > 0.5 ? 1 : 0));
+      addBits(batch, state.adcSource, "demo");
       return;
     }
 
@@ -1734,11 +1741,6 @@ function bindEvents() {
     updateStats();
     state.needsDraw = true;
   });
-
-  els.adcPlotSources.forEach((input) => input.addEventListener("change", () => {
-    updateStats();
-    state.needsDraw = true;
-  }));
 
   els.autoScale.addEventListener("change", () => {
     els.manualScale.hidden = els.autoScale.checked;

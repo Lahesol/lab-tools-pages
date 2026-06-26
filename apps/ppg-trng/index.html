@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=e36a200a27c6" />
+    <link rel="stylesheet" href="./styles.css?v=bc3ce88a14bc" />
   </head>
   <body>
     <div class="app-shell">
@@ -102,7 +102,7 @@
                   <span class="command-label">Query active ADC</span>
                 </button>
               </div>
-              <p class="command-note">Raw and 9999 modes stream ADC3/ADC2/ADC0 together. Active ADC is used for PPG modes.</p>
+              <p class="command-note">Raw, 9999, and PPG modes use the active ADC only.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-command="9999" type="button" title="Toggle random bit mode">
@@ -230,23 +230,6 @@
                     <option value="ADC">ADC</option>
                   </select>
                 </label>
-                <div class="compact-field adc-plot-field" role="group" aria-label="ADC inputs to plot">
-                  <span>ADC Inputs</span>
-                  <div class="segmented-checks">
-                    <label>
-                      <input class="adc-plot-source" data-adc-plot-source="ADC3" type="checkbox" checked />
-                      <span>ADC3</span>
-                    </label>
-                    <label>
-                      <input class="adc-plot-source" data-adc-plot-source="ADC2" type="checkbox" checked />
-                      <span>ADC2</span>
-                    </label>
-                    <label>
-                      <input class="adc-plot-source" data-adc-plot-source="ADC0" type="checkbox" checked />
-                      <span>ADC0</span>
-                    </label>
-                  </div>
-                </div>
                 <label class="switch">
                   <input id="autoScale" type="checkbox" checked />
                   <span>Auto</span>
@@ -382,7 +365,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=6fe17e470120" defer></script>
+    <script src="./app.js?v=586f7bdafddc" defer></script>
     <script src="./dfu.js?v=20260623-3adc-trng" defer></script>
   </body>
 </html>

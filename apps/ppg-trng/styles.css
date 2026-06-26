@@ -402,38 +402,6 @@ input[type="range"] {
   user-select: none;
 }
 
-.adc-plot-field {
-  min-width: 184px;
-}
-
-.segmented-checks {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-}
-
-.segmented-checks label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 40px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--muted);
-  background: #fff;
-  font-size: 12px;
-  font-weight: 850;
-  cursor: pointer;
-}
-
-.segmented-checks input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--accent);
-}
-
 .switch input {
   width: 18px;
   height: 18px;
