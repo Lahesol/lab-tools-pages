@@ -25,7 +25,7 @@ const els = {
   sampleCount: document.querySelector("#sampleCount"),
   windowSize: document.querySelector("#windowSize"),
   channelMode: document.querySelector("#channelMode"),
-  adcPlotMode: document.querySelector("#adcPlotMode"),
+  adcPlotSources: document.querySelectorAll("[data-adc-plot-source]"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
@@ -86,10 +86,12 @@ const state = {
   bitPlaneFilled: 0,
   bitPlaneCapacity: 0,
   bitPlaneCycles: 0,
+  bitLanes: {},
   bitSource: "idle",
   noiseBaseline: null,
   noiseWarmup: 0,
   noisePairBit: null,
+  noiseExtractors: {},
   paused: false,
   demoTimer: null,
   demoPhase: 0,
@@ -124,6 +126,15 @@ const CHANNEL_COLORS = {
   R: "#d64545",
   A: "#5c6f82",
 };
+
+const SERIES_ORDER = ["ADC3", "ADC2", "ADC0", "G", "I", "R", "A"];
+const ADC_SOURCE_COLORS = {
+  ADC3: "#087f72",
+  ADC2: "#7c4dff",
+  ADC0: "#b86800",
+};
+
+const BIT_SOURCE_ORDER = ["ADC3", "ADC2", "ADC0"];
 
 const ADC_SOURCE_INFO = {
   ADC3: {
@@ -624,6 +635,7 @@ function parseSegment(segment) {
   if (parseStatusSegment(segment)) return;
 
   if (state.bitMode) {
+    if (parseTaggedBitSegment(segment)) return;
     parseBitSegment(segment);
     return;
   }
@@ -647,15 +659,16 @@ function normalizeChannel(channel) {
 }
 
 function parseTaggedSegment(segment) {
-  const matches = [...segment.matchAll(/\b(ADC|GREEN|IR|INFRARED|RED|AMBIENT|[AGIR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
+  const matches = [...segment.matchAll(/\b(ADC[023]?|GREEN|IR|INFRARED|RED|AMBIENT|[AGIR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
   if (!matches.length) return false;
 
   let parsed = false;
   matches.forEach((match) => {
-    const channel = normalizeChannel(match[1]);
+    const adcSource = normalizeAdcSource(match[1]);
+    const channel = adcSource ? "ADC" : normalizeChannel(match[1]);
     const value = Number(match[2]);
     if (channel && Number.isFinite(value)) {
-      addSample(value, channel);
+      addSample(value, channel, { adcSource });
       parsed = true;
     }
   });
@@ -695,19 +708,30 @@ function parseAdcStatusSegment(segment) {
 function parseBitSegment(segment) {
   const compact = segment.replace(/[\s,]+/g, "");
   if (!compact || /[^01]/.test(compact)) return false;
-  addBits([...compact].map((bit) => Number(bit)));
+  addBits([...compact].map((bit) => Number(bit)), state.adcSource);
   return true;
 }
 
-function addSample(value, channel = "ADC") {
+function parseTaggedBitSegment(segment) {
+  const matches = [...segment.matchAll(/\b(?:BIT|TRNG|RNG)([023])\b\s*[,=:]\s*([01])/gi)];
+  if (!matches.length) return false;
+
+  matches.forEach((match) => {
+    addBits([Number(match[2])], `ADC${match[1]}`, "9999 mode");
+  });
+  return true;
+}
+
+function addSample(value, channel = "ADC", options = {}) {
   if (state.paused) return;
 
   const normalizedChannel = normalizeChannel(channel) || "ADC";
+  const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
   const sample = {
     t: performance.now(),
     value,
     channel: normalizedChannel,
-    adcSource: state.adcSource,
+    adcSource,
   };
   state.latest = value;
   state.latestChannel = normalizedChannel;
@@ -723,49 +747,91 @@ function addSample(value, channel = "ADC") {
     state.lastStatsAt = now;
     updateStats();
   }
-  if (normalizedChannel === "ADC") extractNoiseBit(value);
+  if (normalizedChannel === "ADC") extractNoiseBit(value, adcSource);
   state.needsDraw = true;
 }
 
-function extractNoiseBit(value) {
+function extractNoiseBit(value, adcSource = state.adcSource) {
   if (state.bitMode || !Number.isFinite(value)) return;
+  const source = normalizeAdcSource(adcSource) || state.adcSource;
+  const extractor = state.noiseExtractors[source] || {
+    baseline: null,
+    warmup: 0,
+    pairBit: null,
+  };
 
-  if (state.noiseBaseline === null) {
-    state.noiseBaseline = value;
-    state.noiseWarmup = 1;
+  if (extractor.baseline === null) {
+    extractor.baseline = value;
+    extractor.warmup = 1;
+    state.noiseExtractors[source] = extractor;
     return;
   }
 
-  const residual = value - state.noiseBaseline;
-  state.noiseBaseline += NOISE_BASELINE_ALPHA * residual;
-  state.noiseWarmup += 1;
+  const residual = value - extractor.baseline;
+  extractor.baseline += NOISE_BASELINE_ALPHA * residual;
+  extractor.warmup += 1;
 
-  if (state.noiseWarmup < NOISE_WARMUP_SAMPLES || residual === 0) return;
+  if (extractor.warmup < NOISE_WARMUP_SAMPLES || residual === 0) {
+    state.noiseExtractors[source] = extractor;
+    return;
+  }
 
   const rawBit = residual > 0 ? 1 : 0;
-  if (state.noisePairBit === null) {
-    state.noisePairBit = rawBit;
+  if (extractor.pairBit === null) {
+    extractor.pairBit = rawBit;
+    state.noiseExtractors[source] = extractor;
     return;
   }
 
-  const previousBit = state.noisePairBit;
-  state.noisePairBit = null;
+  const previousBit = extractor.pairBit;
+  extractor.pairBit = null;
+  state.noiseExtractors[source] = extractor;
 
   if (previousBit === rawBit) return;
-  addBits([previousBit === 0 && rawBit === 1 ? 0 : 1], "noise");
+  addBits([previousBit === 0 && rawBit === 1 ? 0 : 1], source, "ADC noise");
 }
 
 function resetNoiseExtractor() {
   state.noiseBaseline = null;
   state.noiseWarmup = 0;
   state.noisePairBit = null;
+  state.noiseExtractors = {};
 }
 
-function addBits(bits, source = state.bitMode ? "mode" : "noise") {
+function createBitLane(capacity = state.bitPlaneCapacity || 0) {
+  return {
+    plane: new Array(capacity).fill(null),
+    index: 0,
+    filled: 0,
+    cycles: 0,
+    total: 0,
+  };
+}
+
+function ensureBitLane(source) {
+  const normalized = normalizeAdcSource(source) || state.adcSource;
+  if (!state.bitLanes[normalized]) {
+    state.bitLanes[normalized] = createBitLane();
+  }
+  return state.bitLanes[normalized];
+}
+
+function getBitLanes() {
+  return BIT_SOURCE_ORDER.map((source) => [source, ensureBitLane(source)]);
+}
+
+function addBits(bits, adcSource = state.adcSource, source = state.bitMode ? "9999 mode" : "ADC noise") {
   if (state.paused || !bits.length) return;
 
+  const normalizedSource = normalizeAdcSource(adcSource) || state.adcSource;
   const normalizedBits = bits.map((bit) => (bit ? 1 : 0));
-  state.bits.push(...normalizedBits);
+  const now = performance.now();
+  state.bits.push(...normalizedBits.map((bit) => ({
+    t: now,
+    bit,
+    adcSource: normalizedSource,
+    source,
+  })));
   state.totalBits += normalizedBits.length;
   state.bitSource = source;
 
@@ -775,7 +841,7 @@ function addBits(bits, source = state.bitMode ? "mode" : "noise") {
 
   updateBitModeUi();
   ensureBitPlaneCapacity();
-  normalizedBits.forEach(writeBitToPlane);
+  normalizedBits.forEach((bit) => writeBitToPlane(bit, normalizedSource));
   updateBitStats();
   state.needsBitDraw = true;
   window.requestAnimationFrame(resizeBitCanvas);
@@ -834,19 +900,21 @@ function updateBitModeUi() {
 }
 
 function updateBitStats() {
-  const planeBits = state.bitPlane.filter((bit) => bit === 0 || bit === 1);
+  const lanes = getBitLanes();
+  const planeBits = lanes.flatMap(([, lane]) => lane.plane.filter((bit) => bit === 0 || bit === 1));
   const ones = planeBits.reduce((sum, bit) => sum + bit, 0);
   const zeros = planeBits.length - ones;
   const ratio = planeBits.length ? ones / planeBits.length : null;
-  const capacity = state.bitPlaneCapacity || getBitPlaneGeometry().capacity;
+  const capacity = (state.bitPlaneCapacity || getBitPlaneGeometry().capacity) * BIT_SOURCE_ORDER.length;
   const source = state.bitMode ? "9999 mode" : "ADC noise";
 
-  els.bitCount.textContent = `${state.bitPlaneFilled}/${capacity}`;
+  const filled = lanes.reduce((sum, [, lane]) => sum + lane.filled, 0);
+  els.bitCount.textContent = `${filled}/${capacity}`;
   els.oneCount.textContent = String(ones);
   els.zeroCount.textContent = String(zeros);
   els.onesRatio.textContent = ratio === null ? "--" : ratio.toFixed(4);
   els.bitCaption.textContent = planeBits.length
-    ? `${source} | plane ${state.bitPlaneCycles + 1} | total ${state.totalBits}`
+    ? `${source} | ADC3 + ADC2 + ADC0 | total ${state.totalBits}`
     : state.bitMode
       ? "Waiting for bits"
       : "Waiting for ADC noise bits";
@@ -862,43 +930,46 @@ function getBitPlaneGeometry() {
   const rect = els.bitCanvas.getBoundingClientRect();
   const width = bitMap.width || Math.floor(rect.width);
   const height = bitMap.height || Math.floor(rect.height);
+  const laneHeight = Math.max(80, Math.floor(height / BIT_SOURCE_ORDER.length));
+  const labelHeight = 22;
 
   if (!width || !height) {
-    return { columns, rows: 64, cell: 2, capacity: columns * 64 };
+    return { columns, rows: 32, cell: 2, capacity: columns * 32, laneHeight, labelHeight };
   }
 
   const cell = Math.max(2, Math.floor(width / columns));
-  const rows = Math.max(1, Math.floor(height / cell));
-  return { columns, rows, cell, capacity: columns * rows };
+  const rows = Math.max(1, Math.floor((laneHeight - labelHeight) / cell));
+  return { columns, rows, cell, capacity: columns * rows, laneHeight, labelHeight };
 }
 
 function ensureBitPlaneCapacity() {
   const { capacity } = getBitPlaneGeometry();
   if (capacity <= 0 || state.bitPlaneCapacity === capacity) return;
 
-  state.bitPlane = new Array(capacity).fill(null);
-  state.bitPlaneIndex = 0;
-  state.bitPlaneFilled = 0;
   state.bitPlaneCapacity = capacity;
-  state.bitPlaneCycles = 0;
+  BIT_SOURCE_ORDER.forEach((source) => {
+    state.bitLanes[source] = createBitLane(capacity);
+  });
 }
 
-function writeBitToPlane(bit) {
+function writeBitToPlane(bit, adcSource = state.adcSource) {
   ensureBitPlaneCapacity();
   if (!state.bitPlaneCapacity) return;
 
-  if (state.bitPlaneIndex === 0 && state.bitPlaneFilled === state.bitPlaneCapacity) {
-    state.bitPlane.fill(null);
-    state.bitPlaneFilled = 0;
-    state.bitPlaneCycles += 1;
+  const lane = ensureBitLane(adcSource);
+  if (lane.index === 0 && lane.filled === state.bitPlaneCapacity) {
+    lane.plane.fill(null);
+    lane.filled = 0;
+    lane.cycles += 1;
   }
 
-  state.bitPlane[state.bitPlaneIndex] = bit ? 1 : 0;
-  state.bitPlaneIndex += 1;
-  state.bitPlaneFilled = Math.min(state.bitPlaneFilled + 1, state.bitPlaneCapacity);
+  lane.plane[lane.index] = bit ? 1 : 0;
+  lane.index += 1;
+  lane.filled = Math.min(lane.filled + 1, state.bitPlaneCapacity);
+  lane.total += 1;
 
-  if (state.bitPlaneIndex >= state.bitPlaneCapacity) {
-    state.bitPlaneIndex = 0;
+  if (lane.index >= state.bitPlaneCapacity) {
+    lane.index = 0;
   }
 }
 
@@ -953,21 +1024,24 @@ function getSelectedChannel() {
   return normalizeChannel(els.channelMode?.value) || "all";
 }
 
-function getSelectedAdcPlotSource() {
-  const value = els.adcPlotMode?.value || "all";
-  if (value === "all") return "all";
-  return normalizeAdcSource(value) || "all";
+function getSelectedAdcPlotSources() {
+  const sources = [...els.adcPlotSources]
+    .filter((input) => input.checked)
+    .map((input) => normalizeAdcSource(input.dataset.adcPlotSource))
+    .filter(Boolean);
+  return [...new Set(sources)];
 }
 
-function getSamplesForAdcSource(samples = state.samples, source = getSelectedAdcPlotSource()) {
-  if (source === "all") return samples;
-  return samples.filter((sample) => (sample.adcSource || state.adcSource) === source);
+function getSamplesForAdcSource(samples = state.samples, sources = getSelectedAdcPlotSources()) {
+  if (!sources.length) return [];
+  const selected = new Set(sources);
+  return samples.filter((sample) => selected.has(sample.adcSource || state.adcSource));
 }
 
 function getAdcPlotDescription() {
-  const source = getSelectedAdcPlotSource();
-  if (source === "all") return "All ADC inputs";
-  return getAdcSourceInfo(source).detail;
+  const sources = getSelectedAdcPlotSources();
+  if (!sources.length) return "No ADC inputs";
+  return sources.map((source) => getAdcSourceInfo(source).label).join(" + ");
 }
 
 function getSamplesForChannel(channel = getSelectedChannel()) {
@@ -979,6 +1053,25 @@ function getSamplesForChannel(channel = getSelectedChannel()) {
 function getChannelsInSamples(samples) {
   const present = new Set(samples.map((sample) => sample.channel || "ADC"));
   return CHANNEL_ORDER.filter((channel) => present.has(channel));
+}
+
+function getSampleSeriesKey(sample) {
+  const channel = sample.channel || "ADC";
+  if (channel === "ADC") return sample.adcSource || state.adcSource;
+  return channel;
+}
+
+function getSeriesKeysInSamples(samples) {
+  const present = new Set(samples.map(getSampleSeriesKey));
+  return SERIES_ORDER.filter((series) => present.has(series));
+}
+
+function getSeriesLabel(series) {
+  return ADC_SOURCE_INFO[series]?.label || CHANNEL_LABELS[series] || series;
+}
+
+function getSeriesColor(series) {
+  return ADC_SOURCE_COLORS[series] || CHANNEL_COLORS[series] || CHANNEL_COLORS.ADC;
 }
 
 function getChannelDescription(samples = getDisplaySamples()) {
@@ -1240,11 +1333,10 @@ function exportCsv() {
 function clearBits() {
   state.bits = [];
   state.totalBits = 0;
-  state.bitPlane = new Array(state.bitPlaneCapacity || getBitPlaneGeometry().capacity).fill(null);
-  state.bitPlaneIndex = 0;
-  state.bitPlaneFilled = 0;
-  state.bitPlaneCycles = 0;
+  state.bitLanes = {};
+  state.bitPlaneCapacity = 0;
   state.bitSource = state.bitMode ? "mode" : "noise";
+  ensureBitPlaneCapacity();
   updateBitStats();
   state.needsBitDraw = true;
   drawBitMap();
@@ -1256,9 +1348,10 @@ function exportBitsCsv() {
     return;
   }
 
-  const rows = ["index,bit"];
-  state.bits.forEach((bit, index) => {
-    rows.push(`${index},${bit}`);
+  const start = state.bits[0]?.t || performance.now();
+  const rows = ["index,time_ms,adc_input,source,bit"];
+  state.bits.forEach((entry, index) => {
+    rows.push(`${index},${(entry.t - start).toFixed(3)},${entry.adcSource},${entry.source},${entry.bit}`);
   });
 
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
@@ -1282,8 +1375,10 @@ function toggleDemo() {
 
   state.demoTimer = window.setInterval(() => {
     if (state.bitMode) {
-      const batch = Array.from({ length: 12 }, () => (Math.random() > 0.5 ? 1 : 0));
-      addBits(batch);
+      BIT_SOURCE_ORDER.forEach((source) => {
+        const batch = Array.from({ length: 4 }, () => (Math.random() > 0.5 ? 1 : 0));
+        addBits(batch, source, "demo");
+      });
       return;
     }
 
@@ -1387,29 +1482,26 @@ function drawPlot() {
     return;
   }
 
-  const selected = getSelectedChannel();
-  const channels = selected === "all" ? getChannelsInSamples(displaySamples) : [selected];
+  const seriesKeys = getSeriesKeysInSamples(displaySamples);
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(margin.left, margin.top, chartW, chartH);
   ctx.clip();
 
-  channels.forEach((channel) => {
-    const series = selected === "all"
-      ? displaySamples.filter((sample) => (sample.channel || "ADC") === channel)
-      : displaySamples;
-    drawSeries(ctx, series, channel, margin, chartW, chartH, min, max, timeRange);
+  seriesKeys.forEach((seriesKey) => {
+    const series = displaySamples.filter((sample) => getSampleSeriesKey(sample) === seriesKey);
+    drawSeries(ctx, series, seriesKey, margin, chartW, chartH, min, max, timeRange);
   });
   ctx.restore();
 
-  drawLegend(ctx, channels, margin, chartW);
+  drawLegend(ctx, seriesKeys, margin, chartW);
 }
 
-function drawSeries(ctx, samples, channel, margin, chartW, chartH, min, max, timeRange) {
+function drawSeries(ctx, samples, seriesKey, margin, chartW, chartH, min, max, timeRange) {
   if (samples.length < 2) return;
 
-  const color = CHANNEL_COLORS[channel] || CHANNEL_COLORS.ADC;
+  const color = getSeriesColor(seriesKey);
   ctx.beginPath();
   samples.forEach((sample, index) => {
     const x = margin.left + ((sample.t - timeRange.start) / timeRange.duration) * chartW;
@@ -1431,8 +1523,8 @@ function drawSeries(ctx, samples, channel, margin, chartW, chartH, min, max, tim
   ctx.fill();
 }
 
-function drawLegend(ctx, channels, margin, chartW) {
-  if (!channels.length) return;
+function drawLegend(ctx, seriesKeys, margin, chartW) {
+  if (!seriesKeys.length) return;
 
   ctx.save();
   ctx.font = "700 11px Segoe UI, sans-serif";
@@ -1440,11 +1532,11 @@ function drawLegend(ctx, channels, margin, chartW) {
 
   let x = margin.left + chartW;
   const y = margin.top - 8;
-  [...channels].reverse().forEach((channel) => {
-    const label = CHANNEL_LABELS[channel] || channel;
+  [...seriesKeys].reverse().forEach((seriesKey) => {
+    const label = getSeriesLabel(seriesKey);
     const width = ctx.measureText(label).width + 18;
     x -= width + 10;
-    ctx.fillStyle = CHANNEL_COLORS[channel] || CHANNEL_COLORS.ADC;
+    ctx.fillStyle = getSeriesColor(seriesKey);
     ctx.fillRect(x, y - 4, 9, 8);
     ctx.fillStyle = "#30423d";
     ctx.fillText(label, x + 13, y);
@@ -1510,50 +1602,68 @@ function drawBitMap() {
   ctx.fillRect(0, 0, width, height);
 
   ensureBitPlaneCapacity();
-  const { columns, rows, cell } = getBitPlaneGeometry();
-  const visibleBits = state.bitPlane;
+  const { columns, rows, cell, laneHeight, labelHeight } = getBitPlaneGeometry();
+  const lanes = getBitLanes();
+  const totalFilled = lanes.reduce((sum, [, lane]) => sum + lane.filled, 0);
 
-  if (!state.bitPlaneFilled) {
+  if (!totalFilled) {
     ctx.fillStyle = "#66746f";
     ctx.font = "700 13px Segoe UI, sans-serif";
     ctx.fillText(state.bitMode ? "No random bits" : "No ADC noise bits", 14, 28);
     return;
   }
 
-  visibleBits.forEach((bit, index) => {
-    if (bit !== 0 && bit !== 1) return;
-    const x = (index % columns) * cell;
-    const y = Math.floor(index / columns) * cell;
-    ctx.fillStyle = bit ? "#17201d" : "#ffffff";
-    ctx.fillRect(x, y, cell, cell);
-  });
+  lanes.forEach(([source, lane], laneIndex) => {
+    const top = laneIndex * laneHeight;
+    const gridTop = top + labelHeight;
+    const laneBits = lane.plane.filter((bit) => bit === 0 || bit === 1);
+    const ones = laneBits.reduce((sum, bit) => sum + bit, 0);
+    const ratio = laneBits.length ? ones / laneBits.length : null;
 
-  if (state.bitPlaneIndex < state.bitPlaneCapacity) {
-    const x = (state.bitPlaneIndex % columns) * cell;
-    const y = Math.floor(state.bitPlaneIndex / columns) * cell;
-    ctx.strokeStyle = "#f0a43a";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + 1, y + 1, Math.max(1, cell - 2), Math.max(1, cell - 2));
-  }
+    ctx.fillStyle = getSeriesColor(source);
+    ctx.fillRect(0, top, 6, Math.max(1, laneHeight - 1));
+    ctx.fillStyle = "#30423d";
+    ctx.font = "800 12px Segoe UI, sans-serif";
+    ctx.fillText(`${getSeriesLabel(source)} | ${lane.filled}/${state.bitPlaneCapacity} | 1=${ratio === null ? "--" : ratio.toFixed(3)} | plane ${lane.cycles + 1}`, 12, top + 15);
 
-  if (cell >= 5) {
-    ctx.strokeStyle = "rgba(216, 224, 220, 0.65)";
+    lane.plane.forEach((bit, index) => {
+      if (bit !== 0 && bit !== 1) return;
+      const x = (index % columns) * cell;
+      const y = gridTop + Math.floor(index / columns) * cell;
+      ctx.fillStyle = bit ? "#17201d" : "#ffffff";
+      ctx.fillRect(x, y, cell, cell);
+    });
+
+    if (lane.index < state.bitPlaneCapacity) {
+      const x = (lane.index % columns) * cell;
+      const y = gridTop + Math.floor(lane.index / columns) * cell;
+      ctx.strokeStyle = "#f0a43a";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, Math.max(1, cell - 2), Math.max(1, cell - 2));
+    }
+
+    ctx.strokeStyle = "rgba(216, 224, 220, 0.75)";
     ctx.lineWidth = 1;
-    for (let x = 0; x <= columns; x += 1) {
-      const px = x * cell + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(px, 0);
-      ctx.lineTo(px, Math.min(height, rows * cell));
-      ctx.stroke();
+    ctx.strokeRect(0, gridTop, Math.min(width, columns * cell), Math.min(laneHeight - labelHeight - 1, rows * cell));
+
+    if (cell >= 6) {
+      ctx.strokeStyle = "rgba(216, 224, 220, 0.45)";
+      for (let x = 0; x <= columns; x += 1) {
+        const px = x * cell + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(px, gridTop);
+        ctx.lineTo(px, Math.min(top + laneHeight - 1, gridTop + rows * cell));
+        ctx.stroke();
+      }
+      for (let y = 0; y <= rows; y += 1) {
+        const py = gridTop + y * cell + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, py);
+        ctx.lineTo(Math.min(width, columns * cell), py);
+        ctx.stroke();
+      }
     }
-    for (let y = 0; y <= rows; y += 1) {
-      const py = y * cell + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(0, py);
-      ctx.lineTo(Math.min(width, columns * cell), py);
-      ctx.stroke();
-    }
-  }
+  });
 }
 
 function animationLoop() {
@@ -1625,10 +1735,10 @@ function bindEvents() {
     state.needsDraw = true;
   });
 
-  els.adcPlotMode.addEventListener("change", () => {
+  els.adcPlotSources.forEach((input) => input.addEventListener("change", () => {
     updateStats();
     state.needsDraw = true;
-  });
+  }));
 
   els.autoScale.addEventListener("change", () => {
     els.manualScale.hidden = els.autoScale.checked;

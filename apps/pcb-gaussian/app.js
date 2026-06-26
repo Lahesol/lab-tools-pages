@@ -6093,8 +6093,34 @@ function deviceCalMatchSummaryText(results) {
   return `${summary.validCount} fit(s), mean sim ${Number.isFinite(summary.meanSimilarity) ? (summary.meanSimilarity * 100).toFixed(2) : "n/a"}%, min sim ${Number.isFinite(summary.minSimilarity) ? (summary.minSimilarity * 100).toFixed(2) : "n/a"}%, mean loss ${Number.isFinite(summary.meanLoss) ? summary.meanLoss.toPrecision(4) : "n/a"}`;
 }
 
-function normalizeApplicationTargetFitTargets(targets) {
+const DEFAULT_APPLICATION_TARGET_X_SCALE = 0.92;
+const DEFAULT_APPLICATION_TARGET_X_OFFSET = -2.35;
+
+function applicationTargetAxisTransform(options = {}) {
+  let scale = Number(options.targetXScale ?? options.target_x_scale ?? $("appModelTargetXScale")?.value ?? DEFAULT_APPLICATION_TARGET_X_SCALE);
+  let offset = Number(options.targetXOffset ?? options.target_x_offset ?? $("appModelTargetXOffset")?.value ?? DEFAULT_APPLICATION_TARGET_X_OFFSET);
+  if (!Number.isFinite(scale) || Math.abs(scale) < 1e-12) scale = 1.0;
+  if (!Number.isFinite(offset)) offset = 0.0;
+  return { scale, offset };
+}
+
+function transformApplicationTargetParams(target, axis) {
+  const sourceMu = Number(target.mu ?? target.mu_V);
+  const sourceSigma = Math.abs(Number(target.sigma ?? target.sigma_V));
+  return {
+    ...target,
+    sourceMu,
+    sourceSigma,
+    mu: sourceMu * axis.scale + axis.offset,
+    sigma: Math.abs(sourceSigma * axis.scale),
+    targetXScale: axis.scale,
+    targetXOffset: axis.offset,
+  };
+}
+
+function normalizeApplicationTargetFitTargets(targets, options = {}) {
   const rows = [];
+  const axis = applicationTargetAxisTransform(options);
   for (const item of Array.isArray(targets) ? targets : []) {
     const device = clamp(Math.round(Number(item.device)), 1, 16);
     const target = item.target || {};
@@ -6111,13 +6137,13 @@ function normalizeApplicationTargetFitTargets(targets) {
       adcPair: item.adcPair ?? item.adc_pair ?? "",
       basis: item.basis || "",
       label: item.label || "",
-      target: {
+      target: transformApplicationTargetParams({
         A,
         mu,
         sigma,
         baseline: Number.isFinite(baseline) ? baseline : null,
         referenceMode: "application_target",
-      },
+      }, axis),
       seed: { muCode, vstartCode },
     });
   }
@@ -6144,7 +6170,7 @@ async function runApplicationTargetFit(targets, options = {}) {
   if (!state.writer) {
     throw new Error("Connect UART before application target fitting.");
   }
-  let targetRows = normalizeApplicationTargetFitTargets(targets);
+  let targetRows = normalizeApplicationTargetFitTargets(targets, options);
   if (!targetRows.length) throw new Error("No valid application target rows were supplied.");
   targetRows = targetRows.sort((a, b) => a.device - b.device);
   const devices = targetRows.map(row => row.device);
@@ -6176,6 +6202,7 @@ async function runApplicationTargetFit(targets, options = {}) {
     options: { ...opt },
     targetMode: "application_target",
     applicationPreset: options.preset || "",
+    targetXAxis: applicationTargetAxisTransform(options),
     devices,
     targets: targetRows.map(row => ({
       device: row.device,
@@ -7289,9 +7316,9 @@ function getConnectionStatus() {
   };
 }
 
-function getApplicationTargetFitReadiness(targets = []) {
+function getApplicationTargetFitReadiness(targets = [], options = {}) {
   const messages = [];
-  const rows = normalizeApplicationTargetFitTargets(targets);
+  const rows = normalizeApplicationTargetFitTargets(targets, options);
   const connected = Boolean(state.connected && state.writer);
   const busy = Boolean(state.deviceCalRunning || state.sweepRunning);
   if (!connected) messages.push("UART is not connected.");

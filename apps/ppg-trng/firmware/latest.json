@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-06-22-3led-dfu-adc-select",
+  "version": "2026-06-26-trng-vn",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 1,
+  "appVersion": 3,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 75289,
-  "sha256": "2ecc7041a8e0251a22d1cbf77cc6a82837fdf5f667b9200281280b6d404302a7",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-22 with ADC0/ADC2/ADC3 input selection."
+  "size": 75241,
+  "sha256": "a6b587709417322cbd48f944651a8c9c2045f36e3d5d8e689dc2584be8b98ae0",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-26 with ADC3/ADC2/ADC0 tagged TRNG bits using residual/delta mixing and Von Neumann extraction."
 }

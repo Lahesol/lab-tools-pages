@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=475188fc6712" />
+    <link rel="stylesheet" href="./styles.css?v=e36a200a27c6" />
   </head>
   <body>
     <div class="app-shell">
@@ -14,6 +14,7 @@
           <p>Web Serial DAC control and live ADC monitor</p>
         </div>
         <div class="status-strip" aria-live="polite">
+          <span id="guiVersion" class="status-dot is-muted">GUI 3adc-trng</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -80,7 +81,7 @@
             </div>
             <div class="subpanel">
               <div class="panel-heading compact-heading">
-                <h3>ADC Input</h3>
+                <h3>Active ADC</h3>
                 <span id="adcSourceStatus" class="mode-pill">ADC3 device A</span>
               </div>
               <div class="quick-grid">
@@ -101,7 +102,7 @@
                   <span class="command-label">Query active ADC</span>
                 </button>
               </div>
-              <p class="command-note">ADC3/ADC2 are discrete device paths. ADC0 is the commercial PPG sensor path.</p>
+              <p class="command-note">Raw and 9999 modes stream ADC3/ADC2/ADC0 together. Active ADC is used for PPG modes.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-command="9999" type="button" title="Toggle random bit mode">
@@ -229,15 +230,23 @@
                     <option value="ADC">ADC</option>
                   </select>
                 </label>
-                <label class="compact-field" for="adcPlotMode">
-                  <span>ADC Input</span>
-                  <select id="adcPlotMode">
-                    <option value="all" selected>All ADCs</option>
-                    <option value="ADC3">ADC3 device A</option>
-                    <option value="ADC2">ADC2 device B</option>
-                    <option value="ADC0">ADC0 commercial</option>
-                  </select>
-                </label>
+                <div class="compact-field adc-plot-field" role="group" aria-label="ADC inputs to plot">
+                  <span>ADC Inputs</span>
+                  <div class="segmented-checks">
+                    <label>
+                      <input class="adc-plot-source" data-adc-plot-source="ADC3" type="checkbox" checked />
+                      <span>ADC3</span>
+                    </label>
+                    <label>
+                      <input class="adc-plot-source" data-adc-plot-source="ADC2" type="checkbox" checked />
+                      <span>ADC2</span>
+                    </label>
+                    <label>
+                      <input class="adc-plot-source" data-adc-plot-source="ADC0" type="checkbox" checked />
+                      <span>ADC0</span>
+                    </label>
+                  </div>
+                </div>
                 <label class="switch">
                   <input id="autoScale" type="checkbox" checked />
                   <span>Auto</span>
@@ -373,7 +382,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=61522584ffb2" defer></script>
-    <script src="./dfu.js" defer></script>
+    <script src="./app.js?v=6fe17e470120" defer></script>
+    <script src="./dfu.js?v=20260623-3adc-trng" defer></script>
   </body>
 </html>

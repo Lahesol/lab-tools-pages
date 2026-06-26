@@ -69,6 +69,53 @@
       metricsFile: "application\\data\\processed\\seeds_2d_adc_pair_basis\\metrics.csv",
       scoreHint: "Validation uses four ADC pair-summed basis outputs. Load the curve grid to preview the four pair curves, and load the fitting-target CSV to see target A_amp/mu/sigma on the VG axis."
     },
+    seeds_2d_adc_pair_dim1_d15d16_targets: {
+      label: "Seeds 2D Dim1 D15+D16 target reset",
+      kind: "seeds",
+      scoreFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_d15d16_targets\\seeds_2d_adc_pair_scores.csv",
+      gridFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_d15d16_targets\\adc_pair_basis_grid.csv",
+      kernelFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_d15d16_targets\\selected_adc_pairs.csv",
+      targetFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_d15d16_targets\\adc_pair_basis_fit_targets.csv",
+      metricsFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_d15d16_targets\\metrics.csv",
+      scoreHint: "Validation uses Dim1 reset to the D15+D16 two-Gaussian target while Dim2-Dim4 keep the source two-Gaussian target basis."
+    },
+    seeds_2d_adc_pair_dim1_measured_bimodal_targets: {
+      label: "Seeds 2D Dim1 measured bimodal target",
+      kind: "seeds",
+      scoreFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_measured_bimodal_targets\\seeds_2d_adc_pair_scores.csv",
+      gridFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_measured_bimodal_targets\\adc_pair_basis_grid.csv",
+      kernelFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_measured_bimodal_targets\\selected_adc_pairs.csv",
+      targetFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_measured_bimodal_targets\\adc_pair_basis_fit_targets.csv",
+      metricsFile: "application\\data\\processed\\seeds_2d_adc_pair_dim1_measured_bimodal_targets\\metrics.csv",
+      scoreHint: "Validation uses Dim1 reset to the measured ADC5+ADC7 D14+D16 two-lobe curve while Dim2-Dim4 keep the source two-Gaussian target basis."
+    },
+    seeds_sum_threshold_kernels: {
+      label: "Seeds sum-threshold kernel classifier",
+      kind: "seeds",
+      scoreFile: "application\\data\\processed\\seeds_sum_threshold_kernels\\sample_scores_sum_threshold.csv",
+      gridFile: "application\\data\\processed\\seeds_sum_threshold_kernels\\origin_sum_threshold_curves_wide.csv",
+      kernelFile: "application\\data\\processed\\seeds_sum_threshold_kernels\\hardware_selected_kernels.csv",
+      metricsFile: "application\\data\\processed\\seeds_sum_threshold_kernels\\metrics.csv",
+      scoreHint: "Validation uses the intended no-W,b classifier: eight kernel outputs are summed into S, then two learned thresholds split S into class bands."
+    },
+    seeds_sum_threshold_bimodal_hardware: {
+      label: "Seeds sum-threshold with bimodal kernel",
+      kind: "seeds",
+      scoreFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_hardware\\sample_scores_sum_threshold_bimodal.csv",
+      gridFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_hardware\\origin_sum_threshold_bimodal_curves_wide.csv",
+      kernelFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_hardware\\hardware_bimodal_selected_kernels.csv",
+      metricsFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_hardware\\metrics.csv",
+      scoreHint: "Validation uses the intended no-W,b classifier with one forced measured bimodal kernel: S=sum(8 kernel outputs), then two learned thresholds classify S."
+    },
+    seeds_sum_threshold_bimodal_improvement_compare: {
+      label: "Seeds bimodal improvement compare",
+      kind: "seeds",
+      scoreFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_improvement_compare\\sample_scores_improvement_compare.csv",
+      gridFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_improvement_compare\\origin_improvement_compare_curves_wide.csv",
+      kernelFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_improvement_compare\\improvement_B_expanded_direct_selection.csv",
+      metricsFile: "application\\data\\processed\\seeds_sum_threshold_bimodal_improvement_compare\\comparison_metrics.csv",
+      scoreHint: "Compares two no-W,b improvements: target-matched measured candidates versus expanded direct hardware search with a retained bimodal/two-device summed curve."
+    },
     seeds_2d_adc_physical_basis: {
       label: "Seeds 2D physical ADC basis",
       kind: "seeds",
@@ -642,7 +689,7 @@
   function renderAssignmentTable() {
     const tbody = $("appModelAssignmentTable");
     if (!tbody) return;
-    const library = APP_MODEL_TARGET_LIBRARY[state.preset];
+    const library = targetLibrary();
     if (!library?.pairs?.length) {
       tbody.innerHTML = `<tr><td colspan="10">No preset device-to-target assignment for this model.</td></tr>`;
       return;
