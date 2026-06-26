@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-06-26-trng-vn",
+  "version": "2026-06-26-rawavg-restore",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 3,
+  "appVersion": 11,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 75241,
-  "sha256": "a6b587709417322cbd48f944651a8c9c2045f36e3d5d8e689dc2584be8b98ae0",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-26 with ADC3/ADC2/ADC0 tagged TRNG bits using residual/delta mixing and Von Neumann extraction."
+  "size": 76185,
+  "sha256": "7ad6143d125ebaf112385198f2d9486a43034e97ca6e1b41141895c45cb5f644",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-26 with app UART on P0.25/P0.26, 3-channel ADC3/ADC2/ADC0 scan, raw ADC 8-sample software averaging to restore steadier plots, SAADC hardware oversampling disabled because nRF52 asserts with multi-channel scans, short stream pause during control responses, reliable UART retry for control responses, UART boot beacon, runtime heartbeat, tagged TRNG bits, residual/delta mixing, and Von Neumann extraction."
 }
