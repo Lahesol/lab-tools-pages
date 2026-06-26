@@ -885,7 +885,10 @@ function updateStats() {
   const rate = displaySamples.length > 1 ? (displaySamples.length - 1) / elapsed : 0;
 
   const latest = displaySamples.at(-1);
-  els.latestValue.textContent = `${formatNumber(latest.value)} ${latest.channel || "ADC"} · ${getAdcSourceInfo(latest.adcSource).label}`;
+  const latestSource = latest.channel === "ADC"
+    ? normalizeAdcSource(latest.adcSource) || state.adcSource
+    : latest.channel || "ADC";
+  els.latestValue.textContent = `${formatNumber(latest.value)} · ${latestSource}`;
   els.minValue.textContent = formatNumber(min);
   els.maxValue.textContent = formatNumber(max);
   els.avgValue.textContent = formatNumber(avg);
@@ -1453,8 +1456,8 @@ function getYRange(values) {
 
 function getTimeRange(samples) {
   if (!samples.length) return { start: 0, end: 1, duration: 1 };
-  const start = samples[0].t;
-  const end = samples.at(-1).t;
+  const start = 0;
+  const end = Math.max(1, samples.length - 1);
   const duration = Math.max(1, end - start);
   return { start, end, duration };
 }
@@ -1475,6 +1478,9 @@ function drawPlot() {
   ctx.fillRect(0, 0, width, height);
 
   const displaySamples = getDisplaySamples();
+  displaySamples.forEach((sample, index) => {
+    sample.plotIndex = index;
+  });
   const values = displaySamples.map((sample) => sample.value);
   const { min, max } = getYRange(values);
   const timeRange = getTimeRange(displaySamples);
@@ -1511,7 +1517,8 @@ function drawSeries(ctx, samples, seriesKey, margin, chartW, chartH, min, max, t
   const color = getSeriesColor(seriesKey);
   ctx.beginPath();
   samples.forEach((sample, index) => {
-    const x = margin.left + ((sample.t - timeRange.start) / timeRange.duration) * chartW;
+    const samplePosition = Number.isFinite(sample.plotIndex) ? sample.plotIndex : index;
+    const x = margin.left + ((samplePosition - timeRange.start) / timeRange.duration) * chartW;
     const y = margin.top + (1 - (sample.value - min) / (max - min)) * chartH;
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
@@ -1522,7 +1529,8 @@ function drawSeries(ctx, samples, seriesKey, margin, chartW, chartH, min, max, t
   ctx.stroke();
 
   const last = samples.at(-1);
-  const x = margin.left + ((last.t - timeRange.start) / timeRange.duration) * chartW;
+  const lastPosition = Number.isFinite(last.plotIndex) ? last.plotIndex : samples.length - 1;
+  const x = margin.left + ((lastPosition - timeRange.start) / timeRange.duration) * chartW;
   const y = margin.top + (1 - (last.value - min) / (max - min)) * chartH;
   ctx.fillStyle = color;
   ctx.beginPath();
