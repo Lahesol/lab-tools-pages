@@ -24,6 +24,7 @@ const els = {
   rateValue: document.querySelector("#rateValue"),
   sampleCount: document.querySelector("#sampleCount"),
   windowSize: document.querySelector("#windowSize"),
+  plotAdcSource: document.querySelector("#plotAdcSource"),
   channelMode: document.querySelector("#channelMode"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
@@ -329,6 +330,9 @@ function updateAdcSourceUi(options = {}) {
   if (els.adcSourceStatus) {
     els.adcSourceStatus.textContent = pending ? `${info.label} pending` : info.label;
     els.adcSourceStatus.classList.toggle("is-muted", pending);
+  }
+  if (els.plotAdcSource && els.plotAdcSource.value !== state.adcSource) {
+    els.plotAdcSource.value = state.adcSource;
   }
 
   document.querySelectorAll("[data-adc-source]").forEach((button) => {
@@ -1743,6 +1747,14 @@ function bindEvents() {
     }
     updateStats();
     state.needsDraw = true;
+  });
+
+  els.plotAdcSource.addEventListener("change", async () => {
+    const source = normalizeAdcSource(els.plotAdcSource.value);
+    if (!source) return;
+    const connected = isConnected();
+    setAdcSource(source, { pending: connected });
+    if (connected) await sendCommand(source);
   });
 
   els.channelMode.addEventListener("change", () => {
