@@ -4,7 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
-    <link rel="stylesheet" href="styles.css?v=6525b065169b" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="styles.css?v=d1bcd7c3bd85" />
   </head>
   <body>
     <div class="app-shell">
@@ -191,6 +192,90 @@
                 <button id="updateLayerBtn" type="button" class="full-button">Update selected layer</button>
               </aside>
             </div>
+            <section class="network-editor">
+              <div class="section-header compact-header">
+                <div>
+                  <h3>Device Network Editor</h3>
+                  <p>Select STM/LTM per device, create device-to-device connections, and inspect connected current responses under the UV pulse program.</p>
+                </div>
+                <div class="inline-actions">
+                  <button id="connectFanOutBtn" type="button" class="ghost-button light">Connect 1 -> many</button>
+                  <button id="connectFanInBtn" type="button" class="ghost-button light">Connect many -> 1</button>
+                  <button id="clearConnectionsBtn" type="button" class="ghost-button light">Clear connections</button>
+                </div>
+              </div>
+              <div class="network-grid">
+                <div class="panel network-panel">
+                  <div class="panel-title"><span>Per-device mode</span><output id="deviceOverrideSummary">layer default</output></div>
+                  <label class="field">
+                    <span>Device</span>
+                    <select id="deviceSelect"></select>
+                  </label>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Mode</span>
+                      <select id="deviceModeSelect">
+                        <option value="inherit">Layer default</option>
+                        <option value="STM">STM</option>
+                        <option value="LTM">LTM</option>
+                        <option value="adaptive">Adaptive</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Switch</span>
+                      <select id="deviceSwitchSelect">
+                        <option value="inherit">Layer default</option>
+                        <option value="vds">Gate 0 V, VDS +/-30 V</option>
+                        <option value="gate">VDS +30 V, Gate 10/40 V</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label class="toggle">
+                    <input id="deviceTiaOverride" type="checkbox" />
+                    <span>Force TIA on for this device</span>
+                  </label>
+                  <button id="applyDeviceBtn" type="button" class="full-button">Apply device setting</button>
+                </div>
+                <div class="panel network-panel">
+                  <div class="panel-title"><span>Connection builder</span><output id="connectionSummary">0 edges</output></div>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Source device</span>
+                      <select id="sourceDeviceSelect"></select>
+                    </label>
+                    <label class="field">
+                      <span>Target device</span>
+                      <select id="targetDeviceSelect"></select>
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Fan count <output id="fanCountOut">8</output></span>
+                    <input id="fanCount" type="range" min="1" max="24" step="1" value="8" />
+                  </label>
+                  <button id="connectPairBtn" type="button" class="full-button accent">Connect selected pair</button>
+                </div>
+              </div>
+              <div class="analysis-grid network-analysis">
+                <div class="plot-frame wide">
+                  <div class="plot-toolbar">
+                    <span>Device input-output graph</span>
+                    <output id="networkGraphLabel">device-level</output>
+                  </div>
+                  <canvas id="networkCanvas" class="plot-canvas network-map" width="980" height="360" aria-label="Device connection graph"></canvas>
+                </div>
+                <div class="plot-frame wide">
+                  <div class="plot-toolbar">
+                    <span>Connected device current response</span>
+                    <div class="legend-row">
+                      <i class="legend uv"></i>UV pulse
+                      <i class="legend current"></i>source current
+                      <i class="legend tia"></i>connected target current
+                    </div>
+                  </div>
+                  <canvas id="connectionResponseCanvas" class="plot-canvas tall" width="980" height="440" aria-label="Connected device current response"></canvas>
+                </div>
+              </div>
+            </section>
           </section>
 
           <section class="tab-panel" id="tab-ann">
@@ -213,7 +298,8 @@
               <label class="field">
                 <span>Dataset target</span>
                 <select id="annDataset">
-                  <option value="mnist">MNIST / Fashion-MNIST baseline</option>
+                  <option value="mnist">MNIST</option>
+                  <option value="fashionmnist">Fashion-MNIST</option>
                   <option value="uvtoy">Synthetic UV event classes</option>
                   <option value="mitbih">MIT-BIH / ECG anomaly proxy</option>
                 </select>
@@ -226,6 +312,17 @@
                   <option value="latency">Onset latency -> feature value</option>
                 </select>
               </label>
+            </div>
+            <div class="runtime-banner" id="annRuntimeSummary"></div>
+            <div class="dataset-workbench">
+              <div class="dataset-card" id="annDatasetPanel"></div>
+              <div class="plot-frame input-preview">
+                <div class="plot-toolbar">
+                  <span>Input representation</span>
+                  <output id="annInputPreviewLabel">dataset sample</output>
+                </div>
+                <canvas id="annInputCanvas" class="plot-canvas input-map" width="420" height="220" aria-label="ANN dataset input representation"></canvas>
+              </div>
             </div>
             <div class="architecture-strip" id="annArchitecture"></div>
             <div class="analysis-grid">
@@ -292,6 +389,17 @@
                 </select>
               </label>
             </div>
+            <div class="runtime-banner" id="snnRuntimeSummary"></div>
+            <div class="dataset-workbench">
+              <div class="dataset-card" id="snnDatasetPanel"></div>
+              <div class="plot-frame input-preview">
+                <div class="plot-toolbar">
+                  <span>Input representation</span>
+                  <output id="snnInputPreviewLabel">dataset sample</output>
+                </div>
+                <canvas id="snnInputCanvas" class="plot-canvas input-map" width="420" height="220" aria-label="SNN dataset input representation"></canvas>
+              </div>
+            </div>
             <div class="architecture-strip" id="snnArchitecture"></div>
             <div class="analysis-grid">
               <div class="plot-frame wide">
@@ -331,6 +439,7 @@
               <a class="primary-link" href="NEXT_WORK.md">Open NEXT_WORK.md</a>
             </div>
             <div class="reference-grid" id="referenceGrid"></div>
+            <div class="dataset-source-grid" id="datasetSourceGrid"></div>
           </section>
         </section>
 
@@ -384,8 +493,18 @@ SNN: I_syn(t) drives LIF membrane</pre>
           </div>
         </aside>
       </main>
+      <footer class="source-footer">
+        <div>
+          <strong>Dataset sources</strong>
+          <p>Dataset loaders can fetch public research datasets into the local cache. The static GUI uses compact previews and graph-level transient simulation unless a Python backend export is run.</p>
+        </div>
+        <div class="source-links" id="datasetSourceFooter"></div>
+      </footer>
     </div>
 
-    <script src="app.js?v=27c6b2ac4c63"></script>
+    <script src="datasets.js"></script>
+    <script src="device-network.js"></script>
+    <script src="synaptic-graph-sim.js"></script>
+    <script src="app.js?v=fb41705a7487"></script>
   </body>
 </html>

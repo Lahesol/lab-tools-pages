@@ -1,0 +1,12 @@
+{
+  "uvtoy": {
+    "state": "generated",
+    "path": "datasets\\synthetic\\uvtoy",
+    "samples": 4,
+    "files": [
+      "uvtoy_timeseries.csv"
+    ],
+    "notes": "Synthetic UV pulse classes generated locally for device-specific STM/LTM tests.",
+    "updated_at": "2026-06-27T23:41:33+0900"
+  }
+}

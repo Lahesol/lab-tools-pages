@@ -26,6 +26,22 @@ Implemented in `web_gui/`:
 - UV PWM and UV on/off timing table preview.
 - Layer/block style device array canvas.
 - Per-layer device count, role, STM/LTM/adaptive mode, switching method, and TIA toggle.
+- Dataset metadata module in `datasets.js`:
+  - Dataset source links.
+  - Raw input form.
+  - Required input channel count.
+  - Required output class count.
+  - Loader status.
+  - Recommended encoding path into UV pulses.
+  - Fetch command and local cache path for real dataset acquisition.
+- Dataset fetch script in `scripts/fetch_dataset.py`:
+  - Direct download support for MNIST, Fashion-MNIST, and MIT-BIH sample records.
+  - Local synthesis for UV toy event data.
+  - Tonic-based fetch path for N-MNIST, DVS Gesture, and SHD.
+- Dataset-to-device architecture contract:
+  - Compares dataset-required input/output sizes with the user-placed input/output device layers.
+  - Shows whether direct physical mapping is possible.
+  - Flags when a virtual encoder, compression stage, time-multiplexing, or output decoder is being assumed.
 - Front-end compact transient model:
   - UV waveform is applied over time.
   - Each displayed device produces a photocurrent trace.
@@ -44,12 +60,29 @@ Implemented in `web_gui/`:
   - Binned layer spike-count readout.
 - Reference tab with paper/library links.
 - CSV export for UV, selected ANN current/readout, selected SNN current, and membrane trace.
+- Device Network Editor in the Block tab:
+  - Per-device STM/LTM/adaptive override.
+  - Per-device switching route override.
+  - 1-to-many and many-to-1 device connections.
+  - Device-level connection graph.
+  - Connected source/target photocurrent response plot under the selected UV pulse program.
+- Shared ANN/SNN graph simulation backend:
+  - ANN and SNN tabs now consume the Block-tab device graph.
+  - Device-to-device connections are used for current/activation propagation.
+  - Many-to-one input connections are summed with normalization.
+  - One-to-many fan-out connections drive multiple target devices.
+  - Runtime summary shows simulated node count, configured edge count, active edge count, and dataset-to-device adapter status.
 
 Current limitation:
 - The ANN/SNN front-end is a deterministic compact simulation, not a trained model accuracy benchmark.
 - The compact model parameters are engineering placeholders until fit from measured current-time traces.
+- Dataset selectors use metadata plus compact encoded previews. Real downloaded dataset files are not decoded or trained in-browser yet.
+- Real dataset acquisition is now scripted, but fetch commands are not automatically run by the static GUI.
+- If the dataset requires more input/output channels than the current device layout, the GUI currently simulates the user's placed blocks with a virtual encoder/readout adapter.
+- ANN/SNN graph propagation currently uses a browser-side forward graph pass. Backward/recurrent edges need a delayed iterative solver or Python backend.
 - Device parameters are not fit from measured raw current-time traces yet.
-- No Python backend or real dataset loader is connected yet.
+- Public dataset download commands exist, but decoded real samples are not yet streamed into the browser-side simulation.
+- No Python training/inference backend is connected yet.
 
 ## Recommended Next Implementation Steps
 
@@ -59,9 +92,16 @@ Current limitation:
    - Store fitted parameters in `web_gui/device_params.json`.
 
 2. Python simulation backend
-   - Add a Python backend for real ANN/SNN runs.
+   - Add a Python backend for real ANN/SNN runs rather than replacing the web GUI with a Python GUI.
+   - Recommended UI split: keep the browser GUI for architecture editing and use Python as a compute backend or CLI exporter.
    - Recommended first backend: PyTorch + snnTorch + Tonic.
    - Keep the web GUI as a front-end that writes architecture JSON and reads result JSON.
+   - First backend task: make dataset loader and architecture contract explicit:
+     - dataset-native input shape
+     - physical input devices
+     - encoder/compression mapping
+     - physical output devices
+     - readout decoder mapping
 
 3. Architecture export/import
    - Export block arrays as JSON:
@@ -69,19 +109,23 @@ Current limitation:
      - devices per layer
      - mode per layer/device
      - switching route
+     - explicit device-to-device connections
      - TIA gain
      - UV timing program
+     - dataset, encoding, ANN/SNN preset
    - Import saved architecture JSON for reproducible experiments.
 
 4. ANN baseline
    - Start with current-mode MLP or reservoir + linear readout.
    - Use MNIST/Fashion-MNIST only as a baseline sanity check.
    - Add synthetic UV event dataset to show device-specific novelty.
+   - Do not report MNIST/Fashion-MNIST accuracy unless the input encoder and output class readout are fully specified.
 
 5. SNN baseline
    - Start with feedforward LIF and rate-coded UV pulses.
    - Then add time-to-first-spike and PWM phase coding.
    - Use N-MNIST and SHD to test whether timing information matters.
+   - For N-MNIST/DVS Gesture, define how event channels are pooled or multiplexed into the available optical input devices.
 
 6. TIA and circuit model
    - Add configurable TIA gain, bandwidth, saturation voltage, input-referred current noise.

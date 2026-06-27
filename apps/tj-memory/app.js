@@ -41,6 +41,11 @@ const references = [
   },
 ];
 
+const DATASETS = window.DATASET_REGISTRY || {};
+const DATASET_GROUPS = window.DATASET_GROUPS || { ann: ["mnist", "uvtoy", "mitbih"], snn: ["nmnist", "dvsgesture", "shd", "uvtoy"] };
+const NET = window.DEVICE_NETWORK;
+const GRAPH_SIM = window.SYNAPTIC_GRAPH_SIM;
+
 const defaults = {
   activeTab: "uv",
   programMode: "pwm",
@@ -63,6 +68,13 @@ const defaults = {
   snnPreset: "lif",
   snnDataset: "nmnist",
   snnEncoding: "rate",
+  selectedDevice: "L0D0",
+  sourceDevice: "L0D0",
+  targetDevice: "L1D0",
+  fanCount: 8,
+  deviceOverrides: {},
+  connections: [],
+  connectionGraphInitialized: false,
   layers: [
     { name: "Input", role: "input", devices: 16, mode: "STM", switchMethod: "vds", tia: true },
     { name: "Hidden A", role: "hidden", devices: 32, mode: "adaptive", switchMethod: "vds", tia: true },
@@ -113,12 +125,118 @@ function modeForLayer(layer, deviceIndex) {
   return deviceIndex % 2 === 0 ? "STM" : "LTM";
 }
 
+function deviceKey(layerIndex, deviceIndex) {
+  return NET.key(layerIndex, deviceIndex);
+}
+
+function getDeviceOverride(layerIndex, deviceIndex) {
+  return state.deviceOverrides[deviceKey(layerIndex, deviceIndex)] || {};
+}
+
+function getDeviceConfig(layer, layerIndex, deviceIndex) {
+  const override = getDeviceOverride(layerIndex, deviceIndex);
+  const inheritedMode = modeForLayer(layer, deviceIndex);
+  return {
+    mode: override.mode && override.mode !== "inherit" ? override.mode : inheritedMode,
+    switchMethod: override.switchMethod && override.switchMethod !== "inherit" ? override.switchMethod : layer.switchMethod,
+    tia: typeof override.tia === "boolean" ? override.tia : layer.tia,
+    inheritedMode,
+  };
+}
+
 function switchText(method) {
   return method === "vds" ? "VDS -30/+30 V" : "Gate 10/40 V";
 }
 
 function routeShort(method) {
   return method === "vds" ? "VDS +/-30" : "Gate 10/40";
+}
+
+function getDataset(kind) {
+  const id = kind === "ann" ? state.annDataset : state.snnDataset;
+  return DATASETS[id] || DATASETS.uvtoy || {
+    id: "unknown",
+    label: "Unknown dataset",
+    sampleFormat: "not specified",
+    rawInput: "not specified",
+    inputChannels: null,
+    outputClasses: 0,
+    sourceName: "not specified",
+    sourceUrl: "#",
+    loaderStatus: "Dataset metadata is missing.",
+    temporalEncoding: "not specified",
+    preview: "uv",
+  };
+}
+
+function inputLayer() {
+  return state.layers.find((layer) => layer.role === "input") || state.layers[0];
+}
+
+function outputLayer() {
+  return [...state.layers].reverse().find((layer) => layer.role === "output") || state.layers[state.layers.length - 1];
+}
+
+function formatChannelCount(value) {
+  return value === null || value === undefined ? "architecture-defined" : value.toLocaleString();
+}
+
+function architectureContract(kind) {
+  const dataset = getDataset(kind);
+  const inLayer = inputLayer();
+  const outLayer = outputLayer();
+  const inputDevices = inLayer?.devices || 0;
+  const outputDevices = outLayer?.devices || 0;
+  const requiredInput = dataset.inputChannels;
+  const requiredOutput = dataset.outputClasses || 0;
+
+  let inputStatus = "native";
+  let inputMessage = "Input size follows the current UV architecture.";
+  if (typeof requiredInput === "number") {
+    if (inputDevices === requiredInput) {
+      inputStatus = "match";
+      inputMessage = "Direct one-channel-per-device input mapping is possible.";
+    } else if (inputDevices < requiredInput) {
+      inputStatus = "adapter";
+      inputMessage = `${requiredInput.toLocaleString()} dataset channels must be compressed or time-multiplexed into ${inputDevices} input devices.`;
+    } else {
+      inputStatus = "spare";
+      inputMessage = `${inputDevices - requiredInput} input devices are spare or can be used for tiling/redundancy.`;
+    }
+  }
+
+  let outputStatus = "match";
+  let outputMessage = "Direct class readout is possible.";
+  if (outputDevices < requiredOutput) {
+    outputStatus = "adapter";
+    outputMessage = `${requiredOutput} classes require a virtual decoder or multiplexed readout from ${outputDevices} output devices.`;
+  } else if (outputDevices > requiredOutput) {
+    outputStatus = "spare";
+    outputMessage = `${outputDevices - requiredOutput} output devices are spare or can represent confidence/redundancy.`;
+  }
+
+  const runnable = inputStatus !== "adapter" && outputStatus !== "adapter";
+  return {
+    dataset,
+    inputLayer: inLayer,
+    outputLayer: outLayer,
+    inputDevices,
+    outputDevices,
+    requiredInput,
+    requiredOutput,
+    inputStatus,
+    outputStatus,
+    inputMessage,
+    outputMessage,
+    runnable,
+    simulationMode: runnable ? "Direct physical graph mapping" : "Device graph + virtual encoder/readout adapters",
+  };
+}
+
+function statusClass(status) {
+  if (status === "match" || status === "native") return "ok";
+  if (status === "spare") return "warn";
+  return "needs-adapter";
 }
 
 function readControls() {
@@ -141,6 +259,10 @@ function readControls() {
   state.snnPreset = $("snnPreset").value;
   state.snnDataset = $("snnDataset").value;
   state.snnEncoding = $("snnEncoding").value;
+  state.selectedDevice = $("deviceSelect").value;
+  state.sourceDevice = $("sourceDeviceSelect").value;
+  state.targetDevice = $("targetDeviceSelect").value;
+  state.fanCount = Number($("fanCount").value);
 }
 
 function writeControls() {
@@ -162,6 +284,7 @@ function writeControls() {
   $("snnPreset").value = state.snnPreset;
   $("snnDataset").value = state.snnDataset;
   $("snnEncoding").value = state.snnEncoding;
+  $("fanCount").value = state.fanCount;
 }
 
 function updateTraceLayerOptions() {
@@ -280,8 +403,9 @@ function encodedInput(point, kind) {
 }
 
 function simulateDeviceTrace(timeline, drive, layer, layerIndex, deviceIndex, kind) {
-  const mode = modeForLayer(layer, deviceIndex);
-  const params = deviceParams(mode, layer.switchMethod, layerIndex, deviceIndex);
+  const config = getDeviceConfig(layer, layerIndex, deviceIndex);
+  const mode = config.mode === "adaptive" ? modeForLayer(layer, deviceIndex) : config.mode;
+  const params = deviceParams(mode, config.switchMethod, layerIndex, deviceIndex);
   const trace = new Array(timeline.length);
   let current = params.dark;
   const roleGain = { input: 0.92, hidden: 1.04, output: 0.86 }[layer.role] || 1;
@@ -306,7 +430,7 @@ function simulateDeviceTrace(timeline, drive, layer, layerIndex, deviceIndex, ki
     trace[i] = Math.max(0, current + ripple);
   }
 
-  return { mode, trace };
+  return { key: deviceKey(layerIndex, deviceIndex), mode, switchMethod: config.switchMethod, tia: config.tia, trace };
 }
 
 function meanArray(traces) {
@@ -325,59 +449,109 @@ function normalizeTrace(trace) {
   return trace.map((value) => clamp(value / peak, 0, 1.6));
 }
 
+function pseudoFramePixel(dataset, channel) {
+  const grid = 28;
+  const x = channel % grid;
+  const y = Math.floor(channel / grid) % grid;
+  const cx = x - 14;
+  const cy = y - 14;
+  if (dataset.id === "fashionmnist") {
+    return clamp(Math.exp(-((cx * cx) / 120 + (cy * cy) / 72)) * (y > 7 ? 1 : 0.25), 0, 1);
+  }
+  const digit = Math.exp(-((cx * cx) / 42 + (cy * cy) / 96))
+    + Math.exp(-(((cx - 3) * (cx - 3)) / 72 + ((cy + 4) * (cy + 4)) / 32));
+  return clamp(digit, 0, 1);
+}
+
+function datasetFeatureForDevice(dataset, deviceIndex, inputCount) {
+  const channels = Number(dataset.inputChannels) || inputCount || 1;
+  const count = Math.max(1, inputCount || 1);
+  if (dataset.preview === "frame") {
+    const start = Math.floor((deviceIndex / count) * channels);
+    const end = Math.max(start + 1, Math.floor(((deviceIndex + 1) / count) * channels));
+    const samples = Math.min(8, Math.max(1, end - start));
+    let sum = 0;
+    for (let sample = 0; sample < samples; sample += 1) {
+      const channel = clamp(Math.floor(lerp(start, end - 1, samples === 1 ? 0 : sample / (samples - 1))), 0, channels - 1);
+      sum += pseudoFramePixel(dataset, channel);
+    }
+    return 0.18 + 0.82 * (sum / samples);
+  }
+
+  if (dataset.preview === "waveform") {
+    return 0.52 + 0.34 * Math.sin((deviceIndex + 1) * 0.71) ** 2;
+  }
+
+  if (dataset.preview === "event" || dataset.preview === "spike") {
+    const raw = Math.sin((deviceIndex + 1) * 12.9898 + (dataset.id || "").length * 78.233) * 0.5 + 0.5;
+    return 0.24 + raw * 0.76;
+  }
+
+  return 1;
+}
+
+function datasetTemporalGate(dataset, point, index, timeline, deviceIndex, kind) {
+  const totalTime = timeline[timeline.length - 1]?.t || 1;
+  const tNorm = clamp(point.t / totalTime, 0, 1);
+
+  if (dataset.preview === "event") {
+    const centerA = (0.12 + (deviceIndex * 0.173) % 0.74);
+    const centerB = (centerA + 0.31) % 1;
+    const burstA = Math.exp(-((tNorm - centerA) ** 2) / 0.0018);
+    const burstB = Math.exp(-((tNorm - centerB) ** 2) / 0.0035);
+    return 0.18 + 1.42 * clamp(burstA + burstB * 0.7, 0, 1);
+  }
+
+  if (dataset.preview === "spike") {
+    const slots = 18;
+    const slot = Math.floor(tNorm * slots);
+    const active = (slot * 7 + deviceIndex * 3) % 11 < 4;
+    return active ? 1.55 : 0.08;
+  }
+
+  if (dataset.preview === "waveform") {
+    const qrs = Math.exp(-((tNorm - 0.43) ** 2) / 0.00045) - 0.45 * Math.exp(-((tNorm - 0.39) ** 2) / 0.0006);
+    const p = 0.22 * Math.exp(-((tNorm - 0.22) ** 2) / 0.004);
+    const tw = 0.32 * Math.exp(-((tNorm - 0.68) ** 2) / 0.01);
+    return clamp(0.35 + (p + qrs + tw) * 1.1, 0.05, 1.65);
+  }
+
+  if (kind === "snn" && state.snnEncoding === "ttfs") {
+    const rank = (deviceIndex % 16) / 16;
+    return tNorm < 0.12 + rank * 0.35 ? 1.35 : 0.25;
+  }
+
+  return 1;
+}
+
+function graphInputDriveForDevice(kind, timeline, layerIndex, deviceIndex) {
+  const dataset = getDataset(kind);
+  const inLayerIndex = state.layers.findIndex((layer) => layer.role === "input");
+  const inputLayerIndex = inLayerIndex >= 0 ? inLayerIndex : 0;
+  const inputCount = Math.max(1, state.layers[inputLayerIndex]?.devices || 1);
+  const feature = datasetFeatureForDevice(dataset, deviceIndex, inputCount);
+  const layer = state.layers[layerIndex];
+  const residualScale = layer?.role === "input" ? 1 : 0.18;
+
+  return timeline.map((point, index) => {
+    const encoded = encodedInput(point, kind);
+    const temporalGate = datasetTemporalGate(dataset, point, index, timeline, deviceIndex, kind);
+    return clamp(encoded * feature * temporalGate * residualScale, 0, 1.8);
+  });
+}
+
 function simulateArchitecture(kind) {
   const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
-  let drive = timeline.map((point) => encodedInput(point, kind));
-  const uvNorm = timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
-  const layers = [];
-  const architectureGain = kind === "ann" ? 1 : 0.92;
-
-  state.layers.forEach((layer, layerIndex) => {
-    const deviceCount = Math.min(layer.devices, Math.max(4, state.traceDevices));
-    const blendedDrive = drive.map((value, index) => {
-      const opticalFloor = layerIndex === 0 ? uvNorm[index] : uvNorm[index] * 0.18;
-      return clamp(opticalFloor + value * architectureGain, 0, 1.8);
-    });
-    const devices = [];
-
-    for (let deviceIndex = 0; deviceIndex < deviceCount; deviceIndex += 1) {
-      devices.push(simulateDeviceTrace(timeline, blendedDrive, layer, layerIndex, deviceIndex, kind));
-    }
-
-    const mean = meanArray(devices);
-    const peak = Math.max(...mean, 1);
-    const residual = mean[mean.length - 1] / peak;
-    const voltage = layer.tia && state.tiaEnabled
-      ? mean.map((current) => -current * state.tiaGain * 1e-6)
-      : mean.map((current) => current);
-    const activation = normalizeTrace(mean).map((value) => 1 / (1 + Math.exp(-6 * (value - 0.48))));
-
-    layers.push({
-      config: layer,
-      layerIndex,
-      devices,
-      mean,
-      voltage,
-      activation,
-      peak,
-      residual,
-      displayedDevices: deviceCount,
-    });
-
-    drive = activation.map((value, index) => {
-      const coupling = layer.role === "output" ? 0.7 : 0.86;
-      const recurrent = kind === "snn" && state.snnPreset === "rsnn" ? Math.sin(index * 0.025) * 0.08 : 0;
-      return clamp(value * coupling + recurrent, 0, 1.6);
-    });
-  });
-
-  const result = {
-    kind,
+  const result = GRAPH_SIM.simulate({
+    state,
     timeline,
-    layers,
-    selected: layers[safeLayerIndex(state.traceLayer)] || layers[0],
-    output: layers[layers.length - 1],
-  };
+    kind,
+    maxPerLayer: 32,
+    inputDriveForDevice: (layerIndex, deviceIndex) => graphInputDriveForDevice(kind, timeline, layerIndex, deviceIndex),
+    simulateDeviceTrace,
+    tiaGain: state.tiaGain,
+    tiaEnabled: state.tiaEnabled,
+  });
 
   if (kind === "snn") addSnnDynamics(result);
   else addAnnReadout(result);
@@ -387,7 +561,7 @@ function simulateArchitecture(kind) {
 
 function addAnnReadout(result) {
   const output = result.output;
-  const datasetGain = { mnist: 0.92, uvtoy: 0.78, mitbih: 0.72 }[state.annDataset];
+  const datasetGain = { mnist: 0.92, fashionmnist: 0.86, uvtoy: 0.78, mitbih: 0.72 }[state.annDataset] || 0.78;
   const outputActivation = output.activation.map((value, index) => {
     const slowEnvelope = 0.08 * Math.sin(index * 0.014);
     return clamp(value * datasetGain + slowEnvelope, 0, 1);
@@ -451,18 +625,19 @@ function updateMetrics(result) {
   let stm = 0;
   let ltm = 0;
 
-  state.layers.forEach((layer) => {
-    if (layer.mode === "STM") stm += layer.devices;
-    else if (layer.mode === "LTM") ltm += layer.devices;
-    else {
-      stm += Math.ceil(layer.devices / 2);
-      ltm += Math.floor(layer.devices / 2);
+  state.layers.forEach((layer, layerIndex) => {
+    for (let deviceIndex = 0; deviceIndex < layer.devices; deviceIndex += 1) {
+      const mode = getDeviceConfig(layer, layerIndex, deviceIndex).mode;
+      if (mode === "LTM") ltm += 1;
+      else {
+        stm += 1;
+      }
     }
   });
 
   const selected = result?.selected || latestAnn?.selected;
   const peak = selected ? selected.peak : 0;
-  const tiaSwing = selected && selected.config.tia && state.tiaEnabled ? peak * state.tiaGain * 1e-6 : 0;
+  const tiaSwing = selected && selected.tiaEnabledForLayer && state.tiaEnabled ? peak * state.tiaGain * 1e-6 : 0;
   const totalEvents = latestSnn?.spikeCount || 0;
   const duration = latestTimeline[latestTimeline.length - 1]?.t || 1;
   const spikeRate = latestSnn?.selected
@@ -476,7 +651,7 @@ function updateMetrics(result) {
   $("summaryArchitecture").textContent = `${state.layers.length} layers / ${total} devices`;
   $("layerPeakCurrent").textContent = `${round(peak, 1)} nA`;
   $("layerResidual").textContent = `${round((selected?.residual || 0) * 100, 1)}%`;
-  $("layerTiaSwing").textContent = selected?.config.tia && state.tiaEnabled ? `${round(tiaSwing, 4)} V` : "TIA off";
+  $("layerTiaSwing").textContent = selected?.tiaEnabledForLayer && state.tiaEnabled ? `${round(tiaSwing, 4)} V` : "TIA off";
   $("layerSpikeRate").textContent = `${round(spikeRate, 2)} Hz`;
   $("selectedModeBadge").textContent = selected ? `${selected.config.mode} / ${routeShort(selected.config.switchMethod)}` : "STM/LTM";
 }
@@ -500,15 +675,21 @@ function renderBlocks() {
     const visible = Math.min(layer.devices, 32);
 
     for (let i = 0; i < visible; i += 1) {
-      const mode = modeForLayer(layer, i);
+      const config = getDeviceConfig(layer, layerIndex, i);
+      const mode = config.mode === "adaptive" ? modeForLayer(layer, i) : config.mode;
+      const key = deviceKey(layerIndex, i);
+      const override = getDeviceOverride(layerIndex, i);
       const block = document.createElement("button");
       block.type = "button";
-      block.className = `device-block ${mode.toLowerCase()} ${layerIndex === state.traceLayer ? "trace-target" : ""}`;
-      block.innerHTML = `<strong>${mode}</strong><em>${routeShort(layer.switchMethod)}</em><em>${layer.tia ? "TIA on" : "TIA off"}</em>`;
+      block.className = `device-block ${mode.toLowerCase()} ${layerIndex === state.traceLayer ? "trace-target" : ""} ${key === state.selectedDevice ? "device-selected" : ""} ${Object.keys(override).length ? "overridden" : ""}`;
+      block.innerHTML = `<strong>${mode}</strong><em>${routeShort(config.switchMethod)}</em><em>${config.tia ? "TIA on" : "TIA off"}</em>`;
       block.addEventListener("click", () => {
         state.selectedLayer = layerIndex;
         state.traceLayer = layerIndex;
+        state.selectedDevice = key;
+        state.sourceDevice = key;
         updateTraceLayerOptions();
+        updateDeviceSelectors();
         updateSelectedLayer();
         runAllSimulations();
       });
@@ -529,6 +710,14 @@ function renderBlocks() {
   updateSelectedLayer();
 }
 
+function edgeCountBetweenLayers(fromLayerIndex, toLayerIndex) {
+  return (state.connections || []).filter((edge) => {
+    const from = NET.parse(edge.from);
+    const to = NET.parse(edge.to);
+    return from?.layerIndex === fromLayerIndex && to?.layerIndex === toLayerIndex;
+  }).length;
+}
+
 function renderArchitecture(containerId, result) {
   const container = $(containerId);
   if (!container || !result) return;
@@ -541,8 +730,9 @@ function renderArchitecture(containerId, result) {
     article.innerHTML = `
       <span class="node-index">L${index + 1}</span>
       <strong>${layer.name}</strong>
-      <small>${layer.role} / ${layer.devices} devices</small>
+      <small>${layer.role} / ${layerResult.displayedDevices} of ${layer.devices} devices simulated</small>
       <span class="node-meta">${layer.mode} · ${routeShort(layer.switchMethod)} · ${layer.tia ? "TIA" : "Iout"}</span>
+      <span class="node-meta">${layerResult.incomingEdges} in / ${layerResult.outgoingEdges} out graph edges</span>
       <span class="node-value">${round(layerResult.peak, 1)} nA peak</span>
     `;
     article.addEventListener("click", () => {
@@ -557,7 +747,7 @@ function renderArchitecture(containerId, result) {
     if (index < result.layers.length - 1) {
       const arrow = document.createElement("span");
       arrow.className = "arch-arrow";
-      arrow.textContent = "->";
+      arrow.textContent = edgeCountBetweenLayers(index, index + 1) ? `${edgeCountBetweenLayers(index, index + 1)} edges` : "graph";
       container.appendChild(arrow);
     }
   });
@@ -581,6 +771,92 @@ function updateSelectedLayer() {
   $("selectedLayerTia").textContent = layer.tia ? "On" : "Off";
   $("layerDevices").value = layer.devices;
   $("layerRole").value = layer.role;
+}
+
+function optionListForDevices(maxPerLayer = 32) {
+  return NET.allKeys(state, maxPerLayer).map((key) => `<option value="${key}">${NET.label(state, key)}</option>`).join("");
+}
+
+function normalizeDeviceSelections() {
+  const keys = NET.allKeys(state, 32);
+  if (!keys.length) return;
+  if (!keys.includes(state.selectedDevice)) state.selectedDevice = keys[0];
+  if (!keys.includes(state.sourceDevice)) state.sourceDevice = state.selectedDevice;
+  if (!keys.includes(state.targetDevice)) state.targetDevice = keys[Math.min(1, keys.length - 1)];
+  state.connections = NET.cleanConnections(state, state.connections);
+  if (!state.connectionGraphInitialized && !state.connections.length) {
+    state.connections = NET.defaultConnections(state);
+    state.connectionGraphInitialized = true;
+  }
+}
+
+function updateDeviceSelectors() {
+  normalizeDeviceSelections();
+  const options = optionListForDevices(32);
+  $("deviceSelect").innerHTML = options;
+  $("sourceDeviceSelect").innerHTML = options;
+  $("targetDeviceSelect").innerHTML = options;
+  $("deviceSelect").value = state.selectedDevice;
+  $("sourceDeviceSelect").value = state.sourceDevice;
+  $("targetDeviceSelect").value = state.targetDevice;
+  $("fanCount").value = state.fanCount;
+  $("fanCountOut").textContent = `${state.fanCount}`;
+  $("connectionSummary").textContent = `${state.connections.length} edges`;
+  updateDeviceOverrideControls();
+}
+
+function updateDeviceOverrideControls() {
+  const parsed = NET.parse(state.selectedDevice);
+  if (!parsed) return;
+  const override = getDeviceOverride(parsed.layerIndex, parsed.deviceIndex);
+  $("deviceModeSelect").value = override.mode || "inherit";
+  $("deviceSwitchSelect").value = override.switchMethod || "inherit";
+  $("deviceTiaOverride").checked = override.tia === true;
+  $("deviceOverrideSummary").textContent = Object.keys(override).length ? "device override" : "layer default";
+}
+
+function applyDeviceOverride() {
+  const parsed = NET.parse(state.selectedDevice);
+  if (!parsed) return;
+  const key = state.selectedDevice;
+  const mode = $("deviceModeSelect").value;
+  const switchMethod = $("deviceSwitchSelect").value;
+  const tiaForced = $("deviceTiaOverride").checked;
+  const override = {};
+  if (mode !== "inherit") override.mode = mode;
+  if (switchMethod !== "inherit") override.switchMethod = switchMethod;
+  if (tiaForced) override.tia = true;
+  if (Object.keys(override).length) state.deviceOverrides[key] = override;
+  else delete state.deviceOverrides[key];
+  const parsedLayer = parsed.layerIndex;
+  state.selectedLayer = parsedLayer;
+  state.traceLayer = parsedLayer;
+  runAllSimulations();
+}
+
+function addConnections(connections) {
+  const merged = [...state.connections, ...connections];
+  state.connections = NET.cleanConnections(state, merged);
+  state.connectionGraphInitialized = true;
+  runAllSimulations();
+}
+
+function connectSelectedPair() {
+  addConnections([{ from: state.sourceDevice, to: state.targetDevice, weight: 1 }]);
+}
+
+function connectFanOut() {
+  addConnections(NET.fanOut(state, state.sourceDevice, state.fanCount));
+}
+
+function connectFanIn() {
+  addConnections(NET.fanIn(state, state.targetDevice, state.fanCount));
+}
+
+function clearConnections() {
+  state.connections = [];
+  state.connectionGraphInitialized = true;
+  runAllSimulations();
 }
 
 function setupCanvas(canvas) {
@@ -799,6 +1075,138 @@ function drawTimeLabels(ctx, timeline, plot) {
   }
 }
 
+function devicePosition(layerIndex, deviceIndex, width, height) {
+  const layerCount = Math.max(1, state.layers.length);
+  const left = 82;
+  const right = width - 50;
+  const top = 88;
+  const bottom = height - 46;
+  const x = layerCount === 1 ? (left + right) / 2 : lerp(left, right, layerIndex / (layerCount - 1));
+  const visible = Math.min(state.layers[layerIndex]?.devices || 1, 12);
+  const row = deviceIndex % visible;
+  const y = visible === 1 ? (top + bottom) / 2 : lerp(top, bottom, row / (visible - 1));
+  return { x, y };
+}
+
+function drawNetworkCanvas() {
+  const canvas = $("networkCanvas");
+  const { ctx, width, height } = setupCanvas(canvas);
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  drawPlotTitle(ctx, "Device-level input-output network", "nodes are individual devices; edges define optical/electrical signal flow");
+
+  state.layers.forEach((layer, layerIndex) => {
+    const p = devicePosition(layerIndex, 0, width, height);
+    ctx.fillStyle = "#627381";
+    ctx.font = "800 11px Malgun Gothic, Segoe UI, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(layer.name, p.x, 68);
+    ctx.textAlign = "left";
+  });
+
+  ctx.lineWidth = 1.2;
+  state.connections.forEach((connection) => {
+    const from = NET.parse(connection.from);
+    const to = NET.parse(connection.to);
+    if (!from || !to) return;
+    const a = devicePosition(from.layerIndex, from.deviceIndex, width, height);
+    const b = devicePosition(to.layerIndex, to.deviceIndex, width, height);
+    ctx.strokeStyle = connection.from === state.sourceDevice || connection.to === state.targetDevice
+      ? "rgba(11,112,179,0.72)"
+      : "rgba(112,132,146,0.28)";
+    ctx.beginPath();
+    ctx.moveTo(a.x + 8, a.y);
+    ctx.lineTo(b.x - 8, b.y);
+    ctx.stroke();
+  });
+
+  state.layers.forEach((layer, layerIndex) => {
+    const visible = Math.min(layer.devices, 12);
+    for (let deviceIndex = 0; deviceIndex < visible; deviceIndex += 1) {
+      const key = deviceKey(layerIndex, deviceIndex);
+      const config = getDeviceConfig(layer, layerIndex, deviceIndex);
+      const p = devicePosition(layerIndex, deviceIndex, width, height);
+      const active = key === state.selectedDevice || key === state.sourceDevice || key === state.targetDevice;
+      const color = config.mode === "LTM" ? "#0b61b5" : config.mode === "STM" ? "#0f9d91" : "#d98612";
+      ctx.fillStyle = active ? "#fff" : "#f7fafc";
+      ctx.strokeStyle = active ? "#0b70b3" : color;
+      ctx.lineWidth = active ? 2.2 : 1.4;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, active ? 10 : 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.font = "800 9px Malgun Gothic, Segoe UI, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(config.mode === "LTM" ? "L" : config.mode === "STM" ? "S" : "A", p.x, p.y + 3);
+    }
+  });
+  ctx.textAlign = "left";
+  $("networkGraphLabel").textContent = `${state.connections.length} edges / ${Object.keys(state.deviceOverrides).length} overrides`;
+}
+
+function traceForKey(key, drive, kind = "block") {
+  const parsed = NET.parse(key);
+  if (!parsed) return null;
+  const layer = state.layers[parsed.layerIndex];
+  if (!layer) return null;
+  return simulateDeviceTrace(latestTimeline, drive, layer, parsed.layerIndex, parsed.deviceIndex, kind);
+}
+
+function simulateConnectionResponse() {
+  const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
+  const uvDrive = timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
+  const sourceTrace = traceForKey(state.sourceDevice, uvDrive, "block");
+  if (!sourceTrace) return null;
+  const sourcePeak = Math.max(...sourceTrace.trace, 1);
+  const outgoing = state.connections.filter((connection) => connection.from === state.sourceDevice);
+  const incoming = state.connections.filter((connection) => connection.to === state.targetDevice);
+  const edges = outgoing.length ? outgoing : incoming.length ? incoming : [{ from: state.sourceDevice, to: state.targetDevice, weight: 1 }];
+  const targets = edges.slice(0, Math.max(1, state.fanCount)).map((edge) => {
+    const drive = sourceTrace.trace.map((value, index) => {
+      const uvResidual = uvDrive[index] * 0.22;
+      return clamp((value / sourcePeak) * (edge.weight || 1) + uvResidual, 0, 1.8);
+    });
+    const targetTrace = traceForKey(edge.to, drive, "block");
+    return targetTrace ? { ...targetTrace, edge } : null;
+  }).filter(Boolean);
+  return { timeline, uvDrive, sourceTrace, targets };
+}
+
+function drawConnectionResponse() {
+  const canvas = $("connectionResponseCanvas");
+  const { ctx, width, height } = setupCanvas(canvas);
+  const result = simulateConnectionResponse();
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  if (!result) {
+    drawPlotTitle(ctx, "Connected device current response", "select source and target devices");
+    return;
+  }
+
+  const uvPlot = { left: 58, right: width - 20, top: 48, bottom: 112 };
+  const currentPlot = { left: 58, right: width - 20, top: 154, bottom: height - 42 };
+  const targetMax = result.targets.length ? Math.max(...result.targets.flatMap((target) => target.trace), 1) : 1;
+  const maxCurrent = Math.max(...result.sourceTrace.trace, targetMax, 1) * 1.12;
+  const sourceLabel = NET.label(state, state.sourceDevice);
+  const targetLabel = result.targets.length === 1 ? NET.label(state, result.targets[0].edge.to) : `${result.targets.length} connected targets`;
+
+  drawPlotTitle(ctx, "Connected device current response", `${sourceLabel} -> ${targetLabel}`);
+  drawGrid(ctx, uvPlot, 2, 6);
+  drawLine(ctx, result.timeline, result.uvDrive, uvPlot, 0, 1.1, "#7b2ff2", 2);
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("UV input", uvPlot.left, uvPlot.top - 8);
+
+  drawGrid(ctx, currentPlot, 4, 6);
+  result.targets.forEach((target, index) => {
+    const colors = ["#d98612", "#0b61b5", "#7b2ff2", "#c34c3c", "#0f9d91"];
+    drawLine(ctx, result.timeline, target.trace, currentPlot, 0, maxCurrent, colors[index % colors.length], 1.4, 0.6);
+  });
+  drawLine(ctx, result.timeline, result.sourceTrace.trace, currentPlot, 0, maxCurrent, "#0f9d91", 2.4, 1);
+  drawAxis(ctx, result.timeline, currentPlot, maxCurrent, "I_photo (nA)");
+}
+
 function drawSnnTrace() {
   const selected = latestSnn.selected;
   const membrane = latestSnn.membranes[0] || selected.activation;
@@ -817,9 +1225,9 @@ function drawAnnTrace() {
   drawTransientTrace("annTraceCanvas", latestAnn, {
     title: "ANN device transient",
     subtitle: `${selected.config.name} · ${selected.config.mode} · ${routeShort(selected.config.switchMethod)}`,
-    outputTrace: selected.config.tia && state.tiaEnabled ? selected.voltage.map((value) => Math.abs(value)) : selected.activation,
+    outputTrace: selected.tiaEnabledForLayer && state.tiaEnabled ? selected.voltage.map((value) => Math.abs(value)) : selected.activation,
     outputColor: "#d98612",
-    outputLabel: selected.config.tia && state.tiaEnabled ? "|V_TIA| (V)" : "Activation",
+    outputLabel: selected.tiaEnabledForLayer && state.tiaEnabled ? "|V_TIA| (V)" : "Activation",
     bipolar: false,
   });
 }
@@ -890,13 +1298,19 @@ function drawSnnReadout() {
 
 function drawAllActive() {
   drawUvCanvas();
+  if (state.activeTab === "blocks") {
+    drawNetworkCanvas();
+    drawConnectionResponse();
+  }
   if (state.activeTab === "ann") {
+    drawDatasetInputPreview("ann");
     renderArchitecture("annArchitecture", latestAnn);
     drawAnnTrace();
     drawHeatmap();
     drawAnnReadout();
   }
   if (state.activeTab === "snn") {
+    drawDatasetInputPreview("snn");
     renderArchitecture("snnArchitecture", latestSnn);
     drawSnnTrace();
     drawSnnRaster();
@@ -915,14 +1329,258 @@ function renderReferences() {
   `).join("");
 }
 
+function renderDatasetPanel(kind) {
+  const panel = $(`${kind}DatasetPanel`);
+  if (!panel) return;
+  const contract = architectureContract(kind);
+  const { dataset } = contract;
+  const inputBadge = statusClass(contract.inputStatus);
+  const outputBadge = statusClass(contract.outputStatus);
+  const sourceTarget = dataset.sourceUrl && dataset.sourceUrl !== "NEXT_WORK.md" ? ' target="_blank" rel="noreferrer"' : "";
+
+  panel.innerHTML = `
+    <div class="dataset-card-head">
+      <div>
+        <span class="mini-title">${dataset.label}</span>
+        <p>${dataset.task}</p>
+      </div>
+      <span class="status-pill ${contract.runnable ? "ok" : "needs-adapter"}">${contract.simulationMode}</span>
+    </div>
+    <dl class="contract-list">
+      <div><dt>Source</dt><dd><a href="${dataset.sourceUrl}"${sourceTarget}>${dataset.sourceName}</a></dd></div>
+      <div><dt>Sample format</dt><dd>${dataset.sampleFormat}</dd></div>
+      <div><dt>Raw input</dt><dd>${dataset.rawInput}</dd></div>
+      <div><dt>Required input</dt><dd>${formatChannelCount(contract.requiredInput)} channels</dd></div>
+      <div><dt>Required output</dt><dd>${contract.requiredOutput} classes</dd></div>
+      <div><dt>Loader status</dt><dd>${dataset.loaderStatus}</dd></div>
+      <div><dt>Fetch status</dt><dd>${dataset.fetchStatus || "Fetch path not configured."}</dd></div>
+      <div><dt>Cache path</dt><dd>${dataset.cachePath || "not configured"}</dd></div>
+    </dl>
+    <pre class="dataset-command">${dataset.fetchCommand || "No fetch command configured."}</pre>
+    <div class="mapping-check">
+      <div class="mapping-row">
+        <span class="status-pill ${inputBadge}">Input</span>
+        <p>${contract.inputLayer.name}: ${contract.inputDevices} devices. ${contract.inputMessage}</p>
+      </div>
+      <div class="mapping-row">
+        <span class="status-pill ${outputBadge}">Output</span>
+        <p>${contract.outputLayer.name}: ${contract.outputDevices} devices. ${contract.outputMessage}</p>
+      </div>
+      <div class="mapping-flow">
+        <span>Dataset sample</span>
+        <span>${contract.inputStatus === "adapter" ? "virtual encoder" : "direct encoder"}</span>
+        <span>Block-tab device graph</span>
+        <span>${contract.outputStatus === "adapter" ? "virtual readout decoder" : "direct readout"}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderDatasetPanels() {
+  renderDatasetPanel("ann");
+  renderDatasetPanel("snn");
+}
+
+function renderRuntimeSummary(kind, result) {
+  const panel = $(`${kind}RuntimeSummary`);
+  if (!panel || !result) return;
+  const contract = architectureContract(kind);
+  const graph = result.graph || {};
+  const adapterNeeded = !contract.runnable;
+  const adapterText = adapterNeeded
+    ? "virtual input/readout adapter required"
+    : "direct dataset-to-device mapping possible";
+  const edgeText = graph.edgeCount === 0
+    ? "0 edges: isolated devices receive encoded optical input only"
+    : `${graph.usedEdges} active edges from ${graph.edgeCount} configured connections`;
+  panel.innerHTML = `
+    <span class="status-pill ${adapterNeeded ? "needs-adapter" : "ok"}">Graph backend</span>
+    <strong>${graph.nodeCount || 0} simulated devices / ${edgeText}</strong>
+    <p>${contract.dataset.label}: ${contract.requiredInput ? formatChannelCount(contract.requiredInput) : "architecture-defined"} input channels -> ${contract.inputDevices} physical input devices, ${contract.requiredOutput} output classes -> ${contract.outputDevices} output devices. ${adapterText}. Capped at ${graph.maxPerLayer || 32} simulated devices per layer for browser performance.</p>
+  `;
+}
+
+function renderRuntimeSummaries() {
+  renderRuntimeSummary("ann", latestAnn);
+  renderRuntimeSummary("snn", latestSnn);
+}
+
+function renderDatasetSources() {
+  const datasets = Object.values(DATASETS);
+  const links = datasets.map((dataset) => {
+    const target = dataset.sourceUrl !== "NEXT_WORK.md" ? ' target="_blank" rel="noreferrer"' : "";
+    return `<a href="${dataset.sourceUrl}"${target}>${dataset.label}</a>`;
+  }).join("");
+
+  const footer = $("datasetSourceFooter");
+  if (footer) footer.innerHTML = links;
+
+  const grid = $("datasetSourceGrid");
+  if (!grid) return;
+  grid.innerHTML = datasets.map((dataset) => {
+    const target = dataset.sourceUrl !== "NEXT_WORK.md" ? ' target="_blank" rel="noreferrer"' : "";
+    return `
+      <article class="reference-item dataset-source-item">
+        <h3>${dataset.label}</h3>
+        <p><strong>Input:</strong> ${dataset.sampleFormat}<br /><strong>Output:</strong> ${dataset.outputClasses} classes<br />${dataset.loaderStatus}</p>
+        <a href="${dataset.sourceUrl}"${target}>Dataset source</a>
+      </article>
+    `;
+  }).join("");
+}
+
+function drawDatasetInputPreview(kind) {
+  const canvas = $(`${kind}InputCanvas`);
+  if (!canvas) return;
+  const dataset = getDataset(kind);
+  const label = $(`${kind}InputPreviewLabel`);
+  if (label) label.textContent = dataset.sampleFormat;
+  const { ctx, width, height } = setupCanvas(canvas);
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  drawPlotTitle(ctx, dataset.label, dataset.rawInput, 18, 24);
+
+  if (dataset.preview === "frame") drawFramePreview(ctx, width, height, dataset);
+  else if (dataset.preview === "event") drawEventPreview(ctx, width, height, dataset);
+  else if (dataset.preview === "spike") drawSpikePreview(ctx, width, height);
+  else if (dataset.preview === "waveform") drawWaveformPreview(ctx, width, height);
+  else drawUvPreview(ctx, width, height);
+}
+
+function drawFramePreview(ctx, width, height, dataset) {
+  const grid = 28;
+  const size = Math.min(height - 72, width * 0.34);
+  const x0 = 24;
+  const y0 = 56;
+  const cell = size / grid;
+  for (let y = 0; y < grid; y += 1) {
+    for (let x = 0; x < grid; x += 1) {
+      const cx = x - 14;
+      const cy = y - 14;
+      const digit = dataset.id === "mnist"
+        ? Math.exp(-((cx * cx) / 42 + (cy * cy) / 96)) + Math.exp(-(((cx - 3) * (cx - 3)) / 72 + ((cy + 4) * (cy + 4)) / 32))
+        : Math.exp(-((cx * cx) / 120 + (cy * cy) / 72)) * (y > 7 ? 1 : 0.25);
+      const shade = clamp(Math.round(255 - digit * 210), 20, 255);
+      ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+      ctx.fillRect(x0 + x * cell, y0 + y * cell, Math.ceil(cell), Math.ceil(cell));
+    }
+  }
+  ctx.strokeStyle = "#b7c8d3";
+  ctx.strokeRect(x0, y0, size, size);
+  drawInputMappingNote(ctx, width, height, "Flatten 28 x 28 -> 784 channels -> UV rate/amplitude encoder");
+}
+
+function drawEventPreview(ctx, width, height, dataset) {
+  const plot = { left: 42, right: width - 22, top: 62, bottom: height - 42 };
+  drawGrid(ctx, plot, 4, 6);
+  const sensorLabel = dataset.id === "dvsgesture" ? "128 x 128 x polarity" : "34 x 34 x polarity";
+  for (let i = 0; i < 360; i += 1) {
+    const t = i / 360;
+    const band = Math.sin(i * 0.09) * 0.3 + 0.5;
+    const x = lerp(plot.left, plot.right, t);
+    const y = lerp(plot.top, plot.bottom, clamp((Math.sin(i * 0.37) * 0.22 + band), 0, 1));
+    ctx.fillStyle = i % 2 ? "#7b2ff2" : "#0f9d91";
+    ctx.globalAlpha = 0.78;
+    ctx.fillRect(x, y, 2, 2);
+  }
+  ctx.globalAlpha = 1;
+  drawInputMappingNote(ctx, width, height, `Events (x,y,t,p), ${sensorLabel} -> bin/pool/multiplex -> UV pulses`);
+}
+
+function drawSpikePreview(ctx, width, height) {
+  const plot = { left: 42, right: width - 22, top: 62, bottom: height - 42 };
+  drawGrid(ctx, plot, 7, 6);
+  const rows = 20;
+  for (let row = 0; row < rows; row += 1) {
+    const y = lerp(plot.top, plot.bottom, row / Math.max(1, rows - 1));
+    for (let i = 0; i < 22; i += 1) {
+      const phase = Math.sin(row * 1.7 + i * 0.8);
+      if (phase < -0.25) continue;
+      const x = lerp(plot.left, plot.right, ((i * 17 + row * 11) % 220) / 220);
+      ctx.strokeStyle = "#7b2ff2";
+      ctx.beginPath();
+      ctx.moveTo(x, y - 4);
+      ctx.lineTo(x, y + 4);
+      ctx.stroke();
+    }
+  }
+  drawInputMappingNote(ctx, width, height, "Spike trains on 700 channels -> channel grouping or temporal UV pulse encoder");
+}
+
+function drawWaveformPreview(ctx, width, height) {
+  const plot = { left: 42, right: width - 22, top: 62, bottom: height - 42 };
+  drawGrid(ctx, plot, 4, 6);
+  ctx.strokeStyle = "#0b61b5";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < 280; i += 1) {
+    const t = i / 279;
+    const qrs = Math.exp(-((t - 0.43) ** 2) / 0.00045) - 0.45 * Math.exp(-((t - 0.39) ** 2) / 0.0006);
+    const p = 0.22 * Math.exp(-((t - 0.22) ** 2) / 0.004);
+    const tw = 0.32 * Math.exp(-((t - 0.68) ** 2) / 0.01);
+    const value = 0.56 - (p + qrs + tw) * 0.36;
+    const x = lerp(plot.left, plot.right, t);
+    const y = lerp(plot.top, plot.bottom, clamp(value, 0, 1));
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawInputMappingNote(ctx, width, height, "ECG time window -> temporal multiplexed UV intensity sequence");
+}
+
+function drawUvPreview(ctx, width, height) {
+  const plot = { left: 42, right: width - 22, top: 62, bottom: height - 42 };
+  drawGrid(ctx, plot, 4, 6);
+  ctx.strokeStyle = "#7b2ff2";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < 180; i += 1) {
+    const t = i / 179;
+    const phase = (t * 12) % 1;
+    const value = phase < 0.35 ? 0.18 : 0.86;
+    const x = lerp(plot.left, plot.right, t);
+    const y = lerp(plot.top, plot.bottom, value);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  drawInputMappingNote(ctx, width, height, "Native UV pulse pattern -> device blocks directly");
+}
+
+function drawInputMappingNote(ctx, width, height, text) {
+  ctx.fillStyle = "#425765";
+  ctx.font = "700 10px Malgun Gothic, Segoe UI, sans-serif";
+  const maxWidth = width - 44;
+  const words = text.split(" ");
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  });
+  if (line) lines.push(line);
+  lines.slice(0, 2).forEach((value, index) => {
+    ctx.fillText(value, 22, height - 24 + index * 12);
+  });
+}
+
 function runAllSimulations() {
   generateTimeline();
   buildTimingRows();
   updateReadouts();
+  normalizeDeviceSelections();
   latestAnn = simulateArchitecture("ann");
   latestSnn = simulateArchitecture("snn");
   updateMetrics(state.activeTab === "snn" ? latestSnn : latestAnn);
+  renderDatasetPanels();
+  renderRuntimeSummaries();
   renderBlocks();
+  updateDeviceSelectors();
   renderArchitecture("annArchitecture", latestAnn);
   renderArchitecture("snnArchitecture", latestSnn);
   drawAllActive();
@@ -984,7 +1642,7 @@ function exportCsv() {
   ];
   latestTimeline.forEach((point, index) => {
     if (index % 2 !== 0) return;
-    const annOut = selectedAnn.config.tia && state.tiaEnabled ? Math.abs(selectedAnn.voltage[index]) : selectedAnn.activation[index];
+    const annOut = selectedAnn.tiaEnabledForLayer && state.tiaEnabled ? Math.abs(selectedAnn.voltage[index]) : selectedAnn.activation[index];
     const snnMem = latestSnn.membranes[0]?.[index] || 0;
     rows.push([
       point.t.toFixed(5),
@@ -1015,7 +1673,9 @@ function bindEvents() {
     });
   });
 
+  const deferredControls = new Set(["deviceModeSelect", "deviceSwitchSelect", "deviceTiaOverride"]);
   document.querySelectorAll("input, select").forEach((control) => {
+    if (deferredControls.has(control.id)) return;
     control.addEventListener("input", () => {
       readControls();
       runAllSimulations();
@@ -1030,6 +1690,11 @@ function bindEvents() {
   $("updateLayerBtn").addEventListener("click", updateSelectedLayerFromForm);
   $("addLayerBtn").addEventListener("click", addLayer);
   $("removeLayerBtn").addEventListener("click", removeLayer);
+  $("applyDeviceBtn").addEventListener("click", applyDeviceOverride);
+  $("connectPairBtn").addEventListener("click", connectSelectedPair);
+  $("connectFanOutBtn").addEventListener("click", connectFanOut);
+  $("connectFanInBtn").addEventListener("click", connectFanIn);
+  $("clearConnectionsBtn").addEventListener("click", clearConnections);
   $("regenerateTimingBtn").addEventListener("click", runAllSimulations);
   $("runTransientBtn").addEventListener("click", () => {
     readControls();
@@ -1042,6 +1707,9 @@ function bindEvents() {
     latestAnn = simulateArchitecture("ann");
     $("simStatus").textContent = "ANN transient";
     updateMetrics(latestAnn);
+    renderDatasetPanels();
+    renderRuntimeSummaries();
+    drawDatasetInputPreview("ann");
     renderArchitecture("annArchitecture", latestAnn);
     drawAnnTrace();
     drawHeatmap();
@@ -1053,6 +1721,9 @@ function bindEvents() {
     latestSnn = simulateArchitecture("snn");
     $("simStatus").textContent = "SNN transient";
     updateMetrics(latestSnn);
+    renderDatasetPanels();
+    renderRuntimeSummaries();
+    drawDatasetInputPreview("snn");
     renderArchitecture("snnArchitecture", latestSnn);
     drawSnnTrace();
     drawSnnRaster();
@@ -1080,6 +1751,10 @@ function restore() {
     state.traceLayer = safeLayerIndex(state.traceLayer);
     state.traceDevices = clamp(Number(state.traceDevices) || defaults.traceDevices, 4, 32);
     state.deviceVariation = clamp(Number(state.deviceVariation) || defaults.deviceVariation, 0, 20);
+    state.fanCount = clamp(Number(state.fanCount) || defaults.fanCount, 1, 24);
+    if (!state.deviceOverrides || typeof state.deviceOverrides !== "object") state.deviceOverrides = {};
+    if (!Array.isArray(state.connections)) state.connections = [];
+    state.connectionGraphInitialized = Boolean(state.connectionGraphInitialized || state.connections.length);
   } catch {
     Object.assign(state, deepClone(defaults));
   }
@@ -1091,7 +1766,10 @@ function init() {
   writeControls();
   bindEvents();
   renderReferences();
+  renderDatasetSources();
   updateSelectedLayer();
+  normalizeDeviceSelections();
+  updateDeviceSelectors();
   runAllSimulations();
   setInterval(persist, 1000);
 }
