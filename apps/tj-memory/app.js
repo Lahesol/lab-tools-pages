@@ -45,6 +45,7 @@ const DATASETS = window.DATASET_REGISTRY || {};
 const DATASET_GROUPS = window.DATASET_GROUPS || { ann: ["mnist", "uvtoy", "mitbih"], snn: ["nmnist", "dvsgesture", "shd", "uvtoy"] };
 const NET = window.DEVICE_NETWORK;
 const GRAPH_SIM = window.SYNAPTIC_GRAPH_SIM;
+const MODEL = window.DEVICE_MODEL;
 
 const defaults = {
   activeTab: "uv",
@@ -72,6 +73,14 @@ const defaults = {
   sourceDevice: "L0D0",
   targetDevice: "L1D0",
   fanCount: 8,
+  edgeCoupling: 0.86,
+  edgeResidual: 0.12,
+  edgeDelay: 0,
+  checkedDeviceTraces: ["L0D0", "L1D0"],
+  paramMode: "STM",
+  paramSwitchMethod: "vds",
+  measurementText: "",
+  deviceModel: MODEL.defaultModel(),
   deviceOverrides: {},
   connections: [],
   connectionGraphInitialized: false,
@@ -86,6 +95,7 @@ const defaults = {
 const state = structuredClone(defaults);
 
 let latestTimeline = [];
+let latestBlock = null;
 let latestAnn = null;
 let latestSnn = null;
 
@@ -263,6 +273,12 @@ function readControls() {
   state.sourceDevice = $("sourceDeviceSelect").value;
   state.targetDevice = $("targetDeviceSelect").value;
   state.fanCount = Number($("fanCount").value);
+  state.edgeCoupling = Number($("edgeCoupling").value);
+  state.edgeResidual = Number($("edgeResidual").value);
+  state.edgeDelay = Number($("edgeDelay").value);
+  state.paramMode = $("paramModeSelect").value;
+  state.paramSwitchMethod = $("paramSwitchSelect").value;
+  state.measurementText = $("measurementInput").value;
 }
 
 function writeControls() {
@@ -285,6 +301,12 @@ function writeControls() {
   $("snnDataset").value = state.snnDataset;
   $("snnEncoding").value = state.snnEncoding;
   $("fanCount").value = state.fanCount;
+  $("edgeCoupling").value = state.edgeCoupling;
+  $("edgeResidual").value = state.edgeResidual;
+  $("edgeDelay").value = state.edgeDelay;
+  $("paramModeSelect").value = state.paramMode;
+  $("paramSwitchSelect").value = state.paramSwitchMethod;
+  $("measurementInput").value = state.measurementText;
 }
 
 function updateTraceLayerOptions() {
@@ -307,6 +329,10 @@ function updateReadouts() {
   $("tiaGainOut").textContent = `${state.tiaGain} kOhm`;
   $("traceDevicesOut").textContent = `${state.traceDevices}`;
   $("variationOut").textContent = `${state.deviceVariation}%`;
+  $("edgeCouplingOut").textContent = state.edgeCoupling.toFixed(2);
+  $("edgeResidualOut").textContent = state.edgeResidual.toFixed(2);
+  $("edgeDelayOut").textContent = `${state.edgeDelay} ms`;
+  $("transferSummary").textContent = `signal * ${state.edgeCoupling.toFixed(2)} + UV * ${state.edgeResidual.toFixed(2)}`;
   $("traceSummary").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryLayer").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryInput").textContent = state.programMode === "pwm" ? "UV PWM" : "UV on/off table";
@@ -366,18 +392,8 @@ function buildTimingRows() {
 }
 
 function deviceParams(mode, method, layerIndex, deviceIndex) {
-  const isLtm = mode === "LTM";
-  const routeGain = method === "gate" ? 1.12 : 1;
-  const routePersistence = method === "gate" ? 1.18 : 1;
   const variation = stableVariation(layerIndex, deviceIndex);
-  return {
-    gain: (isLtm ? 118 : 84) * routeGain * variation,
-    dark: (isLtm ? 2.2 : 1.1) * variation,
-    tauRise: isLtm ? 0.075 : 0.032,
-    tauDecay: (isLtm ? 2.8 : 0.34) * routePersistence,
-    retention: isLtm ? 0.26 * routePersistence : 0.035,
-    noise: 0.9 + layerIndex * 0.12,
-  };
+  return MODEL.params(state.deviceModel, mode, method, variation, layerIndex);
 }
 
 function encodedInput(point, kind) {
@@ -406,29 +422,15 @@ function simulateDeviceTrace(timeline, drive, layer, layerIndex, deviceIndex, ki
   const config = getDeviceConfig(layer, layerIndex, deviceIndex);
   const mode = config.mode === "adaptive" ? modeForLayer(layer, deviceIndex) : config.mode;
   const params = deviceParams(mode, config.switchMethod, layerIndex, deviceIndex);
-  const trace = new Array(timeline.length);
-  let current = params.dark;
   const roleGain = { input: 0.92, hidden: 1.04, output: 0.86 }[layer.role] || 1;
   const presetGain = kind === "ann"
     ? { mlp: 1, reservoir: 1.1, cnnproxy: 1.18 }[state.annPreset]
     : { lif: 1, csnn: 1.08, rsnn: 1.14 }[state.snnPreset];
-
-  for (let i = 0; i < timeline.length; i += 1) {
-    const dt = i === 0 ? 0 : timeline[i].t - timeline[i - 1].t;
-    const opticalDrive = clamp(drive[i], 0, 1.8);
-    const target = params.dark + opticalDrive * params.gain * roleGain * presetGain;
-    const tau = target > current ? params.tauRise : params.tauDecay;
-    const alpha = 1 - Math.exp(-dt / Math.max(0.001, tau));
-    current += (target - current) * alpha;
-
-    if (opticalDrive < 0.02) {
-      const retained = params.dark + params.gain * params.retention;
-      current = retained + (current - retained) * Math.exp(-dt / Math.max(0.001, params.tauDecay));
-    }
-
-    const ripple = Math.sin(i * 0.037 + deviceIndex * 1.7 + layerIndex) * params.noise;
-    trace[i] = Math.max(0, current + ripple);
-  }
+  const trace = MODEL.response(timeline, drive, params, {
+    roleGain,
+    presetGain,
+    noisePhase: deviceIndex * 1.7 + layerIndex,
+  });
 
   return { key: deviceKey(layerIndex, deviceIndex), mode, switchMethod: config.switchMethod, tia: config.tia, trace };
 }
@@ -540,6 +542,34 @@ function graphInputDriveForDevice(kind, timeline, layerIndex, deviceIndex) {
   });
 }
 
+function blockInputDriveForDevice(timeline, layerIndex) {
+  const layer = state.layers[layerIndex];
+  const residualScale = layer?.role === "input" ? 1 : 0.18;
+  return timeline.map((point) => {
+    const normUv = state.intensity > 0 ? point.uv / state.intensity : 0;
+    return clamp(normUv * residualScale, 0, 1.8);
+  });
+}
+
+function simulateBlockGraph() {
+  const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
+  return GRAPH_SIM.simulate({
+    state,
+    timeline,
+    kind: "block",
+    maxPerLayer: 32,
+    inputDriveForDevice: (layerIndex) => blockInputDriveForDevice(timeline, layerIndex),
+    simulateDeviceTrace,
+    tiaGain: state.tiaGain,
+    tiaEnabled: state.tiaEnabled,
+    edgeDefaults: {
+      coupling: state.edgeCoupling,
+      opticalResidual: state.edgeResidual,
+      delayMs: state.edgeDelay,
+    },
+  });
+}
+
 function simulateArchitecture(kind) {
   const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
   const result = GRAPH_SIM.simulate({
@@ -551,6 +581,11 @@ function simulateArchitecture(kind) {
     simulateDeviceTrace,
     tiaGain: state.tiaGain,
     tiaEnabled: state.tiaEnabled,
+    edgeDefaults: {
+      coupling: state.edgeCoupling,
+      opticalResidual: state.edgeResidual,
+      delayMs: state.edgeDelay,
+    },
   });
 
   if (kind === "snn") addSnnDynamics(result);
@@ -783,6 +818,7 @@ function normalizeDeviceSelections() {
   if (!keys.includes(state.selectedDevice)) state.selectedDevice = keys[0];
   if (!keys.includes(state.sourceDevice)) state.sourceDevice = state.selectedDevice;
   if (!keys.includes(state.targetDevice)) state.targetDevice = keys[Math.min(1, keys.length - 1)];
+  state.checkedDeviceTraces = (state.checkedDeviceTraces || []).filter((key) => keys.includes(key));
   state.connections = NET.cleanConnections(state, state.connections);
   if (!state.connectionGraphInitialized && !state.connections.length) {
     state.connections = NET.defaultConnections(state);
@@ -803,6 +839,48 @@ function updateDeviceSelectors() {
   $("fanCountOut").textContent = `${state.fanCount}`;
   $("connectionSummary").textContent = `${state.connections.length} edges`;
   updateDeviceOverrideControls();
+  renderDeviceTracePicker();
+}
+
+function renderDeviceTracePicker() {
+  const picker = $("deviceTracePicker");
+  if (!picker) return;
+  const keys = NET.allKeys(state, 32);
+  const selected = new Set(state.checkedDeviceTraces || []);
+  picker.innerHTML = keys.map((key) => `
+    <label class="trace-check">
+      <input type="checkbox" value="${key}" ${selected.has(key) ? "checked" : ""} />
+      <span>${NET.label(state, key)}</span>
+    </label>
+  `).join("");
+  picker.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const checked = [...picker.querySelectorAll("input[type='checkbox']:checked")].map((input) => input.value);
+      state.checkedDeviceTraces = checked;
+      updateTraceSelectionSummary();
+      drawSelectedDeviceCurrents();
+    });
+  });
+  updateTraceSelectionSummary();
+}
+
+function updateTraceSelectionSummary() {
+  const output = $("checkedTraceSummary");
+  if (!output) return;
+  const count = (state.checkedDeviceTraces || []).length;
+  output.textContent = `${count} selected`;
+}
+
+function selectSourceTargetTraces() {
+  state.checkedDeviceTraces = [...new Set([state.sourceDevice, state.targetDevice].filter(Boolean))];
+  renderDeviceTracePicker();
+  drawSelectedDeviceCurrents();
+}
+
+function clearTraceSelection() {
+  state.checkedDeviceTraces = [];
+  renderDeviceTracePicker();
+  drawSelectedDeviceCurrents();
 }
 
 function updateDeviceOverrideControls() {
@@ -1156,21 +1234,17 @@ function traceForKey(key, drive, kind = "block") {
 function simulateConnectionResponse() {
   const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
   const uvDrive = timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
-  const sourceTrace = traceForKey(state.sourceDevice, uvDrive, "block");
+  const graph = latestBlock || simulateBlockGraph();
+  const sourceTrace = graph.nodeMap[state.sourceDevice] || traceForKey(state.sourceDevice, uvDrive, "block");
   if (!sourceTrace) return null;
-  const sourcePeak = Math.max(...sourceTrace.trace, 1);
   const outgoing = state.connections.filter((connection) => connection.from === state.sourceDevice);
   const incoming = state.connections.filter((connection) => connection.to === state.targetDevice);
   const edges = outgoing.length ? outgoing : incoming.length ? incoming : [{ from: state.sourceDevice, to: state.targetDevice, weight: 1 }];
   const targets = edges.slice(0, Math.max(1, state.fanCount)).map((edge) => {
-    const drive = sourceTrace.trace.map((value, index) => {
-      const uvResidual = uvDrive[index] * 0.22;
-      return clamp((value / sourcePeak) * (edge.weight || 1) + uvResidual, 0, 1.8);
-    });
-    const targetTrace = traceForKey(edge.to, drive, "block");
+    const targetTrace = graph.nodeMap[edge.to] || traceForKey(edge.to, uvDrive, "block");
     return targetTrace ? { ...targetTrace, edge } : null;
   }).filter(Boolean);
-  return { timeline, uvDrive, sourceTrace, targets };
+  return { timeline, uvDrive, sourceTrace, targets, graph };
 }
 
 function drawConnectionResponse() {
@@ -1205,6 +1279,209 @@ function drawConnectionResponse() {
   });
   drawLine(ctx, result.timeline, result.sourceTrace.trace, currentPlot, 0, maxCurrent, "#0f9d91", 2.4, 1);
   drawAxis(ctx, result.timeline, currentPlot, maxCurrent, "I_photo (nA)");
+}
+
+function drawSelectedDeviceCurrents() {
+  const canvas = $("selectedDeviceCurrentCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = setupCanvas(canvas);
+  const graph = latestBlock || simulateBlockGraph();
+  const timeline = graph.timeline;
+  const selectedKeys = (state.checkedDeviceTraces || []).filter((key) => graph.nodeMap[key]);
+  const uvDrive = timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
+
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  if (!selectedKeys.length) {
+    drawPlotTitle(ctx, "Selected device currents", "check one or more device cells to overlay their current traces");
+    return;
+  }
+
+  const uvPlot = { left: 58, right: width - 20, top: 48, bottom: 112 };
+  const currentPlot = { left: 58, right: width - 20, top: 154, bottom: height - 42 };
+  const selectedNodes = selectedKeys.map((key) => graph.nodeMap[key]);
+  const maxCurrent = Math.max(...selectedNodes.flatMap((node) => node.trace), 1) * 1.12;
+  drawPlotTitle(ctx, "Selected device currents", `${selectedKeys.length} device traces from current Block graph`);
+
+  drawGrid(ctx, uvPlot, 2, 6);
+  drawLine(ctx, timeline, uvDrive, uvPlot, 0, 1.1, "#7b2ff2", 2);
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("UV input", uvPlot.left, uvPlot.top - 8);
+
+  drawGrid(ctx, currentPlot, 4, 6);
+  const colors = ["#0f9d91", "#0b61b5", "#d98612", "#7b2ff2", "#c34c3c", "#243846", "#6f8b3d", "#b45f06"];
+  selectedNodes.forEach((node, index) => {
+    drawLine(ctx, timeline, node.trace, currentPlot, 0, maxCurrent, colors[index % colors.length], index === 0 ? 2.2 : 1.4, index < 8 ? 0.85 : 0.35);
+    const labelX = currentPlot.left + 8;
+    const labelY = currentPlot.top + 15 + index * 13;
+    if (index < 10) {
+      ctx.fillStyle = colors[index % colors.length];
+      ctx.font = "800 10px Malgun Gothic, Segoe UI, sans-serif";
+      ctx.fillText(NET.label(state, node.key), labelX, labelY);
+    }
+  });
+  drawAxis(ctx, timeline, currentPlot, maxCurrent, "I_photo (nA)");
+}
+
+function parameterDrive(timeline) {
+  return timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
+}
+
+function formatParamValue(name, value) {
+  const meta = MODEL.PARAM_META[name];
+  const digits = meta.step < 0.01 ? 3 : meta.step < 0.1 ? 2 : 1;
+  return `${Number(value).toFixed(digits)} ${meta.unit}`;
+}
+
+function renderParameterControls() {
+  const container = $("parameterSliders");
+  if (!container) return;
+  state.deviceModel = MODEL.sanitizeModel(state.deviceModel);
+  const mode = state.paramMode === "LTM" ? "LTM" : "STM";
+  const params = state.deviceModel[mode];
+  const routePrefix = state.paramSwitchMethod === "gate" ? "gate" : "vds";
+  const routeGainKey = `${routePrefix}Gain`;
+  const routePersistenceKey = `${routePrefix}Persistence`;
+  container.innerHTML = Object.entries(MODEL.PARAM_META).map(([name, meta]) => `
+    <label class="parameter-row">
+      <span>${meta.label}<output id="paramOut_${name}">${formatParamValue(name, params[name])}</output></span>
+      <input class="parameter-slider" data-param="${name}" type="range" min="${meta.min}" max="${meta.max}" step="${meta.step}" value="${params[name]}" />
+    </label>
+  `).join("") + `
+    <label class="parameter-row">
+      <span>Route gain multiplier<output id="routeGainOut">${state.deviceModel.route[routeGainKey].toFixed(2)} x</output></span>
+      <input class="route-slider" data-route-param="${routeGainKey}" type="range" min="0.2" max="2" step="0.01" value="${state.deviceModel.route[routeGainKey]}" />
+    </label>
+    <label class="parameter-row">
+      <span>Route persistence multiplier<output id="routePersistenceOut">${state.deviceModel.route[routePersistenceKey].toFixed(2)} x</output></span>
+      <input class="route-slider" data-route-param="${routePersistenceKey}" type="range" min="0.2" max="2" step="0.01" value="${state.deviceModel.route[routePersistenceKey]}" />
+    </label>
+  `;
+  container.querySelectorAll(".parameter-slider").forEach((slider) => {
+    slider.addEventListener("input", () => {
+      const name = slider.dataset.param;
+      state.deviceModel[mode][name] = Number(slider.value);
+      const output = $(`paramOut_${name}`);
+      if (output) output.textContent = formatParamValue(name, state.deviceModel[mode][name]);
+      latestBlock = simulateBlockGraph();
+      latestAnn = simulateArchitecture("ann");
+      latestSnn = simulateArchitecture("snn");
+      updateMetrics(state.activeTab === "snn" ? latestSnn : latestAnn);
+      updateParameterFitSummary();
+      drawAllActive();
+    });
+  });
+  container.querySelectorAll(".route-slider").forEach((slider) => {
+    slider.addEventListener("input", () => {
+      const name = slider.dataset.routeParam;
+      state.deviceModel.route[name] = Number(slider.value);
+      const output = document.getElementById(name.endsWith("Gain") ? "routeGainOut" : "routePersistenceOut");
+      if (output) output.textContent = `${state.deviceModel.route[name].toFixed(2)} x`;
+      latestBlock = simulateBlockGraph();
+      latestAnn = simulateArchitecture("ann");
+      latestSnn = simulateArchitecture("snn");
+      updateMetrics(state.activeTab === "snn" ? latestSnn : latestAnn);
+      updateParameterFitSummary();
+      drawAllActive();
+    });
+  });
+}
+
+function parameterModelTrace() {
+  const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
+  const drive = parameterDrive(timeline);
+  const modelParams = MODEL.params(state.deviceModel, state.paramMode, state.paramSwitchMethod, 1, 0);
+  return {
+    timeline,
+    drive,
+    trace: MODEL.response(timeline, drive, modelParams, { includeNoise: false }),
+  };
+}
+
+function updateParameterFitSummary() {
+  const measurement = MODEL.parseMeasurement(state.measurementText);
+  const model = parameterModelTrace();
+  const measured = MODEL.interpolate(measurement, model.timeline);
+  const error = measured.length ? MODEL.rmse(model.trace, measured) : null;
+  $("measurementSummary").textContent = measurement.length ? `${measurement.length} points loaded` : "no data";
+  $("fitPointCount").textContent = `${measurement.length}`;
+  $("fitRmse").textContent = error === null ? "-" : `${round(error, 3)} nA`;
+  $("fitRouteLabel").textContent = routeShort(state.paramSwitchMethod);
+}
+
+function drawParameterFit() {
+  const canvas = $("parameterFitCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = setupCanvas(canvas);
+  const model = parameterModelTrace();
+  const measurement = MODEL.parseMeasurement(state.measurementText);
+  const measured = MODEL.interpolate(measurement, model.timeline);
+  const uvPlot = { left: 58, right: width - 20, top: 52, bottom: 120 };
+  const currentPlot = { left: 58, right: width - 20, top: 164, bottom: height - 42 };
+  const maxMeasured = measured.length ? Math.max(...measured, 1) : 1;
+  const maxCurrent = Math.max(...model.trace, maxMeasured, 1) * 1.12;
+
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  drawPlotTitle(ctx, "Measured vs compact model overlay", `${state.paramMode} / ${routeShort(state.paramSwitchMethod)} / same UV pulse program`);
+
+  drawGrid(ctx, uvPlot, 2, 6);
+  drawLine(ctx, model.timeline, model.drive, uvPlot, 0, 1.1, "#7b2ff2", 2);
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("UV input", uvPlot.left, uvPlot.top - 8);
+
+  drawGrid(ctx, currentPlot, 4, 6);
+  drawLine(ctx, model.timeline, model.trace, currentPlot, 0, maxCurrent, "#0f9d91", 2.4);
+  if (measured.length) {
+    drawLine(ctx, model.timeline, measured, currentPlot, 0, maxCurrent, "#c34c3c", 1.9, 0.82);
+    ctx.fillStyle = "#c34c3c";
+    measurement.slice(0, 400).forEach((point) => {
+      const x = timeToX(point.t, model.timeline, currentPlot);
+      const y = valueToY(point.current, 0, maxCurrent, currentPlot);
+      ctx.fillRect(x - 1.4, y - 1.4, 2.8, 2.8);
+    });
+  }
+  drawAxis(ctx, model.timeline, currentPlot, maxCurrent, "I_photo (nA)");
+  updateParameterFitSummary();
+}
+
+function loadDemoMeasurement() {
+  const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
+  const trialModel = MODEL.sanitizeModel(state.deviceModel);
+  const mode = state.paramMode === "LTM" ? "LTM" : "STM";
+  trialModel[mode].gain *= 1.14;
+  trialModel[mode].dark += 0.22;
+  trialModel[mode].tauRise *= 1.22;
+  trialModel[mode].tauDecay *= 1.28;
+  trialModel[mode].retention *= 0.86;
+  const drive = parameterDrive(timeline);
+  const trace = MODEL.response(timeline, drive, MODEL.params(trialModel, mode, state.paramSwitchMethod, 1, 0), { includeNoise: false });
+  const rows = ["# time_s,current_nA"];
+  for (let index = 0; index < timeline.length; index += 18) {
+    const ripple = Math.sin(index * 0.19) * 0.45;
+    rows.push(`${timeline[index].t.toFixed(5)},${Math.max(0, trace[index] + ripple).toFixed(5)}`);
+  }
+  state.measurementText = rows.join("\n");
+  $("measurementInput").value = state.measurementText;
+  $("fitStatus").textContent = "demo loaded";
+  drawParameterFit();
+}
+
+function autoFitParameters() {
+  readControls();
+  const measurement = MODEL.parseMeasurement(state.measurementText);
+  if (!measurement.length) {
+    $("fitStatus").textContent = "load data first";
+    drawParameterFit();
+    return;
+  }
+  const model = parameterModelTrace();
+  const result = MODEL.fitMode(state.deviceModel, state.paramMode, state.paramSwitchMethod, model.timeline, model.drive, measurement);
+  state.deviceModel = result.model;
+  $("fitStatus").textContent = result.rmse === null ? "fit skipped" : `fit RMSE ${round(result.rmse, 3)} nA`;
+  runAllSimulations();
 }
 
 function drawSnnTrace() {
@@ -1301,6 +1578,10 @@ function drawAllActive() {
   if (state.activeTab === "blocks") {
     drawNetworkCanvas();
     drawConnectionResponse();
+    drawSelectedDeviceCurrents();
+  }
+  if (state.activeTab === "params") {
+    drawParameterFit();
   }
   if (state.activeTab === "ann") {
     drawDatasetInputPreview("ann");
@@ -1574,6 +1855,7 @@ function runAllSimulations() {
   buildTimingRows();
   updateReadouts();
   normalizeDeviceSelections();
+  latestBlock = simulateBlockGraph();
   latestAnn = simulateArchitecture("ann");
   latestSnn = simulateArchitecture("snn");
   updateMetrics(state.activeTab === "snn" ? latestSnn : latestAnn);
@@ -1581,6 +1863,8 @@ function runAllSimulations() {
   renderRuntimeSummaries();
   renderBlocks();
   updateDeviceSelectors();
+  renderParameterControls();
+  updateParameterFitSummary();
   renderArchitecture("annArchitecture", latestAnn);
   renderArchitecture("snnArchitecture", latestSnn);
   drawAllActive();
@@ -1695,6 +1979,15 @@ function bindEvents() {
   $("connectFanOutBtn").addEventListener("click", connectFanOut);
   $("connectFanInBtn").addEventListener("click", connectFanIn);
   $("clearConnectionsBtn").addEventListener("click", clearConnections);
+  $("selectSourceTargetTracesBtn").addEventListener("click", selectSourceTargetTraces);
+  $("clearTraceSelectionBtn").addEventListener("click", clearTraceSelection);
+  $("loadDemoMeasurementBtn").addEventListener("click", loadDemoMeasurement);
+  $("autoFitParamsBtn").addEventListener("click", autoFitParameters);
+  $("measurementInput").addEventListener("input", () => {
+    state.measurementText = $("measurementInput").value;
+    $("fitStatus").textContent = "manual";
+    drawParameterFit();
+  });
   $("regenerateTimingBtn").addEventListener("click", runAllSimulations);
   $("runTransientBtn").addEventListener("click", () => {
     readControls();
@@ -1752,6 +2045,14 @@ function restore() {
     state.traceDevices = clamp(Number(state.traceDevices) || defaults.traceDevices, 4, 32);
     state.deviceVariation = clamp(Number(state.deviceVariation) || defaults.deviceVariation, 0, 20);
     state.fanCount = clamp(Number(state.fanCount) || defaults.fanCount, 1, 24);
+    state.edgeCoupling = clamp(Number(state.edgeCoupling) || defaults.edgeCoupling, 0, 1.5);
+    state.edgeResidual = clamp(Number(state.edgeResidual) || defaults.edgeResidual, 0, 0.5);
+    state.edgeDelay = clamp(Number(state.edgeDelay) || defaults.edgeDelay, 0, 200);
+    state.paramMode = state.paramMode === "LTM" ? "LTM" : "STM";
+    state.paramSwitchMethod = state.paramSwitchMethod === "gate" ? "gate" : "vds";
+    state.measurementText = typeof state.measurementText === "string" ? state.measurementText : "";
+    state.deviceModel = MODEL.sanitizeModel(state.deviceModel);
+    if (!Array.isArray(state.checkedDeviceTraces)) state.checkedDeviceTraces = deepClone(defaults.checkedDeviceTraces);
     if (!state.deviceOverrides || typeof state.deviceOverrides !== "object") state.deviceOverrides = {};
     if (!Array.isArray(state.connections)) state.connections = [];
     state.connectionGraphInitialized = Boolean(state.connectionGraphInitialized || state.connections.length);

@@ -70,11 +70,12 @@
     return values.map((_, index) => (index >= steps ? values[index - steps] : 0));
   }
 
-  function edgeDrive(sourceNode, edge, timeline, baseDrive) {
+  function edgeDrive(sourceNode, edge, timeline, baseDrive, edgeDefaults) {
     const weight = Number.isFinite(Number(edge.weight)) ? Number(edge.weight) : 1;
-    const coupling = Number.isFinite(Number(edge.coupling)) ? Number(edge.coupling) : 0.86;
-    const opticalResidual = Number.isFinite(Number(edge.opticalResidual)) ? Number(edge.opticalResidual) : 0.12;
-    const shifted = delayedSignal(sourceNode.signal, delaySteps(edge, timeline));
+    const coupling = Number.isFinite(Number(edge.coupling)) ? Number(edge.coupling) : Number(edgeDefaults?.coupling ?? 0.86);
+    const opticalResidual = Number.isFinite(Number(edge.opticalResidual)) ? Number(edge.opticalResidual) : Number(edgeDefaults?.opticalResidual ?? 0.12);
+    const delayEdge = Number.isFinite(Number(edge.delayMs)) ? edge : { ...edge, delayMs: edgeDefaults?.delayMs || 0 };
+    const shifted = delayedSignal(sourceNode.signal, delaySteps(delayEdge, timeline));
     return shifted.map((value, index) => clamp(value * weight * coupling + (baseDrive[index] || 0) * opticalResidual, 0, 1.8));
   }
 
@@ -118,6 +119,7 @@
       simulateDeviceTrace,
       tiaGain,
       tiaEnabled,
+      edgeDefaults = {},
     } = options;
     const validKeys = new Set(allKeys(state, maxPerLayer));
     const { incoming, outgoing, clean } = buildEdgeMaps(state.connections || [], validKeys);
@@ -149,7 +151,7 @@
             unresolvedEdges += 1;
             return;
           }
-          drives.push(edgeDrive(sourceNode, edge, timeline, baseDrive));
+          drives.push(edgeDrive(sourceNode, edge, timeline, baseDrive, edgeDefaults));
           usedEdges += 1;
         });
 

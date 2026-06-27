@@ -385,6 +385,10 @@ input[type="range"] {
   background: var(--membrane);
 }
 
+.legend.measured {
+  background: var(--danger);
+}
+
 canvas,
 .plot-canvas {
   width: 100%;
@@ -863,13 +867,140 @@ th {
 
 .network-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }
 
 .network-panel {
   box-shadow: none;
+}
+
+.trace-picker-panel {
+  grid-column: 1 / -1;
+}
+
+.compact-note {
+  margin: 0 0 11px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+.trace-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.device-trace-picker {
+  max-height: 180px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfdff;
+}
+
+.trace-check {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: #243846;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.trace-check input {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.param-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.param-panel {
+  box-shadow: none;
+}
+
+.parameter-sliders {
+  display: grid;
+  gap: 10px;
+}
+
+.parameter-row {
+  display: grid;
+  gap: 5px;
+}
+
+.parameter-row span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #253c4b;
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.parameter-row output {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.measurement-input {
+  width: 100%;
+  min-height: 210px;
+  resize: vertical;
+  padding: 10px;
+  color: #203645;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfdff;
+  font: 12px/1.45 Consolas, "Cascadia Mono", monospace;
+}
+
+.fit-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.fit-metrics div {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f7fafc;
+}
+
+.fit-metrics dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.fit-metrics dd {
+  margin: 3px 0 0;
+  color: #203645;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .network-analysis {
@@ -1065,6 +1196,7 @@ th {
   .reference-grid,
   .dataset-workbench,
   .dataset-source-grid,
+  .param-workbench,
   .network-grid,
   .analysis-grid {
     grid-template-columns: 1fr;
@@ -1093,7 +1225,8 @@ th {
   }
 
   .field-grid,
-  .metric-grid {
+  .metric-grid,
+  .fit-metrics {
     grid-template-columns: 1fr;
   }
 

@@ -72,6 +72,16 @@ Implemented in `web_gui/`:
   - Many-to-one input connections are summed with normalization.
   - One-to-many fan-out connections drive multiple target devices.
   - Runtime summary shows simulated node count, configured edge count, active edge count, and dataset-to-device adapter status.
+- Device Block transfer inspection:
+  - Signal transfer is now explicit: source current is normalized to activation-like signal, then edge weight/coupling/delay/residual UV are applied to target optical drive.
+  - Edge coupling, residual UV, and delay are adjustable from the Block tab.
+  - Device current traces can be selected with per-cell checkboxes and overlaid in the Block tab.
+- Device Parameters tab:
+  - STM/LTM compact model parameters are editable with sliders.
+  - VDS/Gate route gain and persistence multipliers are editable.
+  - Two-column measured transient CSV can be pasted as `time_s,current_nA`.
+  - Model and measurement traces are overlaid under the current UV pulse program.
+  - A browser-side first-pass auto-fit adjusts gain, dark current, rise tau, decay tau, and retention.
 
 Current limitation:
 - The ANN/SNN front-end is a deterministic compact simulation, not a trained model accuracy benchmark.
@@ -80,16 +90,17 @@ Current limitation:
 - Real dataset acquisition is now scripted, but fetch commands are not automatically run by the static GUI.
 - If the dataset requires more input/output channels than the current device layout, the GUI currently simulates the user's placed blocks with a virtual encoder/readout adapter.
 - ANN/SNN graph propagation currently uses a browser-side forward graph pass. Backward/recurrent edges need a delayed iterative solver or Python backend.
-- Device parameters are not fit from measured raw current-time traces yet.
+- Device parameters can be manually tuned and roughly auto-fitted in-browser, but this is still a first-pass compact fit and not a statistically robust extraction workflow.
 - Public dataset download commands exist, but decoded real samples are not yet streamed into the browser-side simulation.
 - No Python training/inference backend is connected yet.
 
 ## Recommended Next Implementation Steps
 
 1. Device compact model fitting
-   - Fit measured UV current response for both switching routes.
+   - Replace the first-pass browser auto-fit with a Python fitting backend for both switching routes.
    - Extract STM decay, LTM retention, photocurrent gain, noise, and saturation parameters.
    - Store fitted parameters in `web_gui/device_params.json`.
+   - Include confidence intervals, residual plots, and fit report export.
 
 2. Python simulation backend
    - Add a Python backend for real ANN/SNN runs rather than replacing the web GUI with a Python GUI.

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=d1bcd7c3bd85" />
+    <link rel="stylesheet" href="styles.css?v=71617f6495bb" />
   </head>
   <body>
     <div class="app-shell">
@@ -23,6 +23,7 @@
       <nav class="tabs" aria-label="Architecture simulation tabs">
         <button class="active" type="button" data-tab="uv">UV Input</button>
         <button type="button" data-tab="blocks">Device Blocks</button>
+        <button type="button" data-tab="params">Device Parameters</button>
         <button type="button" data-tab="ann">ANN Transient</button>
         <button type="button" data-tab="snn">SNN Spiking</button>
         <button type="button" data-tab="refs">References / Next Work</button>
@@ -254,6 +255,32 @@
                   </label>
                   <button id="connectPairBtn" type="button" class="full-button accent">Connect selected pair</button>
                 </div>
+                <div class="panel network-panel">
+                  <div class="panel-title"><span>Signal transfer model</span><output id="transferSummary">normalized current</output></div>
+                  <p class="compact-note">Source photocurrent is normalized to an activation-like signal, then passed through edge weight, coupling, optional delay, and residual UV drive before it becomes the target device optical drive.</p>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Edge coupling <output id="edgeCouplingOut">0.86</output></span>
+                      <input id="edgeCoupling" type="range" min="0" max="1.5" step="0.01" value="0.86" />
+                    </label>
+                    <label class="field">
+                      <span>Residual UV <output id="edgeResidualOut">0.12</output></span>
+                      <input id="edgeResidual" type="range" min="0" max="0.5" step="0.01" value="0.12" />
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Delay <output id="edgeDelayOut">0 ms</output></span>
+                    <input id="edgeDelay" type="range" min="0" max="200" step="5" value="0" />
+                  </label>
+                </div>
+                <div class="panel network-panel trace-picker-panel">
+                  <div class="panel-title"><span>Device current traces</span><output id="checkedTraceSummary">0 selected</output></div>
+                  <div class="trace-picker-actions">
+                    <button id="selectSourceTargetTracesBtn" type="button" class="ghost-button light">Source + target</button>
+                    <button id="clearTraceSelectionBtn" type="button" class="ghost-button light">Clear</button>
+                  </div>
+                  <div id="deviceTracePicker" class="device-trace-picker" aria-label="Device current trace checkboxes"></div>
+                </div>
               </div>
               <div class="analysis-grid network-analysis">
                 <div class="plot-frame wide">
@@ -274,8 +301,74 @@
                   </div>
                   <canvas id="connectionResponseCanvas" class="plot-canvas tall" width="980" height="440" aria-label="Connected device current response"></canvas>
                 </div>
+                <div class="plot-frame wide">
+                  <div class="plot-toolbar">
+                    <span>Selected device currents</span>
+                    <div class="legend-row">
+                      <i class="legend uv"></i>UV drive
+                      <i class="legend current"></i>checked device current
+                    </div>
+                  </div>
+                  <canvas id="selectedDeviceCurrentCanvas" class="plot-canvas tall" width="980" height="440" aria-label="Checked device current traces"></canvas>
+                </div>
               </div>
             </section>
+          </section>
+
+          <section class="tab-panel" id="tab-params">
+            <div class="section-header">
+              <div>
+                <h2>Device Parameters</h2>
+                <p>Fit the compact STM/LTM photocurrent model to measured UV transient data. Paste time-current CSV, tune sliders, and compare model versus measurement.</p>
+              </div>
+              <div class="inline-actions">
+                <button id="loadDemoMeasurementBtn" type="button" class="ghost-button light">Load demo data</button>
+                <button id="autoFitParamsBtn" type="button" class="primary-button">Auto fit</button>
+              </div>
+            </div>
+            <div class="param-workbench">
+              <div class="panel param-panel">
+                <div class="panel-title"><span>Fit target</span><output id="fitStatus">manual</output></div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Memory mode</span>
+                    <select id="paramModeSelect">
+                      <option value="STM">STM</option>
+                      <option value="LTM">LTM</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Switching route</span>
+                    <select id="paramSwitchSelect">
+                      <option value="vds">Gate 0 V, VDS +/-30 V</option>
+                      <option value="gate">VDS +30 V, Gate 10/40 V</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="parameterSliders" class="parameter-sliders"></div>
+              </div>
+              <div class="panel param-panel">
+                <div class="panel-title"><span>Measured transient data</span><output id="measurementSummary">no data</output></div>
+                <p class="compact-note">Paste two-column data as <code>time_s,current_nA</code>. Header lines and comments are ignored.</p>
+                <textarea id="measurementInput" class="measurement-input" spellcheck="false" placeholder="0.000,1.2&#10;0.010,8.7&#10;0.020,21.4"></textarea>
+                <div class="fit-metrics">
+                  <div><dt>RMSE</dt><dd id="fitRmse">-</dd></div>
+                  <div><dt>Points</dt><dd id="fitPointCount">0</dd></div>
+                  <div><dt>Route</dt><dd id="fitRouteLabel">VDS +/-30</dd></div>
+                </div>
+              </div>
+            </div>
+            <div class="plot-frame wide">
+              <div class="plot-toolbar">
+                <span>Measured vs compact model overlay</span>
+                <div class="legend-row">
+                  <i class="legend current"></i>model current
+                  <i class="legend measured"></i>measured current
+                  <i class="legend uv"></i>UV input
+                </div>
+              </div>
+              <canvas id="parameterFitCanvas" class="plot-canvas tall" width="980" height="520" aria-label="Measured transient and compact model fit overlay"></canvas>
+            </div>
           </section>
 
           <section class="tab-panel" id="tab-ann">
@@ -503,8 +596,9 @@ SNN: I_syn(t) drives LIF membrane</pre>
     </div>
 
     <script src="datasets.js"></script>
+    <script src="device-model.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=fb41705a7487"></script>
+    <script src="app.js?v=be09b2967124"></script>
   </body>
 </html>
