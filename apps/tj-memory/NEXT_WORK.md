@@ -76,6 +76,10 @@ Implemented in `web_gui/`:
   - Signal transfer is now explicit as an O/E/O interface: source photocurrent -> TIA voltage -> UV driver/emitter -> splitter/fan-out -> target optical drive.
   - Driver threshold, driver gain, emitted-UV saturation, splitter loss, optical coupling, direct UV residual, and delay are adjustable from the Block tab.
   - Device current traces can be selected with per-cell checkboxes and overlaid in the Block tab.
+- STM integrate-fire / LTM latch O/E/O transfer:
+  - The Block tab now supports a hybrid transfer mode where STM source devices integrate TIA-driven emitter input and fire UV output pulses only after threshold crossing.
+  - LTM source devices can be modeled as persistent latch/readout outputs with write threshold, readout gain, and retention time controls.
+  - The connection response plot overlays external UV, emitted UV, IF/latch state, source photocurrent, and connected target photocurrent.
 - Device Parameters tab:
   - STM/LTM compact model parameters are editable with sliders.
   - VDS/Gate route gain and persistence multipliers are editable.
@@ -91,6 +95,7 @@ Current limitation:
 - If the dataset requires more input/output channels than the current device layout, the GUI currently simulates the user's placed blocks with a virtual encoder/readout adapter.
 - ANN/SNN graph propagation currently uses a browser-side forward graph pass. Backward/recurrent edges need a delayed iterative solver or Python backend.
 - Device parameters can be manually tuned and roughly auto-fitted in-browser, but this is still a first-pass compact fit and not a statistically robust extraction workflow.
+- The integrate-fire emitter and LTM latch are compact system-level transfer models. Their parameters still need extraction from measured TIA/emitter circuit behavior or a circuit-level SPICE/Python backend.
 - Public dataset download commands exist, but decoded real samples are not yet streamed into the browser-side simulation.
 - No Python training/inference backend is connected yet.
 

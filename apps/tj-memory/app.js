@@ -80,6 +80,17 @@ const defaults = {
   driverGain: 35,
   driverMax: 1.4,
   splitterLossDb: 1.5,
+  transferModelVersion: 2,
+  transferMode: "hybrid",
+  ifTauMs: 120,
+  ifThreshold: 0.18,
+  ifGain: 4,
+  ifReset: 0.05,
+  ifRefractoryMs: 25,
+  emitterPulseMs: 18,
+  ltmWriteThreshold: 0.28,
+  ltmReadoutGain: 0.55,
+  ltmRetentionMs: 850,
   checkedDeviceTraces: ["L0D0", "L1D0"],
   paramMode: "STM",
   paramSwitchMethod: "vds",
@@ -164,6 +175,15 @@ function switchText(method) {
 
 function routeShort(method) {
   return method === "vds" ? "VDS +/-30" : "Gate 10/40";
+}
+
+function transferModeText(mode = state.transferMode) {
+  return {
+    hybrid: "STM IF + LTM latch",
+    continuous: "continuous O/E/O",
+    integrateFire: "IF emitter all",
+    ltmLatch: "LTM latch all",
+  }[mode] || "O/E/O";
 }
 
 function getDataset(kind) {
@@ -284,6 +304,15 @@ function readControls() {
   state.driverGain = Number($("driverGain").value);
   state.driverMax = Number($("driverMax").value);
   state.splitterLossDb = Number($("splitterLossDb").value);
+  state.transferMode = $("transferMode").value;
+  state.ifTauMs = Number($("ifTauMs").value);
+  state.ifThreshold = Number($("ifThreshold").value);
+  state.ifGain = Number($("ifGain").value);
+  state.ifRefractoryMs = Number($("ifRefractoryMs").value);
+  state.emitterPulseMs = Number($("emitterPulseMs").value);
+  state.ltmWriteThreshold = Number($("ltmWriteThreshold").value);
+  state.ltmReadoutGain = Number($("ltmReadoutGain").value);
+  state.ltmRetentionMs = Number($("ltmRetentionMs").value);
   state.paramMode = $("paramModeSelect").value;
   state.paramSwitchMethod = $("paramSwitchSelect").value;
   state.measurementText = $("measurementInput").value;
@@ -316,6 +345,15 @@ function writeControls() {
   $("driverGain").value = state.driverGain;
   $("driverMax").value = state.driverMax;
   $("splitterLossDb").value = state.splitterLossDb;
+  $("transferMode").value = state.transferMode;
+  $("ifTauMs").value = state.ifTauMs;
+  $("ifThreshold").value = state.ifThreshold;
+  $("ifGain").value = state.ifGain;
+  $("ifRefractoryMs").value = state.ifRefractoryMs;
+  $("emitterPulseMs").value = state.emitterPulseMs;
+  $("ltmWriteThreshold").value = state.ltmWriteThreshold;
+  $("ltmReadoutGain").value = state.ltmReadoutGain;
+  $("ltmRetentionMs").value = state.ltmRetentionMs;
   $("paramModeSelect").value = state.paramMode;
   $("paramSwitchSelect").value = state.paramSwitchMethod;
   $("measurementInput").value = state.measurementText;
@@ -348,7 +386,15 @@ function updateReadouts() {
   $("driverGainOut").textContent = `${state.driverGain.toFixed(1)} UV/V`;
   $("driverMaxOut").textContent = state.driverMax.toFixed(2);
   $("splitterLossOut").textContent = `${state.splitterLossDb.toFixed(1)} dB`;
-  $("transferSummary").textContent = `I -> TIA -> UV, fanout loss ${state.splitterLossDb.toFixed(1)} dB`;
+  $("ifTauOut").textContent = `${state.ifTauMs} ms`;
+  $("ifThresholdOut").textContent = state.ifThreshold.toFixed(2);
+  $("ifGainOut").textContent = state.ifGain.toFixed(2);
+  $("ifRefractoryOut").textContent = `${state.ifRefractoryMs} ms`;
+  $("emitterPulseOut").textContent = `${state.emitterPulseMs} ms`;
+  $("ltmWriteThresholdOut").textContent = state.ltmWriteThreshold.toFixed(2);
+  $("ltmReadoutGainOut").textContent = state.ltmReadoutGain.toFixed(2);
+  $("ltmRetentionOut").textContent = `${state.ltmRetentionMs} ms`;
+  $("transferSummary").textContent = `${transferModeText()}, fanout loss ${state.splitterLossDb.toFixed(1)} dB`;
   $("traceSummary").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryLayer").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryInput").textContent = state.programMode === "pwm" ? "UV PWM" : "UV on/off table";
@@ -576,6 +622,16 @@ function edgeTransferDefaults() {
     driverGain: state.driverGain,
     driverMax: state.driverMax,
     splitterLossDb: state.splitterLossDb,
+    transferMode: state.transferMode,
+    ifTauMs: state.ifTauMs,
+    ifThreshold: state.ifThreshold,
+    ifGain: state.ifGain,
+    ifReset: state.ifReset,
+    ifRefractoryMs: state.ifRefractoryMs,
+    emitterPulseMs: state.emitterPulseMs,
+    ltmWriteThreshold: state.ltmWriteThreshold,
+    ltmReadoutGain: state.ltmReadoutGain,
+    ltmRetentionMs: state.ltmRetentionMs,
   };
 }
 
@@ -1191,7 +1247,7 @@ function drawNetworkCanvas() {
   const { ctx, width, height } = setupCanvas(canvas);
   ctx.fillStyle = "#fbfdff";
   ctx.fillRect(0, 0, width, height);
-  drawPlotTitle(ctx, "Device-level input-output network", "nodes are individual devices; edges define optical/electrical signal flow");
+  drawPlotTitle(ctx, "Device-level input-output network", `${transferModeText()}; edges carry emitted optical drive`);
 
   state.layers.forEach((layer, layerIndex) => {
     const p = devicePosition(layerIndex, 0, width, height);
@@ -1240,7 +1296,7 @@ function drawNetworkCanvas() {
     }
   });
   ctx.textAlign = "left";
-  $("networkGraphLabel").textContent = `${state.connections.length} edges / ${Object.keys(state.deviceOverrides).length} overrides`;
+  $("networkGraphLabel").textContent = `${state.connections.length} edges / ${Object.keys(state.deviceOverrides).length} overrides / ${transferModeText()}`;
 }
 
 function traceForKey(key, drive, kind = "block") {
@@ -1285,15 +1341,31 @@ function drawConnectionResponse() {
   const sourceLabel = NET.label(state, state.sourceDevice);
   const targetLabel = result.targets.length === 1 ? NET.label(state, result.targets[0].edge.to) : `${result.targets.length} connected targets`;
 
+  const transferKind = result.sourceTrace.transferKind || transferModeText();
   drawPlotTitle(ctx, "Connected device current response", `${sourceLabel} -> ${targetLabel}`);
   drawGrid(ctx, uvPlot, 2, 6);
   drawLine(ctx, result.timeline, result.uvDrive, uvPlot, 0, 1.1, "#7b2ff2", 2);
   if (result.sourceTrace.opticalOutput) {
     drawLine(ctx, result.timeline, result.sourceTrace.opticalOutput, uvPlot, 0, 1.8, "#d98612", 1.8, 0.85);
   }
+  if (result.sourceTrace.ifMembrane && Math.max(...result.sourceTrace.ifMembrane) > 0.001) {
+    const maxState = Math.max(...result.sourceTrace.ifMembrane, state.ifThreshold, 1);
+    drawLine(ctx, result.timeline, result.sourceTrace.ifMembrane, uvPlot, 0, maxState, "#8a3ffc", 1.6, 0.8);
+  }
+  if (result.sourceTrace.emitterSpikes?.length) {
+    ctx.strokeStyle = "rgba(138,63,252,0.75)";
+    ctx.lineWidth = 1;
+    result.sourceTrace.emitterSpikes.forEach((time) => {
+      const x = timeToX(time, result.timeline, uvPlot);
+      ctx.beginPath();
+      ctx.moveTo(x, uvPlot.top + 3);
+      ctx.lineTo(x, uvPlot.bottom - 3);
+      ctx.stroke();
+    });
+  }
   ctx.fillStyle = "#627381";
   ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
-  ctx.fillText("external UV and source-emitted UV", uvPlot.left, uvPlot.top - 8);
+  ctx.fillText(`external UV, emitted UV, IF/latch state (${transferKind})`, uvPlot.left, uvPlot.top - 8);
 
   drawGrid(ctx, currentPlot, 4, 6);
   result.targets.forEach((target, index) => {
@@ -1700,7 +1772,7 @@ function renderRuntimeSummary(kind, result) {
   panel.innerHTML = `
     <span class="status-pill ${adapterNeeded ? "needs-adapter" : "ok"}">Graph backend</span>
     <strong>${graph.nodeCount || 0} simulated devices / ${edgeText}</strong>
-    <p>${contract.dataset.label}: ${contract.requiredInput ? formatChannelCount(contract.requiredInput) : "architecture-defined"} input channels -> ${contract.inputDevices} physical input devices, ${contract.requiredOutput} output classes -> ${contract.outputDevices} output devices. ${adapterText}. Capped at ${graph.maxPerLayer || 32} simulated devices per layer for browser performance.</p>
+    <p>${contract.dataset.label}: ${contract.requiredInput ? formatChannelCount(contract.requiredInput) : "architecture-defined"} input channels -> ${contract.inputDevices} physical input devices, ${contract.requiredOutput} output classes -> ${contract.outputDevices} output devices. ${adapterText}. Transfer: ${transferModeText()}. Capped at ${graph.maxPerLayer || 32} simulated devices per layer for browser performance.</p>
   `;
 }
 
@@ -2061,6 +2133,7 @@ function restore() {
   try {
     const saved = JSON.parse(window.localStorage.getItem("uv-stm-ltm-architecture-state") || "null");
     if (!saved || typeof saved !== "object") return;
+    const savedTransferModelVersion = Number(saved.transferModelVersion || 0);
     Object.assign(state, deepClone(defaults), saved);
     if (!Array.isArray(state.layers) || state.layers.length < 2) state.layers = deepClone(defaults.layers);
     state.selectedLayer = safeLayerIndex(state.selectedLayer);
@@ -2075,6 +2148,29 @@ function restore() {
     state.driverGain = clamp(Number.isFinite(Number(state.driverGain)) ? Number(state.driverGain) : defaults.driverGain, 1, 140);
     state.driverMax = clamp(Number.isFinite(Number(state.driverMax)) ? Number(state.driverMax) : defaults.driverMax, 0.1, 1.8);
     state.splitterLossDb = clamp(Number.isFinite(Number(state.splitterLossDb)) ? Number(state.splitterLossDb) : defaults.splitterLossDb, 0, 12);
+    if (!["hybrid", "continuous", "integrateFire", "ltmLatch"].includes(state.transferMode)) state.transferMode = defaults.transferMode;
+    state.ifTauMs = clamp(Number.isFinite(Number(state.ifTauMs)) ? Number(state.ifTauMs) : defaults.ifTauMs, 5, 500);
+    state.ifThreshold = clamp(Number.isFinite(Number(state.ifThreshold)) ? Number(state.ifThreshold) : defaults.ifThreshold, 0.05, 1.5);
+    state.ifGain = clamp(Number.isFinite(Number(state.ifGain)) ? Number(state.ifGain) : defaults.ifGain, 0.1, 5);
+    state.ifReset = clamp(Number.isFinite(Number(state.ifReset)) ? Number(state.ifReset) : defaults.ifReset, 0, 1);
+    state.ifRefractoryMs = clamp(Number.isFinite(Number(state.ifRefractoryMs)) ? Number(state.ifRefractoryMs) : defaults.ifRefractoryMs, 0, 250);
+    state.emitterPulseMs = clamp(Number.isFinite(Number(state.emitterPulseMs)) ? Number(state.emitterPulseMs) : defaults.emitterPulseMs, 2, 120);
+    state.ltmWriteThreshold = clamp(Number.isFinite(Number(state.ltmWriteThreshold)) ? Number(state.ltmWriteThreshold) : defaults.ltmWriteThreshold, 0.01, 1.2);
+    state.ltmReadoutGain = clamp(Number.isFinite(Number(state.ltmReadoutGain)) ? Number(state.ltmReadoutGain) : defaults.ltmReadoutGain, 0, 1.2);
+    state.ltmRetentionMs = clamp(Number.isFinite(Number(state.ltmRetentionMs)) ? Number(state.ltmRetentionMs) : defaults.ltmRetentionMs, 100, 5000);
+    if (savedTransferModelVersion < defaults.transferModelVersion) {
+      state.transferModelVersion = defaults.transferModelVersion;
+      state.transferMode = defaults.transferMode;
+      state.ifTauMs = defaults.ifTauMs;
+      state.ifThreshold = defaults.ifThreshold;
+      state.ifGain = defaults.ifGain;
+      state.ifReset = defaults.ifReset;
+      state.ifRefractoryMs = defaults.ifRefractoryMs;
+      state.emitterPulseMs = defaults.emitterPulseMs;
+      state.ltmWriteThreshold = defaults.ltmWriteThreshold;
+      state.ltmReadoutGain = defaults.ltmReadoutGain;
+      state.ltmRetentionMs = defaults.ltmRetentionMs;
+    }
     state.paramMode = state.paramMode === "LTM" ? "LTM" : "STM";
     state.paramSwitchMethod = state.paramSwitchMethod === "gate" ? "gate" : "vds";
     state.measurementText = typeof state.measurementText === "string" ? state.measurementText : "";

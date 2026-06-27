@@ -81,6 +81,101 @@
     return voltageTrace.map((voltage) => clamp((voltage - threshold) * driverGain, 0, driverMax));
   }
 
+  function sampleDt(timeline, index) {
+    if (index <= 0 || timeline.length < 2) {
+      const totalTime = timeline[timeline.length - 1]?.t - timeline[0]?.t;
+      return Number.isFinite(totalTime) ? totalTime / Math.max(1, timeline.length - 1) : 0.001;
+    }
+    return Math.max(0.000001, timeline[index].t - timeline[index - 1].t);
+  }
+
+  function pulseSteps(timeline, pulseMs) {
+    if (timeline.length < 2) return 1;
+    const totalTime = timeline[timeline.length - 1].t - timeline[0].t;
+    const dt = totalTime / Math.max(1, timeline.length - 1);
+    return Math.max(1, Math.round((Number(pulseMs || 0) / 1000) / Math.max(dt, 0.000001)));
+  }
+
+  function integrateFireEmitter(continuousOutput, timeline, edgeDefaults) {
+    const driverMax = Math.max(0.001, Number(edgeDefaults?.driverMax ?? 1.4));
+    const tau = Math.max(0.001, Number(edgeDefaults?.ifTauMs ?? 85) / 1000);
+    const threshold = Math.max(0.001, Number(edgeDefaults?.ifThreshold ?? 0.42));
+    const gain = Math.max(0, Number(edgeDefaults?.ifGain ?? 1.7));
+    const reset = clamp(Number(edgeDefaults?.ifReset ?? 0.05), 0, threshold * 0.95);
+    const refractorySec = Math.max(0, Number(edgeDefaults?.ifRefractoryMs ?? 25) / 1000);
+    const emitSteps = pulseSteps(timeline, Number(edgeDefaults?.emitterPulseMs ?? 18));
+    const output = new Array(continuousOutput.length).fill(0);
+    const membrane = new Array(continuousOutput.length).fill(0);
+    const spikes = [];
+    let u = 0;
+    let pulseLeft = 0;
+    let refractoryUntil = -Infinity;
+
+    for (let index = 0; index < continuousOutput.length; index += 1) {
+      const t = timeline[index]?.t || 0;
+      const dt = sampleDt(timeline, index);
+      const decay = Math.exp(-dt / tau);
+      const drive = clamp((continuousOutput[index] || 0) / driverMax, 0, 1.8);
+
+      if (t >= refractoryUntil) {
+        u = u * decay + drive * gain * (1 - decay);
+        if (u >= threshold) {
+          spikes.push(t);
+          u = reset;
+          pulseLeft = emitSteps;
+          refractoryUntil = t + refractorySec;
+        }
+      } else {
+        u = reset;
+      }
+
+      if (pulseLeft > 0) {
+        output[index] = driverMax;
+        pulseLeft -= 1;
+      }
+      membrane[index] = u;
+    }
+
+    return { output, membrane, spikes, kind: "STM integrate-fire" };
+  }
+
+  function ltmLatchReadout(continuousOutput, timeline, edgeDefaults) {
+    const driverMax = Math.max(0.001, Number(edgeDefaults?.driverMax ?? 1.4));
+    const writeThreshold = clamp(Number(edgeDefaults?.ltmWriteThreshold ?? 0.28), 0, 1.8);
+    const readoutGain = Math.max(0, Number(edgeDefaults?.ltmReadoutGain ?? 0.55));
+    const tau = Math.max(0.001, Number(edgeDefaults?.ltmRetentionMs ?? 850) / 1000);
+    const output = new Array(continuousOutput.length).fill(0);
+    const latch = new Array(continuousOutput.length).fill(0);
+    let state = 0;
+
+    for (let index = 0; index < continuousOutput.length; index += 1) {
+      const dt = sampleDt(timeline, index);
+      const drive = clamp((continuousOutput[index] || 0) / driverMax, 0, 1.8);
+      state *= Math.exp(-dt / tau);
+      if (drive >= writeThreshold) state = Math.max(state, drive);
+      latch[index] = state;
+      output[index] = clamp(state * driverMax * readoutGain, 0, driverMax);
+    }
+
+    return { output, membrane: latch, spikes: [], kind: "LTM latch/readout" };
+  }
+
+  function transferOutput(device, readoutVoltage, timeline, edgeDefaults) {
+    const continuous = driverOutput(readoutVoltage, edgeDefaults);
+    const mode = edgeDefaults?.transferMode || "hybrid";
+    const sourceMode = device.mode === "LTM" ? "LTM" : "STM";
+    if (mode === "continuous") {
+      return { output: continuous, membrane: continuous.map(() => 0), spikes: [], kind: "continuous analog" };
+    }
+    if (mode === "integrateFire" || (mode === "hybrid" && sourceMode === "STM")) {
+      return integrateFireEmitter(continuous, timeline, edgeDefaults);
+    }
+    if (mode === "ltmLatch" || (mode === "hybrid" && sourceMode === "LTM")) {
+      return ltmLatchReadout(continuous, timeline, edgeDefaults);
+    }
+    return { output: continuous, membrane: continuous.map(() => 0), spikes: [], kind: "continuous analog" };
+  }
+
   function splitterScale(sourceNode, edgeDefaults) {
     const splitterLossDb = Number(edgeDefaults?.splitterLossDb ?? 1.5);
     const loss = 10 ** (-splitterLossDb / 10);
@@ -181,7 +276,8 @@
         const drive = combineDrives(drives, length);
         const device = simulateDeviceTrace(timeline, drive, layer, layerIndex, parsed.deviceIndex, kind);
         const readoutVoltage = currentToVoltage(device.trace, tiaGain);
-        const opticalOutput = driverOutput(readoutVoltage, edgeDefaults);
+        const continuousOpticalOutput = driverOutput(readoutVoltage, edgeDefaults);
+        const transfer = transferOutput(device, readoutVoltage, timeline, edgeDefaults);
         const rawSignal = normalizeTrace(device.trace);
         const signal = rawSignal.map((value) => 1 / (1 + Math.exp(-5.4 * (value - 0.38))));
         const node = {
@@ -190,7 +286,11 @@
           deviceIndex: parsed.deviceIndex,
           drive,
           readoutVoltage,
-          opticalOutput,
+          continuousOpticalOutput,
+          opticalOutput: transfer.output,
+          transferKind: transfer.kind,
+          ifMembrane: transfer.membrane,
+          emitterSpikes: transfer.spikes,
           signal,
           incomingEdges: incomingEdges.length,
           outgoingEdges: outgoing.get(deviceKey)?.length || 0,

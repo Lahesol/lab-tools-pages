@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=71617f6495bb" />
+    <link rel="stylesheet" href="styles.css?v=0379de086cf7" />
   </head>
   <body>
     <div class="app-shell">
@@ -257,7 +257,16 @@
                 </div>
                 <div class="panel network-panel">
                   <div class="panel-title"><span>O/E/O transfer model</span><output id="transferSummary">I -> TIA -> UV</output></div>
-                  <p class="compact-note">Source photocurrent is converted by the TIA, thresholded by a UV driver, emitted as optical power, split across fan-out edges, then injected as the next device optical input.</p>
+                  <p class="compact-note">Source photocurrent is converted by the TIA, then either drives a continuous UV emitter or an STM integrate-fire emitter before optical fan-out into connected devices.</p>
+                  <label class="field">
+                    <span>Transfer mode</span>
+                    <select id="transferMode">
+                      <option value="hybrid">Hybrid: STM IF emitter + LTM latch</option>
+                      <option value="continuous">Continuous analog O/E/O</option>
+                      <option value="integrateFire">Integrate-fire emitter for all sources</option>
+                      <option value="ltmLatch">LTM latch/readout for all sources</option>
+                    </select>
+                  </label>
                   <div class="field-grid">
                     <label class="field">
                       <span>Driver threshold <output id="driverThresholdOut">2.0 mV</output></span>
@@ -292,6 +301,46 @@
                     <span>Delay <output id="edgeDelayOut">0 ms</output></span>
                     <input id="edgeDelay" type="range" min="0" max="200" step="5" value="0" />
                   </label>
+                  <div class="compact-subtitle">STM integrate-fire emitter</div>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>IF tau <output id="ifTauOut">120 ms</output></span>
+                      <input id="ifTauMs" type="range" min="5" max="500" step="5" value="120" />
+                    </label>
+                    <label class="field">
+                      <span>IF threshold <output id="ifThresholdOut">0.18</output></span>
+                      <input id="ifThreshold" type="range" min="0.05" max="1.5" step="0.01" value="0.18" />
+                    </label>
+                  </div>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>IF gain <output id="ifGainOut">4.00</output></span>
+                      <input id="ifGain" type="range" min="0.1" max="5" step="0.05" value="4" />
+                    </label>
+                    <label class="field">
+                      <span>Emitter pulse <output id="emitterPulseOut">18 ms</output></span>
+                      <input id="emitterPulseMs" type="range" min="2" max="120" step="2" value="18" />
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Refractory <output id="ifRefractoryOut">25 ms</output></span>
+                    <input id="ifRefractoryMs" type="range" min="0" max="250" step="5" value="25" />
+                  </label>
+                  <div class="compact-subtitle">LTM latch/readout</div>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Write threshold <output id="ltmWriteThresholdOut">0.28</output></span>
+                      <input id="ltmWriteThreshold" type="range" min="0.01" max="1.2" step="0.01" value="0.28" />
+                    </label>
+                    <label class="field">
+                      <span>Readout gain <output id="ltmReadoutGainOut">0.55</output></span>
+                      <input id="ltmReadoutGain" type="range" min="0" max="1.2" step="0.01" value="0.55" />
+                    </label>
+                  </div>
+                  <label class="field">
+                    <span>Retention tau <output id="ltmRetentionOut">850 ms</output></span>
+                    <input id="ltmRetentionMs" type="range" min="100" max="5000" step="50" value="850" />
+                  </label>
                 </div>
                 <div class="panel network-panel trace-picker-panel">
                   <div class="panel-title"><span>Device current traces</span><output id="checkedTraceSummary">0 selected</output></div>
@@ -316,6 +365,7 @@
                     <div class="legend-row">
                       <i class="legend uv"></i>UV pulse
                       <i class="legend tia"></i>emitted UV
+                      <i class="legend membrane"></i>IF/latch state
                       <i class="legend current"></i>source current
                       <i class="legend measured"></i>connected target current
                     </div>
@@ -593,6 +643,7 @@ LTM: slower decay + residual retention
 Route A: Gate = 0 V, VDS = +/-30 V
 Route B: VDS = +30 V, Gate = 10/40 V
 TIA: V_out(t) = -I_photo(t) * R_TIA
+O/E/O: STM uses integrate-fire emitter; LTM uses latch/readout
 SNN: I_syn(t) drives LIF membrane</pre>
           </div>
 
@@ -620,6 +671,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-model.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=243a83410e4a"></script>
+    <script src="app.js?v=de7f75bece55"></script>
   </body>
 </html>
