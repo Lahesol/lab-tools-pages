@@ -70,13 +70,36 @@
     return values.map((_, index) => (index >= steps ? values[index - steps] : 0));
   }
 
+  function currentToVoltage(trace, tiaGainKohm) {
+    return trace.map((currentNa) => Math.abs(currentNa * tiaGainKohm * 1e-6));
+  }
+
+  function driverOutput(voltageTrace, edgeDefaults) {
+    const threshold = Number(edgeDefaults?.driverThresholdMv ?? 2) / 1000;
+    const driverGain = Number(edgeDefaults?.driverGain ?? 35);
+    const driverMax = Number(edgeDefaults?.driverMax ?? 1.4);
+    return voltageTrace.map((voltage) => clamp((voltage - threshold) * driverGain, 0, driverMax));
+  }
+
+  function splitterScale(sourceNode, edgeDefaults) {
+    const splitterLossDb = Number(edgeDefaults?.splitterLossDb ?? 1.5);
+    const loss = 10 ** (-splitterLossDb / 10);
+    const fanoutCount = Math.max(1, sourceNode.outgoingEdges || 1);
+    return loss / Math.sqrt(fanoutCount);
+  }
+
   function edgeDrive(sourceNode, edge, timeline, baseDrive, edgeDefaults) {
     const weight = Number.isFinite(Number(edge.weight)) ? Number(edge.weight) : 1;
     const coupling = Number.isFinite(Number(edge.coupling)) ? Number(edge.coupling) : Number(edgeDefaults?.coupling ?? 0.86);
     const opticalResidual = Number.isFinite(Number(edge.opticalResidual)) ? Number(edge.opticalResidual) : Number(edgeDefaults?.opticalResidual ?? 0.12);
     const delayEdge = Number.isFinite(Number(edge.delayMs)) ? edge : { ...edge, delayMs: edgeDefaults?.delayMs || 0 };
-    const shifted = delayedSignal(sourceNode.signal, delaySteps(delayEdge, timeline));
-    return shifted.map((value, index) => clamp(value * weight * coupling + (baseDrive[index] || 0) * opticalResidual, 0, 1.8));
+    const shifted = delayedSignal(sourceNode.opticalOutput || sourceNode.signal, delaySteps(delayEdge, timeline));
+    const fanout = splitterScale(sourceNode, edgeDefaults);
+    return shifted.map((value, index) => {
+      const convertedLight = value * fanout * weight * coupling;
+      const residualLight = (baseDrive[index] || 0) * opticalResidual;
+      return clamp(convertedLight + residualLight, 0, 1.8);
+    });
   }
 
   function buildEdgeMaps(connections, validKeys) {
@@ -157,6 +180,8 @@
 
         const drive = combineDrives(drives, length);
         const device = simulateDeviceTrace(timeline, drive, layer, layerIndex, parsed.deviceIndex, kind);
+        const readoutVoltage = currentToVoltage(device.trace, tiaGain);
+        const opticalOutput = driverOutput(readoutVoltage, edgeDefaults);
         const rawSignal = normalizeTrace(device.trace);
         const signal = rawSignal.map((value) => 1 / (1 + Math.exp(-5.4 * (value - 0.38))));
         const node = {
@@ -164,6 +189,8 @@
           layerIndex,
           deviceIndex: parsed.deviceIndex,
           drive,
+          readoutVoltage,
+          opticalOutput,
           signal,
           incomingEdges: incomingEdges.length,
           outgoingEdges: outgoing.get(deviceKey)?.length || 0,

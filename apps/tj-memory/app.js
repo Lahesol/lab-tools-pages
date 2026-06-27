@@ -76,6 +76,10 @@ const defaults = {
   edgeCoupling: 0.86,
   edgeResidual: 0.12,
   edgeDelay: 0,
+  driverThresholdMv: 2,
+  driverGain: 35,
+  driverMax: 1.4,
+  splitterLossDb: 1.5,
   checkedDeviceTraces: ["L0D0", "L1D0"],
   paramMode: "STM",
   paramSwitchMethod: "vds",
@@ -276,6 +280,10 @@ function readControls() {
   state.edgeCoupling = Number($("edgeCoupling").value);
   state.edgeResidual = Number($("edgeResidual").value);
   state.edgeDelay = Number($("edgeDelay").value);
+  state.driverThresholdMv = Number($("driverThresholdMv").value);
+  state.driverGain = Number($("driverGain").value);
+  state.driverMax = Number($("driverMax").value);
+  state.splitterLossDb = Number($("splitterLossDb").value);
   state.paramMode = $("paramModeSelect").value;
   state.paramSwitchMethod = $("paramSwitchSelect").value;
   state.measurementText = $("measurementInput").value;
@@ -304,6 +312,10 @@ function writeControls() {
   $("edgeCoupling").value = state.edgeCoupling;
   $("edgeResidual").value = state.edgeResidual;
   $("edgeDelay").value = state.edgeDelay;
+  $("driverThresholdMv").value = state.driverThresholdMv;
+  $("driverGain").value = state.driverGain;
+  $("driverMax").value = state.driverMax;
+  $("splitterLossDb").value = state.splitterLossDb;
   $("paramModeSelect").value = state.paramMode;
   $("paramSwitchSelect").value = state.paramSwitchMethod;
   $("measurementInput").value = state.measurementText;
@@ -332,7 +344,11 @@ function updateReadouts() {
   $("edgeCouplingOut").textContent = state.edgeCoupling.toFixed(2);
   $("edgeResidualOut").textContent = state.edgeResidual.toFixed(2);
   $("edgeDelayOut").textContent = `${state.edgeDelay} ms`;
-  $("transferSummary").textContent = `signal * ${state.edgeCoupling.toFixed(2)} + UV * ${state.edgeResidual.toFixed(2)}`;
+  $("driverThresholdOut").textContent = `${state.driverThresholdMv.toFixed(1)} mV`;
+  $("driverGainOut").textContent = `${state.driverGain.toFixed(1)} UV/V`;
+  $("driverMaxOut").textContent = state.driverMax.toFixed(2);
+  $("splitterLossOut").textContent = `${state.splitterLossDb.toFixed(1)} dB`;
+  $("transferSummary").textContent = `I -> TIA -> UV, fanout loss ${state.splitterLossDb.toFixed(1)} dB`;
   $("traceSummary").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryLayer").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryInput").textContent = state.programMode === "pwm" ? "UV PWM" : "UV on/off table";
@@ -551,6 +567,18 @@ function blockInputDriveForDevice(timeline, layerIndex) {
   });
 }
 
+function edgeTransferDefaults() {
+  return {
+    coupling: state.edgeCoupling,
+    opticalResidual: state.edgeResidual,
+    delayMs: state.edgeDelay,
+    driverThresholdMv: state.driverThresholdMv,
+    driverGain: state.driverGain,
+    driverMax: state.driverMax,
+    splitterLossDb: state.splitterLossDb,
+  };
+}
+
 function simulateBlockGraph() {
   const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
   return GRAPH_SIM.simulate({
@@ -562,11 +590,7 @@ function simulateBlockGraph() {
     simulateDeviceTrace,
     tiaGain: state.tiaGain,
     tiaEnabled: state.tiaEnabled,
-    edgeDefaults: {
-      coupling: state.edgeCoupling,
-      opticalResidual: state.edgeResidual,
-      delayMs: state.edgeDelay,
-    },
+    edgeDefaults: edgeTransferDefaults(),
   });
 }
 
@@ -581,11 +605,7 @@ function simulateArchitecture(kind) {
     simulateDeviceTrace,
     tiaGain: state.tiaGain,
     tiaEnabled: state.tiaEnabled,
-    edgeDefaults: {
-      coupling: state.edgeCoupling,
-      opticalResidual: state.edgeResidual,
-      delayMs: state.edgeDelay,
-    },
+    edgeDefaults: edgeTransferDefaults(),
   });
 
   if (kind === "snn") addSnnDynamics(result);
@@ -1268,9 +1288,12 @@ function drawConnectionResponse() {
   drawPlotTitle(ctx, "Connected device current response", `${sourceLabel} -> ${targetLabel}`);
   drawGrid(ctx, uvPlot, 2, 6);
   drawLine(ctx, result.timeline, result.uvDrive, uvPlot, 0, 1.1, "#7b2ff2", 2);
+  if (result.sourceTrace.opticalOutput) {
+    drawLine(ctx, result.timeline, result.sourceTrace.opticalOutput, uvPlot, 0, 1.8, "#d98612", 1.8, 0.85);
+  }
   ctx.fillStyle = "#627381";
   ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
-  ctx.fillText("UV input", uvPlot.left, uvPlot.top - 8);
+  ctx.fillText("external UV and source-emitted UV", uvPlot.left, uvPlot.top - 8);
 
   drawGrid(ctx, currentPlot, 4, 6);
   result.targets.forEach((target, index) => {
@@ -2045,9 +2068,13 @@ function restore() {
     state.traceDevices = clamp(Number(state.traceDevices) || defaults.traceDevices, 4, 32);
     state.deviceVariation = clamp(Number(state.deviceVariation) || defaults.deviceVariation, 0, 20);
     state.fanCount = clamp(Number(state.fanCount) || defaults.fanCount, 1, 24);
-    state.edgeCoupling = clamp(Number(state.edgeCoupling) || defaults.edgeCoupling, 0, 1.5);
-    state.edgeResidual = clamp(Number(state.edgeResidual) || defaults.edgeResidual, 0, 0.5);
-    state.edgeDelay = clamp(Number(state.edgeDelay) || defaults.edgeDelay, 0, 200);
+    state.edgeCoupling = clamp(Number.isFinite(Number(state.edgeCoupling)) ? Number(state.edgeCoupling) : defaults.edgeCoupling, 0, 1.5);
+    state.edgeResidual = clamp(Number.isFinite(Number(state.edgeResidual)) ? Number(state.edgeResidual) : defaults.edgeResidual, 0, 0.5);
+    state.edgeDelay = clamp(Number.isFinite(Number(state.edgeDelay)) ? Number(state.edgeDelay) : defaults.edgeDelay, 0, 200);
+    state.driverThresholdMv = clamp(Number.isFinite(Number(state.driverThresholdMv)) ? Number(state.driverThresholdMv) : defaults.driverThresholdMv, 0, 50);
+    state.driverGain = clamp(Number.isFinite(Number(state.driverGain)) ? Number(state.driverGain) : defaults.driverGain, 1, 140);
+    state.driverMax = clamp(Number.isFinite(Number(state.driverMax)) ? Number(state.driverMax) : defaults.driverMax, 0.1, 1.8);
+    state.splitterLossDb = clamp(Number.isFinite(Number(state.splitterLossDb)) ? Number(state.splitterLossDb) : defaults.splitterLossDb, 0, 12);
     state.paramMode = state.paramMode === "LTM" ? "LTM" : "STM";
     state.paramSwitchMethod = state.paramSwitchMethod === "gate" ? "gate" : "vds";
     state.measurementText = typeof state.measurementText === "string" ? state.measurementText : "";

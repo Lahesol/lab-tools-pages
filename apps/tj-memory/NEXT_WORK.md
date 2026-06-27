@@ -73,8 +73,8 @@ Implemented in `web_gui/`:
   - One-to-many fan-out connections drive multiple target devices.
   - Runtime summary shows simulated node count, configured edge count, active edge count, and dataset-to-device adapter status.
 - Device Block transfer inspection:
-  - Signal transfer is now explicit: source current is normalized to activation-like signal, then edge weight/coupling/delay/residual UV are applied to target optical drive.
-  - Edge coupling, residual UV, and delay are adjustable from the Block tab.
+  - Signal transfer is now explicit as an O/E/O interface: source photocurrent -> TIA voltage -> UV driver/emitter -> splitter/fan-out -> target optical drive.
+  - Driver threshold, driver gain, emitted-UV saturation, splitter loss, optical coupling, direct UV residual, and delay are adjustable from the Block tab.
   - Device current traces can be selected with per-cell checkboxes and overlaid in the Block tab.
 - Device Parameters tab:
   - STM/LTM compact model parameters are editable with sliders.

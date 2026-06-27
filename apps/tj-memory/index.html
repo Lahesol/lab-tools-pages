@@ -256,15 +256,35 @@
                   <button id="connectPairBtn" type="button" class="full-button accent">Connect selected pair</button>
                 </div>
                 <div class="panel network-panel">
-                  <div class="panel-title"><span>Signal transfer model</span><output id="transferSummary">normalized current</output></div>
-                  <p class="compact-note">Source photocurrent is normalized to an activation-like signal, then passed through edge weight, coupling, optional delay, and residual UV drive before it becomes the target device optical drive.</p>
+                  <div class="panel-title"><span>O/E/O transfer model</span><output id="transferSummary">I -> TIA -> UV</output></div>
+                  <p class="compact-note">Source photocurrent is converted by the TIA, thresholded by a UV driver, emitted as optical power, split across fan-out edges, then injected as the next device optical input.</p>
                   <div class="field-grid">
                     <label class="field">
-                      <span>Edge coupling <output id="edgeCouplingOut">0.86</output></span>
+                      <span>Driver threshold <output id="driverThresholdOut">2.0 mV</output></span>
+                      <input id="driverThresholdMv" type="range" min="0" max="50" step="0.5" value="2" />
+                    </label>
+                    <label class="field">
+                      <span>Driver gain <output id="driverGainOut">35.0 UV/V</output></span>
+                      <input id="driverGain" type="range" min="1" max="140" step="1" value="35" />
+                    </label>
+                  </div>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Max emitted UV <output id="driverMaxOut">1.40</output></span>
+                      <input id="driverMax" type="range" min="0.1" max="1.8" step="0.01" value="1.4" />
+                    </label>
+                    <label class="field">
+                      <span>Splitter loss <output id="splitterLossOut">1.5 dB</output></span>
+                      <input id="splitterLossDb" type="range" min="0" max="12" step="0.1" value="1.5" />
+                    </label>
+                  </div>
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Optical coupling <output id="edgeCouplingOut">0.86</output></span>
                       <input id="edgeCoupling" type="range" min="0" max="1.5" step="0.01" value="0.86" />
                     </label>
                     <label class="field">
-                      <span>Residual UV <output id="edgeResidualOut">0.12</output></span>
+                      <span>Direct UV residual <output id="edgeResidualOut">0.12</output></span>
                       <input id="edgeResidual" type="range" min="0" max="0.5" step="0.01" value="0.12" />
                     </label>
                   </div>
@@ -295,8 +315,9 @@
                     <span>Connected device current response</span>
                     <div class="legend-row">
                       <i class="legend uv"></i>UV pulse
+                      <i class="legend tia"></i>emitted UV
                       <i class="legend current"></i>source current
-                      <i class="legend tia"></i>connected target current
+                      <i class="legend measured"></i>connected target current
                     </div>
                   </div>
                   <canvas id="connectionResponseCanvas" class="plot-canvas tall" width="980" height="440" aria-label="Connected device current response"></canvas>
@@ -599,6 +620,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-model.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=be09b2967124"></script>
+    <script src="app.js?v=243a83410e4a"></script>
   </body>
 </html>
