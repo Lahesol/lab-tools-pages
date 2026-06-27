@@ -1,4 +1,5 @@
 const els = {
+  uiScale: document.querySelector("#uiScale"),
   serialSupport: document.querySelector("#serialSupport"),
   connectionStatus: document.querySelector("#connectionStatus"),
   transportMode: document.querySelector("#transportMode"),
@@ -31,12 +32,16 @@ const els = {
   yMin: document.querySelector("#yMin"),
   yMax: document.querySelector("#yMax"),
   filterMode: document.querySelector("#filterMode"),
+  valueMode: document.querySelector("#valueMode"),
+  biasValue: document.querySelector("#biasValue"),
+  measureBiasButton: document.querySelector("#measureBiasButton"),
   filterWindow: document.querySelector("#filterWindow"),
   filterWindowField: document.querySelector("#filterWindowField"),
   highCutoff: document.querySelector("#highCutoff"),
   highCutoffField: document.querySelector("#highCutoffField"),
   lowCutoff: document.querySelector("#lowCutoff"),
   lowCutoffField: document.querySelector("#lowCutoffField"),
+  valueSummary: document.querySelector("#valueSummary"),
   filterSummary: document.querySelector("#filterSummary"),
   pauseButton: document.querySelector("#pauseButton"),
   clearSamplesButton: document.querySelector("#clearSamplesButton"),
@@ -72,10 +77,13 @@ const state = {
   parseBuffer: "",
   binaryBuffer: [],
   samples: [],
+  pendingSamples: [],
   totalSamples: 0,
   latest: null,
   latestChannel: "ADC",
   adcSource: "ADC3",
+  valueMode: "adc",
+  adcBias: { ADC3: null, ADC2: null, ADC0: null },
   dacValues: { A: 2048, B: 2056 },
   bitMode: false,
   bits: [],
@@ -98,6 +106,9 @@ const state = {
   liveSendTimer: null,
   writeQueue: Promise.resolve(),
   maxSamples: 2000,
+  maxPendingSamples: 4000,
+  sampleDrainScheduled: false,
+  nextSampleDrainAt: 0,
   lastStatsAt: 0,
   needsDraw: true,
   lastDrawAt: 0,
@@ -111,6 +122,10 @@ const NUS_RX_WRITE_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_TX_NOTIFY_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const NOISE_BASELINE_ALPHA = 0.02;
 const NOISE_WARMUP_SAMPLES = 12;
+const ADC_CURRENT_SCALE = 1.8 / 8192;
+const ADC_BIAS_SAMPLE_COUNT = 128;
+const UI_SCALE_STORAGE_KEY = "ppgTrngUiScale";
+const UI_SCALE_VALUES = new Set(["compact", "standard", "large", "touch"]);
 const CHANNEL_ORDER = ["ADC", "G", "I", "R", "A"];
 const CHANNEL_LABELS = {
   ADC: "ADC",
@@ -220,6 +235,36 @@ function logLine(message) {
   addLog("SYS", message);
 }
 
+function getDefaultUiScale() {
+  return window.matchMedia?.("(max-width: 780px)")?.matches ? "touch" : "standard";
+}
+
+function loadUiScale() {
+  try {
+    const saved = window.localStorage?.getItem(UI_SCALE_STORAGE_KEY);
+    return UI_SCALE_VALUES.has(saved) ? saved : getDefaultUiScale();
+  } catch {
+    return getDefaultUiScale();
+  }
+}
+
+function setUiScale(scale, persist = true) {
+  const normalized = UI_SCALE_VALUES.has(scale) ? scale : "standard";
+  document.documentElement.dataset.uiScale = normalized;
+  if (els.uiScale) els.uiScale.value = normalized;
+  if (persist) {
+    try {
+      window.localStorage?.setItem(UI_SCALE_STORAGE_KEY, normalized);
+    } catch {
+      // Ignore storage failures in restricted browser contexts.
+    }
+  }
+  window.requestAnimationFrame(() => {
+    resizeCanvas();
+    resizeBitCanvas();
+  });
+}
+
 function setConnected(connected) {
   setConnectedUi(Boolean(connected));
 }
@@ -302,6 +347,86 @@ function getAdcSourceDescription(source = state.adcSource) {
   return getAdcSourceInfo(source).detail;
 }
 
+function getValueMode() {
+  return els.valueMode?.value === "current" ? "current" : "adc";
+}
+
+function getAdcBias(source = state.adcSource) {
+  const normalized = normalizeAdcSource(source) || state.adcSource;
+  const value = state.adcBias[normalized];
+  return Number.isFinite(value) ? value : null;
+}
+
+function setAdcBias(source, value, options = {}) {
+  const normalized = normalizeAdcSource(source) || state.adcSource;
+  const number = Number.parseFloat(value);
+  state.adcBias[normalized] = Number.isFinite(number) ? number : null;
+  updateValueUi();
+  updateStats();
+  state.needsDraw = true;
+  if (!options.silent && Number.isFinite(number)) {
+    addLog("SYS", `Bias ${normalized} = ${number.toFixed(1)}`);
+  }
+}
+
+function measureBiasFromSamples(options = {}) {
+  const source = normalizeAdcSource(options.source) || state.adcSource;
+  const candidates = state.samples
+    .filter((sample) => (sample.channel || "ADC") === "ADC")
+    .filter((sample) => (sample.adcSource || state.adcSource) === source)
+    .slice(-ADC_BIAS_SAMPLE_COUNT);
+
+  if (!candidates.length) {
+    if (!options.silent) addLog("SYS", `No ${source} ADC samples for bias`);
+    return null;
+  }
+
+  const bias = candidates.reduce((sum, sample) => sum + sample.value, 0) / candidates.length;
+  setAdcBias(source, bias, { silent: options.silent });
+  return bias;
+}
+
+function convertAdcSampleValue(sample, value = sample.value) {
+  if (getValueMode() !== "current") return value;
+  if ((sample.channel || "ADC") !== "ADC") return value;
+  const bias = getAdcBias(sample.adcSource || state.adcSource);
+  if (!Number.isFinite(bias)) return value;
+  return (value - bias) * ADC_CURRENT_SCALE;
+}
+
+function createViewSample(sample) {
+  const channel = sample.channel || "ADC";
+  const adcSource = sample.adcSource || state.adcSource;
+  const bias = channel === "ADC" ? getAdcBias(adcSource) : null;
+  const value = convertAdcSampleValue(sample);
+  return {
+    ...sample,
+    channel,
+    adcSource,
+    adcCode: sample.value,
+    biasCode: bias,
+    rawValue: value,
+    value,
+  };
+}
+
+function getValueDescription() {
+  if (getValueMode() !== "current") return "ADC code";
+  const bias = getAdcBias();
+  return Number.isFinite(bias) ? `Current | bias ${bias.toFixed(0)}` : "Current | set bias";
+}
+
+function updateValueUi() {
+  state.valueMode = getValueMode();
+  const bias = getAdcBias();
+  if (els.biasValue) {
+    els.biasValue.value = Number.isFinite(bias) ? String(Math.round(bias)) : "";
+  }
+  if (els.valueSummary) {
+    els.valueSummary.textContent = getValueDescription();
+  }
+}
+
 function setAdcSource(source, options = {}) {
   const normalized = normalizeAdcSource(source);
   if (!normalized) return;
@@ -309,12 +434,14 @@ function setAdcSource(source, options = {}) {
   state.adcSource = normalized;
   if (changed) {
     state.samples = [];
+    state.pendingSamples = [];
     state.totalSamples = 0;
     state.latest = null;
     state.bits = [];
     state.totalBits = 0;
     state.bitLanes = {};
     state.bitPlaneCapacity = 0;
+    state.nextSampleDrainAt = 0;
   }
   resetNoiseExtractor();
   updateAdcSourceUi(options);
@@ -339,6 +466,7 @@ function updateAdcSourceUi(options = {}) {
     const active = normalizeAdcSource(button.dataset.adcSource) === state.adcSource;
     button.classList.toggle("is-active", active);
   });
+  updateValueUi();
 }
 
 function setConnectedUi(connected) {
@@ -741,14 +869,69 @@ function addSample(value, channel = "ADC", options = {}) {
   const normalizedChannel = normalizeChannel(channel) || "ADC";
   const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
   if (normalizedChannel === "ADC" && adcSource !== state.adcSource) return;
-  const sample = {
-    t: performance.now(),
+  const wasEmpty = state.pendingSamples.length === 0;
+  state.pendingSamples.push({
     value,
     channel: normalizedChannel,
     adcSource,
+  });
+
+  if (state.pendingSamples.length > state.maxPendingSamples) {
+    state.pendingSamples.splice(0, state.pendingSamples.length - state.maxPendingSamples);
+  }
+
+  if (wasEmpty) {
+    state.nextSampleDrainAt = performance.now();
+  }
+  scheduleSampleDrain();
+}
+
+function getSampleDrainIntervalMs(sample) {
+  return (sample.channel || "ADC") === "ADC" ? 5 : 20;
+}
+
+function scheduleSampleDrain() {
+  if (state.sampleDrainScheduled) return;
+  state.sampleDrainScheduled = true;
+  window.requestAnimationFrame(drainSampleQueue);
+}
+
+function drainSampleQueue(now = performance.now()) {
+  state.sampleDrainScheduled = false;
+
+  if (!state.pendingSamples.length) {
+    state.nextSampleDrainAt = 0;
+    return;
+  }
+
+  if (!state.nextSampleDrainAt) {
+    state.nextSampleDrainAt = now;
+  }
+
+  let emitted = 0;
+  while (state.pendingSamples.length && state.nextSampleDrainAt <= now && emitted < 8) {
+    const sample = state.pendingSamples.shift();
+    commitSample(sample.value, sample.channel, sample.adcSource);
+    state.nextSampleDrainAt += getSampleDrainIntervalMs(sample);
+    emitted += 1;
+  }
+
+  if (state.pendingSamples.length) {
+    scheduleSampleDrain();
+  } else {
+    state.nextSampleDrainAt = 0;
+  }
+}
+
+function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSource) {
+  const sample = {
+    t: performance.now(),
+    value,
+    channel: normalizedChannel || "ADC",
+    adcSource: normalizeAdcSource(adcSource) || state.adcSource,
   };
   state.latest = value;
-  state.latestChannel = normalizedChannel;
+  state.latestChannel = sample.channel;
   state.samples.push(sample);
   state.totalSamples += 1;
 
@@ -761,7 +944,7 @@ function addSample(value, channel = "ADC", options = {}) {
     state.lastStatsAt = now;
     updateStats();
   }
-  if (normalizedChannel === "ADC") extractNoiseBit(value, adcSource);
+  if (sample.channel === "ADC") extractNoiseBit(value, sample.adcSource);
   state.needsDraw = true;
 }
 
@@ -876,7 +1059,7 @@ function updateStats() {
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
     els.sampleCount.textContent = String(state.totalSamples);
-    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getFilterDescription()}`;
+    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
     return;
   }
 
@@ -898,7 +1081,7 @@ function updateStats() {
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
   els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcPlotDescription()} | ${getFilterDescription()}`;
+  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcPlotDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
 }
 
 function setBitMode(enabled) {
@@ -1104,6 +1287,7 @@ function updateFilterUi() {
   els.filterWindowField.hidden = mode !== "moving-average";
   els.highCutoffField.hidden = mode !== "high-pass" && mode !== "band-pass";
   els.lowCutoffField.hidden = mode !== "low-pass" && mode !== "band-pass";
+  updateValueUi();
   els.filterSummary.textContent = getFilterDescription();
 }
 
@@ -1116,9 +1300,9 @@ function getDisplaySamples(channel = getSelectedChannel()) {
   }
 
   const settings = getFilterSettings();
-  const samples = getSamplesForChannel(channel);
+  const samples = getSamplesForChannel(channel).map(createViewSample);
   if (settings.mode === "raw") {
-    return samples.map((sample) => ({ ...sample, rawValue: sample.value }));
+    return samples;
   }
 
   const filteredValues = applyFilter(samples, settings);
@@ -1126,6 +1310,8 @@ function getDisplaySamples(channel = getSelectedChannel()) {
     t: sample.t,
     channel: sample.channel || "ADC",
     adcSource: sample.adcSource || state.adcSource,
+    adcCode: sample.adcCode,
+    biasCode: sample.biasCode,
     rawValue: sample.value,
     value: filteredValues[index],
   }));
@@ -1306,8 +1492,10 @@ function applyPpgCommandPreset(command) {
 
 function clearSamples() {
   state.samples = [];
+  state.pendingSamples = [];
   state.totalSamples = 0;
   state.latest = null;
+  state.nextSampleDrainAt = 0;
   resetNoiseExtractor();
   updateStats();
   state.needsDraw = true;
@@ -1323,13 +1511,26 @@ function exportCsv() {
   const start = state.samples[0].t;
   const settings = getFilterSettings();
   const displaySamples = getDisplaySamples();
-  const rows = settings.mode === "raw"
-    ? ["time_ms,channel,adc_input,value"]
-    : ["time_ms,channel,adc_input,raw_value,filtered_value"];
+  const currentMode = getValueMode() === "current";
+  const rows = currentMode
+    ? (settings.mode === "raw"
+      ? ["time_ms,channel,adc_input,adc_code,bias_code,current_value"]
+      : ["time_ms,channel,adc_input,adc_code,bias_code,raw_current,filtered_current"])
+    : (settings.mode === "raw"
+      ? ["time_ms,channel,adc_input,value"]
+      : ["time_ms,channel,adc_input,raw_value,filtered_value"]);
   displaySamples.forEach((sample) => {
     const time = (sample.t - start).toFixed(3);
     const adcSource = sample.adcSource || state.adcSource;
-    if (settings.mode === "raw") {
+    if (currentMode) {
+      const adcCode = Number.isFinite(sample.adcCode) ? sample.adcCode : "";
+      const biasCode = Number.isFinite(sample.biasCode) ? sample.biasCode : "";
+      if (settings.mode === "raw") {
+        rows.push(`${time},${sample.channel || "ADC"},${adcSource},${adcCode},${biasCode},${sample.value}`);
+      } else {
+        rows.push(`${time},${sample.channel || "ADC"},${adcSource},${adcCode},${biasCode},${sample.rawValue},${sample.value}`);
+      }
+    } else if (settings.mode === "raw") {
       rows.push(`${time},${sample.channel || "ADC"},${adcSource},${sample.value}`);
     } else {
       rows.push(`${time},${sample.channel || "ADC"},${adcSource},${sample.rawValue},${sample.value}`);
@@ -1701,6 +1902,10 @@ function animationLoop() {
 }
 
 function bindEvents() {
+  els.uiScale.addEventListener("change", () => {
+    setUiScale(els.uiScale.value);
+  });
+
   els.connectButton.addEventListener("click", () => {
     if (isConnected()) disconnectActiveTransport();
     else connectSelectedTransport();
@@ -1762,6 +1967,23 @@ function bindEvents() {
     state.needsDraw = true;
   });
 
+  els.valueMode.addEventListener("change", () => {
+    if (getValueMode() === "current" && getAdcBias() === null) {
+      measureBiasFromSamples({ silent: true });
+    }
+    updateValueUi();
+    updateStats();
+    state.needsDraw = true;
+  });
+
+  els.biasValue.addEventListener("change", () => {
+    setAdcBias(state.adcSource, els.biasValue.value);
+  });
+
+  els.measureBiasButton.addEventListener("click", () => {
+    measureBiasFromSamples();
+  });
+
   els.autoScale.addEventListener("change", () => {
     els.manualScale.hidden = els.autoScale.checked;
     state.needsDraw = true;
@@ -1790,6 +2012,10 @@ function bindEvents() {
 
   els.pauseButton.addEventListener("click", () => {
     state.paused = !state.paused;
+    if (state.paused) {
+      state.pendingSamples = [];
+      state.nextSampleDrainAt = 0;
+    }
     els.pauseButton.textContent = state.paused ? "Resume" : "Pause";
     addLog("SYS", state.paused ? "Plot paused" : "Plot resumed");
     state.needsDraw = true;
@@ -1813,10 +2039,12 @@ function bindEvents() {
 
 function init() {
   bindEvents();
+  setUiScale(loadUiScale(), false);
   setDacValue(2056, "init");
   updateTransportControls();
   setConnectedUi(false);
   updateAdcSourceUi();
+  updateValueUi();
   updateFilterUi();
   updateBitStats();
   resizeCanvas();

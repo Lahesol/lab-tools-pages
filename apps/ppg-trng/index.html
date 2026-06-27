@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=bc3ce88a14bc" />
+    <link rel="stylesheet" href="./styles.css?v=380ae32b58a2" />
   </head>
   <body>
     <div class="app-shell">
@@ -14,7 +14,16 @@
           <p>Web Serial DAC control and live ADC monitor</p>
         </div>
         <div class="status-strip" aria-live="polite">
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 chat-latest</span>
+          <label class="ui-size-control" for="uiScale">
+            <span>UI size</span>
+            <select id="uiScale">
+              <option value="compact">Compact</option>
+              <option value="standard" selected>Standard</option>
+              <option value="large">Large</option>
+              <option value="touch">Touch</option>
+            </select>
+          </label>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 current-ui</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -249,6 +258,18 @@
             </div>
 
             <div class="filter-row">
+              <label class="compact-field" for="valueMode">
+                <span>Value</span>
+                <select id="valueMode">
+                  <option value="adc" selected>ADC code</option>
+                  <option value="current">Current</option>
+                </select>
+              </label>
+              <label class="compact-field bias-field" for="biasValue">
+                <span>Bias</span>
+                <input id="biasValue" type="number" min="0" max="16383" step="1" placeholder="--" />
+              </label>
+              <button id="measureBiasButton" class="button secondary" type="button">Measure bias</button>
               <label class="compact-field" for="filterMode">
                 <span>Filter</span>
                 <select id="filterMode">
@@ -271,6 +292,7 @@
                 <span>LP Hz</span>
                 <input id="lowCutoff" type="number" min="0.01" step="0.1" value="8" />
               </label>
+              <span id="valueSummary" class="filter-summary">ADC code</span>
               <span id="filterSummary" class="filter-summary">Raw ADC</span>
             </div>
 
@@ -351,7 +373,7 @@
               </label>
               <label class="compact-field" for="dfuAppVersion">
                 <span>App ver</span>
-                <input id="dfuAppVersion" type="number" min="1" value="16" />
+                <input id="dfuAppVersion" type="number" min="1" value="17" />
               </label>
               <label class="compact-field" for="dfuBaud">
                 <span>DFU baud</span>
@@ -373,7 +395,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=46df763838e3" defer></script>
-    <script src="./dfu.js?v=20260627-chat-latest" defer></script>
+    <script src="./app.js?v=96ba673874c8" defer></script>
+    <script src="./dfu.js?v=20260627-current-ui" defer></script>
   </body>
 </html>

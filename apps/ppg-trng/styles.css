@@ -17,8 +17,53 @@
   --shadow: 0 18px 45px rgba(28, 43, 38, 0.1);
   --radius: 8px;
   --mono: "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+  --ui-font-scale: 1;
+  --control-height: 40px;
+  --panel-padding: 16px;
+  --toolbar-padding-x: 16px;
+  --toolbar-padding-y: 16px;
+  --canvas-height: min(58vh, 620px);
+  --canvas-min-height: 390px;
+  --bit-canvas-height: min(42vh, 420px);
+  --bit-canvas-min-height: 360px;
   font-family:
     Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+:root[data-ui-scale="compact"] {
+  --ui-font-scale: 0.92;
+  --control-height: 34px;
+  --panel-padding: 12px;
+  --toolbar-padding-x: 12px;
+  --toolbar-padding-y: 12px;
+  --canvas-height: min(52vh, 560px);
+  --canvas-min-height: 320px;
+  --bit-canvas-height: min(36vh, 360px);
+  --bit-canvas-min-height: 280px;
+}
+
+:root[data-ui-scale="large"] {
+  --ui-font-scale: 1.08;
+  --control-height: 46px;
+  --panel-padding: 18px;
+  --toolbar-padding-x: 18px;
+  --toolbar-padding-y: 18px;
+  --canvas-height: min(62vh, 680px);
+  --canvas-min-height: 430px;
+  --bit-canvas-height: min(46vh, 460px);
+  --bit-canvas-min-height: 390px;
+}
+
+:root[data-ui-scale="touch"] {
+  --ui-font-scale: 1.16;
+  --control-height: 52px;
+  --panel-padding: 20px;
+  --toolbar-padding-x: 20px;
+  --toolbar-padding-y: 20px;
+  --canvas-height: min(64vh, 720px);
+  --canvas-min-height: 460px;
+  --bit-canvas-height: min(48vh, 500px);
+  --bit-canvas-min-height: 420px;
 }
 
 * {
@@ -33,6 +78,7 @@ body {
   margin: 0;
   min-width: 320px;
   color: var(--ink);
+  font-size: calc(14px * var(--ui-font-scale));
   background:
     linear-gradient(180deg, rgba(8, 127, 114, 0.09), transparent 320px),
     var(--bg);
@@ -77,6 +123,36 @@ select {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.ui-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ui-size-control span {
+  white-space: nowrap;
+}
+
+.ui-size-control select {
+  width: auto;
+  height: 28px;
+  min-height: 0;
+  border: 0;
+  padding: 0 4px;
+  color: var(--ink);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .status-dot {
@@ -128,7 +204,7 @@ select {
 }
 
 .panel {
-  padding: 16px;
+  padding: var(--panel-padding);
 }
 
 .panel-heading,
@@ -216,7 +292,7 @@ output {
 select,
 input[type="number"] {
   min-width: 0;
-  height: 40px;
+  height: var(--control-height);
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   padding: 0 10px;
@@ -238,7 +314,7 @@ input[type="range"] {
 }
 
 .button {
-  min-height: 40px;
+  min-height: var(--control-height);
   border: 1px solid transparent;
   border-radius: 7px;
   padding: 0 13px;
@@ -481,7 +557,7 @@ input[type="range"] {
 }
 
 .plot-toolbar {
-  padding: 16px 16px 12px;
+  padding: var(--toolbar-padding-y) var(--toolbar-padding-x) 12px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -505,10 +581,14 @@ input[type="range"] {
   min-width: 100px;
 }
 
+.bias-field {
+  min-width: 82px;
+}
+
 .compact-field select,
 .compact-field input {
   width: 100%;
-  height: 40px;
+  height: var(--control-height);
 }
 
 .scale-row {
@@ -526,7 +606,7 @@ input[type="range"] {
 .filter-summary {
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  min-height: var(--control-height);
   padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -538,8 +618,8 @@ input[type="range"] {
 }
 
 .canvas-wrap {
-  height: min(58vh, 620px);
-  min-height: 390px;
+  height: var(--canvas-height);
+  min-height: var(--canvas-min-height);
   padding: 12px 14px 14px;
   background: #fbfdfc;
 }
@@ -588,8 +668,8 @@ canvas {
 }
 
 .bit-canvas-wrap {
-  height: min(48vh, 540px);
-  min-height: 360px;
+  height: var(--bit-canvas-height);
+  min-height: var(--bit-canvas-min-height);
   padding: 12px 14px 14px;
   background: #fbfdfc;
 }
@@ -697,14 +777,14 @@ canvas {
   }
 
   .canvas-wrap {
-    height: 360px;
-    min-height: 320px;
+    height: var(--canvas-height);
+    min-height: var(--canvas-min-height);
     padding: 10px;
   }
 
   .bit-canvas-wrap {
-    height: 300px;
-    min-height: 240px;
+    height: var(--bit-canvas-height);
+    min-height: var(--bit-canvas-min-height);
     padding: 10px;
   }
 }

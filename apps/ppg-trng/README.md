@@ -86,6 +86,12 @@ The plot can display raw ADC data or browser-side filtered data without changing
 
 Tagged firmware streams are plotted as separate ADC, Green, IR, Red, and Ambient channels. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
 
+The browser may deliver Web Serial data in chunks instead of one line at a time. Parsed samples are therefore buffered briefly and released to the plot at the firmware cadence, 5 ms for raw ADC and 20 ms for tagged PPG/diagnostic samples, so the display advances continuously even when the USB driver batches reads.
+
+The `Value` control can show raw ADC code or a bias-corrected current calculation. Press `Measure bias` while the selected ADC input is at the bias condition, then `Current` displays `(adc - bias) / 8192 * 1.8`. CSV export keeps the original ADC code and bias code with the converted value.
+
+The top-bar `UI size` control switches the console density between compact, standard, large, and touch-sized layouts. The selected size is saved in local browser storage.
+
 ## Bit Extraction
 
 Pressing `9999` toggles the local random bit mode indicator and sends the firmware command. While bit mode is active, incoming tagged bits from the active ADC are stored separately from ADC samples and rendered in one bitmap plane.
