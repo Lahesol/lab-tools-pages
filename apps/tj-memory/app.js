@@ -2805,7 +2805,7 @@ function bindEvents() {
     });
   });
 
-  const deferredControls = new Set(["deviceModeSelect", "deviceSwitchSelect", "deviceTiaOverride"]);
+  const deferredControls = new Set(["deviceModeSelect", "deviceSwitchSelect", "deviceTiaOverride", "layerDevices", "layerRole"]);
   document.querySelectorAll("input, select").forEach((control) => {
     if (deferredControls.has(control.id)) return;
     control.addEventListener("input", () => {
@@ -2832,6 +2832,9 @@ function bindEvents() {
 
   $("applyModeBtn").addEventListener("click", applyModeToBlocks);
   $("updateLayerBtn").addEventListener("click", updateSelectedLayerFromForm);
+  $("layerDevices").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") updateSelectedLayerFromForm();
+  });
   $("addLayerBtn").addEventListener("click", addLayer);
   $("removeLayerBtn").addEventListener("click", removeLayer);
   $("applyDeviceBtn").addEventListener("click", applyDeviceOverride);

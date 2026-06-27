@@ -66,6 +66,7 @@ Implemented in `web_gui/`:
   - 1-to-many and many-to-1 device connections.
   - Device-level connection graph.
   - Connected source/target photocurrent response plot under the selected UV pulse program.
+  - Layer device count and role edits are deferred until `Update selected layer` or Enter, preventing global redraw from resetting typed values.
 - Shared ANN/SNN graph simulation backend:
   - ANN and SNN tabs now consume the Block-tab device graph.
   - Device-to-device connections are used for current/activation propagation.
