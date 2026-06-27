@@ -80,6 +80,7 @@ Implemented in `web_gui/`:
   - The Block tab now supports a hybrid transfer mode where STM source devices integrate TIA-driven emitter input and fire UV output pulses only after threshold crossing.
   - LTM source devices can be modeled as persistent latch/readout outputs with write threshold, readout gain, and retention time controls.
   - The connection response plot overlays external UV, emitted UV, IF/latch state, source photocurrent, and connected target photocurrent.
+  - The O/E/O transfer tuning plot visualizes the selected source device's input current, TIA voltage, IF/latch state, emitter UV output, delivered edge UV, and static voltage-to-UV driver curve while O/E/O parameters are adjusted.
 - Device Parameters tab:
   - STM/LTM compact model parameters are editable with sliders.
   - VDS/Gate route gain and persistence multipliers are editable.

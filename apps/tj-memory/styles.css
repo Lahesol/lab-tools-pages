@@ -381,6 +381,10 @@ input[type="range"] {
   background: var(--tia);
 }
 
+.legend.voltage {
+  background: #3d7fb8;
+}
+
 .legend.membrane {
   background: var(--membrane);
 }
@@ -874,6 +878,15 @@ th {
 
 .network-panel {
   box-shadow: none;
+}
+
+.oeo-tuning-panel {
+  min-width: 0;
+  box-shadow: none;
+}
+
+.oeo-tuning-panel .plot-canvas.tall {
+  height: 640px;
 }
 
 .trace-picker-panel {

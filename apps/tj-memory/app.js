@@ -1102,6 +1102,89 @@ function drawAxis(ctx, timeline, plot, yMax, yLabel) {
   ctx.restore();
 }
 
+function drawTimingLane(ctx, timeline, values, plot, laneIndex, laneCount, options) {
+  const bounds = laneBounds(plot, laneIndex, laneCount);
+  drawLaneBackground(ctx, plot, bounds, laneIndex, options);
+  drawLaneTrace(ctx, timeline, values, plot, bounds, 0, Math.max(Number(options.max || 1), 0.001), options.color, options.width || 1.8, options.alpha || 1);
+}
+
+function laneBounds(plot, laneIndex, laneCount) {
+  const laneHeight = (plot.bottom - plot.top) / laneCount;
+  const laneTop = plot.top + laneHeight * laneIndex + 7;
+  const laneBottom = plot.top + laneHeight * (laneIndex + 1) - 7;
+  return { top: laneTop, bottom: laneBottom, mid: (laneTop + laneBottom) / 2 };
+}
+
+function drawLaneBackground(ctx, plot, bounds, laneIndex, options) {
+  const laneMax = Math.max(Number(options.max || 1), 0.001);
+  const labelX = plot.left - 78;
+
+  ctx.fillStyle = laneIndex % 2 ? "rgba(241,246,250,0.55)" : "rgba(255,255,255,0)";
+  ctx.fillRect(plot.left, bounds.top - 4, plot.right - plot.left, bounds.bottom - bounds.top + 8);
+  ctx.strokeStyle = "#e2ebf1";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(plot.left, bounds.bottom);
+  ctx.lineTo(plot.right, bounds.bottom);
+  ctx.stroke();
+
+  ctx.fillStyle = options.color;
+  ctx.font = "800 10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(options.label, labelX + 64, bounds.mid + 3);
+  ctx.textAlign = "left";
+
+  if (Number.isFinite(options.threshold)) {
+    const thresholdY = valueToY(options.threshold, 0, laneMax, { ...plot, top: bounds.top, bottom: bounds.bottom });
+    ctx.strokeStyle = "rgba(138,63,252,0.28)";
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, thresholdY);
+    ctx.lineTo(plot.right, thresholdY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function drawLaneTrace(ctx, timeline, values, plot, bounds, min, max, color, width = 1.8, alpha = 1) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  values.forEach((value, index) => {
+    const x = timeToX(timeline[index].t, timeline, plot);
+    const y = valueToY(clamp(value || 0, min, max), min, max, { ...plot, top: bounds.top, bottom: bounds.bottom });
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.restore();
+}
+
+function meanValues(traces, length) {
+  if (!traces.length) return new Array(length).fill(0);
+  const out = new Array(length).fill(0);
+  traces.forEach((trace) => {
+    trace.forEach((value, index) => {
+      out[index] += value || 0;
+    });
+  });
+  return out.map((value) => value / traces.length);
+}
+
+function drawEndpointLabel(ctx, timeline, values, plot, min, max, label, color, offsetY = 0) {
+  if (!values.length) return;
+  const index = values.length - 1;
+  const x = Math.min(plot.right - 116, timeToX(timeline[index].t, timeline, plot) - 116);
+  const y = clamp(valueToY(values[index], min, max, plot) + offsetY, plot.top + 14, plot.bottom - 8);
+  ctx.fillStyle = "rgba(251,253,255,0.9)";
+  ctx.fillRect(x - 5, y - 11, 112, 16);
+  ctx.fillStyle = color;
+  ctx.font = "800 10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText(label, x, y);
+}
+
 function drawUvCanvas() {
   const canvas = $("uvCanvas");
   const { ctx, width, height } = setupCanvas(canvas);
@@ -1323,6 +1406,196 @@ function simulateConnectionResponse() {
   return { timeline, uvDrive, sourceTrace, targets, graph };
 }
 
+function delayedTrace(values, timeline, delayMs) {
+  const delay = Number(delayMs || 0);
+  if (!delay || timeline.length < 2) return values;
+  const totalTime = timeline[timeline.length - 1].t - timeline[0].t;
+  const dt = totalTime / Math.max(1, timeline.length - 1);
+  const steps = Math.max(0, Math.round((delay / 1000) / Math.max(dt, 0.000001)));
+  return values.map((_, index) => (index >= steps ? values[index - steps] : 0));
+}
+
+function oeoFanoutScale(node) {
+  const splitterLoss = 10 ** (-state.splitterLossDb / 10);
+  const fanoutCount = Math.max(1, node?.outgoingEdges || 1);
+  return splitterLoss * state.edgeCoupling / Math.sqrt(fanoutCount);
+}
+
+function driverUvFromVoltageMv(voltageMv) {
+  const voltage = Math.max(0, voltageMv) / 1000;
+  const threshold = state.driverThresholdMv / 1000;
+  return clamp((voltage - threshold) * state.driverGain, 0, state.driverMax);
+}
+
+function drawMiniStat(ctx, x, y, label, value, color) {
+  ctx.fillStyle = color;
+  ctx.font = "800 10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText(label, x, y);
+  ctx.fillStyle = "#203645";
+  ctx.font = "800 12px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText(value, x, y + 15);
+}
+
+function drawOeoTransferCurve(ctx, plot, sourceNode, edgeUvPeak) {
+  const voltageMv = sourceNode.readoutVoltage.map((value) => value * 1000);
+  const peakMv = Math.max(...voltageMv, state.driverThresholdMv * 2, 5);
+  const xMax = Math.max(8, peakMv * 1.25, state.driverThresholdMv + 4);
+  const yMax = Math.max(state.driverMax, 0.1);
+  const fanoutScale = oeoFanoutScale(sourceNode);
+
+  drawGrid(ctx, plot, 4, 4);
+  ctx.fillStyle = "#1d3342";
+  ctx.font = "800 12px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("Static driver curve", plot.left, plot.top - 14);
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("|V_TIA| -> UV_out", plot.left, plot.top - 2);
+
+  ctx.strokeStyle = "#d98612";
+  ctx.lineWidth = 2.1;
+  ctx.beginPath();
+  for (let i = 0; i <= 160; i += 1) {
+    const v = xMax * i / 160;
+    const y = driverUvFromVoltageMv(v);
+    const xPix = lerp(plot.left, plot.right, v / xMax);
+    const yPix = valueToY(y, 0, yMax, plot);
+    if (i === 0) ctx.moveTo(xPix, yPix);
+    else ctx.lineTo(xPix, yPix);
+  }
+  ctx.stroke();
+
+  ctx.strokeStyle = "#c34c3c";
+  ctx.lineWidth = 1.7;
+  ctx.globalAlpha = 0.82;
+  ctx.beginPath();
+  for (let i = 0; i <= 160; i += 1) {
+    const v = xMax * i / 160;
+    const y = clamp(driverUvFromVoltageMv(v) * fanoutScale, 0, yMax);
+    const xPix = lerp(plot.left, plot.right, v / xMax);
+    const yPix = valueToY(y, 0, yMax, plot);
+    if (i === 0) ctx.moveTo(xPix, yPix);
+    else ctx.lineTo(xPix, yPix);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  const thresholdX = lerp(plot.left, plot.right, clamp(state.driverThresholdMv / xMax, 0, 1));
+  ctx.strokeStyle = "rgba(19,37,48,0.32)";
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(thresholdX, plot.top);
+  ctx.lineTo(thresholdX, plot.bottom);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText(`${state.driverThresholdMv.toFixed(1)} mV`, thresholdX + 4, plot.bottom - 8);
+
+  const opMv = Math.max(...voltageMv, 0);
+  const opUv = driverUvFromVoltageMv(opMv);
+  const opX = lerp(plot.left, plot.right, clamp(opMv / xMax, 0, 1));
+  const opY = valueToY(opUv, 0, yMax, plot);
+  ctx.fillStyle = "#fff";
+  ctx.strokeStyle = "#d98612";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(opX, opY, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#667887";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("0", plot.left - 3, plot.bottom + 16);
+  ctx.fillText(`${round(xMax, 1)} mV`, plot.right - 46, plot.bottom + 16);
+  ctx.fillText(`${round(yMax, 2)}`, plot.left - 30, plot.top + 4);
+
+  const statsY = plot.bottom + 38;
+  drawMiniStat(ctx, plot.left, statsY, "peak |V_TIA|", `${round(opMv, 2)} mV`, "#3d7fb8");
+  drawMiniStat(ctx, plot.left + 112, statsY, "peak UV_out", `${round(opUv, 3)}`, "#d98612");
+  drawMiniStat(ctx, plot.left + 224, statsY, "edge peak", `${round(edgeUvPeak, 3)}`, "#c34c3c");
+}
+
+function drawOeoTransferTuning() {
+  const canvas = $("oeoTransferCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = setupCanvas(canvas);
+  const graph = latestBlock || simulateBlockGraph();
+  const sourceNode = graph.nodeMap[state.sourceDevice] || graph.nodeMap[state.selectedDevice];
+
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  if (!sourceNode) {
+    drawPlotTitle(ctx, "O/E/O transfer tuning", "select a source device");
+    return;
+  }
+
+  const timeline = graph.timeline;
+  const stacked = width < 820;
+  const timePlot = stacked
+    ? { left: 96, right: width - 18, top: 66, bottom: Math.min(height - 252, 362) }
+    : { left: 106, right: Math.round(width * 0.64), top: 66, bottom: height - 68 };
+  const curvePlot = stacked
+    ? { left: 64, right: width - 24, top: timePlot.bottom + 76, bottom: height - 96 }
+    : { left: timePlot.right + 56, right: width - 24, top: 82, bottom: height - 104 };
+  const voltageMv = sourceNode.readoutVoltage.map((value) => value * 1000);
+  const continuousUv = sourceNode.continuousOpticalOutput || sourceNode.opticalOutput || new Array(timeline.length).fill(0);
+  const emitterUv = sourceNode.opticalOutput || continuousUv;
+  const ifState = sourceNode.ifMembrane || new Array(timeline.length).fill(0);
+  const fanoutScale = oeoFanoutScale(sourceNode);
+  const edgeUv = delayedTrace(emitterUv.map((value) => clamp(value * fanoutScale, 0, state.driverMax)), timeline, state.edgeDelay);
+  const currentPeak = Math.max(...sourceNode.trace, 1);
+  const voltagePeak = Math.max(...voltageMv, state.driverThresholdMv, 0.1);
+  const statePeak = Math.max(...ifState, state.ifThreshold, state.ltmWriteThreshold, 0.2);
+  const outputPeak = Math.max(state.driverMax, ...emitterUv, ...edgeUv, 0.1);
+  const transferKind = sourceNode.transferKind || transferModeText();
+
+  drawPlotTitle(ctx, "O/E/O transfer tuning", `${NET.label(state, sourceNode.key)} / ${transferKind}`);
+  drawGrid(ctx, timePlot, 4, 6);
+  drawTimingLane(ctx, timeline, sourceNode.trace, timePlot, 0, 4, {
+    label: "I_in",
+    color: "#0f9d91",
+    max: currentPeak,
+    width: 2.1,
+  });
+  drawTimingLane(ctx, timeline, voltageMv, timePlot, 1, 4, {
+    label: "|V_TIA|",
+    color: "#3d7fb8",
+    max: voltagePeak,
+    threshold: state.driverThresholdMv,
+    width: 2,
+  });
+  drawTimingLane(ctx, timeline, ifState, timePlot, 2, 4, {
+    label: "IF/latch",
+    color: "#8a3ffc",
+    max: statePeak,
+    threshold: sourceNode.mode === "LTM" ? state.ltmWriteThreshold : state.ifThreshold,
+    width: 1.9,
+  });
+  drawTimingLane(ctx, timeline, emitterUv, timePlot, 3, 4, {
+    label: "UV_out",
+    color: "#d98612",
+    max: outputPeak,
+    width: 2,
+  });
+  const outputBounds = laneBounds(timePlot, 3, 4);
+  drawLaneTrace(ctx, timeline, edgeUv, timePlot, outputBounds, 0, outputPeak, "#c34c3c", 1.7, 0.9);
+  drawTimeLabels(ctx, timeline, timePlot);
+
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText(`fanout scale ${round(fanoutScale, 3)} / delay ${state.edgeDelay} ms`, timePlot.left, timePlot.top - 10);
+  const statY = stacked ? timePlot.bottom + 26 : height - 30;
+  const statX = timePlot.left + 8;
+  drawMiniStat(ctx, statX, statY, "I peak", `${round(currentPeak, 2)} nA`, "#0f9d91");
+  drawMiniStat(ctx, statX + 100, statY, "V peak", `${round(voltagePeak, 2)} mV`, "#3d7fb8");
+  drawMiniStat(ctx, statX + 200, statY, "UV peak", `${round(Math.max(...emitterUv, 0), 3)}`, "#d98612");
+  if (!stacked || width > 520) {
+    drawMiniStat(ctx, statX + 300, statY, "edge UV", `${round(Math.max(...edgeUv, 0), 3)}`, "#c34c3c");
+  }
+
+  drawOeoTransferCurve(ctx, curvePlot, sourceNode, Math.max(...edgeUv, 0));
+}
+
 function drawConnectionResponse() {
   const canvas = $("connectionResponseCanvas");
   const { ctx, width, height } = setupCanvas(canvas);
@@ -1334,45 +1607,69 @@ function drawConnectionResponse() {
     return;
   }
 
-  const uvPlot = { left: 58, right: width - 20, top: 48, bottom: 112 };
-  const currentPlot = { left: 58, right: width - 20, top: 154, bottom: height - 42 };
-  const targetMax = result.targets.length ? Math.max(...result.targets.flatMap((target) => target.trace), 1) : 1;
-  const maxCurrent = Math.max(...result.sourceTrace.trace, targetMax, 1) * 1.12;
+  const timingPlot = { left: 96, right: width - 20, top: 62, bottom: 188 };
+  const currentPlot = { left: 64, right: width - 20, top: 236, bottom: height - 46 };
+  const targetTraces = result.targets.map((target) => target.trace);
+  const targetMean = meanValues(targetTraces, result.timeline.length);
+  const targetMax = targetTraces.length ? Math.max(...targetTraces.flat(), 1) : 1;
+  const maxCurrent = Math.max(...result.sourceTrace.trace, ...targetMean, targetMax, 1) * 1.12;
   const sourceLabel = NET.label(state, state.sourceDevice);
   const targetLabel = result.targets.length === 1 ? NET.label(state, result.targets[0].edge.to) : `${result.targets.length} connected targets`;
 
   const transferKind = result.sourceTrace.transferKind || transferModeText();
   drawPlotTitle(ctx, "Connected device current response", `${sourceLabel} -> ${targetLabel}`);
-  drawGrid(ctx, uvPlot, 2, 6);
-  drawLine(ctx, result.timeline, result.uvDrive, uvPlot, 0, 1.1, "#7b2ff2", 2);
-  if (result.sourceTrace.opticalOutput) {
-    drawLine(ctx, result.timeline, result.sourceTrace.opticalOutput, uvPlot, 0, 1.8, "#d98612", 1.8, 0.85);
-  }
-  if (result.sourceTrace.ifMembrane && Math.max(...result.sourceTrace.ifMembrane) > 0.001) {
-    const maxState = Math.max(...result.sourceTrace.ifMembrane, state.ifThreshold, 1);
-    drawLine(ctx, result.timeline, result.sourceTrace.ifMembrane, uvPlot, 0, maxState, "#8a3ffc", 1.6, 0.8);
-  }
+  drawGrid(ctx, timingPlot, 3, 6);
+  const opticalOutput = result.sourceTrace.opticalOutput || new Array(result.timeline.length).fill(0);
+  const ifState = result.sourceTrace.ifMembrane || new Array(result.timeline.length).fill(0);
+  const statePeak = Math.max(...ifState, state.ifThreshold, state.ltmWriteThreshold, 0.2);
+  drawTimingLane(ctx, result.timeline, result.uvDrive, timingPlot, 0, 3, {
+    label: "External UV",
+    color: "#7b2ff2",
+    max: 1.1,
+    width: 2,
+  });
+  drawTimingLane(ctx, result.timeline, opticalOutput, timingPlot, 1, 3, {
+    label: "Emitter UV",
+    color: "#d98612",
+    max: Math.max(state.driverMax, 0.1),
+    width: 2,
+  });
+  drawTimingLane(ctx, result.timeline, ifState, timingPlot, 2, 3, {
+    label: "IF / latch",
+    color: "#8a3ffc",
+    max: statePeak,
+    threshold: result.sourceTrace.mode === "LTM" ? state.ltmWriteThreshold : state.ifThreshold,
+    width: 1.8,
+  });
   if (result.sourceTrace.emitterSpikes?.length) {
     ctx.strokeStyle = "rgba(138,63,252,0.75)";
     ctx.lineWidth = 1;
     result.sourceTrace.emitterSpikes.forEach((time) => {
-      const x = timeToX(time, result.timeline, uvPlot);
+      const x = timeToX(time, result.timeline, timingPlot);
       ctx.beginPath();
-      ctx.moveTo(x, uvPlot.top + 3);
-      ctx.lineTo(x, uvPlot.bottom - 3);
+      ctx.moveTo(x, timingPlot.top + 3);
+      ctx.lineTo(x, timingPlot.bottom - 3);
       ctx.stroke();
     });
   }
   ctx.fillStyle = "#627381";
   ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
-  ctx.fillText(`external UV, emitted UV, IF/latch state (${transferKind})`, uvPlot.left, uvPlot.top - 8);
+  ctx.fillText(`${transferKind}; lanes are normalized separately`, timingPlot.left, timingPlot.top - 10);
+  drawTimeLabels(ctx, result.timeline, timingPlot);
 
   drawGrid(ctx, currentPlot, 4, 6);
-  result.targets.forEach((target, index) => {
-    const colors = ["#d98612", "#0b61b5", "#7b2ff2", "#c34c3c", "#0f9d91"];
-    drawLine(ctx, result.timeline, target.trace, currentPlot, 0, maxCurrent, colors[index % colors.length], 1.4, 0.6);
+  result.targets.slice(0, 12).forEach((target) => {
+    drawLine(ctx, result.timeline, target.trace, currentPlot, 0, maxCurrent, "#9aaebb", 0.9, 0.22);
   });
-  drawLine(ctx, result.timeline, result.sourceTrace.trace, currentPlot, 0, maxCurrent, "#0f9d91", 2.4, 1);
+  if (targetMean.length) {
+    drawLine(ctx, result.timeline, targetMean, currentPlot, 0, maxCurrent, "#c34c3c", 2.4, 0.95);
+  }
+  drawLine(ctx, result.timeline, result.sourceTrace.trace, currentPlot, 0, maxCurrent, "#0f9d91", 2.5, 1);
+  drawEndpointLabel(ctx, result.timeline, result.sourceTrace.trace, currentPlot, 0, maxCurrent, "source current", "#0f9d91", -10);
+  drawEndpointLabel(ctx, result.timeline, targetMean, currentPlot, 0, maxCurrent, result.targets.length === 1 ? "target current" : "target mean", "#c34c3c", 12);
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("photocurrent response after optical fan-out", currentPlot.left, currentPlot.top - 10);
   drawAxis(ctx, result.timeline, currentPlot, maxCurrent, "I_photo (nA)");
 }
 
@@ -1671,6 +1968,7 @@ function drawSnnReadout() {
 function drawAllActive() {
   drawUvCanvas();
   if (state.activeTab === "blocks") {
+    drawOeoTransferTuning();
     drawNetworkCanvas();
     drawConnectionResponse();
     drawSelectedDeviceCurrents();

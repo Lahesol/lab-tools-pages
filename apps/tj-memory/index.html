@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=0379de086cf7" />
+    <link rel="stylesheet" href="styles.css?v=16da93e852b1" />
   </head>
   <body>
     <div class="app-shell">
@@ -342,6 +342,18 @@
                     <input id="ltmRetentionMs" type="range" min="100" max="5000" step="50" value="850" />
                   </label>
                 </div>
+                <div class="plot-frame oeo-tuning-panel">
+                  <div class="plot-toolbar">
+                    <span>O/E/O transfer tuning</span>
+                    <div class="legend-row">
+                      <i class="legend current"></i>input current
+                      <i class="legend voltage"></i>TIA voltage
+                      <i class="legend membrane"></i>IF/latch
+                      <i class="legend tia"></i>emitter UV
+                    </div>
+                  </div>
+                  <canvas id="oeoTransferCanvas" class="plot-canvas tall" width="980" height="560" aria-label="O/E/O input-output transfer tuning graph"></canvas>
+                </div>
                 <div class="panel network-panel trace-picker-panel">
                   <div class="panel-title"><span>Device current traces</span><output id="checkedTraceSummary">0 selected</output></div>
                   <div class="trace-picker-actions">
@@ -363,11 +375,11 @@
                   <div class="plot-toolbar">
                     <span>Connected device current response</span>
                     <div class="legend-row">
-                      <i class="legend uv"></i>UV pulse
-                      <i class="legend tia"></i>emitted UV
-                      <i class="legend membrane"></i>IF/latch state
+                      <i class="legend uv"></i>external UV
+                      <i class="legend tia"></i>emitter UV
+                      <i class="legend membrane"></i>IF/latch
                       <i class="legend current"></i>source current
-                      <i class="legend measured"></i>connected target current
+                      <i class="legend measured"></i>target current
                     </div>
                   </div>
                   <canvas id="connectionResponseCanvas" class="plot-canvas tall" width="980" height="440" aria-label="Connected device current response"></canvas>
@@ -671,6 +683,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-model.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=de7f75bece55"></script>
+    <script src="app.js?v=1e2c6405887b"></script>
   </body>
 </html>
