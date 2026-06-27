@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=59881060763a" />
+    <link rel="stylesheet" href="./styles.css?v=c0165c0ff239" />
   </head>
   <body>
     <div class="app-shell">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 noise-extractor-v2</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 noise-extractor-v3</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -431,19 +431,42 @@
                   <option value="">Load CSV</option>
                 </select>
               </label>
-              <label class="compact-field" for="noiseWindow" title="Number of previous samples used as the moving-average baseline. Larger values follow slow drift less, smaller values follow drift faster.">
+              <label class="compact-field" for="noiseWindow" title="이전 샘플 몇 개로 이동평균 기준선을 만들지 정합니다. 크게 하면 느린 drift에는 둔감하고, 작게 하면 기준선 변화에 빠르게 반응합니다.">
                 <span>MA window</span>
                 <input id="noiseWindow" type="number" min="2" max="5001" step="1" value="33" />
               </label>
-              <label class="compact-field" for="noiseThresholdOffset" title="Threshold correction added to the moving-average baseline. bit=1 when sample > moving_average + offset.">
+              <label class="compact-field" for="noiseThresholdOffset" title="이동평균 기준선에 더하는 임계값 보정입니다. sample > moving_average + offset이면 1로 판단합니다.">
                 <span>Offset</span>
                 <input id="noiseThresholdOffset" type="number" step="0.001" value="0" />
               </label>
             </div>
 
             <p class="noise-help">
-              MA window sets the previous-sample moving-average baseline. Offset shifts that baseline before thresholding. Von Neumann is shown as a separate post-processed variant for each raw extractor, not as a standalone analog extractor.
+              MA window는 기준선 평균에 사용할 이전 샘플 수입니다. 값을 키우면 느린 drift에는 덜 흔들리고 작은 노이즈를 보기 쉽지만, 빠른 기준선 변화에는 늦게 반응합니다. 값을 줄이면 기준선 변화를 빠르게 따라가지만 노이즈까지 평균에 섞일 수 있습니다. Offset은 기준선에 더하는 임계값 보정입니다. 양수면 1이 덜 나오고, 음수면 1이 더 나옵니다. Von Neumann은 이미 만들어진 bitstream의 01/10 쌍만 남기는 후처리입니다.
             </p>
+
+            <div class="noise-preview-panel">
+              <div class="panel-heading compact-heading">
+                <div>
+                  <h3>CSV preview</h3>
+                  <p id="noisePreviewCaption">Load CSV to confirm delimiter and data column</p>
+                </div>
+              </div>
+              <div class="noise-preview-wrap">
+                <table class="noise-preview-table" aria-label="Parsed CSV preview">
+                  <thead id="noisePreviewHead">
+                    <tr>
+                      <th>No CSV</th>
+                    </tr>
+                  </thead>
+                  <tbody id="noisePreviewBody">
+                    <tr>
+                      <td>Load CSV</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
             <div class="noise-methods">
               <label class="switch">
@@ -462,6 +485,70 @@
                 <input id="noiseVonNeumann" type="checkbox" checked />
                 <span>Also plot Von Neumann</span>
               </label>
+            </div>
+
+            <div class="noise-explain-grid" aria-label="Noise extraction diagrams">
+              <article class="noise-explain-card">
+                <h3>Moving average threshold</h3>
+                <svg class="noise-diagram" viewBox="0 0 300 150" role="img" aria-label="Moving average threshold diagram">
+                  <path d="M24 112 L276 112" class="diagram-axis" />
+                  <path d="M24 102 C60 86 88 104 116 88 S172 70 204 84 S250 94 276 76" class="diagram-signal" />
+                  <path d="M24 93 C76 92 112 89 156 86 S230 84 276 82" class="diagram-baseline" />
+                  <path d="M24 77 C76 76 112 73 156 70 S230 68 276 66" class="diagram-threshold" />
+                  <circle cx="66" cy="90" r="4" class="diagram-zero" />
+                  <circle cx="116" cy="88" r="4" class="diagram-one" />
+                  <circle cx="172" cy="74" r="4" class="diagram-one" />
+                  <circle cx="232" cy="92" r="4" class="diagram-zero" />
+                  <text x="26" y="26">sample > MA + offset</text>
+                  <text x="208" y="64">threshold</text>
+                  <text x="202" y="96">MA baseline</text>
+                  <text x="40" y="136">0</text>
+                  <text x="112" y="136">1</text>
+                  <text x="168" y="136">1</text>
+                  <text x="228" y="136">0</text>
+                </svg>
+              </article>
+              <article class="noise-explain-card">
+                <h3>Delta sign</h3>
+                <svg class="noise-diagram" viewBox="0 0 300 150" role="img" aria-label="Delta sign diagram">
+                  <polyline points="36,96 76,78 116,92 156,64 196,74 236,102 268,82" class="diagram-signal" />
+                  <path d="M76 78 L116 92 M116 92 L156 64 M196 74 L236 102" class="diagram-arrow" />
+                  <text x="30" y="28">delta &gt; 0 = 1, delta &lt; 0 = 0</text>
+                  <text x="82" y="122">0</text>
+                  <text x="122" y="122">1</text>
+                  <text x="202" y="122">0</text>
+                </svg>
+              </article>
+              <article class="noise-explain-card">
+                <h3>LSB parity</h3>
+                <svg class="noise-diagram" viewBox="0 0 300 150" role="img" aria-label="LSB parity diagram">
+                  <rect x="30" y="38" width="58" height="42" rx="5" class="diagram-box" />
+                  <rect x="112" y="38" width="58" height="42" rx="5" class="diagram-box" />
+                  <rect x="194" y="38" width="58" height="42" rx="5" class="diagram-box" />
+                  <text x="43" y="64">2048</text>
+                  <text x="125" y="64">2049</text>
+                  <text x="207" y="64">2050</text>
+                  <text x="44" y="118">0</text>
+                  <text x="126" y="118">1</text>
+                  <text x="208" y="118">0</text>
+                  <text x="28" y="26">rounded value &amp; 1</text>
+                </svg>
+              </article>
+              <article class="noise-explain-card">
+                <h3>Von Neumann post-process</h3>
+                <svg class="noise-diagram" viewBox="0 0 300 150" role="img" aria-label="Von Neumann pair extractor diagram">
+                  <text x="26" y="28">input pairs</text>
+                  <text x="26" y="64" class="diagram-pair">01</text>
+                  <text x="84" y="64" class="diagram-pair">10</text>
+                  <text x="142" y="64" class="diagram-pair muted">00</text>
+                  <text x="200" y="64" class="diagram-pair muted">11</text>
+                  <path d="M40 76 L40 104 M98 76 L98 104 M156 76 L156 104 M214 76 L214 104" class="diagram-arrow" />
+                  <text x="35" y="126">0</text>
+                  <text x="93" y="126">1</text>
+                  <text x="142" y="126">discard</text>
+                  <text x="200" y="126">discard</text>
+                </svg>
+              </article>
             </div>
 
             <div class="noise-summary" aria-live="polite">
@@ -483,25 +570,19 @@
               </div>
             </div>
 
-            <div class="noise-results-wrap">
-              <table class="noise-results">
-                <thead>
-                  <tr>
-                    <th>Method</th>
-                    <th>Bits</th>
-                    <th>Parameters</th>
-                    <th>Test</th>
-                    <th>Value</th>
-                    <th>p-value</th>
-                    <th>Result</th>
-                  </tr>
-                </thead>
-                <tbody id="noiseResultsBody">
-                  <tr>
-                    <td colspan="7">No results</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div id="noiseMethodBlocks" class="noise-method-blocks" aria-live="polite">
+              <section class="noise-method-card is-empty">
+                <h3>Moving average threshold</h3>
+                <p>Run extraction to show test results.</p>
+              </section>
+              <section class="noise-method-card is-empty">
+                <h3>Delta sign</h3>
+                <p>Run extraction to show test results.</p>
+              </section>
+              <section class="noise-method-card is-empty">
+                <h3>LSB parity</h3>
+                <p>Run extraction to show test results.</p>
+              </section>
             </div>
 
             <div class="noise-canvas-wrap">
@@ -512,7 +593,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=7cab5b611210" defer></script>
-    <script src="./dfu.js?v=20260627-noise-extractor-v2" defer></script>
+    <script src="./app.js?v=411e86833362" defer></script>
+    <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

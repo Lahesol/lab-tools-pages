@@ -79,7 +79,10 @@ const els = {
   noiseNumericCount: document.querySelector("#noiseNumericCount"),
   noiseBitCount: document.querySelector("#noiseBitCount"),
   noiseOneRatio: document.querySelector("#noiseOneRatio"),
-  noiseResultsBody: document.querySelector("#noiseResultsBody"),
+  noisePreviewCaption: document.querySelector("#noisePreviewCaption"),
+  noisePreviewHead: document.querySelector("#noisePreviewHead"),
+  noisePreviewBody: document.querySelector("#noisePreviewBody"),
+  noiseMethodBlocks: document.querySelector("#noiseMethodBlocks"),
   noiseBitCanvas: document.querySelector("#noiseBitCanvas"),
   noiseBitCanvasWrap: document.querySelector(".noise-canvas-wrap"),
 };
@@ -137,6 +140,7 @@ const state = {
   needsBitDraw: true,
   lastBitDrawAt: 0,
   noiseTable: null,
+  noiseFileName: "",
   noiseResults: [],
   noiseSelectedBits: [],
   noiseSelectedMethod: "",
@@ -213,6 +217,27 @@ const noiseBitMap = {
   height: 0,
   dpr: 1,
 };
+
+const NOISE_METHODS = [
+  {
+    key: "ma",
+    name: "Moving average threshold",
+    shortName: "Moving average",
+    description: "이전 샘플의 이동평균에 offset을 더한 기준선보다 현재 샘플이 크면 1로 변환합니다.",
+  },
+  {
+    key: "delta",
+    name: "Delta sign",
+    shortName: "Delta sign",
+    description: "연속 샘플의 차분 부호를 사용합니다. 값이 증가하면 1, 감소하면 0으로 변환합니다.",
+  },
+  {
+    key: "lsb",
+    name: "LSB parity",
+    shortName: "LSB parity",
+    description: "반올림한 데이터의 최하위 비트만 사용합니다. ADC 양자화 노이즈가 충분히 흔들릴 때 비교용으로 봅니다.",
+  },
+];
 
 function clampDac(value) {
   const number = Number.parseInt(value, 10);
@@ -1707,16 +1732,76 @@ function populateNoiseColumns(table) {
   els.noiseColumn.disabled = false;
 }
 
+function formatDelimiter(delimiter) {
+  if (delimiter === "\t") return "tab";
+  if (delimiter === " ") return "space";
+  return delimiter || "unknown";
+}
+
+function renderNoisePreview() {
+  const table = state.noiseTable;
+  const selectedColumn = Number.parseInt(els.noiseColumn.value, 10);
+  if (!table?.headers?.length || !table.rows?.length) {
+    if (els.noisePreviewCaption) {
+      els.noisePreviewCaption.textContent = "Load CSV to confirm delimiter and data column";
+    }
+    if (els.noisePreviewHead) {
+      els.noisePreviewHead.innerHTML = "<tr><th>No CSV</th></tr>";
+    }
+    if (els.noisePreviewBody) {
+      els.noisePreviewBody.innerHTML = "<tr><td>Load CSV</td></tr>";
+    }
+    return;
+  }
+
+  const maxRows = 12;
+  const maxColumns = 8;
+  const columnIndexes = table.headers.map((_, index) => index).slice(0, maxColumns);
+  if (Number.isInteger(selectedColumn) && selectedColumn >= maxColumns && selectedColumn < table.headers.length) {
+    columnIndexes[columnIndexes.length - 1] = selectedColumn;
+  }
+
+  const columnLabel = Number.isInteger(selectedColumn)
+    ? `${selectedColumn + 1}: ${table.headers[selectedColumn] || `Column ${selectedColumn + 1}`}`
+    : "none";
+  if (els.noisePreviewCaption) {
+    els.noisePreviewCaption.textContent =
+      `delimiter=${formatDelimiter(table.delimiter)} | data column=${columnLabel} | first ${Math.min(maxRows, table.rows.length)} rows`;
+  }
+
+  if (els.noisePreviewHead) {
+    const headCells = [
+      `<th>Row</th>`,
+      ...columnIndexes.map((columnIndex) => (
+        `<th class="${columnIndex === selectedColumn ? "is-selected-column" : ""}">${escapeHtml(table.headers[columnIndex] || `Column ${columnIndex + 1}`)}</th>`
+      )),
+    ];
+    els.noisePreviewHead.innerHTML = `<tr>${headCells.join("")}</tr>`;
+  }
+
+  if (els.noisePreviewBody) {
+    const rows = table.rows.slice(0, maxRows).map((row, rowIndex) => {
+      const cells = columnIndexes.map((columnIndex) => (
+        `<td class="${columnIndex === selectedColumn ? "is-selected-column" : ""}">${escapeHtml(row[columnIndex] ?? "")}</td>`
+      ));
+      return `<tr><td>${rowIndex + 1}</td>${cells.join("")}</tr>`;
+    });
+    els.noisePreviewBody.innerHTML = rows.join("");
+  }
+}
+
 async function loadNoiseCsvFile(file) {
   if (!file) return;
   const text = await file.text();
   const table = parseCsvText(text, els.noiseDelimiter.value);
   state.noiseTable = table;
+  state.noiseFileName = file.name;
   populateNoiseColumns(table);
   state.noiseResults = [];
   state.noiseSelectedBits = [];
   els.noiseCaption.textContent = `${file.name} | ${table.rows.length} rows | ${table.headers.length} columns`;
   updateNoiseSummary(0, 0, []);
+  renderNoisePreview();
   renderNoiseResults([]);
   resizeNoiseBitCanvas();
 }
@@ -1966,6 +2051,7 @@ function runNoiseExtraction() {
   const offset = Number.parseFloat(els.noiseThresholdOffset.value) || 0;
   if (els.noiseMethodMovingAverage.checked) {
     methods.push({
+      key: "ma",
       name: "Moving average",
       bits: extractMovingAverageBits(values, windowSize, offset),
       params: `window=${windowSize}, offset=${offset}`,
@@ -1973,6 +2059,7 @@ function runNoiseExtraction() {
   }
   if (els.noiseMethodDelta.checked) {
     methods.push({
+      key: "delta",
       name: "Delta sign",
       bits: extractDeltaBits(values),
       params: "lag=1, bit=delta>0",
@@ -1980,6 +2067,7 @@ function runNoiseExtraction() {
   }
   if (els.noiseMethodLsb.checked) {
     methods.push({
+      key: "lsb",
       name: "LSB parity",
       bits: extractLsbBits(values),
       params: "bit=round(value)&1",
@@ -1989,6 +2077,8 @@ function runNoiseExtraction() {
   state.noiseResults = methods.flatMap((method) => {
     const rawResult = {
       method: `${method.name} raw`,
+      methodKey: method.key,
+      variant: "Raw",
       rawCount: method.bits.length,
       bits: method.bits,
       params: method.params,
@@ -2002,6 +2092,8 @@ function runNoiseExtraction() {
       rawResult,
       {
         method: `${method.name} + VN`,
+        methodKey: method.key,
+        variant: "+ Von Neumann",
         rawCount: method.bits.length,
         bits: vnBits,
         params: `${method.params}, post=Von Neumann 01->0 10->1`,
@@ -2028,8 +2120,8 @@ function updateNoiseSummary(rowCount, numericCount, resultsOrBits) {
   const { ones } = bitCounts(bits);
   els.noiseOneRatio.textContent = bits.length ? (ones / bits.length).toFixed(4) : "--";
   els.noiseCaption.textContent = state.noiseSelectedMethod
-    ? `${state.noiseResults.length} streams | ${bits.length} total plotted bits`
-    : (state.noiseTable ? `${state.noiseTable.rows.length} rows loaded` : "Load a CSV file");
+    ? `${state.noiseFileName || "CSV"} | ${state.noiseResults.length} streams | ${bits.length} total plotted bits`
+    : (state.noiseTable ? `${state.noiseFileName || "CSV"} | ${state.noiseTable.rows.length} rows loaded` : "Load a CSV file");
 }
 
 function formatPValue(value) {
@@ -2038,29 +2130,101 @@ function formatPValue(value) {
   return value.toFixed(4);
 }
 
+function formatOneRatio(bits) {
+  if (!bits?.length) return "--";
+  return (bitCounts(bits).ones / bits.length).toFixed(4);
+}
+
+function isNoiseMethodEnabled(methodKey) {
+  if (methodKey === "ma") return Boolean(els.noiseMethodMovingAverage.checked);
+  if (methodKey === "delta") return Boolean(els.noiseMethodDelta.checked);
+  if (methodKey === "lsb") return Boolean(els.noiseMethodLsb.checked);
+  return false;
+}
+
 function renderNoiseResults(results) {
-  els.noiseResultsBody.innerHTML = "";
+  if (!els.noiseMethodBlocks) return;
+  els.noiseMethodBlocks.innerHTML = "";
+
   if (!results.length) {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="7">No results</td>`;
-    els.noiseResultsBody.append(row);
+    NOISE_METHODS.forEach((method) => {
+      const card = document.createElement("section");
+      card.className = "noise-method-card is-empty";
+      card.innerHTML = `
+        <div class="method-card-head">
+          <h3>${escapeHtml(method.name)}</h3>
+          <span class="method-state">${isNoiseMethodEnabled(method.key) ? "Ready" : "Disabled"}</span>
+        </div>
+        <p>${escapeHtml(method.description)}</p>
+        <p class="method-empty">Run extraction to show this method's test result block.</p>
+      `;
+      els.noiseMethodBlocks.append(card);
+    });
     return;
   }
 
-  results.forEach((result) => {
-    result.tests.forEach(([testName, test]) => {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${escapeHtml(result.method)}</td>
-        <td>${result.bits.length}${result.rawCount !== result.bits.length ? ` / ${result.rawCount} raw` : ""}</td>
-        <td>${escapeHtml(result.params || "")}</td>
-        <td>${escapeHtml(testName)}</td>
-        <td>${escapeHtml(test.value)}</td>
-        <td>${formatPValue(test.p)}</td>
-        <td><span class="test-result ${test.pass ? "is-pass" : "is-fail"}">${test.pass ? "PASS" : "CHECK"}</span></td>
+  NOISE_METHODS.forEach((method) => {
+    const methodResults = results.filter((result) => result.methodKey === method.key);
+    const card = document.createElement("section");
+    card.className = `noise-method-card${methodResults.length ? "" : " is-empty"}`;
+    const totalBits = methodResults.reduce((sum, result) => sum + result.bits.length, 0);
+    const stateText = methodResults.length
+      ? `${methodResults.length} stream${methodResults.length > 1 ? "s" : ""}, ${totalBits} bits`
+      : (isNoiseMethodEnabled(method.key) ? "No output" : "Disabled");
+
+    let body = "";
+    if (!methodResults.length) {
+      body = `<p class="method-empty">${isNoiseMethodEnabled(method.key) ? "No bits were generated for this method." : "This method was not selected."}</p>`;
+    } else {
+      const rows = [];
+      methodResults.forEach((result) => {
+        result.tests.forEach(([testName, test], testIndex) => {
+          rows.push(`
+            <tr>
+              ${testIndex === 0 ? `<td rowspan="${result.tests.length}">${escapeHtml(result.variant || result.method)}</td>` : ""}
+              ${testIndex === 0 ? `<td rowspan="${result.tests.length}">${result.bits.length}</td>` : ""}
+              ${testIndex === 0 ? `<td rowspan="${result.tests.length}">${result.rawCount}</td>` : ""}
+              ${testIndex === 0 ? `<td rowspan="${result.tests.length}">${formatOneRatio(result.bits)}</td>` : ""}
+              ${testIndex === 0 ? `<td rowspan="${result.tests.length}" class="params-cell">${escapeHtml(result.params || "")}</td>` : ""}
+              <td>${escapeHtml(testName)}</td>
+              <td>${escapeHtml(test.value)}</td>
+              <td>${formatPValue(test.p)}</td>
+              <td><span class="test-result ${test.pass ? "is-pass" : "is-fail"}">${test.pass ? "PASS" : "CHECK"}</span></td>
+            </tr>
+          `);
+        });
+      });
+      body = `
+        <div class="noise-results-wrap method-results-wrap">
+          <table class="noise-results">
+            <thead>
+              <tr>
+                <th>Variant</th>
+                <th>Bits</th>
+                <th>Raw</th>
+                <th>One ratio</th>
+                <th>Parameters</th>
+                <th>Test</th>
+                <th>Value</th>
+                <th>p-value</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>${rows.join("")}</tbody>
+          </table>
+        </div>
       `;
-      els.noiseResultsBody.append(row);
-    });
+    }
+
+    card.innerHTML = `
+      <div class="method-card-head">
+        <h3>${escapeHtml(method.name)}</h3>
+        <span class="method-state">${escapeHtml(stateText)}</span>
+      </div>
+      <p>${escapeHtml(method.description)}</p>
+      ${body}
+    `;
+    els.noiseMethodBlocks.append(card);
   });
 }
 
@@ -2616,6 +2780,9 @@ function bindEvents() {
         addLog("ERR", error.message || error, true);
       });
     }
+  });
+  els.noiseColumn.addEventListener("change", () => {
+    renderNoisePreview();
   });
   els.runNoiseButton.addEventListener("click", runNoiseExtraction);
   els.exportNoiseBitsButton.addEventListener("click", exportNoiseBitsCsv);

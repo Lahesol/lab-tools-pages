@@ -4,31 +4,31 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
-    <link rel="stylesheet" href="styles.css?v=740bc208ab8d" />
+    <link rel="stylesheet" href="styles.css?v=6525b065169b" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <div>
+        <div class="brand-block">
           <h1>UV STM/LTM Architecture Simulator</h1>
-          <p>Programmable UV input, reconfigurable optical-synapse blocks, ANN/SNN system exploration</p>
+          <p>Transient optical input, block-level device current, ANN/SNN architecture response</p>
         </div>
         <div class="top-actions">
           <button id="resetBtn" type="button" class="ghost-button">Reset</button>
-          <button id="exportBtn" type="button" class="primary-button">Export Simulation CSV</button>
+          <button id="exportBtn" type="button" class="primary-button">Export CSV</button>
         </div>
       </header>
 
       <nav class="tabs" aria-label="Architecture simulation tabs">
         <button class="active" type="button" data-tab="uv">UV Input</button>
         <button type="button" data-tab="blocks">Device Blocks</button>
-        <button type="button" data-tab="ann">ANN</button>
-        <button type="button" data-tab="snn">SNN</button>
+        <button type="button" data-tab="ann">ANN Transient</button>
+        <button type="button" data-tab="snn">SNN Spiking</button>
         <button type="button" data-tab="refs">References / Next Work</button>
       </nav>
 
       <main class="workspace">
-        <section class="left-column">
+        <section class="left-column" aria-label="Simulation controls">
           <div class="panel">
             <div class="panel-title">
               <span>UV source</span>
@@ -70,7 +70,7 @@
           <div class="panel">
             <div class="panel-title">
               <span>Device mode control</span>
-              <output id="modeControlSummary">block-level</output>
+              <output id="modeControlSummary">STM</output>
             </div>
             <label class="field">
               <span>Switching method</span>
@@ -105,7 +105,27 @@
               <span>TIA gain <output id="tiaGainOut">100 kOhm</output></span>
               <input id="tiaGain" type="range" min="10" max="1000" step="10" value="100" />
             </label>
-            <button id="applyModeBtn" type="button" class="full-button">Apply to blocks</button>
+            <button id="applyModeBtn" type="button" class="full-button">Apply mode to blocks</button>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">
+              <span>Trace target</span>
+              <output id="traceSummary">Hidden A</output>
+            </div>
+            <label class="field">
+              <span>Layer to inspect</span>
+              <select id="traceLayerSelect"></select>
+            </label>
+            <label class="field">
+              <span>Devices displayed <output id="traceDevicesOut">12</output></span>
+              <input id="traceDevices" type="range" min="4" max="32" step="1" value="12" />
+            </label>
+            <label class="field">
+              <span>Device variation <output id="variationOut">8%</output></span>
+              <input id="deviceVariation" type="range" min="0" max="20" step="1" value="8" />
+            </label>
+            <button id="runTransientBtn" type="button" class="full-button accent">Run transient model</button>
           </div>
         </section>
 
@@ -114,13 +134,13 @@
             <div class="section-header">
               <div>
                 <h2>UV PWM / On-Off Program</h2>
-                <p>Single-wavelength UV input drives every optical synapse block. Timing can be PWM-generated or table-driven.</p>
+                <p>Single-wavelength UV input drives the optical synapse blocks. The timing waveform below is the source for ANN and SNN transient calculations.</p>
               </div>
-              <button id="regenerateTimingBtn" type="button" class="ghost-button light">Regenerate table</button>
+              <button id="regenerateTimingBtn" type="button" class="ghost-button light">Regenerate</button>
             </div>
             <div class="two-up">
-              <div class="plot-card">
-                <canvas id="uvCanvas" width="980" height="360" aria-label="UV timing plot"></canvas>
+              <div class="plot-frame">
+                <canvas id="uvCanvas" class="plot-canvas uv-plot" width="980" height="360" aria-label="UV timing plot"></canvas>
               </div>
               <div class="table-card">
                 <div class="mini-title">On/off timing table</div>
@@ -138,7 +158,7 @@
             <div class="section-header">
               <div>
                 <h2>Device Blocks</h2>
-                <p>Arrange the optical transistor devices as reusable blocks. Each block stores memory mode, switching route, and TIA status.</p>
+                <p>Build an optical-memory architecture from reusable transistor-synapse blocks. Each layer stores mode, switching route, TIA status, and role.</p>
               </div>
               <div class="inline-actions">
                 <button id="addLayerBtn" type="button" class="ghost-button light">Add layer</button>
@@ -176,10 +196,10 @@
           <section class="tab-panel" id="tab-ann">
             <div class="section-header">
               <div>
-                <h2>ANN Architecture Simulation</h2>
-                <p>Approximate analog ANN inference where UV-driven device currents represent weighted activations.</p>
+                <h2>ANN Transient Workbench</h2>
+                <p>UV input is propagated through optical-memory blocks. The plots show device photocurrent, TIA voltage, and analog activation versus time.</p>
               </div>
-              <button id="runAnnBtn" type="button" class="primary-button">Run ANN simulation</button>
+              <button id="runAnnBtn" type="button" class="primary-button">Run ANN transient</button>
             </div>
             <div class="config-grid">
               <label class="field">
@@ -207,16 +227,43 @@
                 </select>
               </label>
             </div>
-            <canvas id="annCanvas" width="980" height="400" aria-label="ANN simulation chart"></canvas>
+            <div class="architecture-strip" id="annArchitecture"></div>
+            <div class="analysis-grid">
+              <div class="plot-frame wide">
+                <div class="plot-toolbar">
+                  <span>Time-domain response</span>
+                  <div class="legend-row">
+                    <i class="legend uv"></i>UV
+                    <i class="legend current"></i>Device current
+                    <i class="legend tia"></i>TIA output
+                  </div>
+                </div>
+                <canvas id="annTraceCanvas" class="plot-canvas tall" width="980" height="520" aria-label="ANN time-domain device current plot"></canvas>
+              </div>
+              <div class="plot-frame">
+                <div class="plot-toolbar">
+                  <span>Device current heatmap</span>
+                  <output id="annHeatmapLabel">selected layer</output>
+                </div>
+                <canvas id="annHeatmapCanvas" class="plot-canvas mid" width="980" height="300" aria-label="ANN device current heatmap"></canvas>
+              </div>
+              <div class="plot-frame">
+                <div class="plot-toolbar">
+                  <span>ANN readout</span>
+                  <output id="annReadoutLabel">analog activation</output>
+                </div>
+                <canvas id="annReadoutCanvas" class="plot-canvas mid" width="980" height="300" aria-label="ANN readout traces"></canvas>
+              </div>
+            </div>
           </section>
 
           <section class="tab-panel" id="tab-snn">
             <div class="section-header">
               <div>
-                <h2>SNN Architecture Simulation</h2>
-                <p>Use UV pulses as presynaptic spikes. Device current feeds LIF neurons through optional TIA conversion.</p>
+                <h2>SNN Spiking Workbench</h2>
+                <p>Device current is treated as synaptic current for LIF neurons. The raster and membrane traces expose timing, retention, and sparsity.</p>
               </div>
-              <button id="runSnnBtn" type="button" class="primary-button">Run SNN simulation</button>
+              <button id="runSnnBtn" type="button" class="primary-button">Run SNN transient</button>
             </div>
             <div class="config-grid">
               <label class="field">
@@ -245,14 +292,41 @@
                 </select>
               </label>
             </div>
-            <canvas id="snnCanvas" width="980" height="400" aria-label="SNN simulation chart"></canvas>
+            <div class="architecture-strip" id="snnArchitecture"></div>
+            <div class="analysis-grid">
+              <div class="plot-frame wide">
+                <div class="plot-toolbar">
+                  <span>Synaptic current and membrane</span>
+                  <div class="legend-row">
+                    <i class="legend uv"></i>UV
+                    <i class="legend current"></i>I_syn
+                    <i class="legend membrane"></i>Membrane
+                  </div>
+                </div>
+                <canvas id="snnTraceCanvas" class="plot-canvas tall" width="980" height="520" aria-label="SNN synaptic current and membrane trace"></canvas>
+              </div>
+              <div class="plot-frame">
+                <div class="plot-toolbar">
+                  <span>Spike raster</span>
+                  <output id="snnRasterLabel">selected layer</output>
+                </div>
+                <canvas id="snnRasterCanvas" class="plot-canvas mid" width="980" height="300" aria-label="SNN spike raster"></canvas>
+              </div>
+              <div class="plot-frame">
+                <div class="plot-toolbar">
+                  <span>Layer spike count</span>
+                  <output id="snnReadoutLabel">output event rate</output>
+                </div>
+                <canvas id="snnReadoutCanvas" class="plot-canvas mid" width="980" height="300" aria-label="SNN readout traces"></canvas>
+              </div>
+            </div>
           </section>
 
           <section class="tab-panel" id="tab-refs">
             <div class="section-header">
               <div>
                 <h2>References and Next Work</h2>
-                <p>Use this tab to keep simulation assumptions explicit and to route the next implementation step.</p>
+                <p>Simulation assumptions, recommended datasets, and implementation tasks are kept explicit here for the next development pass.</p>
               </div>
               <a class="primary-link" href="NEXT_WORK.md">Open NEXT_WORK.md</a>
             </div>
@@ -260,12 +334,12 @@
           </section>
         </section>
 
-        <aside class="right-column">
+        <aside class="right-column" aria-label="Analysis summary">
           <div class="metric-grid">
             <div class="metric"><span>Total devices</span><strong id="totalDevices">0</strong></div>
             <div class="metric"><span>STM / LTM</span><strong id="modeMix">0 / 0</strong></div>
-            <div class="metric"><span>TIA blocks</span><strong id="tiaBlocks">0</strong></div>
-            <div class="metric"><span>Output scale</span><strong id="outputScale">0 V</strong></div>
+            <div class="metric"><span>Peak current</span><strong id="peakCurrent">0 nA</strong></div>
+            <div class="metric"><span>Events</span><strong id="eventCount">0</strong></div>
           </div>
 
           <div class="panel">
@@ -274,33 +348,44 @@
               <div><dt>Input</dt><dd id="summaryInput">UV PWM</dd></div>
               <div><dt>Switch route</dt><dd id="summarySwitch">VDS -30/+30</dd></div>
               <div><dt>Architecture</dt><dd id="summaryArchitecture">ANN/SNN ready</dd></div>
-              <div><dt>Recommended backend</dt><dd id="summaryBackend">snnTorch + Tonic</dd></div>
+              <div><dt>Selected layer</dt><dd id="summaryLayer">Hidden A</dd></div>
             </dl>
           </div>
 
           <div class="panel">
-            <div class="panel-title"><span>Block model</span><output>current output</output></div>
-            <pre class="equation">u_uv(t) -> I_device(t)
-STM:  VDS +30 V or Gate 10 V
-LTM:  VDS -30 V or Gate 40 V
-TIA:  V_out = -I_device * R_TIA
-ANN:  activation = normalize(V_out)
-SNN:  I_syn feeds LIF membrane</pre>
+            <div class="panel-title"><span>Selected layer response</span><output id="selectedModeBadge">STM/LTM</output></div>
+            <dl class="summary-list">
+              <div><dt>Mean peak</dt><dd id="layerPeakCurrent">0 nA</dd></div>
+              <div><dt>Residual memory</dt><dd id="layerResidual">0%</dd></div>
+              <div><dt>TIA swing</dt><dd id="layerTiaSwing">0 V</dd></div>
+              <div><dt>Spike rate</dt><dd id="layerSpikeRate">0 Hz</dd></div>
+            </dl>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span>Compact model</span><output>front-end</output></div>
+            <pre class="equation">UV(t) -> I_photo(t)
+STM: fast rise / fast decay
+LTM: slower decay + residual retention
+Route A: Gate = 0 V, VDS = +/-30 V
+Route B: VDS = +30 V, Gate = 10/40 V
+TIA: V_out(t) = -I_photo(t) * R_TIA
+SNN: I_syn(t) drives LIF membrane</pre>
           </div>
 
           <div class="panel">
             <div class="panel-title"><span>Recommended datasets</span><output>starter</output></div>
             <ul class="plain-list">
+              <li>Synthetic UV event classes for device-specific STM/LTM claims.</li>
               <li>MNIST/Fashion-MNIST for ANN baseline.</li>
               <li>N-MNIST or DVS Gesture for event/SNN baseline.</li>
               <li>SHD for temporal spike classification.</li>
-              <li>Synthetic UV event classes for device-specific novelty.</li>
             </ul>
           </div>
         </aside>
       </main>
     </div>
 
-    <script src="app.js?v=a430e2063426"></script>
+    <script src="app.js?v=27c6b2ac4c63"></script>
   </body>
 </html>

@@ -102,16 +102,16 @@ The bitmap is a fixed plane. After all cells in the plane are filled, the next b
 
 ## Noise Extractor
 
-The `Noise extractor` tab accepts CSV files exported from the live PPG/ADC view or other tools. After loading a file, choose the data column and run one or more extractors:
+The `Noise extractor` tab accepts CSV files exported from the live PPG/ADC view or other tools. After loading a file, choose the delimiter and data column; the first parsed rows are shown in `CSV preview` so the selected column can be checked before extraction. Then run one or more extractors:
 
 - Moving average threshold
 - Delta sign
 - LSB parity
 - Optional Von Neumann pair extractor as a separate post-processed variant for each selected raw extractor
 
-`MA window` is the number of previous samples used as the moving-average baseline. `Offset` is added to that baseline, so the moving-average bit rule is `sample > moving_average + offset`. Von Neumann is not a standalone analog extractor because it needs an input bitstream; when enabled, the tab shows both the raw extractor output and the `+ VN` output as separate rows and bitmap lanes.
+`MA window`는 기준선 평균에 사용할 이전 샘플 수입니다. 값을 키우면 느린 drift에는 덜 흔들리고 작은 노이즈를 보기 쉽지만, 빠른 기준선 변화에는 늦게 반응합니다. 값을 줄이면 기준선 변화를 빠르게 따라가지만 노이즈까지 평균에 섞일 수 있습니다. `Offset`은 기준선에 더하는 임계값 보정입니다. 양수면 1이 덜 나오고, 음수면 1이 더 나옵니다. Moving-average bit rule is `sample > moving_average + offset`.
 
-The tab reports bit count, raw count, parameters, and ones ratio per method, renders separate bitmap lanes for each method/parameter variant, exports extracted bits as CSV, and runs browser-side randomness checks: NIST-style monobit frequency, runs, block frequency, serial m=2, plus entropy and lag-1 autocorrelation summaries.
+Von Neumann is not a standalone analog extractor because it needs an input bitstream; when enabled, the tab shows both the raw extractor output and the `+ VN` output as separate bitmap lanes. The test area is split into three method blocks: moving-average threshold, delta sign, and LSB parity. Each block reports generated bit count, raw count, parameters, one ratio, and browser-side randomness checks: NIST-style monobit frequency, runs, block frequency, serial m=2, plus entropy and lag-1 autocorrelation summaries.
 
 ## Portal Build
 

@@ -16,8 +16,8 @@ Core assumptions:
 - Architecture simulations should be separated into tabs:
   - UV Input
   - Device Blocks
-  - ANN
-  - SNN
+  - ANN Transient
+  - SNN Spiking
   - References / Next Work
 
 ## Current Prototype Status
@@ -26,13 +26,28 @@ Implemented in `web_gui/`:
 - UV PWM and UV on/off timing table preview.
 - Layer/block style device array canvas.
 - Per-layer device count, role, STM/LTM/adaptive mode, switching method, and TIA toggle.
-- ANN tab with approximate current-mode architecture metrics.
-- SNN tab with approximate LIF/CSNN/RSNN metrics.
+- Front-end compact transient model:
+  - UV waveform is applied over time.
+  - Each displayed device produces a photocurrent trace.
+  - STM/LTM mode changes decay and residual retention behavior.
+  - Switching route changes gain/persistence assumptions.
+  - Optional TIA converts current to voltage.
+- ANN Transient tab:
+  - Architecture schematic.
+  - Time-domain UV/current/TIA or activation plot.
+  - Device-current heatmap for the selected layer.
+  - Analog activation/readout plot.
+- SNN Spiking tab:
+  - Architecture schematic.
+  - Synaptic current and membrane trace.
+  - Spike raster for the selected layer.
+  - Binned layer spike-count readout.
 - Reference tab with paper/library links.
-- CSV export for UV timing waveform.
+- CSV export for UV, selected ANN current/readout, selected SNN current, and membrane trace.
 
 Current limitation:
-- The ANN/SNN results are qualitative estimates, not trained model accuracy.
+- The ANN/SNN front-end is a deterministic compact simulation, not a trained model accuracy benchmark.
+- The compact model parameters are engineering placeholders until fit from measured current-time traces.
 - Device parameters are not fit from measured raw current-time traces yet.
 - No Python backend or real dataset loader is connected yet.
 
