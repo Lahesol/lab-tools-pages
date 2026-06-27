@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=32044750e65a" />
+    <link rel="stylesheet" href="styles.css?v=c22d126cf9be" />
   </head>
   <body>
     <div class="app-shell">
@@ -24,6 +24,7 @@
         <button class="active" type="button" data-tab="uv">UV Input</button>
         <button type="button" data-tab="blocks">Device Blocks</button>
         <button type="button" data-tab="params">Device Parameters</button>
+        <button type="button" data-tab="optimizer">Optimizer</button>
         <button type="button" data-tab="ann">ANN Transient</button>
         <button type="button" data-tab="snn">SNN Spiking</button>
         <button type="button" data-tab="refs">Terms / References</button>
@@ -502,6 +503,120 @@
             </div>
           </section>
 
+          <section class="tab-panel" id="tab-optimizer">
+            <div class="section-header">
+              <div>
+                <h2>Architecture Optimizer</h2>
+                <p>Search block layouts and connection patterns under the current device and O/E/O parameters. This is a browser-side proxy optimizer, not a trained accuracy benchmark.</p>
+              </div>
+              <div class="inline-actions">
+                <button id="runOptimizerBtn" type="button" class="primary-button">Run optimizer</button>
+                <button id="applyBestCandidateBtn" type="button" class="ghost-button light">Apply best to blocks</button>
+              </div>
+            </div>
+
+            <div class="optimizer-grid">
+              <div class="panel optimizer-panel">
+                <div class="panel-title"><span>Search setup</span><output id="optimizerStatus">idle</output></div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Optimize for</span>
+                    <select id="optimizerTarget">
+                      <option value="ann">ANN analog proxy</option>
+                      <option value="snn">SNN spiking proxy</option>
+                      <option value="uv">UV event detector</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Iterations <output id="optimizerIterationsOut">80</output></span>
+                    <input id="optimizerIterations" type="range" min="20" max="240" step="10" value="80" />
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Max fanout <output id="optimizerFanoutOut">8</output></span>
+                    <input id="optimizerMaxFanout" type="range" min="1" max="24" step="1" value="8" />
+                  </label>
+                  <label class="field">
+                    <span>Max hidden devices <output id="optimizerMaxDevicesOut">48</output></span>
+                    <input id="optimizerMaxDevices" type="range" min="8" max="96" step="4" value="48" />
+                  </label>
+                </div>
+                <div class="optimizer-toggle-grid">
+                  <label class="toggle"><input id="optimizerTuneSizes" type="checkbox" checked /><span>Tune hidden device counts</span></label>
+                  <label class="toggle"><input id="optimizerTuneModes" type="checkbox" checked /><span>Tune STM/LTM ratio and route</span></label>
+                  <label class="toggle"><input id="optimizerTuneConnections" type="checkbox" checked /><span>Tune fanout connections</span></label>
+                  <label class="toggle"><input id="optimizerTuneOeo" type="checkbox" /><span>Tune O/E/O soft parameters</span></label>
+                </div>
+              </div>
+
+              <div class="panel optimizer-panel">
+                <div class="panel-title"><span>Objective weights</span><output id="optimizerScoreSummary">score proxy</output></div>
+                <label class="field">
+                  <span>Class / output separation <output id="optimizerSepOut">0.35</output></span>
+                  <input id="optimizerSeparationWeight" type="range" min="0" max="1" step="0.05" value="0.35" />
+                </label>
+                <label class="field">
+                  <span>Spike sparsity / balance <output id="optimizerSparsityOut">0.25</output></span>
+                  <input id="optimizerSparsityWeight" type="range" min="0" max="1" step="0.05" value="0.25" />
+                </label>
+                <label class="field">
+                  <span>Latency / response speed <output id="optimizerLatencyOut">0.15</output></span>
+                  <input id="optimizerLatencyWeight" type="range" min="0" max="1" step="0.05" value="0.15" />
+                </label>
+                <label class="field">
+                  <span>Low energy / low UV drive <output id="optimizerEnergyOut">0.15</output></span>
+                  <input id="optimizerEnergyWeight" type="range" min="0" max="1" step="0.05" value="0.15" />
+                </label>
+                <label class="field">
+                  <span>Robustness / no saturation <output id="optimizerRobustOut">0.10</output></span>
+                  <input id="optimizerRobustnessWeight" type="range" min="0" max="1" step="0.05" value="0.10" />
+                </label>
+              </div>
+            </div>
+
+            <details class="term-note" open>
+              <summary>Optimizer terms</summary>
+              <dl class="term-list compact-term-list">
+                <div><dt>Proxy score</dt><dd>Weighted score from compact simulation metrics. It is for architecture screening, not final model accuracy.</dd></div>
+                <div><dt>Separation</dt><dd>ANN output margin or UV event class separation proxy from output-layer response.</dd></div>
+                <div><dt>Sparsity</dt><dd>SNN/IF event activity target. Higher score means useful but not excessive spikes.</dd></div>
+                <div><dt>Latency</dt><dd>How early the output layer reaches useful activation or spikes.</dd></div>
+                <div><dt>Energy</dt><dd>Penalty proxy from emitted UV, delivered edge UV, and photocurrent activity.</dd></div>
+                <div><dt>Robustness</dt><dd>Penalty against TIA/emitter saturation, disconnected graphs, and dataset-device mismatch.</dd></div>
+              </dl>
+            </details>
+
+            <div class="optimizer-results">
+              <div class="plot-frame wide">
+                <div class="plot-toolbar">
+                  <span>Candidate trade-off plot</span>
+                  <output id="optimizerPlotLabel">score vs energy</output>
+                </div>
+                <canvas id="optimizerCanvas" class="plot-canvas mid" width="980" height="320" aria-label="Architecture optimizer candidate plot"></canvas>
+              </div>
+              <div class="panel optimizer-best-panel">
+                <div class="panel-title"><span>Best candidate</span><output id="optimizerBestBadge">none</output></div>
+                <dl class="summary-list">
+                  <div><dt>Score</dt><dd id="optimizerBestScore">-</dd></div>
+                  <div><dt>Mode mix</dt><dd id="optimizerBestModeMix">-</dd></div>
+                  <div><dt>Edges</dt><dd id="optimizerBestEdges">-</dd></div>
+                  <div><dt>Energy proxy</dt><dd id="optimizerBestEnergy">-</dd></div>
+                  <div><dt>Constraint</dt><dd id="optimizerBestConstraint">-</dd></div>
+                </dl>
+              </div>
+              <div class="table-card optimizer-table-card">
+                <div class="mini-title">Top candidates</div>
+                <table>
+                  <thead>
+                    <tr><th>#</th><th>Score</th><th>Target</th><th>Devices</th><th>STM/LTM</th><th>Edges</th><th>Energy</th><th>Notes</th></tr>
+                  </thead>
+                  <tbody id="optimizerTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <section class="tab-panel" id="tab-ann">
             <div class="section-header">
               <div>
@@ -734,6 +849,11 @@
                 <article class="reference-item"><h3>I_syn</h3><p>Synaptic current derived from device photocurrent and used to drive LIF membrane state.</p></article>
                 <article class="reference-item"><h3>Spike raster</h3><p>Time-vs-device plot showing when simulated output spikes occur.</p></article>
                 <article class="reference-item"><h3>TTFS</h3><p>Time-to-first-spike encoding. Stronger input is represented by earlier spike timing.</p></article>
+                <article class="reference-item"><h3>Proxy score</h3><p>Weighted browser-side optimizer score from compact simulation metrics. It is a screening metric, not measured model accuracy.</p></article>
+                <article class="reference-item"><h3>Separation objective</h3><p>Optimizer objective that rewards output margin, dynamic range, or class/event distinguishability.</p></article>
+                <article class="reference-item"><h3>Sparsity objective</h3><p>Optimizer objective that rewards useful but not excessive SNN/IF events.</p></article>
+                <article class="reference-item"><h3>Energy proxy</h3><p>Optimizer penalty based on optical output, delivered edge UV, and current activity in the compact model.</p></article>
+                <article class="reference-item"><h3>Robustness objective</h3><p>Optimizer objective that penalizes saturation, disconnected graphs, and dataset-device adapter requirements.</p></article>
               </div>
             </section>
             <div class="dataset-source-grid" id="datasetSourceGrid"></div>
@@ -804,6 +924,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-model.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=e2114c50ab14"></script>
+    <script src="app.js?v=b1885c2b0f85"></script>
   </body>
 </html>

@@ -89,6 +89,11 @@ Implemented in `web_gui/`:
   - Two-column measured transient CSV can be pasted as `time_s,current_nA`.
   - Model and measurement traces are overlaid under the current UV pulse program.
   - A browser-side first-pass auto-fit adjusts gain, dark current, rise tau, decay tau, and retention.
+- Architecture Optimizer tab:
+  - Browser-side heuristic search generates candidate block architectures under the current device and O/E/O parameters.
+  - Candidate variables include hidden device count, STM/LTM mode mix, switching route, fan-out connection topology, and optional O/E/O soft parameters.
+  - Proxy objectives include output separation, spike sparsity/balance, latency, low UV/energy proxy, and saturation/adapter robustness.
+  - Results include a score-vs-energy trade-off plot, best-candidate summary, top-candidate table, and an apply-to-blocks action.
 
 Current limitation:
 - The ANN/SNN front-end is a deterministic compact simulation, not a trained model accuracy benchmark.
@@ -98,6 +103,7 @@ Current limitation:
 - If the dataset requires more input/output channels than the current device layout, the GUI currently simulates the user's placed blocks with a virtual encoder/readout adapter.
 - ANN/SNN graph propagation currently uses a browser-side forward graph pass. Backward/recurrent edges need a delayed iterative solver or Python backend.
 - Device parameters can be manually tuned and roughly auto-fitted in-browser, but this is still a first-pass compact fit and not a statistically robust extraction workflow.
+- The Architecture Optimizer is a compact proxy optimizer. It screens structures quickly but does not replace trained ANN/SNN accuracy evaluation.
 - The integrate-fire emitter and LTM latch are compact system-level transfer models. Their parameters still need extraction from measured TIA/emitter circuit behavior or a circuit-level SPICE/Python backend.
 - Public dataset download commands exist, but decoded real samples are not yet streamed into the browser-side simulation.
 - No Python training/inference backend is connected yet.

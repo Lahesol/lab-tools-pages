@@ -69,6 +69,19 @@ const defaults = {
   snnPreset: "lif",
   snnDataset: "nmnist",
   snnEncoding: "rate",
+  optimizerTarget: "ann",
+  optimizerIterations: 80,
+  optimizerMaxFanout: 8,
+  optimizerMaxDevices: 48,
+  optimizerTuneSizes: true,
+  optimizerTuneModes: true,
+  optimizerTuneConnections: true,
+  optimizerTuneOeo: false,
+  optimizerSeparationWeight: 0.35,
+  optimizerSparsityWeight: 0.25,
+  optimizerLatencyWeight: 0.15,
+  optimizerEnergyWeight: 0.15,
+  optimizerRobustnessWeight: 0.1,
   selectedDevice: "L0D0",
   sourceDevice: "L0D0",
   targetDevice: "L1D0",
@@ -113,6 +126,7 @@ let latestTimeline = [];
 let latestBlock = null;
 let latestAnn = null;
 let latestSnn = null;
+let latestOptimizer = { candidates: [], best: null, target: "ann" };
 
 function $(id) {
   return document.getElementById(id);
@@ -293,6 +307,19 @@ function readControls() {
   state.snnPreset = $("snnPreset").value;
   state.snnDataset = $("snnDataset").value;
   state.snnEncoding = $("snnEncoding").value;
+  state.optimizerTarget = $("optimizerTarget").value;
+  state.optimizerIterations = Number($("optimizerIterations").value);
+  state.optimizerMaxFanout = Number($("optimizerMaxFanout").value);
+  state.optimizerMaxDevices = Number($("optimizerMaxDevices").value);
+  state.optimizerTuneSizes = $("optimizerTuneSizes").checked;
+  state.optimizerTuneModes = $("optimizerTuneModes").checked;
+  state.optimizerTuneConnections = $("optimizerTuneConnections").checked;
+  state.optimizerTuneOeo = $("optimizerTuneOeo").checked;
+  state.optimizerSeparationWeight = Number($("optimizerSeparationWeight").value);
+  state.optimizerSparsityWeight = Number($("optimizerSparsityWeight").value);
+  state.optimizerLatencyWeight = Number($("optimizerLatencyWeight").value);
+  state.optimizerEnergyWeight = Number($("optimizerEnergyWeight").value);
+  state.optimizerRobustnessWeight = Number($("optimizerRobustnessWeight").value);
   state.selectedDevice = $("deviceSelect").value;
   state.sourceDevice = $("sourceDeviceSelect").value;
   state.targetDevice = $("targetDeviceSelect").value;
@@ -337,6 +364,19 @@ function writeControls() {
   $("snnPreset").value = state.snnPreset;
   $("snnDataset").value = state.snnDataset;
   $("snnEncoding").value = state.snnEncoding;
+  $("optimizerTarget").value = state.optimizerTarget;
+  $("optimizerIterations").value = state.optimizerIterations;
+  $("optimizerMaxFanout").value = state.optimizerMaxFanout;
+  $("optimizerMaxDevices").value = state.optimizerMaxDevices;
+  $("optimizerTuneSizes").checked = state.optimizerTuneSizes;
+  $("optimizerTuneModes").checked = state.optimizerTuneModes;
+  $("optimizerTuneConnections").checked = state.optimizerTuneConnections;
+  $("optimizerTuneOeo").checked = state.optimizerTuneOeo;
+  $("optimizerSeparationWeight").value = state.optimizerSeparationWeight;
+  $("optimizerSparsityWeight").value = state.optimizerSparsityWeight;
+  $("optimizerLatencyWeight").value = state.optimizerLatencyWeight;
+  $("optimizerEnergyWeight").value = state.optimizerEnergyWeight;
+  $("optimizerRobustnessWeight").value = state.optimizerRobustnessWeight;
   $("fanCount").value = state.fanCount;
   $("edgeCoupling").value = state.edgeCoupling;
   $("edgeResidual").value = state.edgeResidual;
@@ -400,6 +440,14 @@ function updateReadouts() {
   $("summaryInput").textContent = state.programMode === "pwm" ? "UV PWM" : "UV on/off table";
   $("summarySwitch").textContent = state.switchMethod === "vds" ? "VDS -30/+30" : "Gate 10/40";
   $("modeControlSummary").textContent = state.defaultMemoryMode;
+  $("optimizerIterationsOut").textContent = `${state.optimizerIterations}`;
+  $("optimizerFanoutOut").textContent = `${state.optimizerMaxFanout}`;
+  $("optimizerMaxDevicesOut").textContent = `${state.optimizerMaxDevices}`;
+  $("optimizerSepOut").textContent = state.optimizerSeparationWeight.toFixed(2);
+  $("optimizerSparsityOut").textContent = state.optimizerSparsityWeight.toFixed(2);
+  $("optimizerLatencyOut").textContent = state.optimizerLatencyWeight.toFixed(2);
+  $("optimizerEnergyOut").textContent = state.optimizerEnergyWeight.toFixed(2);
+  $("optimizerRobustOut").textContent = state.optimizerRobustnessWeight.toFixed(2);
 }
 
 function generateTimeline() {
@@ -1720,6 +1768,407 @@ function parameterDrive(timeline) {
   return timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
 }
 
+function seededRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value += 0x6D2B79F5;
+    let t = value;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function optimizerKind() {
+  return state.optimizerTarget === "snn" ? "snn" : "ann";
+}
+
+function snapshotOptimizedState() {
+  return {
+    layers: deepClone(state.layers),
+    connections: deepClone(state.connections),
+    deviceOverrides: deepClone(state.deviceOverrides),
+    connectionGraphInitialized: state.connectionGraphInitialized,
+    driverThresholdMv: state.driverThresholdMv,
+    driverGain: state.driverGain,
+    driverMax: state.driverMax,
+    splitterLossDb: state.splitterLossDb,
+    edgeCoupling: state.edgeCoupling,
+    edgeResidual: state.edgeResidual,
+    edgeDelay: state.edgeDelay,
+    ifTauMs: state.ifTauMs,
+    ifThreshold: state.ifThreshold,
+    ifGain: state.ifGain,
+    ifRefractoryMs: state.ifRefractoryMs,
+    emitterPulseMs: state.emitterPulseMs,
+    ltmWriteThreshold: state.ltmWriteThreshold,
+    ltmReadoutGain: state.ltmReadoutGain,
+    ltmRetentionMs: state.ltmRetentionMs,
+  };
+}
+
+function restoreOptimizedState(snapshot) {
+  Object.assign(state, deepClone(snapshot));
+}
+
+function applyOptimizedState(candidate) {
+  if (!candidate?.snapshot) return;
+  const activeTab = state.activeTab;
+  restoreOptimizedState(candidate.snapshot);
+  state.activeTab = activeTab;
+  state.connectionGraphInitialized = true;
+}
+
+function withCandidate(candidate, fn) {
+  const previous = snapshotOptimizedState();
+  applyOptimizedState(candidate);
+  try {
+    return fn();
+  } finally {
+    restoreOptimizedState(previous);
+  }
+}
+
+function hiddenLayerIndexes(layers) {
+  return layers
+    .map((layer, index) => ({ layer, index }))
+    .filter((item) => item.layer.role === "hidden")
+    .map((item) => item.index);
+}
+
+function countModeMix(layers) {
+  let stm = 0;
+  let ltm = 0;
+  layers.forEach((layer) => {
+    const ltmCount = layer.mode === "LTM" ? layer.devices : layer.mode === "adaptive" ? Math.floor(layer.devices / 2) : 0;
+    ltm += ltmCount;
+    stm += layer.devices - ltmCount;
+  });
+  return { stm, ltm };
+}
+
+function candidateConnections(candidateState, random, maxFanout) {
+  const connections = [];
+  for (let layerIndex = 0; layerIndex < candidateState.layers.length - 1; layerIndex += 1) {
+    const sourceKeys = NET.layerKeys(candidateState, layerIndex, 32);
+    const targetKeys = NET.layerKeys(candidateState, layerIndex + 1, 32);
+    if (!sourceKeys.length || !targetKeys.length) continue;
+    sourceKeys.forEach((source, sourceIndex) => {
+      const fanout = clamp(1 + Math.floor(random() * maxFanout), 1, Math.max(1, Math.min(maxFanout, targetKeys.length)));
+      for (let f = 0; f < fanout; f += 1) {
+        const jitter = Math.floor(random() * targetKeys.length);
+        const target = targetKeys[(sourceIndex * fanout + f + jitter) % targetKeys.length];
+        connections.push({ from: source, to: target, weight: round(0.45 + random() * 0.65, 2) });
+      }
+    });
+  }
+  return NET.cleanConnections(candidateState, connections);
+}
+
+function buildOptimizerCandidate(index) {
+  const random = seededRandom(761 + index * 7919 + state.optimizerIterations * 13);
+  const snapshot = snapshotOptimizedState();
+  const candidateState = {
+    layers: deepClone(snapshot.layers),
+    connections: deepClone(snapshot.connections),
+    deviceOverrides: {},
+  };
+  const hiddenIndexes = hiddenLayerIndexes(candidateState.layers);
+  const outputIndex = Math.max(0, candidateState.layers.map((layer) => layer.role).lastIndexOf("output"));
+  const dataset = getDataset(optimizerKind());
+
+  if (state.optimizerTuneSizes) {
+    hiddenIndexes.forEach((layerIndex) => {
+      const layer = candidateState.layers[layerIndex];
+      const scale = 0.65 + random() * 0.95;
+      layer.devices = clamp(Math.round(layer.devices * scale / 2) * 2, 4, state.optimizerMaxDevices);
+    });
+    if (dataset.outputClasses && candidateState.layers[outputIndex]) {
+      const outputDevices = random() > 0.45 ? dataset.outputClasses : candidateState.layers[outputIndex].devices;
+      candidateState.layers[outputIndex].devices = clamp(outputDevices, 1, Math.max(dataset.outputClasses, 16));
+    }
+  }
+
+  if (state.optimizerTuneModes) {
+    hiddenIndexes.forEach((layerIndex, hiddenOrder) => {
+      const layer = candidateState.layers[layerIndex];
+      const stmBias = state.optimizerTarget === "snn" ? 0.68 : state.optimizerTarget === "uv" ? 0.78 : 0.48;
+      const draw = random();
+      layer.mode = draw < stmBias ? "STM" : draw < stmBias + 0.22 ? "adaptive" : "LTM";
+      layer.switchMethod = random() < (hiddenOrder % 2 ? 0.58 : 0.42) ? "gate" : "vds";
+      layer.tia = true;
+    });
+    if (candidateState.layers[outputIndex]) {
+      candidateState.layers[outputIndex].mode = state.optimizerTarget === "snn" && random() < 0.55 ? "STM" : "LTM";
+      candidateState.layers[outputIndex].switchMethod = "gate";
+    }
+  }
+
+  if (state.optimizerTuneConnections) {
+    candidateState.connections = candidateConnections(candidateState, random, state.optimizerMaxFanout);
+  }
+
+  snapshot.layers = candidateState.layers;
+  snapshot.connections = NET.cleanConnections(candidateState, candidateState.connections);
+  snapshot.deviceOverrides = candidateState.deviceOverrides;
+  snapshot.connectionGraphInitialized = true;
+
+  if (state.optimizerTuneOeo) {
+    snapshot.driverThresholdMv = round(clamp(state.driverThresholdMv * (0.6 + random() * 1.2), 0, 50), 2);
+    snapshot.driverGain = round(clamp(state.driverGain * (0.65 + random() * 0.95), 1, 140), 2);
+    snapshot.ifThreshold = round(clamp(state.ifThreshold * (0.65 + random() * 1.25), 0.05, 1.5), 3);
+    snapshot.ifGain = round(clamp(state.ifGain * (0.65 + random() * 1.2), 0.1, 5), 3);
+    snapshot.ltmWriteThreshold = round(clamp(state.ltmWriteThreshold * (0.65 + random() * 1.2), 0.01, 1.2), 3);
+  }
+
+  return { id: index + 1, snapshot, notes: [] };
+}
+
+function mean(values) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function outputLatencyScore(trace, timeline) {
+  const peak = Math.max(...trace, 1e-6);
+  const threshold = peak * 0.55;
+  const hit = trace.findIndex((value) => value >= threshold);
+  if (hit < 0) return 0;
+  const totalTime = timeline[timeline.length - 1]?.t || 1;
+  return clamp(1 - (timeline[hit].t / totalTime), 0, 1);
+}
+
+function graphEnergyProxy(result) {
+  const nodes = Object.values(result.nodeMap || {});
+  if (!nodes.length) return 1;
+  let sumOptical = 0;
+  let samples = 0;
+  nodes.forEach((node) => {
+    (node.opticalOutput || []).forEach((value) => {
+      sumOptical += value;
+      samples += 1;
+    });
+  });
+  return samples ? sumOptical / samples / Math.max(state.driverMax, 0.1) : 1;
+}
+
+function saturationPenalty(result) {
+  const nodes = Object.values(result.nodeMap || {});
+  let saturated = 0;
+  let samples = 0;
+  nodes.forEach((node) => {
+    (node.opticalOutput || []).forEach((value) => {
+      if (value >= state.driverMax * 0.98) saturated += 1;
+      samples += 1;
+    });
+  });
+  return samples ? saturated / samples : 0;
+}
+
+function evaluateOptimizerCandidate(candidate) {
+  const kind = state.optimizerTarget === "snn" ? "snn" : "ann";
+  return withCandidate(candidate, () => {
+    const result = state.optimizerTarget === "uv" ? simulateBlockGraph() : simulateArchitecture(kind);
+    const contract = architectureContract(kind);
+    const output = result.output || result.selected;
+    const outputMean = output.mean || [];
+    const peak = Math.max(...outputMean, 1);
+    const residual = outputMean.length ? outputMean[outputMean.length - 1] / peak : 0;
+    const dynamic = clamp((peak - Math.min(...outputMean, peak)) / peak, 0, 1);
+    const energy = clamp(graphEnergyProxy(result), 0, 2);
+    const energyScore = clamp(1 - energy / 1.25, 0, 1);
+    const robust = clamp(1 - saturationPenalty(result) * 2, 0, 1);
+    const latency = outputLatencyScore(outputMean, result.timeline);
+    const edgeScore = clamp((result.graph.usedEdges || 0) / Math.max(1, result.graph.edgeCount || 1), 0, 1);
+    let separation = dynamic * 0.55 + clamp(1 - residual, 0, 1) * 0.25 + edgeScore * 0.2;
+    let sparsity = 0.55;
+
+    if (state.optimizerTarget === "ann" && result.readout) {
+      const margin = result.readout.decisionMargin || [];
+      separation = clamp(mean(margin.map((value) => Math.abs(value - 0.5) * 2)), 0, 1) * 0.65 + dynamic * 0.35;
+      sparsity = clamp(1 - energy * 0.5, 0, 1);
+    } else if (state.optimizerTarget === "snn") {
+      const duration = result.timeline[result.timeline.length - 1]?.t || 1;
+      const rate = (result.spikeCount || 0) / Math.max(1, result.selected.displayedDevices) / duration;
+      const targetRate = 9;
+      sparsity = clamp(1 - Math.abs(rate - targetRate) / targetRate, 0, 1);
+      separation = clamp((result.spikeCount || 0) / Math.max(1, result.selected.displayedDevices * 8), 0, 1) * 0.45 + dynamic * 0.55;
+    } else {
+      separation = dynamic * 0.5 + clamp(1 - residual, 0, 1) * 0.35 + latency * 0.15;
+      sparsity = clamp(1 - energy * 0.65, 0, 1);
+    }
+
+    const adapterPenalty = contract.runnable ? 0 : 0.08;
+    const disconnectedPenalty = result.graph.edgeCount && result.graph.usedEdges === 0 ? 0.2 : 0;
+    const weights = {
+      separation: state.optimizerSeparationWeight,
+      sparsity: state.optimizerSparsityWeight,
+      latency: state.optimizerLatencyWeight,
+      energy: state.optimizerEnergyWeight,
+      robustness: state.optimizerRobustnessWeight,
+    };
+    const weightSum = Math.max(0.001, Object.values(weights).reduce((sum, value) => sum + value, 0));
+    const rawScore = (
+      separation * weights.separation
+      + sparsity * weights.sparsity
+      + latency * weights.latency
+      + energyScore * weights.energy
+      + robust * weights.robustness
+    ) / weightSum;
+    const score = clamp(rawScore - adapterPenalty - disconnectedPenalty, 0, 1);
+    const modeMix = countModeMix(candidate.snapshot.layers);
+    const devices = candidate.snapshot.layers.reduce((sum, layer) => sum + layer.devices, 0);
+    const notes = [];
+    if (!contract.runnable) notes.push("adapter");
+    if (state.optimizerTuneOeo) notes.push("OEO tuned");
+    if (result.graph.usedEdges < result.graph.edgeCount) notes.push("partial graph");
+    if (!notes.length) notes.push("direct graph");
+
+    return {
+      ...candidate,
+      target: state.optimizerTarget,
+      score,
+      metrics: {
+        separation,
+        sparsity,
+        latency,
+        energy,
+        energyScore,
+        robust,
+        devices,
+        stm: modeMix.stm,
+        ltm: modeMix.ltm,
+        edgeCount: result.graph.edgeCount,
+        usedEdges: result.graph.usedEdges,
+        adapter: !contract.runnable,
+      },
+      notes,
+    };
+  });
+}
+
+function runOptimizer() {
+  readControls();
+  $("optimizerStatus").textContent = "running";
+  const candidates = [];
+  const iterations = clamp(state.optimizerIterations, 20, 240);
+  for (let index = 0; index < iterations; index += 1) {
+    candidates.push(evaluateOptimizerCandidate(buildOptimizerCandidate(index)));
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  latestOptimizer = { target: state.optimizerTarget, candidates, best: candidates[0] || null };
+  $("optimizerStatus").textContent = `${candidates.length} candidates`;
+  renderOptimizerResults();
+  drawOptimizerPlot();
+}
+
+function activateTab(tabName) {
+  state.activeTab = tabName;
+  document.querySelectorAll(".tabs button").forEach((button) => button.classList.toggle("active", button.dataset.tab === tabName));
+  document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tabName}`));
+}
+
+function applyBestCandidate() {
+  const best = latestOptimizer.best;
+  if (!best) {
+    $("optimizerStatus").textContent = "run first";
+    return;
+  }
+  applyOptimizedState(best);
+  activateTab("blocks");
+  updateTraceLayerOptions();
+  writeControls();
+  updateDeviceSelectors();
+  runAllSimulations();
+  $("simStatus").textContent = "optimizer applied";
+}
+
+function renderOptimizerResults() {
+  const candidates = latestOptimizer.candidates || [];
+  const best = latestOptimizer.best;
+  const tbody = $("optimizerTableBody");
+  if (tbody) {
+    tbody.innerHTML = candidates.slice(0, 10).map((candidate, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${candidate.score.toFixed(3)}</td>
+        <td>${candidate.target.toUpperCase()}</td>
+        <td>${candidate.metrics.devices}</td>
+        <td>${candidate.metrics.stm}/${candidate.metrics.ltm}</td>
+        <td>${candidate.metrics.usedEdges}/${candidate.metrics.edgeCount}</td>
+        <td>${candidate.metrics.energy.toFixed(3)}</td>
+        <td>${candidate.notes.join(", ")}</td>
+      </tr>
+    `).join("");
+  }
+
+  $("optimizerBestBadge").textContent = best ? `candidate ${best.id}` : "none";
+  $("optimizerBestScore").textContent = best ? best.score.toFixed(3) : "-";
+  $("optimizerBestModeMix").textContent = best ? `${best.metrics.stm} STM / ${best.metrics.ltm} LTM` : "-";
+  $("optimizerBestEdges").textContent = best ? `${best.metrics.usedEdges} used / ${best.metrics.edgeCount} configured` : "-";
+  $("optimizerBestEnergy").textContent = best ? best.metrics.energy.toFixed(3) : "-";
+  $("optimizerBestConstraint").textContent = best ? best.notes.join(", ") : "-";
+  $("optimizerPlotLabel").textContent = candidates.length ? `${candidates.length} candidates` : "score vs energy";
+}
+
+function drawOptimizerPlot() {
+  const canvas = $("optimizerCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = setupCanvas(canvas);
+  const candidates = latestOptimizer.candidates || [];
+  const plot = { left: 58, right: width - 28, top: 46, bottom: height - 42 };
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  drawPlotTitle(ctx, "Architecture candidate trade-off", "higher score and lower energy proxy are preferred");
+  drawGrid(ctx, plot, 4, 6);
+  ctx.fillStyle = "#667887";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("Energy proxy", (plot.left + plot.right) / 2 - 32, plot.bottom + 28);
+  ctx.save();
+  ctx.translate(16, (plot.top + plot.bottom) / 2 + 28);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("Proxy score", 0, 0);
+  ctx.restore();
+
+  if (!candidates.length) {
+    ctx.fillStyle = "#627381";
+    ctx.font = "800 12px Malgun Gothic, Segoe UI, sans-serif";
+    ctx.fillText("Run optimizer to generate architecture candidates.", plot.left + 12, plot.top + 26);
+    return;
+  }
+
+  const maxEnergy = Math.max(...candidates.map((candidate) => candidate.metrics.energy), 0.1) * 1.08;
+  candidates.forEach((candidate, index) => {
+    const x = lerp(plot.left, plot.right, clamp(candidate.metrics.energy / maxEnergy, 0, 1));
+    const y = valueToY(candidate.score, 0, 1, plot);
+    const isBest = index === 0;
+    ctx.fillStyle = isBest ? "#d98612" : candidate.metrics.adapter ? "rgba(195,76,60,0.45)" : "rgba(11,97,181,0.45)";
+    ctx.beginPath();
+    ctx.arc(x, y, isBest ? 6 : 3.6, 0, Math.PI * 2);
+    ctx.fill();
+    if (isBest) {
+      ctx.strokeStyle = "#8a5200";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = "#8a5200";
+      ctx.font = "800 10px Malgun Gothic, Segoe UI, sans-serif";
+      ctx.fillText("best", x + 8, y - 8);
+    }
+  });
+
+  ctx.fillStyle = "#667887";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("0", plot.left - 3, plot.bottom + 16);
+  ctx.fillText(maxEnergy.toFixed(2), plot.right - 30, plot.bottom + 16);
+  ctx.fillText("1.0", plot.left - 34, plot.top + 4);
+}
+
+function invalidateOptimizer(status = "settings changed") {
+  latestOptimizer = { candidates: [], best: null, target: state.optimizerTarget };
+  if ($("optimizerStatus")) $("optimizerStatus").textContent = status;
+  if ($("optimizerTableBody")) renderOptimizerResults();
+  if ($("optimizerCanvas")) drawOptimizerPlot();
+}
+
 function formatParamValue(name, value) {
   const meta = MODEL.PARAM_META[name];
   const digits = meta.step < 0.01 ? 3 : meta.step < 0.1 ? 2 : 1;
@@ -1761,6 +2210,7 @@ function renderParameterControls() {
       latestSnn = simulateArchitecture("snn");
       updateMetrics(state.activeTab === "snn" ? latestSnn : latestAnn);
       updateParameterFitSummary();
+      invalidateOptimizer("rerun recommended");
       drawAllActive();
     });
   });
@@ -1775,6 +2225,7 @@ function renderParameterControls() {
       latestSnn = simulateArchitecture("snn");
       updateMetrics(state.activeTab === "snn" ? latestSnn : latestAnn);
       updateParameterFitSummary();
+      invalidateOptimizer("rerun recommended");
       drawAllActive();
     });
   });
@@ -1975,6 +2426,10 @@ function drawAllActive() {
   }
   if (state.activeTab === "params") {
     drawParameterFit();
+  }
+  if (state.activeTab === "optimizer") {
+    renderOptimizerResults();
+    drawOptimizerPlot();
   }
   if (state.activeTab === "ann") {
     drawDatasetInputPreview("ann");
@@ -2355,10 +2810,22 @@ function bindEvents() {
     if (deferredControls.has(control.id)) return;
     control.addEventListener("input", () => {
       readControls();
+      if (control.id.startsWith("optimizer")) {
+        updateReadouts();
+        invalidateOptimizer("settings changed");
+        return;
+      }
+      invalidateOptimizer("rerun recommended");
       runAllSimulations();
     });
     control.addEventListener("change", () => {
       readControls();
+      if (control.id.startsWith("optimizer")) {
+        updateReadouts();
+        invalidateOptimizer("settings changed");
+        return;
+      }
+      invalidateOptimizer("rerun recommended");
       runAllSimulations();
     });
   });
@@ -2376,6 +2843,8 @@ function bindEvents() {
   $("clearTraceSelectionBtn").addEventListener("click", clearTraceSelection);
   $("loadDemoMeasurementBtn").addEventListener("click", loadDemoMeasurement);
   $("autoFitParamsBtn").addEventListener("click", autoFitParameters);
+  $("runOptimizerBtn").addEventListener("click", runOptimizer);
+  $("applyBestCandidateBtn").addEventListener("click", applyBestCandidate);
   $("measurementInput").addEventListener("input", () => {
     state.measurementText = $("measurementInput").value;
     $("fitStatus").textContent = "manual";
@@ -2471,6 +2940,19 @@ function restore() {
     }
     state.paramMode = state.paramMode === "LTM" ? "LTM" : "STM";
     state.paramSwitchMethod = state.paramSwitchMethod === "gate" ? "gate" : "vds";
+    if (!["ann", "snn", "uv"].includes(state.optimizerTarget)) state.optimizerTarget = defaults.optimizerTarget;
+    state.optimizerIterations = clamp(Number.isFinite(Number(state.optimizerIterations)) ? Number(state.optimizerIterations) : defaults.optimizerIterations, 20, 240);
+    state.optimizerMaxFanout = clamp(Number.isFinite(Number(state.optimizerMaxFanout)) ? Number(state.optimizerMaxFanout) : defaults.optimizerMaxFanout, 1, 24);
+    state.optimizerMaxDevices = clamp(Number.isFinite(Number(state.optimizerMaxDevices)) ? Number(state.optimizerMaxDevices) : defaults.optimizerMaxDevices, 8, 96);
+    state.optimizerTuneSizes = typeof state.optimizerTuneSizes === "boolean" ? state.optimizerTuneSizes : defaults.optimizerTuneSizes;
+    state.optimizerTuneModes = typeof state.optimizerTuneModes === "boolean" ? state.optimizerTuneModes : defaults.optimizerTuneModes;
+    state.optimizerTuneConnections = typeof state.optimizerTuneConnections === "boolean" ? state.optimizerTuneConnections : defaults.optimizerTuneConnections;
+    state.optimizerTuneOeo = typeof state.optimizerTuneOeo === "boolean" ? state.optimizerTuneOeo : defaults.optimizerTuneOeo;
+    state.optimizerSeparationWeight = clamp(Number.isFinite(Number(state.optimizerSeparationWeight)) ? Number(state.optimizerSeparationWeight) : defaults.optimizerSeparationWeight, 0, 1);
+    state.optimizerSparsityWeight = clamp(Number.isFinite(Number(state.optimizerSparsityWeight)) ? Number(state.optimizerSparsityWeight) : defaults.optimizerSparsityWeight, 0, 1);
+    state.optimizerLatencyWeight = clamp(Number.isFinite(Number(state.optimizerLatencyWeight)) ? Number(state.optimizerLatencyWeight) : defaults.optimizerLatencyWeight, 0, 1);
+    state.optimizerEnergyWeight = clamp(Number.isFinite(Number(state.optimizerEnergyWeight)) ? Number(state.optimizerEnergyWeight) : defaults.optimizerEnergyWeight, 0, 1);
+    state.optimizerRobustnessWeight = clamp(Number.isFinite(Number(state.optimizerRobustnessWeight)) ? Number(state.optimizerRobustnessWeight) : defaults.optimizerRobustnessWeight, 0, 1);
     state.measurementText = typeof state.measurementText === "string" ? state.measurementText : "";
     state.deviceModel = MODEL.sanitizeModel(state.deviceModel);
     if (!Array.isArray(state.checkedDeviceTraces)) state.checkedDeviceTraces = deepClone(defaults.checkedDeviceTraces);
