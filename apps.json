@@ -38,5 +38,13 @@
         "group":  "Firmware",
         "status":  "Ready",
         "accent":  "#0e8fa3"
+    },
+    {
+        "name":  "UV STM/LTM Architecture Simulator",
+        "description":  "Interactive simulator for UV input timing, optical synapse blocks, and ANN/SNN memory architecture exploration.",
+        "url":  "apps/tj-memory/",
+        "group":  "Memory",
+        "status":  "Ready",
+        "accent":  "#7b2ff2"
     }
 ]

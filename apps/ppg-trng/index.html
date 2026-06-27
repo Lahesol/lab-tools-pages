@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=eff91f5ce528" />
+    <link rel="stylesheet" href="./styles.css?v=59881060763a" />
   </head>
   <body>
     <div class="app-shell">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 noise-extractor</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 noise-extractor-v2</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -431,15 +431,19 @@
                   <option value="">Load CSV</option>
                 </select>
               </label>
-              <label class="compact-field" for="noiseWindow">
+              <label class="compact-field" for="noiseWindow" title="Number of previous samples used as the moving-average baseline. Larger values follow slow drift less, smaller values follow drift faster.">
                 <span>MA window</span>
                 <input id="noiseWindow" type="number" min="2" max="5001" step="1" value="33" />
               </label>
-              <label class="compact-field" for="noiseThresholdOffset">
+              <label class="compact-field" for="noiseThresholdOffset" title="Threshold correction added to the moving-average baseline. bit=1 when sample > moving_average + offset.">
                 <span>Offset</span>
                 <input id="noiseThresholdOffset" type="number" step="0.001" value="0" />
               </label>
             </div>
+
+            <p class="noise-help">
+              MA window sets the previous-sample moving-average baseline. Offset shifts that baseline before thresholding. Von Neumann is shown as a separate post-processed variant for each raw extractor, not as a standalone analog extractor.
+            </p>
 
             <div class="noise-methods">
               <label class="switch">
@@ -456,7 +460,7 @@
               </label>
               <label class="switch">
                 <input id="noiseVonNeumann" type="checkbox" checked />
-                <span>Von Neumann</span>
+                <span>Also plot Von Neumann</span>
               </label>
             </div>
 
@@ -484,6 +488,8 @@
                 <thead>
                   <tr>
                     <th>Method</th>
+                    <th>Bits</th>
+                    <th>Parameters</th>
                     <th>Test</th>
                     <th>Value</th>
                     <th>p-value</th>
@@ -492,7 +498,7 @@
                 </thead>
                 <tbody id="noiseResultsBody">
                   <tr>
-                    <td colspan="5">No results</td>
+                    <td colspan="7">No results</td>
                   </tr>
                 </tbody>
               </table>
@@ -506,7 +512,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=7ae8a62e3f4e" defer></script>
-    <script src="./dfu.js?v=20260627-noise-extractor" defer></script>
+    <script src="./app.js?v=7cab5b611210" defer></script>
+    <script src="./dfu.js?v=20260627-noise-extractor-v2" defer></script>
   </body>
 </html>

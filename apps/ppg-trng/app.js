@@ -1718,7 +1718,7 @@ async function loadNoiseCsvFile(file) {
   els.noiseCaption.textContent = `${file.name} | ${table.rows.length} rows | ${table.headers.length} columns`;
   updateNoiseSummary(0, 0, []);
   renderNoiseResults([]);
-  drawNoiseBitMap([]);
+  resizeNoiseBitCanvas();
 }
 
 function getNoiseColumnValues() {
@@ -1965,42 +1965,70 @@ function runNoiseExtraction() {
   const windowSize = clampInteger(els.noiseWindow.value, 2, 5001, 33);
   const offset = Number.parseFloat(els.noiseThresholdOffset.value) || 0;
   if (els.noiseMethodMovingAverage.checked) {
-    methods.push(["Moving average", extractMovingAverageBits(values, windowSize, offset)]);
+    methods.push({
+      name: "Moving average",
+      bits: extractMovingAverageBits(values, windowSize, offset),
+      params: `window=${windowSize}, offset=${offset}`,
+    });
   }
   if (els.noiseMethodDelta.checked) {
-    methods.push(["Delta sign", extractDeltaBits(values)]);
+    methods.push({
+      name: "Delta sign",
+      bits: extractDeltaBits(values),
+      params: "lag=1, bit=delta>0",
+    });
   }
   if (els.noiseMethodLsb.checked) {
-    methods.push(["LSB parity", extractLsbBits(values)]);
+    methods.push({
+      name: "LSB parity",
+      bits: extractLsbBits(values),
+      params: "bit=round(value)&1",
+    });
   }
 
-  const useVn = els.noiseVonNeumann.checked;
-  state.noiseResults = methods.map(([name, rawBits]) => {
-    const bits = useVn ? vonNeumannExtract(rawBits) : rawBits;
-    return {
-      method: useVn ? `${name} + VN` : name,
-      rawCount: rawBits.length,
-      bits,
-      tests: evaluateBits(bits),
+  state.noiseResults = methods.flatMap((method) => {
+    const rawResult = {
+      method: `${method.name} raw`,
+      rawCount: method.bits.length,
+      bits: method.bits,
+      params: method.params,
+      tests: evaluateBits(method.bits),
     };
+
+    if (!els.noiseVonNeumann.checked) return [rawResult];
+
+    const vnBits = vonNeumannExtract(method.bits);
+    return [
+      rawResult,
+      {
+        method: `${method.name} + VN`,
+        rawCount: method.bits.length,
+        bits: vnBits,
+        params: `${method.params}, post=Von Neumann 01->0 10->1`,
+        tests: evaluateBits(vnBits),
+      },
+    ];
   });
 
   const selected = state.noiseResults[0];
   state.noiseSelectedMethod = selected?.method || "";
   state.noiseSelectedBits = selected?.bits || [];
-  updateNoiseSummary(state.noiseTable?.rows?.length || 0, values.length, state.noiseSelectedBits);
+  updateNoiseSummary(state.noiseTable?.rows?.length || 0, values.length, state.noiseResults);
   renderNoiseResults(state.noiseResults);
-  drawNoiseBitMap(state.noiseSelectedBits);
+  resizeNoiseBitCanvas();
 }
 
-function updateNoiseSummary(rowCount, numericCount, bits) {
-  const { ones } = bitCounts(bits);
+function updateNoiseSummary(rowCount, numericCount, resultsOrBits) {
+  const bits = Array.isArray(resultsOrBits) && resultsOrBits[0]?.bits
+    ? resultsOrBits.flatMap((result) => result.bits)
+    : (resultsOrBits || []);
   els.noiseRowCount.textContent = String(rowCount || 0);
   els.noiseNumericCount.textContent = String(numericCount || 0);
   els.noiseBitCount.textContent = String(bits.length || 0);
+  const { ones } = bitCounts(bits);
   els.noiseOneRatio.textContent = bits.length ? (ones / bits.length).toFixed(4) : "--";
   els.noiseCaption.textContent = state.noiseSelectedMethod
-    ? `${state.noiseSelectedMethod} | ${bits.length} bits`
+    ? `${state.noiseResults.length} streams | ${bits.length} total plotted bits`
     : (state.noiseTable ? `${state.noiseTable.rows.length} rows loaded` : "Load a CSV file");
 }
 
@@ -2014,7 +2042,7 @@ function renderNoiseResults(results) {
   els.noiseResultsBody.innerHTML = "";
   if (!results.length) {
     const row = document.createElement("tr");
-    row.innerHTML = `<td colspan="5">No results</td>`;
+    row.innerHTML = `<td colspan="7">No results</td>`;
     els.noiseResultsBody.append(row);
     return;
   }
@@ -2024,6 +2052,8 @@ function renderNoiseResults(results) {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${escapeHtml(result.method)}</td>
+        <td>${result.bits.length}${result.rawCount !== result.bits.length ? ` / ${result.rawCount} raw` : ""}</td>
+        <td>${escapeHtml(result.params || "")}</td>
         <td>${escapeHtml(testName)}</td>
         <td>${escapeHtml(test.value)}</td>
         <td>${formatPValue(test.p)}</td>
@@ -2036,6 +2066,10 @@ function renderNoiseResults(results) {
 
 function resizeNoiseBitCanvas() {
   if (els.noiseView?.hidden) return;
+  const lanes = Math.max(1, state.noiseResults.length || 1);
+  if (els.noiseBitCanvasWrap) {
+    els.noiseBitCanvasWrap.style.height = `${Math.min(960, Math.max(260, lanes * 112))}px`;
+  }
   const rect = els.noiseBitCanvas.getBoundingClientRect();
   noiseBitMap.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
   noiseBitMap.width = Math.floor(rect.width);
@@ -2043,10 +2077,10 @@ function resizeNoiseBitCanvas() {
   els.noiseBitCanvas.width = Math.floor(noiseBitMap.width * noiseBitMap.dpr);
   els.noiseBitCanvas.height = Math.floor(noiseBitMap.height * noiseBitMap.dpr);
   noiseBitMap.ctx.setTransform(noiseBitMap.dpr, 0, 0, noiseBitMap.dpr, 0, 0);
-  drawNoiseBitMap(state.noiseSelectedBits);
+  drawNoiseBitMap(state.noiseResults);
 }
 
-function drawNoiseBitMap(bits = []) {
+function drawNoiseBitMap(results = state.noiseResults) {
   const ctx = noiseBitMap.ctx;
   const width = noiseBitMap.width;
   const height = noiseBitMap.height;
@@ -2055,35 +2089,61 @@ function drawNoiseBitMap(bits = []) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
 
-  if (!bits.length) {
+  const lanes = Array.isArray(results) && results[0]?.bits
+    ? results
+    : (Array.isArray(results) && results.length ? [{ method: "Bits", bits: results, rawCount: results.length, params: "" }] : []);
+
+  if (!lanes.length) {
     ctx.fillStyle = "#66746f";
     ctx.font = "700 13px Segoe UI, sans-serif";
     ctx.fillText("No extracted bits", 14, 28);
     return;
   }
 
+  const labelHeight = 24;
+  const laneHeight = Math.max(1, Math.floor(height / lanes.length));
   const columns = Math.max(32, Math.floor(width / 4));
   const cell = Math.max(2, Math.floor(width / columns));
-  const rows = Math.floor(height / cell);
-  const capacity = Math.min(bits.length, columns * rows);
-  for (let index = 0; index < capacity; index += 1) {
-    const x = (index % columns) * cell;
-    const y = Math.floor(index / columns) * cell;
-    ctx.fillStyle = bits[index] ? "#17201d" : "#ffffff";
-    ctx.fillRect(x, y, cell, cell);
-    ctx.strokeStyle = "#d8e0dc";
-    ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
-  }
+
+  lanes.forEach((lane, laneIndex) => {
+    const top = laneIndex * laneHeight;
+    const bits = lane.bits || [];
+    const rows = Math.max(1, Math.floor((laneHeight - labelHeight) / cell));
+    const capacity = Math.min(bits.length, columns * rows);
+    const ones = bitCounts(bits).ones;
+    const ratio = bits.length ? ones / bits.length : null;
+
+    ctx.fillStyle = "#30423d";
+    ctx.font = "700 12px Segoe UI, sans-serif";
+    const label = `${lane.method} | bits ${bits.length}${lane.rawCount !== bits.length ? ` / raw ${lane.rawCount}` : ""} | 1=${ratio === null ? "--" : ratio.toFixed(3)} | ${lane.params || ""}`;
+    ctx.fillText(label, 12, top + 16);
+
+    for (let index = 0; index < capacity; index += 1) {
+      const x = (index % columns) * cell;
+      const y = top + labelHeight + Math.floor(index / columns) * cell;
+      ctx.fillStyle = bits[index] ? "#17201d" : "#ffffff";
+      ctx.fillRect(x, y, cell, cell);
+      ctx.strokeStyle = "#d8e0dc";
+      ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+    }
+  });
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
 function exportNoiseBitsCsv() {
-  if (!state.noiseSelectedBits.length) {
+  if (!state.noiseResults.length) {
     addLog("SYS", "No extracted noise bits to export");
     return;
   }
-  const rows = ["index,method,bit"];
-  state.noiseSelectedBits.forEach((bit, index) => {
-    rows.push(`${index},${state.noiseSelectedMethod},${bit}`);
+  const rows = ["method,params,index,bit"];
+  state.noiseResults.forEach((result) => {
+    result.bits.forEach((bit, index) => {
+      rows.push(`${csvCell(result.method)},${csvCell(result.params || "")},${index},${bit}`);
+    });
   });
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -2092,7 +2152,7 @@ function exportNoiseBitsCsv() {
   link.download = `noise_bits_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  addLog("SYS", `Exported ${state.noiseSelectedBits.length} noise bits`);
+  addLog("SYS", `Exported ${state.noiseResults.length} noise bit streams`);
 }
 
 function toggleDemo() {

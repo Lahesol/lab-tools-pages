@@ -107,9 +107,11 @@ The `Noise extractor` tab accepts CSV files exported from the live PPG/ADC view 
 - Moving average threshold
 - Delta sign
 - LSB parity
-- Optional Von Neumann pair extractor
+- Optional Von Neumann pair extractor as a separate post-processed variant for each selected raw extractor
 
-The tab reports bit count and ones ratio, renders a bitmap preview, exports extracted bits as CSV, and runs browser-side randomness checks: NIST-style monobit frequency, runs, block frequency, serial m=2, plus entropy and lag-1 autocorrelation summaries.
+`MA window` is the number of previous samples used as the moving-average baseline. `Offset` is added to that baseline, so the moving-average bit rule is `sample > moving_average + offset`. Von Neumann is not a standalone analog extractor because it needs an input bitstream; when enabled, the tab shows both the raw extractor output and the `+ VN` output as separate rows and bitmap lanes.
+
+The tab reports bit count, raw count, parameters, and ones ratio per method, renders separate bitmap lanes for each method/parameter variant, exports extracted bits as CSV, and runs browser-side randomness checks: NIST-style monobit frequency, runs, block frequency, serial m=2, plus entropy and lag-1 autocorrelation summaries.
 
 ## Portal Build
 

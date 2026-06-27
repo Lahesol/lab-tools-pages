@@ -1,0 +1,306 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UV STM/LTM Architecture Simulator</title>
+    <link rel="stylesheet" href="styles.css?v=740bc208ab8d" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>UV STM/LTM Architecture Simulator</h1>
+          <p>Programmable UV input, reconfigurable optical-synapse blocks, ANN/SNN system exploration</p>
+        </div>
+        <div class="top-actions">
+          <button id="resetBtn" type="button" class="ghost-button">Reset</button>
+          <button id="exportBtn" type="button" class="primary-button">Export Simulation CSV</button>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Architecture simulation tabs">
+        <button class="active" type="button" data-tab="uv">UV Input</button>
+        <button type="button" data-tab="blocks">Device Blocks</button>
+        <button type="button" data-tab="ann">ANN</button>
+        <button type="button" data-tab="snn">SNN</button>
+        <button type="button" data-tab="refs">References / Next Work</button>
+      </nav>
+
+      <main class="workspace">
+        <section class="left-column">
+          <div class="panel">
+            <div class="panel-title">
+              <span>UV source</span>
+              <output id="uvSummary">365 nm PWM</output>
+            </div>
+            <div class="field-grid compact">
+              <label class="field">
+                <span>Wavelength</span>
+                <select id="wavelength" disabled>
+                  <option value="365">UV / 365 nm only</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Input program</span>
+                <select id="programMode">
+                  <option value="pwm">PWM train</option>
+                  <option value="onoff">On/off timing table</option>
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>Frequency <output id="freqOut">8 Hz</output></span>
+              <input id="frequency" type="range" min="1" max="50" step="1" value="8" />
+            </label>
+            <label class="field">
+              <span>Duty cycle <output id="dutyOut">35%</output></span>
+              <input id="duty" type="range" min="5" max="95" step="1" value="35" />
+            </label>
+            <label class="field">
+              <span>Pulse count <output id="pulseCountOut">40</output></span>
+              <input id="pulseCount" type="range" min="4" max="160" step="1" value="40" />
+            </label>
+            <label class="field">
+              <span>UV intensity <output id="intensityOut">0.80</output></span>
+              <input id="intensity" type="range" min="0.05" max="1.5" step="0.01" value="0.8" />
+            </label>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title">
+              <span>Device mode control</span>
+              <output id="modeControlSummary">block-level</output>
+            </div>
+            <label class="field">
+              <span>Switching method</span>
+              <select id="switchMethod">
+                <option value="vds">Gate 0 V fixed, VDS -30/+30 V</option>
+                <option value="gate">VDS +30 V fixed, Gate 10/40 V</option>
+              </select>
+            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span>Default mode</span>
+                <select id="defaultMemoryMode">
+                  <option value="STM">STM</option>
+                  <option value="LTM">LTM</option>
+                  <option value="adaptive">Adaptive</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Apply target</span>
+                <select id="applyTarget">
+                  <option value="all">All blocks</option>
+                  <option value="selected">Selected layer</option>
+                  <option value="hidden">Hidden layers</option>
+                </select>
+              </label>
+            </div>
+            <label class="toggle">
+              <input id="tiaEnabled" type="checkbox" checked />
+              <span>TIA current-to-voltage readout</span>
+            </label>
+            <label class="field">
+              <span>TIA gain <output id="tiaGainOut">100 kOhm</output></span>
+              <input id="tiaGain" type="range" min="10" max="1000" step="10" value="100" />
+            </label>
+            <button id="applyModeBtn" type="button" class="full-button">Apply to blocks</button>
+          </div>
+        </section>
+
+        <section class="main-column">
+          <section class="tab-panel active" id="tab-uv">
+            <div class="section-header">
+              <div>
+                <h2>UV PWM / On-Off Program</h2>
+                <p>Single-wavelength UV input drives every optical synapse block. Timing can be PWM-generated or table-driven.</p>
+              </div>
+              <button id="regenerateTimingBtn" type="button" class="ghost-button light">Regenerate table</button>
+            </div>
+            <div class="two-up">
+              <div class="plot-card">
+                <canvas id="uvCanvas" width="980" height="360" aria-label="UV timing plot"></canvas>
+              </div>
+              <div class="table-card">
+                <div class="mini-title">On/off timing table</div>
+                <table>
+                  <thead>
+                    <tr><th>#</th><th>Start</th><th>On</th><th>Off</th></tr>
+                  </thead>
+                  <tbody id="timingTable"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-blocks">
+            <div class="section-header">
+              <div>
+                <h2>Device Blocks</h2>
+                <p>Arrange the optical transistor devices as reusable blocks. Each block stores memory mode, switching route, and TIA status.</p>
+              </div>
+              <div class="inline-actions">
+                <button id="addLayerBtn" type="button" class="ghost-button light">Add layer</button>
+                <button id="removeLayerBtn" type="button" class="ghost-button light">Remove selected</button>
+              </div>
+            </div>
+            <div class="block-layout">
+              <div class="block-canvas" id="blockCanvas" aria-label="Device block architecture canvas"></div>
+              <aside class="block-inspector">
+                <div class="mini-title">Selected layer</div>
+                <dl class="summary-list">
+                  <div><dt>Name</dt><dd id="selectedLayerName">Input</dd></div>
+                  <div><dt>Devices</dt><dd id="selectedLayerDevices">16</dd></div>
+                  <div><dt>Mode</dt><dd id="selectedLayerMode">STM</dd></div>
+                  <div><dt>Switch</dt><dd id="selectedLayerSwitch">VDS</dd></div>
+                  <div><dt>TIA</dt><dd id="selectedLayerTia">On</dd></div>
+                </dl>
+                <label class="field">
+                  <span>Layer devices</span>
+                  <input id="layerDevices" type="number" min="1" max="256" value="16" />
+                </label>
+                <label class="field">
+                  <span>Layer role</span>
+                  <select id="layerRole">
+                    <option value="input">Input encoder</option>
+                    <option value="hidden">Hidden / reservoir</option>
+                    <option value="output">Output readout</option>
+                  </select>
+                </label>
+                <button id="updateLayerBtn" type="button" class="full-button">Update selected layer</button>
+              </aside>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-ann">
+            <div class="section-header">
+              <div>
+                <h2>ANN Architecture Simulation</h2>
+                <p>Approximate analog ANN inference where UV-driven device currents represent weighted activations.</p>
+              </div>
+              <button id="runAnnBtn" type="button" class="primary-button">Run ANN simulation</button>
+            </div>
+            <div class="config-grid">
+              <label class="field">
+                <span>ANN preset</span>
+                <select id="annPreset">
+                  <option value="mlp">MLP current-mode classifier</option>
+                  <option value="reservoir">Device reservoir + linear readout</option>
+                  <option value="cnnproxy">Convolutional block proxy</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Dataset target</span>
+                <select id="annDataset">
+                  <option value="mnist">MNIST / Fashion-MNIST baseline</option>
+                  <option value="uvtoy">Synthetic UV event classes</option>
+                  <option value="mitbih">MIT-BIH / ECG anomaly proxy</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Input encoding</span>
+                <select id="annEncoding">
+                  <option value="rate">PWM duty -> analog rate</option>
+                  <option value="amplitude">UV intensity -> amplitude</option>
+                  <option value="latency">Onset latency -> feature value</option>
+                </select>
+              </label>
+            </div>
+            <canvas id="annCanvas" width="980" height="400" aria-label="ANN simulation chart"></canvas>
+          </section>
+
+          <section class="tab-panel" id="tab-snn">
+            <div class="section-header">
+              <div>
+                <h2>SNN Architecture Simulation</h2>
+                <p>Use UV pulses as presynaptic spikes. Device current feeds LIF neurons through optional TIA conversion.</p>
+              </div>
+              <button id="runSnnBtn" type="button" class="primary-button">Run SNN simulation</button>
+            </div>
+            <div class="config-grid">
+              <label class="field">
+                <span>SNN preset</span>
+                <select id="snnPreset">
+                  <option value="lif">Feedforward LIF</option>
+                  <option value="csnn">Convolutional SNN proxy</option>
+                  <option value="rsnn">Recurrent reservoir SNN</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Dataset target</span>
+                <select id="snnDataset">
+                  <option value="nmnist">N-MNIST</option>
+                  <option value="dvsgesture">DVS Gesture</option>
+                  <option value="shd">Spiking Heidelberg Digits</option>
+                  <option value="uvtoy">Synthetic UV event classes</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Spike encoding</span>
+                <select id="snnEncoding">
+                  <option value="rate">Rate coding</option>
+                  <option value="ttfs">Time-to-first-spike</option>
+                  <option value="phase">PWM phase coding</option>
+                </select>
+              </label>
+            </div>
+            <canvas id="snnCanvas" width="980" height="400" aria-label="SNN simulation chart"></canvas>
+          </section>
+
+          <section class="tab-panel" id="tab-refs">
+            <div class="section-header">
+              <div>
+                <h2>References and Next Work</h2>
+                <p>Use this tab to keep simulation assumptions explicit and to route the next implementation step.</p>
+              </div>
+              <a class="primary-link" href="NEXT_WORK.md">Open NEXT_WORK.md</a>
+            </div>
+            <div class="reference-grid" id="referenceGrid"></div>
+          </section>
+        </section>
+
+        <aside class="right-column">
+          <div class="metric-grid">
+            <div class="metric"><span>Total devices</span><strong id="totalDevices">0</strong></div>
+            <div class="metric"><span>STM / LTM</span><strong id="modeMix">0 / 0</strong></div>
+            <div class="metric"><span>TIA blocks</span><strong id="tiaBlocks">0</strong></div>
+            <div class="metric"><span>Output scale</span><strong id="outputScale">0 V</strong></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span>Simulation summary</span><output id="simStatus">ready</output></div>
+            <dl class="summary-list">
+              <div><dt>Input</dt><dd id="summaryInput">UV PWM</dd></div>
+              <div><dt>Switch route</dt><dd id="summarySwitch">VDS -30/+30</dd></div>
+              <div><dt>Architecture</dt><dd id="summaryArchitecture">ANN/SNN ready</dd></div>
+              <div><dt>Recommended backend</dt><dd id="summaryBackend">snnTorch + Tonic</dd></div>
+            </dl>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span>Block model</span><output>current output</output></div>
+            <pre class="equation">u_uv(t) -> I_device(t)
+STM:  VDS +30 V or Gate 10 V
+LTM:  VDS -30 V or Gate 40 V
+TIA:  V_out = -I_device * R_TIA
+ANN:  activation = normalize(V_out)
+SNN:  I_syn feeds LIF membrane</pre>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title"><span>Recommended datasets</span><output>starter</output></div>
+            <ul class="plain-list">
+              <li>MNIST/Fashion-MNIST for ANN baseline.</li>
+              <li>N-MNIST or DVS Gesture for event/SNN baseline.</li>
+              <li>SHD for temporal spike classification.</li>
+              <li>Synthetic UV event classes for device-specific novelty.</li>
+            </ul>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="app.js?v=a430e2063426"></script>
+  </body>
+</html>
