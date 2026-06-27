@@ -100,6 +100,17 @@ When `9999` bit mode is not active, ADC samples still produce bitmap bits from t
 
 The bitmap is a fixed plane. After all cells in the plane are filled, the next bit clears the plane and writing restarts from the first cell. The panel tracks current-plane bits, ones, zeros, and ones ratio, and CSV export keeps the buffered bit history.
 
+## Noise Extractor
+
+The `Noise extractor` tab accepts CSV files exported from the live PPG/ADC view or other tools. After loading a file, choose the data column and run one or more extractors:
+
+- Moving average threshold
+- Delta sign
+- LSB parity
+- Optional Von Neumann pair extractor
+
+The tab reports bit count and ones ratio, renders a bitmap preview, exports extracted bits as CSV, and runs browser-side randomness checks: NIST-style monobit frequency, runs, block frequency, serial m=2, plus entropy and lag-1 autocorrelation summaries.
+
 ## Portal Build
 
 The app source lives in `YM-PPG/web_gui`. Running `server-ops/scripts/build-github-pages.ps1` copies it into `lab-tools-pages/apps/ppg-trng`.

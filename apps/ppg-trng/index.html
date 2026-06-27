@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=380ae32b58a2" />
+    <link rel="stylesheet" href="./styles.css?v=eff91f5ce528" />
   </head>
   <body>
     <div class="app-shell">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 current-ui</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-06-27 noise-extractor</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -184,6 +184,12 @@
         </aside>
 
         <section class="main-panel">
+          <div class="view-tabs" role="tablist" aria-label="Main views">
+            <button class="view-tab is-active" data-view-target="liveView" type="button">Live monitor</button>
+            <button class="view-tab" data-view-target="noiseView" type="button">Noise extractor</button>
+          </div>
+
+          <div id="liveView" class="view-panel">
           <div class="metric-grid" aria-live="polite">
             <div class="metric">
               <span>Latest</span>
@@ -391,11 +397,116 @@
             <p id="dfuStatus" class="command-note status-line">DFU idle.</p>
             <pre id="dfuInfo" class="info-box">Running app: connect first, then Enter bootloader. Blank MCU: flash the initial UART DFU HEX once with a programmer. Browser upload requires a signed Nordic DFU ZIP package.</pre>
           </section>
+          </div>
+
+          <section id="noiseView" class="noise-panel view-panel" hidden>
+            <div class="plot-toolbar">
+              <div>
+                <h2>Noise Extractor</h2>
+                <p id="noiseCaption">Load a CSV file</p>
+              </div>
+              <div class="toolbar-actions">
+                <button id="runNoiseButton" class="button primary" type="button">Run</button>
+                <button id="exportNoiseBitsButton" class="button secondary" type="button">Bits CSV</button>
+              </div>
+            </div>
+
+            <div class="noise-grid">
+              <label class="compact-field noise-file-field" for="noiseCsvFile">
+                <span>CSV file</span>
+                <input id="noiseCsvFile" type="file" accept=".csv,text/csv,text/plain" />
+              </label>
+              <label class="compact-field" for="noiseDelimiter">
+                <span>Delimiter</span>
+                <select id="noiseDelimiter">
+                  <option value="auto" selected>Auto</option>
+                  <option value=",">Comma</option>
+                  <option value="tab">Tab</option>
+                  <option value=";">Semicolon</option>
+                </select>
+              </label>
+              <label class="compact-field" for="noiseColumn">
+                <span>Data column</span>
+                <select id="noiseColumn" disabled>
+                  <option value="">Load CSV</option>
+                </select>
+              </label>
+              <label class="compact-field" for="noiseWindow">
+                <span>MA window</span>
+                <input id="noiseWindow" type="number" min="2" max="5001" step="1" value="33" />
+              </label>
+              <label class="compact-field" for="noiseThresholdOffset">
+                <span>Offset</span>
+                <input id="noiseThresholdOffset" type="number" step="0.001" value="0" />
+              </label>
+            </div>
+
+            <div class="noise-methods">
+              <label class="switch">
+                <input id="noiseMethodMovingAverage" type="checkbox" checked />
+                <span>Moving avg threshold</span>
+              </label>
+              <label class="switch">
+                <input id="noiseMethodDelta" type="checkbox" checked />
+                <span>Delta sign</span>
+              </label>
+              <label class="switch">
+                <input id="noiseMethodLsb" type="checkbox" />
+                <span>LSB parity</span>
+              </label>
+              <label class="switch">
+                <input id="noiseVonNeumann" type="checkbox" checked />
+                <span>Von Neumann</span>
+              </label>
+            </div>
+
+            <div class="noise-summary" aria-live="polite">
+              <div class="bit-stat">
+                <span>Rows</span>
+                <strong id="noiseRowCount">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Numeric</span>
+                <strong id="noiseNumericCount">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Bits</span>
+                <strong id="noiseBitCount">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>One ratio</span>
+                <strong id="noiseOneRatio">--</strong>
+              </div>
+            </div>
+
+            <div class="noise-results-wrap">
+              <table class="noise-results">
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    <th>Test</th>
+                    <th>Value</th>
+                    <th>p-value</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody id="noiseResultsBody">
+                  <tr>
+                    <td colspan="5">No results</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="noise-canvas-wrap">
+              <canvas id="noiseBitCanvas" aria-label="Extracted random bit bitmap"></canvas>
+            </div>
+          </section>
         </section>
       </main>
     </div>
 
-    <script src="./app.js?v=96ba673874c8" defer></script>
-    <script src="./dfu.js?v=20260627-current-ui" defer></script>
+    <script src="./app.js?v=7ae8a62e3f4e" defer></script>
+    <script src="./dfu.js?v=20260627-noise-extractor" defer></script>
   </body>
 </html>

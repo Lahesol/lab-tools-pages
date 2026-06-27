@@ -60,6 +60,28 @@ const els = {
   onesRatio: document.querySelector("#onesRatio"),
   bitCanvas: document.querySelector("#bitCanvas"),
   bitCanvasWrap: document.querySelector(".bit-canvas-wrap"),
+  viewTabs: document.querySelectorAll("[data-view-target]"),
+  liveView: document.querySelector("#liveView"),
+  noiseView: document.querySelector("#noiseView"),
+  noiseCaption: document.querySelector("#noiseCaption"),
+  noiseCsvFile: document.querySelector("#noiseCsvFile"),
+  noiseDelimiter: document.querySelector("#noiseDelimiter"),
+  noiseColumn: document.querySelector("#noiseColumn"),
+  noiseWindow: document.querySelector("#noiseWindow"),
+  noiseThresholdOffset: document.querySelector("#noiseThresholdOffset"),
+  noiseMethodMovingAverage: document.querySelector("#noiseMethodMovingAverage"),
+  noiseMethodDelta: document.querySelector("#noiseMethodDelta"),
+  noiseMethodLsb: document.querySelector("#noiseMethodLsb"),
+  noiseVonNeumann: document.querySelector("#noiseVonNeumann"),
+  runNoiseButton: document.querySelector("#runNoiseButton"),
+  exportNoiseBitsButton: document.querySelector("#exportNoiseBitsButton"),
+  noiseRowCount: document.querySelector("#noiseRowCount"),
+  noiseNumericCount: document.querySelector("#noiseNumericCount"),
+  noiseBitCount: document.querySelector("#noiseBitCount"),
+  noiseOneRatio: document.querySelector("#noiseOneRatio"),
+  noiseResultsBody: document.querySelector("#noiseResultsBody"),
+  noiseBitCanvas: document.querySelector("#noiseBitCanvas"),
+  noiseBitCanvasWrap: document.querySelector(".noise-canvas-wrap"),
 };
 
 const state = {
@@ -114,6 +136,10 @@ const state = {
   lastDrawAt: 0,
   needsBitDraw: true,
   lastBitDrawAt: 0,
+  noiseTable: null,
+  noiseResults: [],
+  noiseSelectedBits: [],
+  noiseSelectedMethod: "",
 };
 
 const encoder = new TextEncoder();
@@ -176,6 +202,13 @@ const plot = {
 
 const bitMap = {
   ctx: els.bitCanvas.getContext("2d"),
+  width: 0,
+  height: 0,
+  dpr: 1,
+};
+
+const noiseBitMap = {
+  ctx: els.noiseBitCanvas.getContext("2d"),
   width: 0,
   height: 0,
   dpr: 1,
@@ -1581,6 +1614,487 @@ function exportBitsCsv() {
   addLog("SYS", `Exported ${state.bits.length} bits`);
 }
 
+function setActiveView(viewId) {
+  const target = viewId === "noiseView" ? "noiseView" : "liveView";
+  [els.liveView, els.noiseView].forEach((view) => {
+    if (view) view.hidden = view.id !== target;
+  });
+  els.viewTabs.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.viewTarget === target);
+  });
+  window.requestAnimationFrame(() => {
+    resizeCanvas();
+    resizeBitCanvas();
+    resizeNoiseBitCanvas();
+  });
+}
+
+function splitCsvLine(line, delimiter) {
+  const cells = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const ch = line[index];
+    if (ch === '"') {
+      if (quoted && line[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (ch === delimiter && !quoted) {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += ch;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function detectDelimiter(lines, requested) {
+  if (requested === "tab") return "\t";
+  if (requested && requested !== "auto") return requested;
+  const sample = lines.find((line) => line.trim()) || "";
+  const options = [",", "\t", ";"];
+  return options
+    .map((delimiter) => ({ delimiter, count: splitCsvLine(sample, delimiter).length }))
+    .sort((left, right) => right.count - left.count)[0]?.delimiter || ",";
+}
+
+function parseNumberCell(value) {
+  const text = String(value || "").trim();
+  if (!text) return NaN;
+  const normalized = text.replace(/,/g, "");
+  const number = Number.parseFloat(normalized);
+  return Number.isFinite(number) ? number : NaN;
+}
+
+function parseCsvText(text, delimiterMode) {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim().length);
+  const delimiter = detectDelimiter(lines, delimiterMode);
+  const rows = lines.map((line) => splitCsvLine(line, delimiter));
+  if (!rows.length) return { headers: [], rows: [], delimiter };
+
+  const first = rows[0];
+  const firstNumeric = first.filter((cell) => Number.isFinite(parseNumberCell(cell))).length;
+  const hasHeader = firstNumeric < Math.max(1, Math.ceil(first.length / 2));
+  const headers = hasHeader
+    ? first.map((cell, index) => cell || `Column ${index + 1}`)
+    : first.map((_, index) => `Column ${index + 1}`);
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  return { headers, rows: dataRows, delimiter };
+}
+
+function populateNoiseColumns(table) {
+  els.noiseColumn.innerHTML = "";
+  if (!table?.headers?.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Load CSV";
+    els.noiseColumn.append(option);
+    els.noiseColumn.disabled = true;
+    return;
+  }
+
+  table.headers.forEach((header, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = `${index + 1}: ${header}`;
+    els.noiseColumn.append(option);
+  });
+  els.noiseColumn.disabled = false;
+}
+
+async function loadNoiseCsvFile(file) {
+  if (!file) return;
+  const text = await file.text();
+  const table = parseCsvText(text, els.noiseDelimiter.value);
+  state.noiseTable = table;
+  populateNoiseColumns(table);
+  state.noiseResults = [];
+  state.noiseSelectedBits = [];
+  els.noiseCaption.textContent = `${file.name} | ${table.rows.length} rows | ${table.headers.length} columns`;
+  updateNoiseSummary(0, 0, []);
+  renderNoiseResults([]);
+  drawNoiseBitMap([]);
+}
+
+function getNoiseColumnValues() {
+  const table = state.noiseTable;
+  const column = Number.parseInt(els.noiseColumn.value, 10);
+  if (!table || !Number.isInteger(column)) return [];
+  return table.rows
+    .map((row) => parseNumberCell(row[column]))
+    .filter((value) => Number.isFinite(value));
+}
+
+function extractMovingAverageBits(values, windowSize, offset) {
+  const bits = [];
+  const window = [];
+  let sum = 0;
+  values.forEach((value) => {
+    if (window.length >= windowSize) {
+      const threshold = (sum / window.length) + offset;
+      bits.push(value > threshold ? 1 : 0);
+    }
+    window.push(value);
+    sum += value;
+    if (window.length > windowSize) {
+      sum -= window.shift();
+    }
+  });
+  return bits;
+}
+
+function extractDeltaBits(values) {
+  const bits = [];
+  for (let index = 1; index < values.length; index += 1) {
+    const delta = values[index] - values[index - 1];
+    if (delta !== 0) bits.push(delta > 0 ? 1 : 0);
+  }
+  return bits;
+}
+
+function extractLsbBits(values) {
+  return values.map((value) => Math.abs(Math.round(value)) & 1);
+}
+
+function vonNeumannExtract(bits) {
+  const extracted = [];
+  for (let index = 0; index + 1 < bits.length; index += 2) {
+    const left = bits[index];
+    const right = bits[index + 1];
+    if (left === 0 && right === 1) extracted.push(0);
+    else if (left === 1 && right === 0) extracted.push(1);
+  }
+  return extracted;
+}
+
+function erfc(value) {
+  const z = Math.abs(value);
+  const t = 1 / (1 + z / 2);
+  const r = t * Math.exp(
+    -z * z - 1.26551223 +
+    t * (1.00002368 +
+    t * (0.37409196 +
+    t * (0.09678418 +
+    t * (-0.18628806 +
+    t * (0.27886807 +
+    t * (-1.13520398 +
+    t * (1.48851587 +
+    t * (-0.82215223 +
+    t * 0.17087277)))))))),
+  );
+  return value >= 0 ? r : 2 - r;
+}
+
+function gammaLn(value) {
+  const cof = [
+    76.18009172947146,
+    -86.50532032941677,
+    24.01409824083091,
+    -1.231739572450155,
+    0.001208650973866179,
+    -0.000005395239384953,
+  ];
+  let x = value;
+  let y = value;
+  let tmp = x + 5.5;
+  tmp -= (x + 0.5) * Math.log(tmp);
+  let ser = 1.000000000190015;
+  cof.forEach((coef) => {
+    y += 1;
+    ser += coef / y;
+  });
+  return -tmp + Math.log(2.5066282746310005 * ser / x);
+}
+
+function gammaP(a, x) {
+  if (x <= 0) return 0;
+  if (x >= a + 1) return 1 - gammaQ(a, x);
+  let ap = a;
+  let sum = 1 / a;
+  let del = sum;
+  for (let n = 1; n <= 100; n += 1) {
+    ap += 1;
+    del *= x / ap;
+    sum += del;
+    if (Math.abs(del) < Math.abs(sum) * 3e-7) {
+      return sum * Math.exp(-x + a * Math.log(x) - gammaLn(a));
+    }
+  }
+  return sum * Math.exp(-x + a * Math.log(x) - gammaLn(a));
+}
+
+function gammaQ(a, x) {
+  if (x <= 0) return 1;
+  if (x < a + 1) return 1 - gammaP(a, x);
+  let b = x + 1 - a;
+  let c = 1 / 1e-30;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i <= 100; i += 1) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < 1e-30) d = 1e-30;
+    c = b + an / c;
+    if (Math.abs(c) < 1e-30) c = 1e-30;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 3e-7) break;
+  }
+  return Math.exp(-x + a * Math.log(x) - gammaLn(a)) * h;
+}
+
+function bitCounts(bits) {
+  const ones = bits.reduce((sum, bit) => sum + bit, 0);
+  return { ones, zeros: bits.length - ones };
+}
+
+function frequencyTest(bits) {
+  const n = bits.length;
+  if (!n) return { value: "n=0", p: null, pass: false };
+  const sum = bits.reduce((acc, bit) => acc + (bit ? 1 : -1), 0);
+  const p = erfc(Math.abs(sum) / Math.sqrt(2 * n));
+  return { value: `S=${sum}`, p, pass: p >= 0.01 };
+}
+
+function runsTest(bits) {
+  const n = bits.length;
+  if (n < 2) return { value: "n<2", p: null, pass: false };
+  const { ones } = bitCounts(bits);
+  const pi = ones / n;
+  const tau = 2 / Math.sqrt(n);
+  if (Math.abs(pi - 0.5) >= tau) return { value: `pi=${pi.toFixed(4)}`, p: 0, pass: false };
+  let runs = 1;
+  for (let index = 1; index < n; index += 1) {
+    if (bits[index] !== bits[index - 1]) runs += 1;
+  }
+  const p = erfc(Math.abs(runs - 2 * n * pi * (1 - pi)) / (2 * Math.sqrt(2 * n) * pi * (1 - pi)));
+  return { value: `runs=${runs}`, p, pass: p >= 0.01 };
+}
+
+function blockFrequencyTest(bits, blockSize = 128) {
+  const blocks = Math.floor(bits.length / blockSize);
+  if (blocks < 1) return { value: `blocks=0`, p: null, pass: false };
+  let chi = 0;
+  for (let block = 0; block < blocks; block += 1) {
+    const start = block * blockSize;
+    const ones = bits.slice(start, start + blockSize).reduce((sum, bit) => sum + bit, 0);
+    const pi = ones / blockSize;
+    chi += (pi - 0.5) ** 2;
+  }
+  chi *= 4 * blockSize;
+  const p = gammaQ(blocks / 2, chi / 2);
+  return { value: `M=${blockSize}, chi=${chi.toFixed(3)}`, p, pass: p >= 0.01 };
+}
+
+function serialPsi(bits, patternLength) {
+  if (patternLength <= 0) return 0;
+  const n = bits.length;
+  const counts = new Array(2 ** patternLength).fill(0);
+  for (let index = 0; index < n; index += 1) {
+    let pattern = 0;
+    for (let bit = 0; bit < patternLength; bit += 1) {
+      pattern = (pattern << 1) | bits[(index + bit) % n];
+    }
+    counts[pattern] += 1;
+  }
+  const sum = counts.reduce((acc, count) => acc + count * count, 0);
+  return (sum * (2 ** patternLength) / n) - n;
+}
+
+function serialTest(bits, m = 2) {
+  if (bits.length < 8) return { value: "n<8", p: null, pass: false };
+  const psiM = serialPsi(bits, m);
+  const psiM1 = serialPsi(bits, m - 1);
+  const psiM2 = serialPsi(bits, m - 2);
+  const delta1 = psiM - psiM1;
+  const delta2 = psiM - 2 * psiM1 + psiM2;
+  const p1 = gammaQ(2 ** (m - 2), delta1 / 2);
+  const p2 = gammaQ(2 ** (m - 3), delta2 / 2);
+  const p = Math.min(p1, p2);
+  return { value: `d1=${delta1.toFixed(3)}, d2=${delta2.toFixed(3)}`, p, pass: p >= 0.01 };
+}
+
+function entropySummary(bits) {
+  if (!bits.length) return { value: "n=0", p: null, pass: false };
+  const { ones, zeros } = bitCounts(bits);
+  const p1 = ones / bits.length;
+  const p0 = zeros / bits.length;
+  const entropy = [p0, p1]
+    .filter((p) => p > 0)
+    .reduce((sum, p) => sum - p * Math.log2(p), 0);
+  const minEntropy = -Math.log2(Math.max(p0, p1));
+  return { value: `H=${entropy.toFixed(4)}, Hmin=${minEntropy.toFixed(4)}`, p: null, pass: entropy >= 0.98 };
+}
+
+function autocorrelationSummary(bits) {
+  if (bits.length < 2) return { value: "n<2", p: null, pass: false };
+  let same = 0;
+  for (let index = 1; index < bits.length; index += 1) {
+    if (bits[index] === bits[index - 1]) same += 1;
+  }
+  const ratio = same / (bits.length - 1);
+  return { value: `same=${ratio.toFixed(4)}`, p: null, pass: Math.abs(ratio - 0.5) < 0.05 };
+}
+
+function evaluateBits(bits) {
+  return [
+    ["NIST monobit", frequencyTest(bits)],
+    ["NIST runs", runsTest(bits)],
+    ["NIST block frequency", blockFrequencyTest(bits)],
+    ["NIST serial m=2", serialTest(bits, 2)],
+    ["Entropy", entropySummary(bits)],
+    ["Lag-1 autocorr", autocorrelationSummary(bits)],
+  ];
+}
+
+function runNoiseExtraction() {
+  const values = getNoiseColumnValues();
+  if (!values.length) {
+    addLog("SYS", "No numeric CSV data for noise extraction");
+    return;
+  }
+
+  const methods = [];
+  const windowSize = clampInteger(els.noiseWindow.value, 2, 5001, 33);
+  const offset = Number.parseFloat(els.noiseThresholdOffset.value) || 0;
+  if (els.noiseMethodMovingAverage.checked) {
+    methods.push(["Moving average", extractMovingAverageBits(values, windowSize, offset)]);
+  }
+  if (els.noiseMethodDelta.checked) {
+    methods.push(["Delta sign", extractDeltaBits(values)]);
+  }
+  if (els.noiseMethodLsb.checked) {
+    methods.push(["LSB parity", extractLsbBits(values)]);
+  }
+
+  const useVn = els.noiseVonNeumann.checked;
+  state.noiseResults = methods.map(([name, rawBits]) => {
+    const bits = useVn ? vonNeumannExtract(rawBits) : rawBits;
+    return {
+      method: useVn ? `${name} + VN` : name,
+      rawCount: rawBits.length,
+      bits,
+      tests: evaluateBits(bits),
+    };
+  });
+
+  const selected = state.noiseResults[0];
+  state.noiseSelectedMethod = selected?.method || "";
+  state.noiseSelectedBits = selected?.bits || [];
+  updateNoiseSummary(state.noiseTable?.rows?.length || 0, values.length, state.noiseSelectedBits);
+  renderNoiseResults(state.noiseResults);
+  drawNoiseBitMap(state.noiseSelectedBits);
+}
+
+function updateNoiseSummary(rowCount, numericCount, bits) {
+  const { ones } = bitCounts(bits);
+  els.noiseRowCount.textContent = String(rowCount || 0);
+  els.noiseNumericCount.textContent = String(numericCount || 0);
+  els.noiseBitCount.textContent = String(bits.length || 0);
+  els.noiseOneRatio.textContent = bits.length ? (ones / bits.length).toFixed(4) : "--";
+  els.noiseCaption.textContent = state.noiseSelectedMethod
+    ? `${state.noiseSelectedMethod} | ${bits.length} bits`
+    : (state.noiseTable ? `${state.noiseTable.rows.length} rows loaded` : "Load a CSV file");
+}
+
+function formatPValue(value) {
+  if (!Number.isFinite(value)) return "--";
+  if (value < 0.0001) return value.toExponential(2);
+  return value.toFixed(4);
+}
+
+function renderNoiseResults(results) {
+  els.noiseResultsBody.innerHTML = "";
+  if (!results.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td colspan="5">No results</td>`;
+    els.noiseResultsBody.append(row);
+    return;
+  }
+
+  results.forEach((result) => {
+    result.tests.forEach(([testName, test]) => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${escapeHtml(result.method)}</td>
+        <td>${escapeHtml(testName)}</td>
+        <td>${escapeHtml(test.value)}</td>
+        <td>${formatPValue(test.p)}</td>
+        <td><span class="test-result ${test.pass ? "is-pass" : "is-fail"}">${test.pass ? "PASS" : "CHECK"}</span></td>
+      `;
+      els.noiseResultsBody.append(row);
+    });
+  });
+}
+
+function resizeNoiseBitCanvas() {
+  if (els.noiseView?.hidden) return;
+  const rect = els.noiseBitCanvas.getBoundingClientRect();
+  noiseBitMap.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  noiseBitMap.width = Math.floor(rect.width);
+  noiseBitMap.height = Math.floor(rect.height);
+  els.noiseBitCanvas.width = Math.floor(noiseBitMap.width * noiseBitMap.dpr);
+  els.noiseBitCanvas.height = Math.floor(noiseBitMap.height * noiseBitMap.dpr);
+  noiseBitMap.ctx.setTransform(noiseBitMap.dpr, 0, 0, noiseBitMap.dpr, 0, 0);
+  drawNoiseBitMap(state.noiseSelectedBits);
+}
+
+function drawNoiseBitMap(bits = []) {
+  const ctx = noiseBitMap.ctx;
+  const width = noiseBitMap.width;
+  const height = noiseBitMap.height;
+  if (!width || !height) return;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  if (!bits.length) {
+    ctx.fillStyle = "#66746f";
+    ctx.font = "700 13px Segoe UI, sans-serif";
+    ctx.fillText("No extracted bits", 14, 28);
+    return;
+  }
+
+  const columns = Math.max(32, Math.floor(width / 4));
+  const cell = Math.max(2, Math.floor(width / columns));
+  const rows = Math.floor(height / cell);
+  const capacity = Math.min(bits.length, columns * rows);
+  for (let index = 0; index < capacity; index += 1) {
+    const x = (index % columns) * cell;
+    const y = Math.floor(index / columns) * cell;
+    ctx.fillStyle = bits[index] ? "#17201d" : "#ffffff";
+    ctx.fillRect(x, y, cell, cell);
+    ctx.strokeStyle = "#d8e0dc";
+    ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+  }
+}
+
+function exportNoiseBitsCsv() {
+  if (!state.noiseSelectedBits.length) {
+    addLog("SYS", "No extracted noise bits to export");
+    return;
+  }
+  const rows = ["index,method,bit"];
+  state.noiseSelectedBits.forEach((bit, index) => {
+    rows.push(`${index},${state.noiseSelectedMethod},${bit}`);
+  });
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `noise_bits_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${state.noiseSelectedBits.length} noise bits`);
+}
+
 function toggleDemo() {
   if (state.demoTimer) {
     window.clearInterval(state.demoTimer);
@@ -1906,6 +2420,12 @@ function bindEvents() {
     setUiScale(els.uiScale.value);
   });
 
+  els.viewTabs.forEach((button) => {
+    button.addEventListener("click", () => {
+      setActiveView(button.dataset.viewTarget);
+    });
+  });
+
   els.connectButton.addEventListener("click", () => {
     if (isConnected()) disconnectActiveTransport();
     else connectSelectedTransport();
@@ -2025,6 +2545,20 @@ function bindEvents() {
   els.exportButton.addEventListener("click", exportCsv);
   els.clearBitsButton.addEventListener("click", clearBits);
   els.exportBitsButton.addEventListener("click", exportBitsCsv);
+  els.noiseCsvFile.addEventListener("change", () => {
+    loadNoiseCsvFile(els.noiseCsvFile.files?.[0]).catch((error) => {
+      addLog("ERR", error.message || error, true);
+    });
+  });
+  els.noiseDelimiter.addEventListener("change", () => {
+    if (els.noiseCsvFile.files?.[0]) {
+      loadNoiseCsvFile(els.noiseCsvFile.files[0]).catch((error) => {
+        addLog("ERR", error.message || error, true);
+      });
+    }
+  });
+  els.runNoiseButton.addEventListener("click", runNoiseExtraction);
+  els.exportNoiseBitsButton.addEventListener("click", exportNoiseBitsCsv);
   els.bitColumns.addEventListener("change", () => {
     state.needsBitDraw = true;
     resizeBitCanvas();
@@ -2050,6 +2584,7 @@ function init() {
   resizeCanvas();
   new ResizeObserver(resizeCanvas).observe(els.canvasWrap || els.plotCanvas);
   new ResizeObserver(resizeBitCanvas).observe(els.bitCanvasWrap || els.bitCanvas);
+  new ResizeObserver(resizeNoiseBitCanvas).observe(els.noiseBitCanvasWrap || els.noiseBitCanvas);
   updateStats();
   animationLoop();
 }
