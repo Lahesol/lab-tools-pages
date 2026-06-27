@@ -1512,7 +1512,7 @@ function drawOeoTransferCurve(ctx, plot, sourceNode, edgeUvPeak) {
   const statsY = plot.bottom + 38;
   drawMiniStat(ctx, plot.left, statsY, "peak |V_TIA|", `${round(opMv, 2)} mV`, "#3d7fb8");
   drawMiniStat(ctx, plot.left + 112, statsY, "peak UV_out", `${round(opUv, 3)}`, "#d98612");
-  drawMiniStat(ctx, plot.left + 224, statsY, "edge peak", `${round(edgeUvPeak, 3)}`, "#c34c3c");
+  drawMiniStat(ctx, plot.left + 224, statsY, "delivered UV", `${round(edgeUvPeak, 3)}`, "#c34c3c");
 }
 
 function drawOeoTransferTuning() {
@@ -1588,9 +1588,9 @@ function drawOeoTransferTuning() {
   const statX = timePlot.left + 8;
   drawMiniStat(ctx, statX, statY, "I peak", `${round(currentPeak, 2)} nA`, "#0f9d91");
   drawMiniStat(ctx, statX + 100, statY, "V peak", `${round(voltagePeak, 2)} mV`, "#3d7fb8");
-  drawMiniStat(ctx, statX + 200, statY, "UV peak", `${round(Math.max(...emitterUv, 0), 3)}`, "#d98612");
+  drawMiniStat(ctx, statX + 200, statY, "UV_out peak", `${round(Math.max(...emitterUv, 0), 3)}`, "#d98612");
   if (!stacked || width > 520) {
-    drawMiniStat(ctx, statX + 300, statY, "edge UV", `${round(Math.max(...edgeUv, 0), 3)}`, "#c34c3c");
+    drawMiniStat(ctx, statX + 300, statY, "delivered UV", `${round(Math.max(...edgeUv, 0), 3)}`, "#c34c3c");
   }
 
   drawOeoTransferCurve(ctx, curvePlot, sourceNode, Math.max(...edgeUv, 0));

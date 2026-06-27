@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=16da93e852b1" />
+    <link rel="stylesheet" href="styles.css?v=32044750e65a" />
   </head>
   <body>
     <div class="app-shell">
@@ -26,7 +26,7 @@
         <button type="button" data-tab="params">Device Parameters</button>
         <button type="button" data-tab="ann">ANN Transient</button>
         <button type="button" data-tab="snn">SNN Spiking</button>
-        <button type="button" data-tab="refs">References / Next Work</button>
+        <button type="button" data-tab="refs">Terms / References</button>
       </nav>
 
       <main class="workspace">
@@ -154,6 +154,17 @@
                 </table>
               </div>
             </div>
+            <details class="term-note">
+              <summary>UV input terms</summary>
+              <dl class="term-list compact-term-list">
+                <div><dt>Frequency</dt><dd>Pulse repetition rate of the UV source in Hz.</dd></div>
+                <div><dt>Duty cycle</dt><dd>Fraction of each PWM period where the UV source is on.</dd></div>
+                <div><dt>Pulse count</dt><dd>Number of UV on-pulses generated in the timing program.</dd></div>
+                <div><dt>UV intensity</dt><dd>Normalized optical input amplitude used by the compact device model.</dd></div>
+                <div><dt>On/off timing</dt><dd>Explicit start, on-time, and off-time schedule for programmable illumination.</dd></div>
+                <div><dt>365 nm</dt><dd>Current simulator assumption: single-wavelength UV input only.</dd></div>
+              </dl>
+            </details>
           </section>
 
           <section class="tab-panel" id="tab-blocks">
@@ -193,6 +204,21 @@
                 <button id="updateLayerBtn" type="button" class="full-button">Update selected layer</button>
               </aside>
             </div>
+            <details class="term-note">
+              <summary>Device block and connection terms</summary>
+              <dl class="term-list compact-term-list">
+                <div><dt>Device block</dt><dd>One UV-driven STM/LTM transistor-synapse cell. Optical input produces photocurrent output.</dd></div>
+                <div><dt>Layer</dt><dd>Visual grouping of devices. In the Block tab, explicit device-to-device edges define actual signal routing.</dd></div>
+                <div><dt>STM</dt><dd>Short-term memory mode with faster decay. Used for transient/event filtering.</dd></div>
+                <div><dt>LTM</dt><dd>Long-term memory mode with slower decay or persistent latch/readout state.</dd></div>
+                <div><dt>Source device</dt><dd>Device whose current is converted through O/E/O and sent to connected target devices.</dd></div>
+                <div><dt>Target device</dt><dd>Device receiving delivered optical input from a source edge.</dd></div>
+                <div><dt>1-to-many</dt><dd>One source emitter drives multiple targets through optical fan-out.</dd></div>
+                <div><dt>Many-to-one</dt><dd>Multiple source edges are combined as optical input to one target device.</dd></div>
+                <div><dt>TIA</dt><dd>Transimpedance amplifier converting photocurrent into voltage for readout or emitter drive.</dd></div>
+                <div><dt>Switching route</dt><dd>Mode-control bias method: VDS switching at gate 0 V, or gate switching at fixed VDS +30 V.</dd></div>
+              </dl>
+            </details>
             <section class="network-editor">
               <div class="section-header compact-header">
                 <div>
@@ -353,6 +379,15 @@
                     </div>
                   </div>
                   <canvas id="oeoTransferCanvas" class="plot-canvas tall" width="980" height="560" aria-label="O/E/O input-output transfer tuning graph"></canvas>
+                  <details class="term-note" open>
+                    <summary>O/E/O terms and plotted values</summary>
+                    <dl class="term-list compact-term-list">
+                      <div><dt>I peak</dt><dd>Peak photocurrent from the selected source device.</dd></div>
+                      <div><dt>V peak</dt><dd>Peak absolute TIA voltage from I_photo x R_TIA.</dd></div>
+                      <div><dt>UV_out peak</dt><dd>Peak optical output emitted by the local driver/emitter before splitter and coupling losses.</dd></div>
+                      <div><dt>Delivered edge UV</dt><dd>Peak optical input delivered to connected target devices after splitter loss, fan-out scaling, coupling, and delay.</dd></div>
+                    </dl>
+                  </details>
                 </div>
                 <div class="panel network-panel trace-picker-panel">
                   <div class="panel-title"><span>Device current traces</span><output id="checkedTraceSummary">0 selected</output></div>
@@ -441,6 +476,19 @@
                 </div>
               </div>
             </div>
+            <details class="term-note">
+              <summary>Device parameter fitting terms</summary>
+              <dl class="term-list compact-term-list">
+                <div><dt>Photocurrent gain</dt><dd>Current increase per normalized UV drive in the compact transient model.</dd></div>
+                <div><dt>Dark current</dt><dd>Baseline current when UV drive is absent.</dd></div>
+                <div><dt>Rise tau</dt><dd>Time constant for current increase during UV illumination.</dd></div>
+                <div><dt>Decay tau</dt><dd>Time constant for current relaxation after UV turns off.</dd></div>
+                <div><dt>Retention</dt><dd>Residual current fraction retained after UV input, stronger in LTM mode.</dd></div>
+                <div><dt>Ripple / noise</dt><dd>Small deterministic perturbation added to visualize device variation/noise.</dd></div>
+                <div><dt>RMSE</dt><dd>Root-mean-square error between measured transient and compact model trace.</dd></div>
+                <div><dt>Route multiplier</dt><dd>Gain or persistence scaling caused by VDS or gate switching route.</dd></div>
+              </dl>
+            </details>
             <div class="plot-frame wide">
               <div class="plot-toolbar">
                 <span>Measured vs compact model overlay</span>
@@ -489,6 +537,17 @@
                 </select>
               </label>
             </div>
+            <details class="term-note">
+              <summary>ANN simulation terms</summary>
+              <dl class="term-list compact-term-list">
+                <div><dt>ANN preset</dt><dd>Browser-side analog architecture proxy, such as MLP, reservoir, or convolutional-block approximation.</dd></div>
+                <div><dt>Dataset target</dt><dd>Reference dataset whose input/output dimensions are compared with the placed device graph.</dd></div>
+                <div><dt>Input encoding</dt><dd>Mapping from dataset sample values into UV pulse amplitude, rate, or latency.</dd></div>
+                <div><dt>Activation</dt><dd>Normalized analog response derived from device current for readout simulation.</dd></div>
+                <div><dt>Virtual adapter</dt><dd>Assumed compression, multiplexing, or decoder used when dataset channels do not match physical devices.</dd></div>
+                <div><dt>Current heatmap</dt><dd>Per-device current over time for the selected layer.</dd></div>
+              </dl>
+            </details>
             <div class="runtime-banner" id="annRuntimeSummary"></div>
             <div class="dataset-workbench">
               <div class="dataset-card" id="annDatasetPanel"></div>
@@ -565,6 +624,19 @@
                 </select>
               </label>
             </div>
+            <details class="term-note">
+              <summary>SNN simulation terms</summary>
+              <dl class="term-list compact-term-list">
+                <div><dt>LIF</dt><dd>Leaky integrate-and-fire neuron model driven by device synaptic current.</dd></div>
+                <div><dt>I_syn</dt><dd>Synaptic current derived from device photocurrent response.</dd></div>
+                <div><dt>Membrane</dt><dd>Internal neuron state that integrates current and decays over time.</dd></div>
+                <div><dt>Spike raster</dt><dd>Plot of output spike times for each simulated device/neuron.</dd></div>
+                <div><dt>Rate coding</dt><dd>Input intensity represented by spike or pulse frequency.</dd></div>
+                <div><dt>TTFS</dt><dd>Time-to-first-spike encoding, where earlier events represent stronger features.</dd></div>
+                <div><dt>Phase coding</dt><dd>Input encoded by phase within the PWM timing cycle.</dd></div>
+                <div><dt>Spike count</dt><dd>Number of output events in each layer or time bin.</dd></div>
+              </dl>
+            </details>
             <div class="runtime-banner" id="snnRuntimeSummary"></div>
             <div class="dataset-workbench">
               <div class="dataset-card" id="snnDatasetPanel"></div>
@@ -609,12 +681,61 @@
           <section class="tab-panel" id="tab-refs">
             <div class="section-header">
               <div>
-                <h2>References and Next Work</h2>
-                <p>Simulation assumptions, recommended datasets, and implementation tasks are kept explicit here for the next development pass.</p>
+                <h2>Terms, References and Next Work</h2>
+                <p>Simulation terms, assumptions, recommended datasets, and implementation tasks are kept explicit here for the next development pass.</p>
               </div>
               <a class="primary-link" href="NEXT_WORK.md">Open NEXT_WORK.md</a>
             </div>
             <div class="reference-grid" id="referenceGrid"></div>
+            <section class="term-guide-section">
+              <div class="section-header compact-header">
+                <div>
+                  <h3>Simulator Glossary</h3>
+                  <p>Definitions used across UV input, device modeling, block connection, O/E/O, ANN, SNN, and dataset mapping panels.</p>
+                </div>
+              </div>
+              <div class="term-guide-grid">
+                <article class="reference-item"><h3>Frequency</h3><p>UV PWM repetition rate. It controls how often optical pulses are applied to the device model.</p></article>
+                <article class="reference-item"><h3>Duty cycle</h3><p>Fraction of each PWM period where UV is on. Higher duty generally increases integrated optical dose.</p></article>
+                <article class="reference-item"><h3>UV intensity</h3><p>Normalized optical input amplitude. It is unitless in the browser compact model until calibrated to measured irradiance.</p></article>
+                <article class="reference-item"><h3>Device block</h3><p>One optical STM/LTM synaptic device. Its input is UV drive and its output is photocurrent.</p></article>
+                <article class="reference-item"><h3>STM</h3><p>Short-term memory mode with fast transient decay. In the O/E/O hybrid model it drives an integrate-fire emitter.</p></article>
+                <article class="reference-item"><h3>LTM</h3><p>Long-term memory mode with slower retention. In the O/E/O hybrid model it behaves as a latch/readout state.</p></article>
+                <article class="reference-item"><h3>Switching route</h3><p>Bias method used to select STM/LTM behavior: VDS route or gate route.</p></article>
+                <article class="reference-item"><h3>VDS route</h3><p>Gate fixed at 0 V while VDS is changed between -30 V and +30 V.</p></article>
+                <article class="reference-item"><h3>Gate route</h3><p>VDS fixed at +30 V while gate voltage is changed between 10 V and 40 V.</p></article>
+                <article class="reference-item"><h3>Photocurrent gain</h3><p>Compact-model current response scale for normalized UV input.</p></article>
+                <article class="reference-item"><h3>Dark current</h3><p>Baseline current when UV input is off.</p></article>
+                <article class="reference-item"><h3>Rise tau</h3><p>Time constant for current rise under UV illumination.</p></article>
+                <article class="reference-item"><h3>Decay tau</h3><p>Time constant for current decay after UV input turns off.</p></article>
+                <article class="reference-item"><h3>Retention</h3><p>Residual current or state that remains after optical input. It represents memory persistence.</p></article>
+                <article class="reference-item"><h3>RMSE</h3><p>Root-mean-square error between measured transient data and simulated model trace.</p></article>
+                <article class="reference-item"><h3>TIA</h3><p>Transimpedance amplifier. It converts photocurrent to voltage: |V_TIA| = I_photo x R_TIA.</p></article>
+                <article class="reference-item"><h3>Driver threshold</h3><p>Minimum |V_TIA| required before the emitter produces UV output. Higher threshold suppresses weak STM transients.</p></article>
+                <article class="reference-item"><h3>Driver gain</h3><p>Slope from |V_TIA| above threshold to emitted UV intensity. Higher gain makes small voltage changes produce larger optical output.</p></article>
+                <article class="reference-item"><h3>Max emitted UV</h3><p>Saturation limit of the local emitter output. This caps UV_out before splitter and coupling losses.</p></article>
+                <article class="reference-item"><h3>Splitter loss</h3><p>Optical power loss applied when one source drives fan-out connections. Larger dB loss reduces delivered edge UV.</p></article>
+                <article class="reference-item"><h3>Optical coupling</h3><p>Efficiency factor from emitter/output guide to target device input. It scales delivered edge UV.</p></article>
+                <article class="reference-item"><h3>Direct UV residual</h3><p>Fraction of external UV that still reaches a connected target even without source-emitted UV.</p></article>
+                <article class="reference-item"><h3>Delay</h3><p>Propagation or driver delay applied to emitted UV before it becomes target optical input.</p></article>
+                <article class="reference-item"><h3>IF tau</h3><p>Leaky integration time constant for STM integrate-fire emitter state. Longer tau accumulates repeated pulses more strongly.</p></article>
+                <article class="reference-item"><h3>IF threshold</h3><p>Integrator state level required to fire an emitter pulse. Lower threshold produces more UV output events.</p></article>
+                <article class="reference-item"><h3>IF gain</h3><p>Input scaling from continuous driver output into the STM integrator. Higher gain charges the integrator faster.</p></article>
+                <article class="reference-item"><h3>Emitter pulse</h3><p>Duration of UV pulse emitted after integrate-fire threshold crossing.</p></article>
+                <article class="reference-item"><h3>Refractory</h3><p>Minimum interval after firing before the STM integrate-fire emitter can fire again.</p></article>
+                <article class="reference-item"><h3>Write threshold</h3><p>LTM latch input threshold. Above this, the LTM output state is written or reinforced.</p></article>
+                <article class="reference-item"><h3>Readout gain</h3><p>Scale factor from LTM latch state to persistent optical/readout output.</p></article>
+                <article class="reference-item"><h3>Retention tau</h3><p>Decay time constant of the LTM latch/readout state in the compact O/E/O model.</p></article>
+                <article class="reference-item"><h3>Dataset target</h3><p>Dataset selected for architecture mapping. The GUI checks whether dataset input/output dimensions match placed devices.</p></article>
+                <article class="reference-item"><h3>Input encoding</h3><p>Method for converting dataset samples into UV pulse sequences, amplitudes, rates, or latencies.</p></article>
+                <article class="reference-item"><h3>Virtual adapter</h3><p>Assumed encoder/readout layer used when physical device count does not match dataset channels or class count.</p></article>
+                <article class="reference-item"><h3>ANN activation</h3><p>Normalized analog response used as a browser-side readout proxy. It is not trained-model accuracy.</p></article>
+                <article class="reference-item"><h3>LIF neuron</h3><p>Leaky integrate-and-fire neuron model used in the SNN tab.</p></article>
+                <article class="reference-item"><h3>I_syn</h3><p>Synaptic current derived from device photocurrent and used to drive LIF membrane state.</p></article>
+                <article class="reference-item"><h3>Spike raster</h3><p>Time-vs-device plot showing when simulated output spikes occur.</p></article>
+                <article class="reference-item"><h3>TTFS</h3><p>Time-to-first-spike encoding. Stronger input is represented by earlier spike timing.</p></article>
+              </div>
+            </section>
             <div class="dataset-source-grid" id="datasetSourceGrid"></div>
           </section>
         </section>
@@ -683,6 +804,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-model.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=1e2c6405887b"></script>
+    <script src="app.js?v=e2114c50ab14"></script>
   </body>
 </html>

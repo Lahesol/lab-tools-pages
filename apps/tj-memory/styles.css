@@ -910,6 +910,62 @@ th {
   text-transform: uppercase;
 }
 
+.term-note {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f7fafc;
+  color: #344a59;
+}
+
+.term-note summary {
+  cursor: pointer;
+  color: #203645;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.term-list {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0;
+}
+
+.compact-term-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.term-list div {
+  min-width: 0;
+}
+
+.term-list dt {
+  color: #203645;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.term-list dd {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.term-guide-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.term-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .trace-picker-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1219,6 +1275,7 @@ th {
   .reference-grid,
   .dataset-workbench,
   .dataset-source-grid,
+  .term-guide-grid,
   .param-workbench,
   .network-grid,
   .analysis-grid {
@@ -1249,7 +1306,8 @@ th {
 
   .field-grid,
   .metric-grid,
-  .fit-metrics {
+  .fit-metrics,
+  .compact-term-list {
     grid-template-columns: 1fr;
   }
 

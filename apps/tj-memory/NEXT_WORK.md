@@ -18,7 +18,7 @@ Core assumptions:
   - Device Blocks
   - ANN Transient
   - SNN Spiking
-  - References / Next Work
+  - Terms / References
 
 ## Current Prototype Status
 
@@ -81,6 +81,8 @@ Implemented in `web_gui/`:
   - LTM source devices can be modeled as persistent latch/readout outputs with write threshold, readout gain, and retention time controls.
   - The connection response plot overlays external UV, emitted UV, IF/latch state, source photocurrent, and connected target photocurrent.
   - The O/E/O transfer tuning plot visualizes the selected source device's input current, TIA voltage, IF/latch state, emitter UV output, delivered edge UV, and static voltage-to-UV driver curve while O/E/O parameters are adjusted.
+  - Inline contextual term notes now cover UV input, device blocks, device parameter fitting, O/E/O transfer, ANN simulation, SNN simulation, and dataset/architecture mapping terms.
+  - The References tab now includes a simulator-wide glossary rather than an O/E/O-only glossary.
 - Device Parameters tab:
   - STM/LTM compact model parameters are editable with sliders.
   - VDS/Gate route gain and persistence multipliers are editable.
