@@ -441,8 +441,11 @@
                 <p>Fit the compact STM/LTM photocurrent model to measured UV transient data. Paste time-current CSV, tune sliders, and compare model versus measurement.</p>
               </div>
               <div class="inline-actions">
+                <button id="saveDeviceParamsBtn" type="button" class="ghost-button light">Save params</button>
+                <button id="loadDeviceParamsBtn" type="button" class="ghost-button light">Load params</button>
                 <button id="loadDemoMeasurementBtn" type="button" class="ghost-button light">Load demo data</button>
                 <button id="autoFitParamsBtn" type="button" class="primary-button">Auto fit</button>
+                <input id="deviceParamsFileInput" type="file" accept=".json,application/json" hidden />
               </div>
             </div>
             <div class="param-workbench">
@@ -924,6 +927,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-model.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=1784903a819c"></script>
+    <script src="app.js?v=7444594362a0"></script>
   </body>
 </html>

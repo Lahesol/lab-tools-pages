@@ -2327,6 +2327,114 @@ function autoFitParameters() {
   runAllSimulations();
 }
 
+function deviceParameterPackage() {
+  readControls();
+  return {
+    schema: "uv-stm-ltm-device-parameters",
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    app: "UV STM/LTM Architecture Simulator",
+    fitTarget: {
+      paramMode: state.paramMode,
+      paramSwitchMethod: state.paramSwitchMethod,
+      uvProgram: {
+        programMode: state.programMode,
+        frequency: state.frequency,
+        duty: state.duty,
+        pulseCount: state.pulseCount,
+        intensity: state.intensity,
+      },
+    },
+    deviceModel: MODEL.sanitizeModel(state.deviceModel),
+    measurementText: state.measurementText || "",
+    notes: "Compact STM/LTM photocurrent model parameters plus the measured transient text used for browser-side overlay fitting.",
+  };
+}
+
+function saveDeviceParameters() {
+  const payload = deviceParameterPackage();
+  const stamp = payload.exportedAt.replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `uv_stm_ltm_device_params_${stamp}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  $("fitStatus").textContent = "params saved";
+}
+
+function savedUvProgram(payload) {
+  const uv = payload?.fitTarget?.uvProgram || payload?.uvProgram;
+  if (!uv || typeof uv !== "object") return null;
+  return {
+    programMode: uv.programMode === "onoff" ? "onoff" : "pwm",
+    frequency: clamp(Number.isFinite(Number(uv.frequency)) ? Number(uv.frequency) : state.frequency, 1, 50),
+    duty: clamp(Number.isFinite(Number(uv.duty)) ? Number(uv.duty) : state.duty, 5, 95),
+    pulseCount: clamp(Number.isFinite(Number(uv.pulseCount)) ? Number(uv.pulseCount) : state.pulseCount, 4, 160),
+    intensity: clamp(Number.isFinite(Number(uv.intensity)) ? Number(uv.intensity) : state.intensity, 0.05, 1.5),
+  };
+}
+
+function readDeviceParameterPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Device parameter file is not a JSON object.");
+  }
+  const sourceModel = payload.deviceModel || payload.model || payload.parameters || payload;
+  const hasModelKeys = sourceModel && typeof sourceModel === "object" && (sourceModel.STM || sourceModel.LTM || sourceModel.route);
+  if (!hasModelKeys) {
+    throw new Error("JSON must contain deviceModel, STM/LTM, or route parameters.");
+  }
+  const fitTarget = payload.fitTarget || {};
+  const paramMode = payload.paramMode || fitTarget.paramMode;
+  const paramSwitchMethod = payload.paramSwitchMethod || fitTarget.paramSwitchMethod;
+  return {
+    deviceModel: MODEL.sanitizeModel(sourceModel),
+    paramMode: paramMode === "LTM" ? "LTM" : paramMode === "STM" ? "STM" : state.paramMode,
+    paramSwitchMethod: paramSwitchMethod === "gate" ? "gate" : paramSwitchMethod === "vds" ? "vds" : state.paramSwitchMethod,
+    measurementText: typeof payload.measurementText === "string" ? payload.measurementText : state.measurementText,
+    uvProgram: savedUvProgram(payload),
+  };
+}
+
+function applyDeviceParameterPayload(payload) {
+  const parsed = readDeviceParameterPayload(payload);
+  state.deviceModel = parsed.deviceModel;
+  state.paramMode = parsed.paramMode;
+  state.paramSwitchMethod = parsed.paramSwitchMethod;
+  state.measurementText = parsed.measurementText;
+  if (parsed.uvProgram) {
+    state.programMode = parsed.uvProgram.programMode;
+    state.frequency = parsed.uvProgram.frequency;
+    state.duty = parsed.uvProgram.duty;
+    state.pulseCount = parsed.uvProgram.pulseCount;
+    state.intensity = parsed.uvProgram.intensity;
+  }
+  writeControls();
+  invalidateOptimizer("rerun recommended");
+  runAllSimulations();
+  $("fitStatus").textContent = "params loaded";
+}
+
+function loadDeviceParametersFromFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    try {
+      applyDeviceParameterPayload(JSON.parse(String(reader.result || "{}")));
+    } catch (error) {
+      console.error(error);
+      $("fitStatus").textContent = "load failed";
+    }
+  });
+  reader.addEventListener("error", () => {
+    $("fitStatus").textContent = "load failed";
+  });
+  reader.readAsText(file);
+}
+
 function drawSnnTrace() {
   const selected = latestSnn.selected;
   const membrane = latestSnn.membranes[0] || selected.activation;
@@ -2805,7 +2913,7 @@ function bindEvents() {
     });
   });
 
-  const deferredControls = new Set(["deviceModeSelect", "deviceSwitchSelect", "deviceTiaOverride", "layerDevices", "layerRole"]);
+  const deferredControls = new Set(["deviceModeSelect", "deviceSwitchSelect", "deviceTiaOverride", "layerDevices", "layerRole", "deviceParamsFileInput"]);
   document.querySelectorAll("input, select").forEach((control) => {
     if (deferredControls.has(control.id)) return;
     control.addEventListener("input", () => {
@@ -2844,6 +2952,13 @@ function bindEvents() {
   $("clearConnectionsBtn").addEventListener("click", clearConnections);
   $("selectSourceTargetTracesBtn").addEventListener("click", selectSourceTargetTraces);
   $("clearTraceSelectionBtn").addEventListener("click", clearTraceSelection);
+  $("saveDeviceParamsBtn").addEventListener("click", saveDeviceParameters);
+  $("loadDeviceParamsBtn").addEventListener("click", () => $("deviceParamsFileInput").click());
+  $("deviceParamsFileInput").addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (file) loadDeviceParametersFromFile(file);
+    event.target.value = "";
+  });
   $("loadDemoMeasurementBtn").addEventListener("click", loadDemoMeasurement);
   $("autoFitParamsBtn").addEventListener("click", autoFitParameters);
   $("runOptimizerBtn").addEventListener("click", runOptimizer);
