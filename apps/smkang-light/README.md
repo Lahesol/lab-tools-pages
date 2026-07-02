@@ -60,14 +60,16 @@ files automatically.
 6. The serial reader preserves raw RX/TX lines in a run folder and separately
    parses numeric 14-bit ADC samples for plotting. In static mode the run folder
    is replaced by in-memory raw-log export.
-7. Every parsed ADC sample is saved with the current DAC A/B/C/D command values.
-   The same records can be plotted against time or against one selected DAC
-   voltage axis.
-8. A blank RX line during firmware `SC` stores the current samples as one `SC_cycleN`
+7. Plot and processed CSV records use configurable ADC oversampling. The default
+   is an 8-sample average; set oversampling to 1 to plot every numeric RX sample.
+8. Every processed ADC average is saved with the current DAC A/B/C/D command
+   values plus the raw sample count/min/max used for that average. The same
+   records can be plotted against time or against one selected DAC voltage axis.
+9. A blank RX line during firmware `SC` stores the current samples as one `SC_cycleN`
    curve, matching the original GUI behavior.
-9. CSV exports are available for current parsed ADC data, stored curves, and the raw
+10. CSV exports are available for current parsed ADC data, stored curves, and the raw
    UART log.
-10. Disconnect stops ADC if the GUI believes ADC is running, then closes the
+11. Disconnect stops ADC if the GUI believes ADC is running, then closes the
    serial port.
 
 ## Data Outputs
@@ -82,7 +84,9 @@ measurements/web_gui_runs/<YYYYMMDD_HHMMSS>/
 
 The raw UART log is written before any plotting/export analysis in backend mode.
 In static mode, raw UART lines are kept in memory and can be downloaded through
-`Raw Log`. Parsed CSV downloads should be treated as processed data.
+`Raw Log`. Parsed CSV downloads should be treated as processed data. Processed
+ADC CSV columns use `adc_count_avg` plus `adc_raw_count`, `adc_raw_min`, and
+`adc_raw_max` so the average can be traced back to the original RX samples.
 
 ## Firmware Change Summary
 

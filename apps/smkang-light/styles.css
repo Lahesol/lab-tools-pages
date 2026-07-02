@@ -238,6 +238,10 @@ h2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.three-col {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .sweep-options {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
@@ -425,6 +429,7 @@ h2 {
   }
 
   .two-col,
+  .three-col,
   .sweep-options,
   .zero-grid {
     grid-template-columns: 1fr;

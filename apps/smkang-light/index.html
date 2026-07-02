@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SMKang Light DAC/ADC Control</title>
-    <link rel="stylesheet" href="styles.css?v=32dd3ec0d2e8" />
+    <link rel="stylesheet" href="styles.css?v=15e357f437a3" />
   </head>
   <body>
     <main class="app-shell">
@@ -44,7 +44,7 @@
               <h2>ADC Setup</h2>
               <button id="applyAdcConfigBtn" type="button">Apply ADC</button>
             </div>
-            <div class="form-grid two-col">
+            <div class="form-grid three-col">
               <label>
                 ADC input
                 <select id="adcInputSelect">
@@ -61,6 +61,10 @@
               <label>
                 Sampling rate (Hz)
                 <input id="adcRateInput" type="number" min="1" max="1000" step="1" value="1000" />
+              </label>
+              <label>
+                Oversampling (samples)
+                <input id="adcOversampleInput" type="number" min="1" max="1000" step="1" value="8" />
               </label>
             </div>
           </section>
@@ -210,6 +214,6 @@
       </div>
     </template>
 
-    <script src="app.js?v=32690b801bcf"></script>
+    <script src="app.js?v=49509ee699f1"></script>
   </body>
 </html>

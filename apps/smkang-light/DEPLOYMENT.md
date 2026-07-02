@@ -52,6 +52,10 @@ reproduction procedure when needed.
 For GitHub Pages runs, raw UART logs are held in browser memory and must be
 downloaded with `Raw Log` before closing or refreshing the tab.
 
+ADC plot and processed CSV exports use the GUI oversampling setting. Raw UART
+logs still include every RX line; processed CSV records include average count
+and raw sample count/min/max columns.
+
 PC-controlled sweep sends only changed DAC values after comparing each point
 with the last commanded A/B/C/D state. Fixed channels are not rewritten at every
 point.

@@ -1,11 +1,12 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
-const APP_VERSION = "smkang-light-web-gui-0.3.2";
+const APP_VERSION = "smkang-light-web-gui-0.3.3";
 const POLL_MS = 250;
 const ADC_BITS = 14;
 const ADC_VREF = 3.3;
 const ADC_GAIN = 1.0;
+const DEFAULT_ADC_OVERSAMPLE_N = 8;
 const MAX_LOG_ROWS = 1200;
 const DAPLINK_FILTERS = [{ usbVendorId: 0xc251, usbProductId: 0xf001 }];
 
@@ -26,6 +27,8 @@ const state = {
   baud: 230400,
   adcInput: 1,
   adcRateHz: 1000,
+  adcOversampleN: DEFAULT_ADC_OVERSAMPLE_N,
+  adcOsBuffer: newOversampleBuffer(),
   currentDacMv: { A: 0, B: 0, C: 0, D: 0 },
   fixedMv: { ...FIXED_DEFAULTS },
   zeroCodes: { ...ZERO_DEFAULTS },
@@ -34,6 +37,7 @@ const state = {
   currentSampleT0: null,
   scCycleCount: 0,
   logRows: [],
+  rawLogRows: [],
   nextLogId: 1,
   runId: null,
   runDir: null,
@@ -76,6 +80,7 @@ function bindElements() {
     "clearBtn",
     "adcInputSelect",
     "adcRateInput",
+    "adcOversampleInput",
     "applyAdcConfigBtn",
     "channelTable",
     "applyFixedBtn",
@@ -165,6 +170,7 @@ function bindActions() {
     postAction("/api/adc/config", {
       input: readInt(els.adcInputSelect),
       rate_hz: readInt(els.adcRateInput),
+      oversample_n: readInt(els.adcOversampleInput),
     })
   );
 
@@ -434,11 +440,12 @@ async function handleLocalAction(path, body, afterLogId = null) {
       await sendSerialCommand(String(body.cmd || ""), { startNewBlock: Boolean(body.startNewBlock ?? true) });
       break;
     case "/api/adc/toggle":
+      if (state.adcRunning) flushOversample();
       await sendSerialCommand("ADC", { startNewBlock: !state.adcRunning });
       state.adcRunning = !state.adcRunning;
       break;
     case "/api/adc/config":
-      await setLocalAdcConfig(body.input, body.rate_hz);
+      await setLocalAdcConfig(body.input, body.rate_hz, body.oversample_n);
       break;
     case "/api/direct":
       await sendDirect(body.channel, Number.parseInt(body.value, 10), true);
@@ -465,6 +472,7 @@ async function handleLocalAction(path, body, afterLogId = null) {
     case "/api/clear":
       state.samples = [];
       state.currentSampleT0 = null;
+      resetOversample();
       appendLogRow("INFO", "Current ADC data cleared");
       break;
     default:
@@ -544,6 +552,7 @@ async function disconnectWebSerial() {
 
   if (state.adcRunning) {
     try {
+      flushOversample();
       await sendSerialCommand("ADC", { startNewBlock: false });
     } catch (error) {
       appendLogRow("WARN", `Could not stop ADC before disconnect: ${error.message}`);
@@ -639,7 +648,14 @@ async function sendSerialCommand(cmd, options = {}) {
   }
 }
 
-async function setLocalAdcConfig(input, rateHz) {
+async function setLocalAdcConfig(input, rateHz, oversampleN) {
+  if (
+    (input !== undefined && input !== null && input !== "") ||
+    (rateHz !== undefined && rateHz !== null && rateHz !== "") ||
+    (oversampleN !== undefined && oversampleN !== null && oversampleN !== "")
+  ) {
+    flushOversample();
+  }
   if (input !== undefined && input !== null && input !== "") {
     const adcInput = Number.parseInt(input, 10);
     if (adcInput < 0 || adcInput > 7) throw new Error("ADC input must be 0..7.");
@@ -653,6 +669,15 @@ async function setLocalAdcConfig(input, rateHz) {
     await sendSerialCommand(`AR${rate}`, { startNewBlock: false });
     state.adcRateHz = rate;
   }
+  if (oversampleN !== undefined && oversampleN !== null && oversampleN !== "") {
+    let oversample = Number.parseInt(oversampleN, 10);
+    if (oversample < 1) throw new Error("ADC oversampling must be positive.");
+    oversample = Math.min(oversample, 1000);
+    if (oversample !== state.adcOversampleN) {
+      state.adcOversampleN = oversample;
+      appendLogRow("INFO", `ADC plot oversampling set to x${oversample}`);
+    }
+  }
 }
 
 async function setLocalFixed(channel, valueMv) {
@@ -665,6 +690,7 @@ async function sendDirect(channel, valueMv, startNewBlock = true) {
   const ch = validateChannel(channel);
   const value = Number.parseInt(valueMv, 10);
   if (startNewBlock) prepareNewCommandBlock(`D${ch}${value}`);
+  else if (state.currentDacMv[ch] !== value) flushOversample();
   state.currentDacMv[ch] = value;
   await sendSerialCommand(`D${ch}${value}`, { startNewBlock: false });
 }
@@ -812,6 +838,8 @@ function resetLocalRun(baud, portLabel) {
   state.adcRunning = false;
   state.adcInput = Number.parseInt(els.adcInputSelect.value, 10) || 1;
   state.adcRateHz = Number.parseInt(els.adcRateInput.value, 10) || 1000;
+  state.adcOversampleN = Number.parseInt(els.adcOversampleInput.value, 10) || DEFAULT_ADC_OVERSAMPLE_N;
+  state.adcOsBuffer = newOversampleBuffer();
   state.currentDacMv = { A: 0, B: 0, C: 0, D: 0 };
   state.fixedMv = { ...FIXED_DEFAULTS };
   state.zeroCodes = { ...ZERO_DEFAULTS };
@@ -826,6 +854,7 @@ function resetLocalRun(baud, portLabel) {
   state.currentSampleT0 = null;
   state.scCycleCount = 0;
   state.logRows = [];
+  state.rawLogRows = [];
   state.nextLogId = 1;
   state.lastLogId = 0;
   state.runId = makeRunId();
@@ -841,28 +870,65 @@ function resetLocalRun(baud, portLabel) {
   };
 }
 
+function newOversampleBuffer() {
+  return {
+    count: 0,
+    sum: 0,
+    min: null,
+    max: null,
+    timestamp: null,
+    time_s: null,
+    dac: null,
+  };
+}
+
+function resetOversample() {
+  state.adcOsBuffer = newOversampleBuffer();
+}
+
 function appendSample(adcVal) {
   const now = performance.now() / 1000;
   if (state.currentSampleT0 === null) state.currentSampleT0 = now;
+  const buffer = state.adcOsBuffer;
+  if (buffer.count === 0) buffer.dac = { ...state.currentDacMv };
+  buffer.count += 1;
+  buffer.sum += adcVal;
+  buffer.min = buffer.min === null ? adcVal : Math.min(buffer.min, adcVal);
+  buffer.max = buffer.max === null ? adcVal : Math.max(buffer.max, adcVal);
+  buffer.timestamp = new Date().toISOString();
+  buffer.time_s = now - state.currentSampleT0;
+  if (buffer.count >= Math.max(1, state.adcOversampleN)) flushOversample();
+}
+
+function flushOversample() {
+  const buffer = state.adcOsBuffer;
+  if (!buffer || buffer.count <= 0) return;
+  const adcAvg = buffer.sum / buffer.count;
   state.samples.push({
-    timestamp: new Date().toISOString(),
-    time_s: now - state.currentSampleT0,
-    adc: adcVal,
-    adc_voltage: adcToVoltage(adcVal),
-    dac: { ...state.currentDacMv },
+    timestamp: buffer.timestamp || new Date().toISOString(),
+    time_s: Number(buffer.time_s || 0),
+    adc: adcAvg,
+    adc_voltage: adcToVoltage(adcAvg),
+    adc_raw_count: buffer.count,
+    adc_raw_min: buffer.min,
+    adc_raw_max: buffer.max,
+    dac: { ...(buffer.dac || state.currentDacMv) },
   });
+  resetOversample();
 }
 
 function prepareNewCommandBlock(label) {
   storeCurrentCurveIfNeeded();
   state.samples = [];
   state.currentSampleT0 = null;
+  resetOversample();
   state.currentCommand = label;
   state.currentCommandTime = new Date();
   if (String(label).startsWith("SC")) state.scCycleCount = 0;
 }
 
 function storeCurrentCurveIfNeeded() {
+  flushOversample();
   if (!state.samples.length || !state.currentCommand) return;
   state.curveRecords.push({
     cmd: state.currentCommand,
@@ -873,7 +939,9 @@ function storeCurrentCurveIfNeeded() {
 }
 
 function storeScSegmentIfAny() {
-  if (state.currentCommand !== "SC" || !state.samples.length) return;
+  if (state.currentCommand !== "SC") return;
+  flushOversample();
+  if (!state.samples.length) return;
   state.scCycleCount += 1;
   state.curveRecords.push({
     cmd: `SC_cycle${state.scCycleCount}`,
@@ -883,6 +951,7 @@ function storeScSegmentIfAny() {
   appendLogRow("INFO", `Stored SC curve #${state.scCycleCount} (N=${state.samples.length})`);
   state.samples = [];
   state.currentSampleT0 = null;
+  resetOversample();
 }
 
 function createLocalSnapshot(includeSamples = true, afterLogId = null) {
@@ -899,6 +968,7 @@ function createLocalSnapshot(includeSamples = true, afterLogId = null) {
     adc_running: state.adcRunning,
     adc_input: state.adcInput,
     adc_rate_hz: state.adcRateHz,
+    adc_oversample_n: state.adcOversampleN,
     current_dac_mv: { ...state.currentDacMv },
     fixed_mv: { ...state.fixedMv },
     zero_codes: { ...state.zeroCodes },
@@ -920,6 +990,7 @@ function createLocalSnapshot(includeSamples = true, afterLogId = null) {
       baud: 230400,
       adc_input: 1,
       adc_rate_hz: 1000,
+      adc_oversample_n: DEFAULT_ADC_OVERSAMPLE_N,
     },
   };
   if (includeSamples) payload.samples = state.samples.map((record) => cloneRecord(record));
@@ -949,6 +1020,7 @@ function appendLogRow(direction, text) {
     text: String(text),
   };
   state.nextLogId += 1;
+  state.rawLogRows.push({ ...row });
   state.logRows.push(row);
   if (state.logRows.length > MAX_LOG_ROWS) {
     state.logRows.splice(0, state.logRows.length - MAX_LOG_ROWS);
@@ -961,8 +1033,18 @@ function applySnapshot(data) {
   state.sweepRunning = Boolean(data.sweep?.running);
   state.curves = Array.isArray(data.curves) ? data.curves : [];
   if (data.last_log_id !== undefined) state.lastLogId = data.last_log_id;
-  if (data.adc_input !== undefined) els.adcInputSelect.value = String(data.adc_input);
-  if (data.adc_rate_hz !== undefined) els.adcRateInput.value = String(data.adc_rate_hz);
+  if (data.adc_input !== undefined) {
+    state.adcInput = Number.parseInt(data.adc_input, 10);
+    els.adcInputSelect.value = String(data.adc_input);
+  }
+  if (data.adc_rate_hz !== undefined) {
+    state.adcRateHz = Number.parseInt(data.adc_rate_hz, 10);
+    els.adcRateInput.value = String(data.adc_rate_hz);
+  }
+  if (data.adc_oversample_n !== undefined) {
+    state.adcOversampleN = Number.parseInt(data.adc_oversample_n, 10) || DEFAULT_ADC_OVERSAMPLE_N;
+    els.adcOversampleInput.value = String(state.adcOversampleN);
+  }
   updateBadges(data);
   updateSweepProgress(data.sweep || {});
   updateControlState();
@@ -979,7 +1061,10 @@ function applySnapshot(data) {
 function updateBadges(data) {
   els.connectionBadge.textContent = state.connected ? `Connected ${data.port || ""} @ ${data.baud || ""}` : "Disconnected";
   els.connectionBadge.className = `badge ${state.connected ? "badge-ok" : "badge-idle"}`;
-  els.adcBadge.textContent = state.adcRunning ? `ADC ${data.adc_input ?? ""} @ ${data.adc_rate_hz ?? ""} Hz` : "ADC idle";
+  const adcInput = data.adc_input ?? state.adcInput ?? "";
+  const adcRate = data.adc_rate_hz ?? state.adcRateHz ?? "";
+  const adcOversample = data.adc_oversample_n ?? state.adcOversampleN ?? DEFAULT_ADC_OVERSAMPLE_N;
+  els.adcBadge.textContent = state.adcRunning ? `ADC ${adcInput} @ ${adcRate} Hz | avg x${adcOversample}` : "ADC idle";
   els.adcBadge.className = `badge ${state.adcRunning ? "badge-warn" : "badge-idle"}`;
   els.sweepBadge.textContent = state.sweepRunning ? "Sweep running" : "Sweep idle";
   els.sweepBadge.className = `badge ${state.sweepRunning ? "badge-warn" : "badge-idle"}`;
@@ -1216,8 +1301,11 @@ async function downloadExport(kind) {
       return;
     }
 
-    if (kind === "current") downloadText("current_adc_with_dac.csv", recordsToCsv(state.samples), "text/csv;charset=utf-8");
-    else if (kind === "curves") downloadText("stored_curves_with_dac.csv", curvesToCsv(), "text/csv;charset=utf-8");
+    if (kind === "current") {
+      flushOversample();
+      drawActivePlot();
+      downloadText("current_adc_with_dac.csv", recordsToCsv(state.samples), "text/csv;charset=utf-8");
+    } else if (kind === "curves") downloadText("stored_curves_with_dac.csv", curvesToCsv(), "text/csv;charset=utf-8");
     else downloadText("raw_uart_log.csv", rawLogToCsv(), "text/csv;charset=utf-8");
   } catch (error) {
     appendLocalLog("ERROR", error.message);
@@ -1225,7 +1313,21 @@ async function downloadExport(kind) {
 }
 
 function recordsToCsv(records) {
-  const rows = [["timestamp", "time_s", "adc_count", "adc_voltage", "dac_A_mv", "dac_B_mv", "dac_C_mv", "dac_D_mv"]];
+  const rows = [
+    [
+      "timestamp",
+      "time_s",
+      "adc_count_avg",
+      "adc_voltage",
+      "adc_raw_count",
+      "adc_raw_min",
+      "adc_raw_max",
+      "dac_A_mv",
+      "dac_B_mv",
+      "dac_C_mv",
+      "dac_D_mv",
+    ],
+  ];
   records.forEach((record) => {
     rows.push(recordToCsvRow(record));
   });
@@ -1233,7 +1335,25 @@ function recordsToCsv(records) {
 }
 
 function curvesToCsv() {
-  const rows = [["curve_index", "cmd", "sent_time", "sample_index", "timestamp", "time_s", "adc_count", "adc_voltage", "dac_A_mv", "dac_B_mv", "dac_C_mv", "dac_D_mv"]];
+  const rows = [
+    [
+      "curve_index",
+      "cmd",
+      "sent_time",
+      "sample_index",
+      "timestamp",
+      "time_s",
+      "adc_count_avg",
+      "adc_voltage",
+      "adc_raw_count",
+      "adc_raw_min",
+      "adc_raw_max",
+      "dac_A_mv",
+      "dac_B_mv",
+      "dac_C_mv",
+      "dac_D_mv",
+    ],
+  ];
   state.curveRecords.forEach((curve, curveIndex) => {
     curve.records.forEach((record, sampleIndex) => {
       rows.push([curveIndex + 1, curve.cmd, curve.sent_time, sampleIndex, ...recordToCsvRow(record)]);
@@ -1244,7 +1364,7 @@ function curvesToCsv() {
 
 function rawLogToCsv() {
   const rows = [["wall_time_iso", "direction", "text"]];
-  state.logRows.forEach((row) => rows.push([row.time, row.direction, row.text]));
+  state.rawLogRows.forEach((row) => rows.push([row.time, row.direction, row.text]));
   return toCsv(rows);
 }
 
@@ -1253,8 +1373,11 @@ function recordToCsvRow(record) {
   return [
     record.timestamp || "",
     Number(record.time_s || 0).toFixed(6),
-    record.adc ?? "",
+    Number(record.adc ?? 0).toFixed(6),
     Number(record.adc_voltage || 0).toFixed(9),
+    record.adc_raw_count ?? 1,
+    record.adc_raw_min ?? record.adc ?? "",
+    record.adc_raw_max ?? record.adc ?? "",
     dac.A ?? "",
     dac.B ?? "",
     dac.C ?? "",
@@ -1298,10 +1421,16 @@ function formatStats(samples) {
   const max = Math.max(...values);
   return [
     `Samples: ${values.length}`,
-    `Last: ${last} (${adcToVoltage(last).toFixed(3)} V)`,
-    `Min: ${min} (${adcToVoltage(min).toFixed(3)} V)`,
-    `Max: ${max} (${adcToVoltage(max).toFixed(3)} V)`,
+    `Last: ${formatAdcCount(last)} (${adcToVoltage(last).toFixed(3)} V)`,
+    `Min: ${formatAdcCount(min)} (${adcToVoltage(min).toFixed(3)} V)`,
+    `Max: ${formatAdcCount(max)} (${adcToVoltage(max).toFixed(3)} V)`,
   ].join(" | ");
+}
+
+function formatAdcCount(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return Number.isInteger(number) ? String(number) : number.toFixed(2);
 }
 
 function statsForRecords(records) {
