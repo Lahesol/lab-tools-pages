@@ -1,12 +1,13 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
-const APP_VERSION = "smkang-light-web-gui-0.3.0";
+const APP_VERSION = "smkang-light-web-gui-0.3.1";
 const POLL_MS = 250;
 const ADC_BITS = 14;
 const ADC_VREF = 3.3;
 const ADC_GAIN = 1.0;
 const MAX_LOG_ROWS = 1200;
+const DAPLINK_FILTERS = [{ usbVendorId: 0xc251, usbProductId: 0xf001 }];
 
 const state = {
   transportMode: null,
@@ -332,10 +333,17 @@ async function refreshWebSerialPorts() {
   });
 
   const requestOption = document.createElement("option");
-  requestOption.value = "request";
-  requestOption.textContent = "Select serial port...";
+  requestOption.value = "request-daplink";
+  requestOption.textContent = "Click Connect to select DAPLink (C251:F001)...";
   els.portSelect.appendChild(requestOption);
-  els.portSelect.value = state.webSerialPorts.length ? "granted:0" : "request";
+  const anyOption = document.createElement("option");
+  anyOption.value = "request-any";
+  anyOption.textContent = "Click Connect to select any serial port...";
+  els.portSelect.appendChild(anyOption);
+  els.portSelect.value = state.webSerialPorts.length ? "granted:0" : "request-daplink";
+  els.runInfo.textContent = state.webSerialPorts.length
+    ? "Browser Web Serial UART web GUI"
+    : "Click Connect, then choose USB Serial Device / DAPLink / COM6 in the browser prompt";
   updateControlState();
 }
 
@@ -478,11 +486,17 @@ async function connectWebSerial(body) {
     port = state.webSerialPorts[index] || null;
   }
   if (!port) {
-    port = await navigator.serial.requestPort();
+    port = await requestWebSerialPort(selected === "request-any");
   }
 
   const baud = Math.max(1, Number.parseInt(body.baud, 10) || 230400);
-  await port.open({ baudRate: baud, bufferSize: 1024 });
+  try {
+    await port.open({ baudRate: baud, bufferSize: 1024 });
+  } catch (error) {
+    throw new Error(
+      `Could not open serial port. Close other serial tools using COM6, then retry. (${error.message})`
+    );
+  }
 
   resetLocalRun(baud, describeSerialPort(port, "Web Serial port"));
   state.serial = {
@@ -498,6 +512,26 @@ async function connectWebSerial(body) {
   state.baud = baud;
   appendLogRow("INFO", `Connected to ${state.portLabel} @ ${baud} bps`);
   state.serial.readLoopPromise = readWebSerialLoop(port);
+}
+
+async function requestWebSerialPort(allowAny = false) {
+  try {
+    return allowAny ? await navigator.serial.requestPort() : await navigator.serial.requestPort({ filters: DAPLINK_FILTERS });
+  } catch (error) {
+    if (error?.name === "NotFoundError") {
+      throw new Error(
+        allowAny
+          ? "No serial port was selected. Use Chrome/Edge, connect the board, then choose USB Serial Device / DAPLink / COM6 in the browser prompt."
+          : "No DAPLink serial port was selected. If the prompt is empty, choose 'select any serial port' in the Port dropdown and retry."
+      );
+    }
+    if (error?.name === "SecurityError") {
+      throw new Error(
+        "Serial permission was blocked by the browser. Open the app directly over HTTPS in Chrome/Edge, not inside an embedded frame."
+      );
+    }
+    throw error;
+  }
 }
 
 async function disconnectWebSerial() {

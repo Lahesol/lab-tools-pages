@@ -26,6 +26,11 @@ http://127.0.0.1:8765/
 When opened from GitHub Pages, the GUI uses the browser Web Serial API directly.
 Use a Chromium-based browser such as Chrome or Edge over HTTPS. The browser asks
 the user to select the DAPLink virtual COM port before UART commands are sent.
+For this board, choose the port shown as USB Serial Device, DAPLink, or COM6.
+The browser will not show unapproved serial ports in the dropdown before the
+first permission approval; click `Connect` to open the browser's port chooser.
+If the filtered DAPLink chooser is empty, select `Click Connect to select any
+serial port...` in the Port dropdown and retry.
 
 Static mode keeps raw TX/RX log lines in browser memory. Export `Raw Log` before
 closing or refreshing the tab when a run must be archived.
