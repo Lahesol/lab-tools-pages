@@ -1,7 +1,7 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
-const APP_VERSION = "smkang-light-web-gui-0.3.4";
+const APP_VERSION = "smkang-light-web-gui-0.3.5";
 const POLL_MS = 250;
 const ADC_BITS = 14;
 const ADC_VREF = 3.3;
@@ -44,6 +44,9 @@ const state = {
   logRows: [],
   rawLogRows: [],
   nextLogId: 1,
+  adcDisplayLogCount: 0,
+  adcDisplayLogLastS: 0,
+  adcIgnoreUntilS: 0,
   runId: null,
   runDir: null,
   serial: null,
@@ -634,15 +637,21 @@ function processSerialBytes(value) {
 }
 
 function handleRxLine(line) {
-  appendLogRow("RX", line);
   const text = line.trim();
+  if (/^\d+$/.test(text)) {
+    appendLogRow("RX", line, { display: false });
+    const adcVal = Number.parseInt(text, 10);
+    if (adcVal >= 0 && adcVal < 1 << ADC_BITS) {
+      appendSample(adcVal);
+      appendAdcLogSummary(adcVal);
+    }
+    return;
+  }
+
+  appendLogRow("RX", line);
   if (text === "") {
     storeScSegmentIfAny();
     return;
-  }
-  if (/^\d+$/.test(text)) {
-    const adcVal = Number.parseInt(text, 10);
-    if (adcVal >= 0 && adcVal < 1 << ADC_BITS) appendSample(adcVal);
   }
 }
 
@@ -661,6 +670,28 @@ async function sendSerialCommand(cmd, options = {}) {
   } finally {
     writer.releaseLock();
   }
+}
+
+function firmwareSamplePeriodMs() {
+  return 1000 / Math.max(1, Number.parseInt(state.adcRateHz, 10) || DEFAULT_ADC_RATE_HZ);
+}
+
+function firmwareOutputPeriodMs() {
+  return firmwareSamplePeriodMs() * Math.max(1, Number.parseInt(state.adcFirmwareAverageN, 10) || DEFAULT_ADC_FIRMWARE_AVERAGE_N);
+}
+
+function adcSettleDiscardMs() {
+  return firmwareSamplePeriodMs() * Math.max(0, Number.parseInt(state.adcSettleDiscardN, 10) || 0);
+}
+
+function minimumSweepDwellMs() {
+  const plotN = Math.max(1, Number.parseInt(state.adcOversampleN, 10) || DEFAULT_ADC_OVERSAMPLE_N);
+  return Math.ceil(adcSettleDiscardMs() + firmwareOutputPeriodMs() * plotN + 8);
+}
+
+function markAdcSettling() {
+  resetOversample();
+  state.adcIgnoreUntilS = performance.now() / 1000 + (adcSettleDiscardMs() + firmwareOutputPeriodMs()) / 1000;
 }
 
 async function setLocalAdcConfig(input, rateHz, oversampleN, firmwareAverageN, settleDiscardN) {
@@ -721,7 +752,10 @@ async function sendDirect(channel, valueMv, startNewBlock = true) {
   const ch = validateChannel(channel);
   const value = Number.parseInt(valueMv, 10);
   if (startNewBlock) prepareNewCommandBlock(`D${ch}${value}`);
-  else if (state.currentDacMv[ch] !== value) flushOversample();
+  else if (state.currentDacMv[ch] !== value) {
+    flushOversample();
+    markAdcSettling();
+  }
   state.currentDacMv[ch] = value;
   await sendSerialCommand(`D${ch}${value}`, { startNewBlock: false });
 }
@@ -774,8 +808,10 @@ function startLocalSweep(config) {
 }
 
 async function runLocalSweep(points, config) {
-  const delayMs = Math.max(0, Number.parseInt(config.delay_ms, 10) || 0);
+  const requestedDelayMs = Math.max(0, Number.parseInt(config.delay_ms, 10) || 0);
   const autoAdc = Boolean(config.auto_adc);
+  const minDelayMs = autoAdc ? minimumSweepDwellMs() : 0;
+  const delayMs = Math.max(requestedDelayMs, minDelayMs);
   let startedAdc = false;
   const lastSent = { ...state.currentDacMv };
   let dacCommandsSent = 0;
@@ -786,7 +822,10 @@ async function runLocalSweep(points, config) {
       state.adcRunning = true;
       startedAdc = true;
     }
-    appendLogRow("INFO", `WEB_SWEEP started, points=${points.length}, delay=${delayMs}ms, changed-only DAC writes`);
+    appendLogRow(
+      "INFO",
+      `WEB_SWEEP started, points=${points.length}, delay=${delayMs}ms, requested=${requestedDelayMs}ms, min=${minDelayMs}ms, changed-only DAC writes`
+    );
 
     for (let idx = 0; idx < points.length; idx += 1) {
       if (state.sweepStopRequested) break;
@@ -923,6 +962,7 @@ function resetOversample() {
 
 function appendSample(adcVal) {
   const now = performance.now() / 1000;
+  if (now < state.adcIgnoreUntilS) return;
   if (state.currentSampleT0 === null) state.currentSampleT0 = now;
   const buffer = state.adcOsBuffer;
   if (buffer.count === 0) buffer.dac = { ...state.currentDacMv };
@@ -1051,7 +1091,18 @@ function localCurveMetadata() {
   });
 }
 
-function appendLogRow(direction, text) {
+function appendAdcLogSummary(adcVal) {
+  const now = performance.now() / 1000;
+  state.adcDisplayLogCount += 1;
+  if (now - state.adcDisplayLogLastS < 1) return;
+  appendLogRow("RX", `ADC samples +${state.adcDisplayLogCount}, last=${adcVal}`, { raw: false });
+  state.adcDisplayLogCount = 0;
+  state.adcDisplayLogLastS = now;
+}
+
+function appendLogRow(direction, text, options = {}) {
+  const raw = options.raw !== false;
+  const display = options.display !== false;
   const row = {
     id: state.nextLogId,
     time: new Date().toISOString(),
@@ -1059,10 +1110,12 @@ function appendLogRow(direction, text) {
     text: String(text),
   };
   state.nextLogId += 1;
-  state.rawLogRows.push({ ...row });
-  state.logRows.push(row);
-  if (state.logRows.length > MAX_LOG_ROWS) {
-    state.logRows.splice(0, state.logRows.length - MAX_LOG_ROWS);
+  if (raw) state.rawLogRows.push({ ...row });
+  if (display) {
+    state.logRows.push(row);
+    if (state.logRows.length > MAX_LOG_ROWS) {
+      state.logRows.splice(0, state.logRows.length - MAX_LOG_ROWS);
+    }
   }
 }
 
