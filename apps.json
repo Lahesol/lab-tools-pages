@@ -46,5 +46,13 @@
         "group":  "Memory",
         "status":  "Ready",
         "accent":  "#7b2ff2"
+    },
+    {
+        "name":  "SMKang Light DAC/ADC Control",
+        "description":  "UART DAC/ADC control GUI for the Neuro KHKim multipurpose firmware.",
+        "url":  "apps/smkang-light/",
+        "group":  "Optics",
+        "status":  "Ready",
+        "accent":  "#c47a21"
     }
 ]

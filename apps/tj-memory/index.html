@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=c22d126cf9be" />
+    <link rel="stylesheet" href="styles.css?v=51010687cd87" />
   </head>
   <body>
     <div class="app-shell">
@@ -285,6 +285,157 @@
                 <div class="panel network-panel">
                   <div class="panel-title"><span>O/E/O transfer model</span><output id="transferSummary">I -> TIA -> UV</output></div>
                   <p class="compact-note">Source photocurrent is converted by the TIA, then either drives a continuous UV emitter or an STM integrate-fire emitter before optical fan-out into connected devices.</p>
+                  <figure class="oeo-diagram-card" aria-label="O/E/O signal path diagram">
+                    <svg class="oeo-flow-svg" viewBox="0 0 720 278" role="img" aria-labelledby="oeoDiagramTitle oeoDiagramDesc">
+                      <title id="oeoDiagramTitle">O/E/O transfer path</title>
+                      <desc id="oeoDiagramDesc">Optical UV input enters a source memory device, becomes photocurrent and TIA voltage, drives either an STM integrate-fire emitter or LTM latch readout, then fans out as UV to connected target devices.</desc>
+                      <defs>
+                        <marker id="oeoArrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                          <path d="M 0 0 L 10 5 L 0 10 z" />
+                        </marker>
+                      </defs>
+                      <rect class="oeo-band oeo-band-optical" x="18" y="26" width="186" height="222" rx="8" />
+                      <rect class="oeo-band oeo-band-electrical" x="224" y="26" width="258" height="222" rx="8" />
+                      <rect class="oeo-band oeo-band-optical" x="502" y="26" width="200" height="222" rx="8" />
+                      <text class="oeo-domain" x="111" y="49">Optical input</text>
+                      <text class="oeo-domain" x="353" y="49">Electrical state</text>
+                      <text class="oeo-domain" x="602" y="49">Optical output</text>
+
+                      <g class="oeo-node oeo-node-source">
+                        <rect x="52" y="95" width="126" height="76" rx="8" />
+                        <text x="115" y="121">Source</text>
+                        <text x="115" y="140">STM/LTM device</text>
+                        <text class="oeo-small" x="115" y="158">UV -> I_photo</text>
+                      </g>
+                      <g class="oeo-node oeo-node-electrical">
+                        <rect x="242" y="83" width="116" height="52" rx="8" />
+                        <text x="300" y="107">TIA</text>
+                        <text class="oeo-small" x="300" y="124">I_photo -> V_TIA</text>
+                      </g>
+                      <g class="oeo-node oeo-node-electrical">
+                        <rect x="386" y="62" width="76" height="52" rx="8" />
+                        <text x="424" y="85">STM IF</text>
+                        <text class="oeo-small" x="424" y="102">pulse state</text>
+                      </g>
+                      <g class="oeo-node oeo-node-electrical">
+                        <rect x="386" y="144" width="76" height="52" rx="8" />
+                        <text x="424" y="167">LTM latch</text>
+                        <text class="oeo-small" x="424" y="184">readout state</text>
+                      </g>
+                      <g class="oeo-node oeo-node-output">
+                        <rect x="520" y="92" width="116" height="62" rx="8" />
+                        <text x="578" y="117">UV emitter</text>
+                        <text class="oeo-small" x="578" y="136">driver limited</text>
+                      </g>
+                      <g class="oeo-node oeo-node-output">
+                        <rect x="604" y="176" width="76" height="44" rx="8" />
+                        <text x="642" y="195">Targets</text>
+                        <text class="oeo-small" x="642" y="211">1:N fan-out</text>
+                      </g>
+
+                      <path class="oeo-arrow oeo-arrow-optical" d="M 35 133 L 52 133" marker-end="url(#oeoArrow)" />
+                      <text class="oeo-edge-label" x="41" y="122">UV</text>
+                      <path class="oeo-arrow oeo-arrow-electrical" d="M 178 133 L 242 111" marker-end="url(#oeoArrow)" />
+                      <text class="oeo-edge-label" x="211" y="111">current</text>
+                      <path class="oeo-arrow oeo-arrow-electrical" d="M 358 109 C 372 100 374 90 386 88" marker-end="url(#oeoArrow)" />
+                      <path class="oeo-arrow oeo-arrow-electrical" d="M 358 111 C 374 127 374 163 386 170" marker-end="url(#oeoArrow)" />
+                      <path class="oeo-arrow oeo-arrow-electrical" d="M 462 88 C 488 91 495 103 520 113" marker-end="url(#oeoArrow)" />
+                      <path class="oeo-arrow oeo-arrow-electrical" d="M 462 170 C 493 165 500 139 520 132" marker-end="url(#oeoArrow)" />
+                      <path class="oeo-arrow oeo-arrow-optical" d="M 636 122 C 660 130 667 153 642 176" marker-end="url(#oeoArrow)" />
+                      <path class="oeo-split" d="M 584 154 C 602 164 614 168 642 176" />
+                      <path class="oeo-split" d="M 584 154 C 608 145 630 141 660 145" />
+                      <path class="oeo-split" d="M 584 154 C 607 158 624 162 675 164" />
+                      <text class="oeo-edge-label" x="657" y="135">UV edges</text>
+
+                      <g class="oeo-key">
+                        <circle cx="54" cy="233" r="5" class="oeo-key-optical" />
+                        <text x="66" y="237">O: UV light</text>
+                        <circle cx="155" cy="233" r="5" class="oeo-key-electrical" />
+                        <text x="167" y="237">E: current/voltage/state</text>
+                      </g>
+                    </svg>
+                    <figcaption>O/E/O converts a source device photocurrent into an electrical driver state and emits UV again, so one source can optically fan out into multiple target STM/LTM devices.</figcaption>
+                  </figure>
+                  <details class="if-explainer-note" open>
+                    <summary>STM/LTM IF and O/E/O coupling guide</summary>
+                    <div class="if-material-grid">
+                      <section class="if-material-card">
+                        <h4>STM integrate-fire</h4>
+                        <p>STM is treated as a transient current source. The TIA voltage charges a leaky IF state; when the state crosses the IF threshold, the local emitter sends a short UV pulse, then the IF state resets and enters refractory time.</p>
+                        <ol>
+                          <li>UV input creates <code>I_photo(t)</code> in the source device.</li>
+                          <li>TIA converts current to <code>V_TIA(t)</code>.</li>
+                          <li>Driver output charges <code>x_IF(t)</code>.</li>
+                          <li>If <code>x_IF >= theta_IF</code>, emit a UV pulse to connected targets.</li>
+                        </ol>
+                      </section>
+                      <section class="if-material-card">
+                        <h4>LTM latch/readout</h4>
+                        <p>In hybrid mode, LTM does not spike by default. Sustained or repeated input writes a latch state. That state decays slowly and drives persistent optical readout, so the downstream target receives a longer UV contribution than the STM case.</p>
+                        <ol>
+                          <li><code>V_TIA(t)</code> is compared with the LTM write threshold.</li>
+                          <li>If the threshold is exceeded, <code>s_LTM(t)</code> is written or reinforced.</li>
+                          <li><code>s_LTM(t)</code> decays with retention tau.</li>
+                          <li>Readout gain converts the latch state to emitted UV.</li>
+                        </ol>
+                      </section>
+                      <section class="if-material-card">
+                        <h4>LTM through IF mode</h4>
+                        <p>If transfer mode is set to integrate-fire for all sources, LTM current also drives the IF block. Because LTM current relaxes more slowly, the IF state can cross threshold after delayed accumulation or fire repeated pulses under sustained retention.</p>
+                        <ol>
+                          <li>LTM extends the current tail after UV turns off.</li>
+                          <li>The longer tail keeps charging <code>x_IF(t)</code>.</li>
+                          <li>Threshold crossing can happen later than STM.</li>
+                          <li>The emitted UV still fans out through the same O/E/O edge model.</li>
+                        </ol>
+                      </section>
+                    </div>
+                    <figure class="if-waveform-card" aria-label="STM and LTM integrate-fire timing diagram">
+                      <svg class="if-wave-svg" viewBox="0 0 720 286" role="img" aria-labelledby="ifDiagramTitle ifDiagramDesc">
+                        <title id="ifDiagramTitle">STM and LTM IF timing</title>
+                        <desc id="ifDiagramDesc">STM integrates transient driver output to a threshold and emits short UV pulses. LTM latch readout persists, and if routed through IF, the slower retained current can produce delayed or repeated firing.</desc>
+                        <defs>
+                          <marker id="ifArrow" viewBox="0 0 10 10" refX="8.4" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" />
+                          </marker>
+                        </defs>
+                        <text class="if-title" x="78" y="31">signal path</text>
+                        <text class="if-title" x="270" y="31">STM IF state</text>
+                        <text class="if-title" x="520" y="31">LTM latch / retained IF</text>
+                        <path class="if-axis" d="M 44 84 H 680" marker-end="url(#ifArrow)" />
+                        <path class="if-axis" d="M 44 168 H 680" marker-end="url(#ifArrow)" />
+                        <path class="if-axis" d="M 44 246 H 680" marker-end="url(#ifArrow)" />
+                        <text class="if-row-label" x="20" y="88">UV</text>
+                        <text class="if-row-label" x="20" y="172">x_IF</text>
+                        <text class="if-row-label" x="20" y="250">UV_out</text>
+
+                        <path class="if-pulse-line" d="M 64 84 V 52 H 96 V 84 M 132 84 V 52 H 164 V 84 M 202 84 V 52 H 234 V 84" />
+                        <path class="if-stm-line" d="M 64 168 L 96 132 L 124 162 L 164 122 L 192 158 L 234 118 L 258 160" />
+                        <path class="if-threshold" d="M 58 124 H 308" />
+                        <text class="if-edge-label" x="294" y="118">theta_IF</text>
+                        <path class="if-output-line" d="M 64 246 H 118 V 212 H 134 V 246 H 198 V 212 H 214 V 246 H 680" />
+
+                        <path class="if-ltm-current" d="M 342 84 V 52 H 374 V 84 C 430 104 506 101 660 94" />
+                        <path class="if-ltm-state" d="M 342 168 C 380 135 428 130 474 136 C 528 145 588 153 660 160" />
+                        <path class="if-threshold" d="M 336 124 H 682" />
+                        <path class="if-ltm-readout" d="M 342 246 C 382 218 438 216 494 224 C 550 232 610 236 660 238" />
+                        <text class="if-edge-label" x="622" y="63">retained current tail</text>
+                        <text class="if-edge-label" x="606" y="217">persistent readout</text>
+
+                        <g class="if-flow-labels">
+                          <text x="98" y="109">I_photo -> TIA -> driver</text>
+                          <text x="206" y="192">reset + refractory after fire</text>
+                          <text x="446" y="192">latch state decays slowly</text>
+                        </g>
+                      </svg>
+                      <figcaption>In the compact hybrid model, STM uses IF pulse generation while LTM uses latch/readout. Selecting integrate-fire for all sources routes LTM through the same IF block, where its slower retained current can trigger delayed or repeated UV pulses.</figcaption>
+                    </figure>
+                    <pre class="if-equation-block">V_TIA(t) = |I_photo(t)| * R_TIA
+u_driver(t) = clip((V_TIA(t) - V_threshold) * G_driver, 0, UV_max)
+STM IF: dx_IF/dt = (u_driver - x_IF) / tau_IF; if x_IF >= theta_IF -> emit UV pulse, reset, refractory
+LTM latch: ds_LTM/dt = -s_LTM / tau_retention; if u_driver >= theta_write -> reinforce s_LTM; UV_out = readout_gain * s_LTM
+Edge UV: UV_target(t) = UV_external residual + delayed emitted UV * coupling * splitter factor</pre>
+                  </details>
                   <label class="field">
                     <span>Transfer mode</span>
                     <select id="transferMode">
@@ -829,6 +980,10 @@
                 <article class="reference-item"><h3>Retention</h3><p>Residual current or state that remains after optical input. It represents memory persistence.</p></article>
                 <article class="reference-item"><h3>RMSE</h3><p>Root-mean-square error between measured transient data and simulated model trace.</p></article>
                 <article class="reference-item"><h3>TIA</h3><p>Transimpedance amplifier. It converts photocurrent to voltage: |V_TIA| = I_photo x R_TIA.</p></article>
+                <article class="reference-item"><h3>O/E/O path</h3><p>Optical-electrical-optical transfer: UV input produces device current, TIA/driver electronics create a state, and an emitter sends UV to connected target devices.</p></article>
+                <article class="reference-item"><h3>STM IF event</h3><p>In hybrid mode, STM current is converted to TIA voltage and accumulated by a leaky IF state. A UV pulse is emitted only after threshold crossing, followed by reset and refractory time.</p></article>
+                <article class="reference-item"><h3>LTM latch event</h3><p>In hybrid mode, LTM is modeled as write-and-readout memory rather than a spike generator. Input above write threshold reinforces a slow latch state that drives persistent emitted UV.</p></article>
+                <article class="reference-item"><h3>LTM routed through IF</h3><p>When integrate-fire is forced for all sources, LTM also drives the IF block. Its retained current can produce delayed threshold crossing or repeated emission under sustained input.</p></article>
                 <article class="reference-item"><h3>Driver threshold</h3><p>Minimum |V_TIA| required before the emitter produces UV output. Higher threshold suppresses weak STM transients.</p></article>
                 <article class="reference-item"><h3>Driver gain</h3><p>Slope from |V_TIA| above threshold to emitted UV intensity. Higher gain makes small voltage changes produce larger optical output.</p></article>
                 <article class="reference-item"><h3>Max emitted UV</h3><p>Saturation limit of the local emitter output. This caps UV_out before splitter and coupling losses.</p></article>

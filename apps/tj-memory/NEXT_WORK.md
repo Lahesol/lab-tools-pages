@@ -75,11 +75,15 @@ Implemented in `web_gui/`:
   - Runtime summary shows simulated node count, configured edge count, active edge count, and dataset-to-device adapter status.
 - Device Block transfer inspection:
   - Signal transfer is now explicit as an O/E/O interface: source photocurrent -> TIA voltage -> UV driver/emitter -> splitter/fan-out -> target optical drive.
+  - The O/E/O panel includes an inline explanatory signal-path diagram showing Optical input -> Electrical current/TIA/state -> Optical UV fan-out to target devices.
   - Driver threshold, driver gain, emitted-UV saturation, splitter loss, optical coupling, direct UV residual, and delay are adjustable from the Block tab.
   - Device current traces can be selected with per-cell checkboxes and overlaid in the Block tab.
 - STM integrate-fire / LTM latch O/E/O transfer:
   - The Block tab now supports a hybrid transfer mode where STM source devices integrate TIA-driven emitter input and fire UV output pulses only after threshold crossing.
   - LTM source devices can be modeled as persistent latch/readout outputs with write threshold, readout gain, and retention time controls.
+  - An explanatory IF/O/E/O guide now contrasts STM integrate-fire, LTM latch/readout, and LTM routed through integrate-fire mode with a timing diagram and compact equations.
+  - A standalone 16:9 report figure was generated in `report_assets/` as SVG and PNG for explaining STM/LTM-resolved O/E/O coupling and IF generation.
+  - An editable PowerPoint figure, `report_assets/stm_ltm_if_oeo_editable.pptx`, was generated from the shared technical template using native editable shapes, lines, arrows, and text.
   - The connection response plot overlays external UV, emitted UV, IF/latch state, source photocurrent, and connected target photocurrent.
   - The O/E/O transfer tuning plot visualizes the selected source device's input current, TIA voltage, IF/latch state, emitter UV output, delivered edge UV, and static voltage-to-UV driver curve while O/E/O parameters are adjusted.
   - Inline contextual term notes now cover UV input, device blocks, device parameter fitting, O/E/O transfer, ANN simulation, SNN simulation, and dataset/architecture mapping terms.

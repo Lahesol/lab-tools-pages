@@ -1,0 +1,215 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SMKang Light DAC/ADC Control</title>
+    <link rel="stylesheet" href="styles.css?v=32dd3ec0d2e8" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>SMKang Light DAC/ADC Control</h1>
+          <p id="runInfo">Local UART web GUI</p>
+        </div>
+        <div class="status-stack">
+          <span id="connectionBadge" class="badge badge-idle">Disconnected</span>
+          <span id="adcBadge" class="badge">ADC idle</span>
+          <span id="sweepBadge" class="badge">Sweep idle</span>
+        </div>
+      </header>
+
+      <section class="toolbar panel">
+        <label>
+          Port
+          <select id="portSelect"></select>
+        </label>
+        <button id="refreshPortsBtn" type="button">Refresh</button>
+        <label>
+          Baud
+          <input id="baudInput" type="number" min="1" step="1" value="230400" />
+        </label>
+        <button id="connectBtn" type="button">Connect</button>
+        <button id="disconnectBtn" type="button">Disconnect</button>
+        <button id="adcToggleBtn" type="button" class="primary">Start ADC</button>
+        <button id="zeroVoltageBtn" type="button">All DAC 0 V</button>
+        <button id="clearBtn" type="button">Clear Current</button>
+      </section>
+
+      <section class="main-grid">
+        <div class="left-stack">
+          <section class="panel">
+            <div class="section-head">
+              <h2>ADC Setup</h2>
+              <button id="applyAdcConfigBtn" type="button">Apply ADC</button>
+            </div>
+            <div class="form-grid two-col">
+              <label>
+                ADC input
+                <select id="adcInputSelect">
+                  <option value="0">AIN0</option>
+                  <option value="1" selected>AIN1</option>
+                  <option value="2">AIN2</option>
+                  <option value="3">AIN3</option>
+                  <option value="4">AIN4</option>
+                  <option value="5">AIN5</option>
+                  <option value="6">AIN6</option>
+                  <option value="7">AIN7</option>
+                </select>
+              </label>
+              <label>
+                Sampling rate (Hz)
+                <input id="adcRateInput" type="number" min="1" max="1000" step="1" value="1000" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <h2>DAC Channel Modes</h2>
+              <button id="applyFixedBtn" type="button">Apply Fixed D</button>
+            </div>
+            <div class="channel-table" id="channelTable">
+              <div class="channel-table-head">
+                <span>Ch</span>
+                <span>Mode</span>
+                <span>Fixed mV</span>
+                <span>Start mV</span>
+                <span>Stop mV</span>
+                <span>Set F</span>
+                <span>Apply D</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <h2>PC-Controlled Sweep</h2>
+              <div class="button-row">
+                <button id="startSweepBtn" type="button" class="primary">Start Sweep</button>
+                <button id="stopSweepBtn" type="button">Stop</button>
+              </div>
+            </div>
+            <div class="form-grid sweep-options">
+              <label>
+                Direction
+                <select id="sweepDirectionSelect">
+                  <option value="forward">Forward</option>
+                  <option value="reverse">Reverse</option>
+                  <option value="roundtrip">Round-trip</option>
+                </select>
+              </label>
+              <label>
+                Step (mV)
+                <input id="sweepStepInput" type="number" min="1" step="1" value="100" />
+              </label>
+              <label>
+                Delay (ms)
+                <input id="sweepDelayInput" type="number" min="0" step="1" value="10" />
+              </label>
+              <label>
+                Cycles
+                <input id="sweepCyclesInput" type="number" min="1" step="1" value="1" />
+              </label>
+              <label class="checkbox-label">
+                <input id="autoAdcCheckbox" type="checkbox" checked />
+                Run ADC during sweep
+              </label>
+            </div>
+            <p id="sweepProgress" class="muted">No sweep running</p>
+          </section>
+
+          <section class="panel">
+            <h2>Zero Codes</h2>
+            <div class="section-subhead">
+              <span class="muted">Optional zero-code calibration. Use All DAC 0 V for normal output reset.</span>
+              <button id="zeroCodeBtn" type="button">Set Z + D0</button>
+            </div>
+            <div id="zeroGrid" class="zero-grid"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Manual Command</h2>
+            <form id="manualForm" class="manual-form">
+              <input id="manualInput" type="text" autocomplete="off" placeholder="ADC, AD1, AR100, DA0, SC..." />
+              <button type="submit">Send</button>
+            </form>
+          </section>
+        </div>
+
+        <div class="right-stack">
+          <section class="panel plot-panel">
+            <div class="section-head">
+              <div>
+                <h2 id="plotTitle">Current ADC</h2>
+                <p id="statsLine">Samples: 0 | Last: - | Min: - | Max: -</p>
+              </div>
+              <div class="button-row">
+                <label class="inline-label">
+                  X axis
+                  <select id="plotAxisSelect">
+                    <option value="time">Time</option>
+                    <option value="A">DAC A</option>
+                    <option value="B">DAC B</option>
+                    <option value="C">DAC C</option>
+                    <option value="D">DAC D</option>
+                  </select>
+                </label>
+                <button id="showCurrentBtn" type="button">Show Current</button>
+                <a class="button-link" href="/api/export/current.csv">Current CSV</a>
+                <a class="button-link" href="/api/export/curves.csv">Curves CSV</a>
+                <a class="button-link" href="/api/export/raw-log.csv">Raw Log</a>
+              </div>
+            </div>
+            <canvas id="adcCanvas" width="960" height="430"></canvas>
+          </section>
+
+          <section class="panel split-panel">
+            <div>
+              <div class="section-head">
+                <h2>Stored Curves</h2>
+                <span id="curveCount" class="muted">0 curves</span>
+              </div>
+              <div id="curveList" class="curve-list"></div>
+            </div>
+            <div>
+              <div class="section-head">
+                <h2>TX/RX Log</h2>
+                <span id="lastLogId" class="muted">log 0</span>
+              </div>
+              <pre id="logBox" class="log-box"></pre>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <template id="channelRowTemplate">
+      <div class="channel-row">
+        <span class="channel-name"></span>
+        <select class="channel-mode">
+          <option value="fixed">Fixed</option>
+          <option value="sweep">Sweep</option>
+        </select>
+        <input class="channel-fixed" type="number" step="1" />
+        <input class="channel-start" type="number" step="1" />
+        <input class="channel-stop" type="number" step="1" />
+        <button class="fixed-btn" type="button">F</button>
+        <button class="direct-btn" type="button">D</button>
+      </div>
+    </template>
+
+    <template id="zeroTemplate">
+      <div class="zero-row">
+        <span class="channel-name"></span>
+        <label>
+          Zero code
+          <input class="zero-value" type="number" min="0" max="4095" step="1" />
+        </label>
+      </div>
+    </template>
+
+    <script src="app.js?v=ef8e07c1ccc3"></script>
+  </body>
+</html>

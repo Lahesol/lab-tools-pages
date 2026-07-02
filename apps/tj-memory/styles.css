@@ -889,6 +889,295 @@ th {
   height: 640px;
 }
 
+.oeo-diagram-card {
+  margin: 0 0 13px;
+  padding: 10px;
+  border: 1px solid #cddce6;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.oeo-flow-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 184px;
+}
+
+.oeo-diagram-card figcaption {
+  margin: 8px 2px 0;
+  color: #4d6070;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.oeo-band {
+  stroke: #d9e4eb;
+  stroke-width: 1;
+}
+
+.oeo-band-optical {
+  fill: #f2ecff;
+}
+
+.oeo-band-electrical {
+  fill: #fff7ec;
+}
+
+.oeo-domain {
+  fill: #263a48;
+  font-size: 13px;
+  font-weight: 850;
+  text-anchor: middle;
+}
+
+.oeo-node rect {
+  fill: #fff;
+  stroke: #b9cad5;
+  stroke-width: 1.4;
+}
+
+.oeo-node text {
+  fill: #1d3442;
+  font-size: 12px;
+  font-weight: 820;
+  text-anchor: middle;
+}
+
+.oeo-node .oeo-small,
+.oeo-small {
+  fill: #647988;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.oeo-node-source rect {
+  stroke: var(--uv);
+}
+
+.oeo-node-electrical rect {
+  stroke: var(--tia);
+}
+
+.oeo-node-output rect {
+  stroke: var(--stm);
+}
+
+.oeo-arrow,
+.oeo-split {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.oeo-arrow {
+  stroke-width: 2.2;
+}
+
+.oeo-arrow-optical {
+  stroke: var(--uv);
+}
+
+.oeo-arrow-electrical {
+  stroke: var(--tia);
+}
+
+.oeo-split {
+  stroke: var(--stm);
+  stroke-width: 1.8;
+  stroke-dasharray: 4 4;
+}
+
+.oeo-flow-svg marker path {
+  fill: #5f7484;
+}
+
+.oeo-edge-label {
+  fill: #536979;
+  font-size: 10px;
+  font-weight: 760;
+  text-anchor: middle;
+}
+
+.oeo-key text {
+  fill: #536979;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.oeo-key-optical {
+  fill: var(--uv);
+}
+
+.oeo-key-electrical {
+  fill: var(--tia);
+}
+
+.if-explainer-note {
+  margin: 0 0 13px;
+  padding: 10px;
+  border: 1px solid #cddce6;
+  border-radius: 8px;
+  background: #f8fbfd;
+  color: #304655;
+}
+
+.if-explainer-note summary {
+  cursor: pointer;
+  color: #203645;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.if-material-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.if-material-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d8e5ed;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.if-material-card h4 {
+  margin: 0 0 7px;
+  color: #1f3746;
+  font-size: 12px;
+  font-weight: 860;
+}
+
+.if-material-card p,
+.if-material-card li {
+  color: #536979;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.if-material-card p {
+  margin: 0 0 8px;
+}
+
+.if-material-card ol {
+  margin: 0;
+  padding-left: 17px;
+}
+
+.if-material-card code,
+.if-equation-block code {
+  color: #203645;
+}
+
+.if-waveform-card {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid #d8e5ed;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.if-wave-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 190px;
+}
+
+.if-waveform-card figcaption {
+  margin: 7px 2px 0;
+  color: #536979;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.if-title {
+  fill: #203645;
+  font-size: 12px;
+  font-weight: 850;
+  text-anchor: middle;
+}
+
+.if-row-label {
+  fill: #4c6070;
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.if-axis {
+  fill: none;
+  stroke: #d1dee7;
+  stroke-width: 1.4;
+}
+
+.if-pulse-line,
+.if-stm-line,
+.if-output-line,
+.if-ltm-current,
+.if-ltm-state,
+.if-ltm-readout {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.if-pulse-line,
+.if-ltm-current {
+  stroke: var(--uv);
+  stroke-width: 2.4;
+}
+
+.if-stm-line {
+  stroke: var(--membrane);
+  stroke-width: 2.6;
+}
+
+.if-output-line,
+.if-ltm-readout {
+  stroke: var(--stm);
+  stroke-width: 2.4;
+}
+
+.if-ltm-state {
+  stroke: var(--ltm);
+  stroke-width: 2.5;
+}
+
+.if-threshold {
+  fill: none;
+  stroke: #c34c3c;
+  stroke-width: 1.4;
+  stroke-dasharray: 5 5;
+}
+
+.if-edge-label,
+.if-flow-labels text {
+  fill: #657988;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.if-wave-svg marker path {
+  fill: #8294a1;
+}
+
+.if-equation-block {
+  margin: 10px 0 0;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid #d8e5ed;
+  border-radius: 8px;
+  background: #10212c;
+  color: #dcecf5;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
 .trace-picker-panel {
   grid-column: 1 / -1;
 }
@@ -1318,7 +1607,8 @@ th {
   .optimizer-results,
   .param-workbench,
   .network-grid,
-  .analysis-grid {
+  .analysis-grid,
+  .if-material-grid {
     grid-template-columns: 1fr;
   }
 
