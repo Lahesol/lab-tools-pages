@@ -1,29 +1,61 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
+const APP_VERSION = "smkang-light-web-gui-0.3.0";
 const POLL_MS = 250;
+const ADC_BITS = 14;
+const ADC_VREF = 3.3;
+const ADC_GAIN = 1.0;
+const MAX_LOG_ROWS = 1200;
 
 const state = {
+  transportMode: null,
   connected: false,
   adcRunning: false,
   sweepRunning: false,
   lastLogId: 0,
   samples: [],
   curves: [],
+  curveRecords: [],
   activeCurveIndex: null,
   activeSamples: null,
   activeTitle: "Current ADC",
   polling: false,
+  portLabel: null,
+  baud: 230400,
+  adcInput: 1,
+  adcRateHz: 1000,
+  currentDacMv: { A: 0, B: 0, C: 0, D: 0 },
+  fixedMv: { ...FIXED_DEFAULTS },
+  zeroCodes: { ...ZERO_DEFAULTS },
+  currentCommand: null,
+  currentCommandTime: null,
+  currentSampleT0: null,
+  scCycleCount: 0,
+  logRows: [],
+  nextLogId: 1,
+  runId: null,
+  runDir: null,
+  serial: null,
+  webSerialPorts: [],
+  sweepStatus: {
+    running: false,
+    label: null,
+    points_total: 0,
+    points_done: 0,
+    error: null,
+  },
+  sweepStopRequested: false,
 };
 
 const els = {};
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
   renderChannelRows();
   renderZeroControls();
   bindActions();
-  refreshPorts();
+  await refreshPorts();
   pollData();
 });
 
@@ -62,6 +94,9 @@ function bindElements() {
     "statsLine",
     "plotAxisSelect",
     "showCurrentBtn",
+    "exportCurrentBtn",
+    "exportCurvesBtn",
+    "exportRawLogBtn",
     "adcCanvas",
     "curveCount",
     "curveList",
@@ -169,6 +204,21 @@ function bindActions() {
     renderCurves();
   });
   els.plotAxisSelect.addEventListener("change", drawActivePlot);
+  els.exportCurrentBtn.addEventListener("click", () => downloadExport("current"));
+  els.exportCurvesBtn.addEventListener("click", () => downloadExport("curves"));
+  els.exportRawLogBtn.addEventListener("click", () => downloadExport("raw-log"));
+
+  if ("serial" in navigator) {
+    navigator.serial.addEventListener("disconnect", (event) => {
+      if (state.serial?.port === event.target) {
+        appendLogRow("WARN", "Serial device disconnected");
+        state.connected = false;
+        state.adcRunning = false;
+        state.sweepStopRequested = true;
+        setDisconnectedUi();
+      }
+    });
+  }
 }
 
 function buildSweepConfig() {
@@ -192,45 +242,122 @@ function buildSweepConfig() {
   };
 }
 
+async function ensureTransport() {
+  if (state.transportMode) return state.transportMode;
+  const params = new URLSearchParams(window.location.search);
+  const forced = (params.get("transport") || "").toLowerCase();
+  if (forced === "serial" || forced === "webserial") {
+    setTransportMode("webserial");
+    return state.transportMode;
+  }
+
+  const localHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+  if (forced === "backend" || localHost) {
+    try {
+      await fetchJson("/api/status");
+      setTransportMode("backend");
+      return state.transportMode;
+    } catch {
+      if (forced === "backend") throw new Error("Local backend is unavailable.");
+    }
+  }
+
+  setTransportMode("webserial");
+  return state.transportMode;
+}
+
+function setTransportMode(mode) {
+  state.transportMode = mode;
+  if (mode === "backend") {
+    els.runInfo.textContent = "Local backend UART web GUI";
+  } else {
+    els.runInfo.textContent = "Browser Web Serial UART web GUI";
+  }
+}
+
 async function refreshPorts() {
   try {
-    const data = await fetchJson("/api/ports");
-    const selected = els.portSelect.value;
-    els.portSelect.textContent = "";
-    if (!data.ports.length) {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = data.pyserial_available ? "No serial ports found" : "pyserial not installed";
-      els.portSelect.appendChild(option);
+    const mode = await ensureTransport();
+    if (mode === "backend") {
+      await refreshBackendPorts();
     } else {
-      data.ports.forEach((port) => {
-        const option = document.createElement("option");
-        option.value = port.device;
-        option.textContent = `${port.device} ${port.description ? "- " + port.description : ""}`;
-        els.portSelect.appendChild(option);
-      });
-      if (selected) els.portSelect.value = selected;
+      await refreshWebSerialPorts();
     }
-    updateControlState();
   } catch (error) {
-    setBackendMessage(`Backend unavailable: ${error.message}`);
+    setBackendMessage(error.message);
     setDisconnectedUi();
   }
+}
+
+async function refreshBackendPorts() {
+  const data = await fetchJson("/api/ports");
+  const selected = els.portSelect.value;
+  els.portSelect.textContent = "";
+  if (!data.ports.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = data.pyserial_available ? "No serial ports found" : "pyserial not installed";
+    els.portSelect.appendChild(option);
+  } else {
+    data.ports.forEach((port) => {
+      const option = document.createElement("option");
+      option.value = port.device;
+      option.textContent = `${port.device} ${port.description ? "- " + port.description : ""}`;
+      els.portSelect.appendChild(option);
+    });
+    if (selected) els.portSelect.value = selected;
+  }
+  updateControlState();
+}
+
+async function refreshWebSerialPorts() {
+  els.portSelect.textContent = "";
+  state.webSerialPorts = [];
+  if (!("serial" in navigator)) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Web Serial unsupported";
+    els.portSelect.appendChild(option);
+    els.runInfo.textContent = "Web Serial unavailable in this browser";
+    updateControlState();
+    return;
+  }
+
+  state.webSerialPorts = await navigator.serial.getPorts();
+  state.webSerialPorts.forEach((port, index) => {
+    const option = document.createElement("option");
+    option.value = `granted:${index}`;
+    option.textContent = describeSerialPort(port, `Granted port ${index + 1}`);
+    els.portSelect.appendChild(option);
+  });
+
+  const requestOption = document.createElement("option");
+  requestOption.value = "request";
+  requestOption.textContent = "Select serial port...";
+  els.portSelect.appendChild(requestOption);
+  els.portSelect.value = state.webSerialPorts.length ? "granted:0" : "request";
+  updateControlState();
 }
 
 async function pollData(options = {}) {
   if (state.polling && !options.immediate) return;
   state.polling = true;
   try {
-    const query = state.lastLogId ? `?after_log=${state.lastLogId}` : "";
-    const data = await fetchJson(`/api/data${query}`);
+    const mode = await ensureTransport();
+    let data;
+    if (mode === "backend") {
+      const query = state.lastLogId ? `?after_log=${state.lastLogId}` : "";
+      data = await fetchJson(`/api/data${query}`);
+    } else {
+      data = createLocalSnapshot(true, state.lastLogId);
+    }
     applySnapshot(data);
     if (state.activeCurveIndex === null) {
-      state.samples = data.samples || [];
+      state.samples = data.samples || state.samples || [];
       drawActivePlot();
     }
   } catch (error) {
-    setBackendMessage(`Backend unavailable: ${error.message}`);
+    setBackendMessage(error.message);
     setDisconnectedUi();
   } finally {
     state.polling = false;
@@ -240,27 +367,40 @@ async function pollData(options = {}) {
 
 async function postAction(path, body, options = {}) {
   try {
-    const data = await fetchJson(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (options.showCurrent) {
-      state.activeCurveIndex = null;
-      state.activeSamples = null;
-      state.activeTitle = "Current ADC";
+    const mode = await ensureTransport();
+    let data;
+    if (mode === "backend") {
+      data = await fetchJson(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (options.showCurrent) {
+        state.activeCurveIndex = null;
+        state.activeSamples = null;
+        state.activeTitle = "Current ADC";
+      }
+      applySnapshot(data);
+      const full = await fetchJson(`/api/data?after_log=${state.lastLogId}`);
+      applySnapshot(full);
+      state.samples = full.samples || [];
+    } else {
+      data = await handleLocalAction(path, body, state.lastLogId);
+      if (options.showCurrent) {
+        state.activeCurveIndex = null;
+        state.activeSamples = null;
+        state.activeTitle = "Current ADC";
+      }
+      applySnapshot(data);
+      state.samples = data.samples || state.samples || [];
     }
-    applySnapshot(data);
-    const full = await fetchJson(`/api/data?after_log=${state.lastLogId}`);
-    applySnapshot(full);
-    state.samples = full.samples || [];
     drawActivePlot();
   } catch (error) {
     appendLocalLog("ERROR", error.message);
   }
 }
 
-async function fetchJson(path, options) {
+async function fetchJson(path, options = {}) {
   const response = await fetch(path, options);
   let payload = {};
   try {
@@ -272,6 +412,506 @@ async function fetchJson(path, options) {
     throw new Error(payload.error || `${response.status} ${response.statusText}`);
   }
   return payload;
+}
+
+async function handleLocalAction(path, body, afterLogId = null) {
+  switch (path) {
+    case "/api/connect":
+      await connectWebSerial(body);
+      break;
+    case "/api/disconnect":
+      await disconnectWebSerial();
+      break;
+    case "/api/command":
+      await sendSerialCommand(String(body.cmd || ""), { startNewBlock: Boolean(body.startNewBlock ?? true) });
+      break;
+    case "/api/adc/toggle":
+      await sendSerialCommand("ADC", { startNewBlock: !state.adcRunning });
+      state.adcRunning = !state.adcRunning;
+      break;
+    case "/api/adc/config":
+      await setLocalAdcConfig(body.input, body.rate_hz);
+      break;
+    case "/api/direct":
+      await sendDirect(body.channel, Number.parseInt(body.value, 10), true);
+      break;
+    case "/api/direct-all":
+      await applyAllDirect(body.values || {});
+      break;
+    case "/api/dac/zero-all":
+      await setAllZeroVoltage();
+      break;
+    case "/api/fixed":
+      await setLocalFixed(body.channel, Number.parseInt(body.value, 10));
+      break;
+    case "/api/zero-all":
+      await setAllZeroCodes(body.codes || {});
+      break;
+    case "/api/sweep/start":
+      startLocalSweep(body);
+      break;
+    case "/api/sweep/stop":
+      state.sweepStopRequested = true;
+      appendLogRow("INFO", "Sweep stop requested");
+      break;
+    case "/api/clear":
+      state.samples = [];
+      state.currentSampleT0 = null;
+      appendLogRow("INFO", "Current ADC data cleared");
+      break;
+    default:
+      throw new Error("Unknown action.");
+  }
+  return createLocalSnapshot(true, afterLogId);
+}
+
+async function connectWebSerial(body) {
+  if (!("serial" in navigator)) {
+    throw new Error("Web Serial is unavailable. Use Chrome or Edge over HTTPS.");
+  }
+  if (state.connected) return;
+
+  const selected = String(body.port || els.portSelect.value || "request");
+  let port = null;
+  if (selected.startsWith("granted:")) {
+    const index = Number.parseInt(selected.split(":")[1], 10);
+    port = state.webSerialPorts[index] || null;
+  }
+  if (!port) {
+    port = await navigator.serial.requestPort();
+  }
+
+  const baud = Math.max(1, Number.parseInt(body.baud, 10) || 230400);
+  await port.open({ baudRate: baud, bufferSize: 1024 });
+
+  resetLocalRun(baud, describeSerialPort(port, "Web Serial port"));
+  state.serial = {
+    port,
+    decoder: new TextDecoder(),
+    encoder: new TextEncoder(),
+    reader: null,
+    readBuffer: "",
+    readLoopPromise: null,
+  };
+  state.connected = true;
+  state.portLabel = describeSerialPort(port, "Web Serial port");
+  state.baud = baud;
+  appendLogRow("INFO", `Connected to ${state.portLabel} @ ${baud} bps`);
+  state.serial.readLoopPromise = readWebSerialLoop(port);
+}
+
+async function disconnectWebSerial() {
+  state.sweepStopRequested = true;
+  const serial = state.serial;
+  if (!serial) {
+    state.connected = false;
+    return;
+  }
+
+  if (state.adcRunning) {
+    try {
+      await sendSerialCommand("ADC", { startNewBlock: false });
+    } catch (error) {
+      appendLogRow("WARN", `Could not stop ADC before disconnect: ${error.message}`);
+    }
+    state.adcRunning = false;
+  }
+
+  state.connected = false;
+  if (serial.reader) {
+    try {
+      await serial.reader.cancel();
+    } catch {
+      // Ignore cancellation errors during shutdown.
+    }
+  }
+  if (serial.readLoopPromise) {
+    try {
+      await serial.readLoopPromise;
+    } catch {
+      // Reader loop reports meaningful errors separately.
+    }
+  }
+  try {
+    await serial.port.close();
+  } catch (error) {
+    appendLogRow("WARN", `Serial close failed: ${error.message}`);
+  }
+  appendLogRow("INFO", "Disconnected");
+  state.serial = null;
+}
+
+async function readWebSerialLoop(port) {
+  const serial = state.serial;
+  if (!serial || !port.readable) return;
+  const reader = port.readable.getReader();
+  serial.reader = reader;
+  try {
+    while (state.connected && state.serial?.port === port) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) processSerialBytes(value);
+    }
+  } catch (error) {
+    if (state.connected) appendLogRow("ERROR", `Serial reader stopped: ${error.message}`);
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Ignore release errors after device removal.
+    }
+    if (state.serial?.reader === reader) state.serial.reader = null;
+  }
+}
+
+function processSerialBytes(value) {
+  if (!state.serial) return;
+  state.serial.readBuffer += state.serial.decoder.decode(value, { stream: true });
+  while (state.serial.readBuffer.includes("\n")) {
+    const index = state.serial.readBuffer.indexOf("\n");
+    const rawLine = state.serial.readBuffer.slice(0, index);
+    state.serial.readBuffer = state.serial.readBuffer.slice(index + 1);
+    handleRxLine(rawLine.replace(/\r/g, ""));
+  }
+}
+
+function handleRxLine(line) {
+  appendLogRow("RX", line);
+  const text = line.trim();
+  if (text === "") {
+    storeScSegmentIfAny();
+    return;
+  }
+  if (/^\d+$/.test(text)) {
+    const adcVal = Number.parseInt(text, 10);
+    if (adcVal >= 0 && adcVal < 1 << ADC_BITS) appendSample(adcVal);
+  }
+}
+
+async function sendSerialCommand(cmd, options = {}) {
+  if (!state.connected || !state.serial?.port?.writable) {
+    throw new Error("Serial port is not connected.");
+  }
+  const trimmed = String(cmd).trim();
+  if (!trimmed) return;
+  if (options.startNewBlock !== false) prepareNewCommandBlock(trimmed);
+
+  const writer = state.serial.port.writable.getWriter();
+  try {
+    await writer.write(state.serial.encoder.encode(`${trimmed}\r`));
+    appendLogRow("TX", trimmed);
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+async function setLocalAdcConfig(input, rateHz) {
+  if (input !== undefined && input !== null && input !== "") {
+    const adcInput = Number.parseInt(input, 10);
+    if (adcInput < 0 || adcInput > 7) throw new Error("ADC input must be 0..7.");
+    await sendSerialCommand(`AD${adcInput}`, { startNewBlock: false });
+    state.adcInput = adcInput;
+  }
+  if (rateHz !== undefined && rateHz !== null && rateHz !== "") {
+    let rate = Number.parseInt(rateHz, 10);
+    if (rate < 1) throw new Error("ADC sample rate must be positive.");
+    rate = Math.min(rate, 1000);
+    await sendSerialCommand(`AR${rate}`, { startNewBlock: false });
+    state.adcRateHz = rate;
+  }
+}
+
+async function setLocalFixed(channel, valueMv) {
+  const ch = validateChannel(channel);
+  state.fixedMv[ch] = valueMv;
+  await sendSerialCommand(`F${ch}${valueMv}`);
+}
+
+async function sendDirect(channel, valueMv, startNewBlock = true) {
+  const ch = validateChannel(channel);
+  const value = Number.parseInt(valueMv, 10);
+  if (startNewBlock) prepareNewCommandBlock(`D${ch}${value}`);
+  state.currentDacMv[ch] = value;
+  await sendSerialCommand(`D${ch}${value}`, { startNewBlock: false });
+}
+
+async function applyAllDirect(values) {
+  prepareNewCommandBlock("D_ALL");
+  for (const channel of CHANNELS) {
+    await sendDirect(channel, Number.parseInt(values[channel], 10), false);
+    await sleep(20);
+  }
+}
+
+async function setAllZeroVoltage() {
+  prepareNewCommandBlock("D_ZERO_ALL");
+  for (const channel of CHANNELS) {
+    await sendDirect(channel, 0, false);
+    await sleep(20);
+  }
+}
+
+async function setAllZeroCodes(codes) {
+  prepareNewCommandBlock("Z_ALL");
+  for (const channel of CHANNELS) {
+    const code = Number.parseInt(codes[channel], 10);
+    if (code < 0 || code > 4095) throw new Error(`Zero code for ${channel} must be 0..4095.`);
+    state.zeroCodes[channel] = code;
+    await sendSerialCommand(`Z${channel}${code}`, { startNewBlock: false });
+    await sleep(20);
+  }
+  for (const channel of CHANNELS) {
+    await sendDirect(channel, 0, false);
+    await sleep(20);
+  }
+}
+
+function startLocalSweep(config) {
+  if (state.sweepStatus.running) throw new Error("A sweep is already running.");
+  const points = buildSweepPoints(config);
+  if (!points.length) throw new Error("No sweep points were generated.");
+  state.sweepStopRequested = false;
+  state.sweepStatus = {
+    running: true,
+    label: "WEB_SWEEP",
+    points_total: points.length,
+    points_done: 0,
+    error: null,
+  };
+  prepareNewCommandBlock("WEB_SWEEP");
+  runLocalSweep(points, config);
+}
+
+async function runLocalSweep(points, config) {
+  const delayMs = Math.max(0, Number.parseInt(config.delay_ms, 10) || 0);
+  const autoAdc = Boolean(config.auto_adc);
+  let startedAdc = false;
+  try {
+    if (autoAdc && !state.adcRunning) {
+      await sendSerialCommand("ADC", { startNewBlock: false });
+      state.adcRunning = true;
+      startedAdc = true;
+    }
+    appendLogRow("INFO", `WEB_SWEEP started, points=${points.length}, delay=${delayMs}ms`);
+
+    for (let idx = 0; idx < points.length; idx += 1) {
+      if (state.sweepStopRequested) break;
+      const point = points[idx];
+      for (const channel of CHANNELS) {
+        await sendDirect(channel, point[channel], false);
+        await sleep(3);
+      }
+      state.sweepStatus.points_done = idx + 1;
+      if (delayMs > 0) await sleep(delayMs);
+    }
+
+    if (startedAdc && state.adcRunning) {
+      await sendSerialCommand("ADC", { startNewBlock: false });
+      state.adcRunning = false;
+    }
+    storeCurrentCurveIfNeeded();
+    state.sweepStatus.running = false;
+    state.sweepStatus.error = null;
+    appendLogRow("INFO", "WEB_SWEEP finished");
+  } catch (error) {
+    state.sweepStatus.running = false;
+    state.sweepStatus.error = error.message;
+    appendLogRow("ERROR", `WEB_SWEEP failed: ${error.message}`);
+  }
+}
+
+function buildSweepPoints(config) {
+  const channelsCfg = config.channels || {};
+  const stepMv = Math.max(1, Math.abs(Number.parseInt(config.step_mv, 10) || 100));
+  const cycles = Math.max(1, Number.parseInt(config.cycles, 10) || 1);
+  const direction = String(config.direction || "forward").toLowerCase();
+  if (!["forward", "reverse", "roundtrip"].includes(direction)) {
+    throw new Error("Sweep direction must be forward, reverse, or roundtrip.");
+  }
+
+  const normalized = {};
+  let maxSpan = 0;
+  CHANNELS.forEach((channel) => {
+    const item = channelsCfg[channel] || {};
+    const mode = String(item.mode || "fixed").toLowerCase();
+    const fixed = Number.parseInt(item.fixed ?? state.fixedMv[channel], 10);
+    let start = Number.parseInt(item.start ?? fixed, 10);
+    let stop = Number.parseInt(item.stop ?? fixed, 10);
+    if (mode !== "sweep") {
+      start = fixed;
+      stop = fixed;
+    }
+    maxSpan = Math.max(maxSpan, Math.abs(stop - start));
+    normalized[channel] = { mode, fixed, start, stop };
+  });
+
+  const steps = Math.max(1, Math.ceil(maxSpan / stepMv));
+  const forwardFracs = Array.from({ length: steps + 1 }, (_, idx) => idx / steps);
+  let fracs;
+  if (direction === "forward") fracs = forwardFracs;
+  else if (direction === "reverse") fracs = [...forwardFracs].reverse();
+  else fracs = forwardFracs.concat([...forwardFracs].reverse().slice(1));
+
+  const points = [];
+  for (let cycle = 0; cycle < cycles; cycle += 1) {
+    fracs.forEach((frac) => {
+      const point = {};
+      CHANNELS.forEach((channel) => {
+        const item = normalized[channel];
+        point[channel] =
+          item.mode === "sweep" ? Math.round(item.start + (item.stop - item.start) * frac) : item.fixed;
+      });
+      points.push(point);
+    });
+  }
+  return points;
+}
+
+function resetLocalRun(baud, portLabel) {
+  state.adcRunning = false;
+  state.adcInput = Number.parseInt(els.adcInputSelect.value, 10) || 1;
+  state.adcRateHz = Number.parseInt(els.adcRateInput.value, 10) || 1000;
+  state.currentDacMv = { A: 0, B: 0, C: 0, D: 0 };
+  state.fixedMv = { ...FIXED_DEFAULTS };
+  state.zeroCodes = { ...ZERO_DEFAULTS };
+  state.samples = [];
+  state.curves = [];
+  state.curveRecords = [];
+  state.activeCurveIndex = null;
+  state.activeSamples = null;
+  state.activeTitle = "Current ADC";
+  state.currentCommand = null;
+  state.currentCommandTime = null;
+  state.currentSampleT0 = null;
+  state.scCycleCount = 0;
+  state.logRows = [];
+  state.nextLogId = 1;
+  state.lastLogId = 0;
+  state.runId = makeRunId();
+  state.runDir = null;
+  state.portLabel = portLabel;
+  state.baud = baud;
+  state.sweepStatus = {
+    running: false,
+    label: null,
+    points_total: 0,
+    points_done: 0,
+    error: null,
+  };
+}
+
+function appendSample(adcVal) {
+  const now = performance.now() / 1000;
+  if (state.currentSampleT0 === null) state.currentSampleT0 = now;
+  state.samples.push({
+    timestamp: new Date().toISOString(),
+    time_s: now - state.currentSampleT0,
+    adc: adcVal,
+    adc_voltage: adcToVoltage(adcVal),
+    dac: { ...state.currentDacMv },
+  });
+}
+
+function prepareNewCommandBlock(label) {
+  storeCurrentCurveIfNeeded();
+  state.samples = [];
+  state.currentSampleT0 = null;
+  state.currentCommand = label;
+  state.currentCommandTime = new Date();
+  if (String(label).startsWith("SC")) state.scCycleCount = 0;
+}
+
+function storeCurrentCurveIfNeeded() {
+  if (!state.samples.length || !state.currentCommand) return;
+  state.curveRecords.push({
+    cmd: state.currentCommand,
+    sent_time: (state.currentCommandTime || new Date()).toISOString(),
+    records: state.samples.map((record) => cloneRecord(record)),
+  });
+  appendLogRow("INFO", `Stored curve: ${state.currentCommand}, N=${state.samples.length}`);
+}
+
+function storeScSegmentIfAny() {
+  if (state.currentCommand !== "SC" || !state.samples.length) return;
+  state.scCycleCount += 1;
+  state.curveRecords.push({
+    cmd: `SC_cycle${state.scCycleCount}`,
+    sent_time: (state.currentCommandTime || new Date()).toISOString(),
+    records: state.samples.map((record) => cloneRecord(record)),
+  });
+  appendLogRow("INFO", `Stored SC curve #${state.scCycleCount} (N=${state.samples.length})`);
+  state.samples = [];
+  state.currentSampleT0 = null;
+}
+
+function createLocalSnapshot(includeSamples = true, afterLogId = null) {
+  let logs = state.logRows;
+  if (afterLogId !== null && afterLogId !== undefined) {
+    logs = logs.filter((row) => row.id > afterLogId);
+  }
+  const payload = {
+    version: APP_VERSION,
+    web_serial_available: "serial" in navigator,
+    connected: state.connected,
+    port: state.portLabel,
+    baud: state.baud,
+    adc_running: state.adcRunning,
+    adc_input: state.adcInput,
+    adc_rate_hz: state.adcRateHz,
+    current_dac_mv: { ...state.currentDacMv },
+    fixed_mv: { ...state.fixedMv },
+    zero_codes: { ...state.zeroCodes },
+    current_command: state.currentCommand,
+    run_id: state.runId,
+    run_dir: state.runDir,
+    adc_bits: ADC_BITS,
+    vref: ADC_VREF,
+    gain: ADC_GAIN,
+    stats: statsForRecords(state.samples),
+    curves: localCurveMetadata(),
+    sweep: { ...state.sweepStatus },
+    logs,
+    last_log_id: state.logRows.length ? state.logRows[state.logRows.length - 1].id : 0,
+    defaults: {
+      channels: [...CHANNELS],
+      fixed_mv: { ...FIXED_DEFAULTS },
+      zero_code: { ...ZERO_DEFAULTS },
+      baud: 230400,
+      adc_input: 1,
+      adc_rate_hz: 1000,
+    },
+  };
+  if (includeSamples) payload.samples = state.samples.map((record) => cloneRecord(record));
+  return payload;
+}
+
+function localCurveMetadata() {
+  return state.curveRecords.map((curve, index) => {
+    const stats = statsForRecords(curve.records);
+    return {
+      index,
+      cmd: curve.cmd,
+      sent_time: curve.sent_time,
+      num_samples: curve.records.length,
+      last: stats.last,
+      min: stats.min,
+      max: stats.max,
+    };
+  });
+}
+
+function appendLogRow(direction, text) {
+  const row = {
+    id: state.nextLogId,
+    time: new Date().toISOString(),
+    direction,
+    text: String(text),
+  };
+  state.nextLogId += 1;
+  state.logRows.push(row);
+  if (state.logRows.length > MAX_LOG_ROWS) {
+    state.logRows.splice(0, state.logRows.length - MAX_LOG_ROWS);
+  }
 }
 
 function applySnapshot(data) {
@@ -287,7 +927,12 @@ function applySnapshot(data) {
   updateControlState();
   appendLogs(data.logs || []);
   renderCurves();
-  els.runInfo.textContent = data.run_id ? `Run ${data.run_id} | ${data.run_dir || ""}` : "Local UART web GUI";
+  if (data.run_id) {
+    const prefix = state.transportMode === "webserial" ? "Browser Web Serial" : "Run";
+    els.runInfo.textContent = data.run_dir ? `${prefix} ${data.run_id} | ${data.run_dir}` : `${prefix} ${data.run_id}`;
+  } else {
+    els.runInfo.textContent = state.transportMode === "webserial" ? "Browser Web Serial UART web GUI" : "Local UART web GUI";
+  }
 }
 
 function updateBadges(data) {
@@ -347,7 +992,7 @@ function appendLogs(logs) {
   if (!logs.length) return;
   const wasAtBottom = els.logBox.scrollTop + els.logBox.clientHeight >= els.logBox.scrollHeight - 12;
   const text = logs
-    .map((row) => `[${String(row.time || "").replace("T", " ")}] ${row.direction}: ${row.text}`)
+    .map((row) => `[${String(row.time || "").replace("T", " ").replace("Z", "")}] ${row.direction}: ${row.text}`)
     .join("\n");
   els.logBox.textContent += `${els.logBox.textContent ? "\n" : ""}${text}`;
   els.lastLogId.textContent = `log ${state.lastLogId}`;
@@ -381,10 +1026,17 @@ function renderCurves() {
 
 async function loadCurve(index) {
   try {
-    const curve = await fetchJson(`/api/curve?index=${encodeURIComponent(index)}`);
+    if (state.transportMode === "backend") {
+      const curve = await fetchJson(`/api/curve?index=${encodeURIComponent(index)}`);
+      state.activeSamples = curve.samples || [];
+      state.activeTitle = `Curve ${index + 1}: ${curve.cmd}`;
+    } else {
+      const curve = state.curveRecords[index];
+      if (!curve) throw new Error("Curve index is out of range.");
+      state.activeSamples = curve.records.map((record) => cloneRecord(record));
+      state.activeTitle = `Curve ${index + 1}: ${curve.cmd}`;
+    }
     state.activeCurveIndex = index;
-    state.activeSamples = curve.samples || [];
-    state.activeTitle = `Curve ${index + 1}: ${curve.cmd}`;
     renderCurves();
     drawActivePlot();
   } catch (error) {
@@ -508,6 +1160,89 @@ function drawPlot(samples, title, axis) {
   els.statsLine.textContent = formatStats(samples);
 }
 
+async function downloadExport(kind) {
+  try {
+    if (state.transportMode === "backend") {
+      const paths = {
+        current: ["/api/export/current.csv", "current_adc_with_dac.csv"],
+        curves: ["/api/export/curves.csv", "stored_curves_with_dac.csv"],
+        "raw-log": ["/api/export/raw-log.csv", "raw_uart_log.csv"],
+      };
+      const [path, filename] = paths[kind];
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      downloadText(filename, await response.text(), "text/csv;charset=utf-8");
+      return;
+    }
+
+    if (kind === "current") downloadText("current_adc_with_dac.csv", recordsToCsv(state.samples), "text/csv;charset=utf-8");
+    else if (kind === "curves") downloadText("stored_curves_with_dac.csv", curvesToCsv(), "text/csv;charset=utf-8");
+    else downloadText("raw_uart_log.csv", rawLogToCsv(), "text/csv;charset=utf-8");
+  } catch (error) {
+    appendLocalLog("ERROR", error.message);
+  }
+}
+
+function recordsToCsv(records) {
+  const rows = [["timestamp", "time_s", "adc_count", "adc_voltage", "dac_A_mv", "dac_B_mv", "dac_C_mv", "dac_D_mv"]];
+  records.forEach((record) => {
+    rows.push(recordToCsvRow(record));
+  });
+  return toCsv(rows);
+}
+
+function curvesToCsv() {
+  const rows = [["curve_index", "cmd", "sent_time", "sample_index", "timestamp", "time_s", "adc_count", "adc_voltage", "dac_A_mv", "dac_B_mv", "dac_C_mv", "dac_D_mv"]];
+  state.curveRecords.forEach((curve, curveIndex) => {
+    curve.records.forEach((record, sampleIndex) => {
+      rows.push([curveIndex + 1, curve.cmd, curve.sent_time, sampleIndex, ...recordToCsvRow(record)]);
+    });
+  });
+  return toCsv(rows);
+}
+
+function rawLogToCsv() {
+  const rows = [["wall_time_iso", "direction", "text"]];
+  state.logRows.forEach((row) => rows.push([row.time, row.direction, row.text]));
+  return toCsv(rows);
+}
+
+function recordToCsvRow(record) {
+  const dac = record.dac || {};
+  return [
+    record.timestamp || "",
+    Number(record.time_s || 0).toFixed(6),
+    record.adc ?? "",
+    Number(record.adc_voltage || 0).toFixed(9),
+    dac.A ?? "",
+    dac.B ?? "",
+    dac.C ?? "",
+    dac.D ?? "",
+  ];
+}
+
+function toCsv(rows) {
+  return `${rows.map((row) => row.map(csvCell).join(",")).join("\n")}\n`;
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function downloadText(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function formatAxisValue(value, axis) {
   if (axis === "time") return Number(value).toFixed(2);
   return String(Math.round(value));
@@ -528,8 +1263,27 @@ function formatStats(samples) {
   ].join(" | ");
 }
 
+function statsForRecords(records) {
+  const values = records.map((record) => Number(record.adc)).filter(Number.isFinite);
+  if (!values.length) {
+    return { samples: 0, last: null, min: null, max: null, last_voltage: null, min_voltage: null, max_voltage: null };
+  }
+  const last = values[values.length - 1];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return {
+    samples: values.length,
+    last,
+    min,
+    max,
+    last_voltage: adcToVoltage(last),
+    min_voltage: adcToVoltage(min),
+    max_voltage: adcToVoltage(max),
+  };
+}
+
 function adcToVoltage(adc) {
-  return (adc / ((1 << 14) - 1)) * 3.3;
+  return (adc / ((1 << ADC_BITS) - 1)) * ADC_VREF / ADC_GAIN;
 }
 
 function readInt(input) {
@@ -542,6 +1296,49 @@ function getChannelRow(channel) {
   return document.querySelector(`.channel-row[data-channel="${channel}"]`);
 }
 
+function validateChannel(channel) {
+  const ch = String(channel || "").trim().toUpperCase();
+  if (!CHANNELS.includes(ch)) throw new Error("Channel must be A, B, C, or D.");
+  return ch;
+}
+
 function setBackendMessage(message) {
   if (message) els.runInfo.textContent = message;
+}
+
+function describeSerialPort(port, fallback) {
+  try {
+    const info = port.getInfo();
+    const vendor = info.usbVendorId !== undefined ? info.usbVendorId.toString(16).padStart(4, "0").toUpperCase() : null;
+    const product = info.usbProductId !== undefined ? info.usbProductId.toString(16).padStart(4, "0").toUpperCase() : null;
+    if (vendor && product) return `USB ${vendor}:${product}`;
+  } catch {
+    // Fall through to fallback.
+  }
+  return fallback;
+}
+
+function cloneRecord(record) {
+  return {
+    ...record,
+    dac: { ...(record.dac || {}) },
+  };
+}
+
+function makeRunId() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    "_",
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+  ].join("");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

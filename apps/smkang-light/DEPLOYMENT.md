@@ -12,17 +12,21 @@ SMKang_Light/web_gui/README.md
 SMKang_Light/web_gui/DEPLOYMENT.md
 ```
 
-The hardware-control API is not static. Real serial control, ADC input/rate
-changes, and PC-controlled sweeps require the local backend:
+The static frontend can control UART directly through browser Web Serial when
+served from GitHub Pages over HTTPS. This path requires a Chromium-based browser
+and an explicit user-selected serial port.
+
+The local backend remains available for localhost use and automatic raw-log file
+creation:
 
 ```text
 SMKang_Light/web_gui_server.py
 SMKang_Light/requirements-web-gui.txt
 ```
 
-If the static frontend is served from GitHub Pages, `/api/*` calls will not work
-unless a local backend/proxy is also provided. For experiments, run
-`web_gui_server.py` on the measurement PC and open `http://127.0.0.1:8765/`.
+When the page is opened from `http://127.0.0.1:8765/`, the frontend detects the
+backend and uses `/api/*`. Otherwise it falls back to Web Serial. To force a
+transport during debugging, use `?transport=backend` or `?transport=serial`.
 
 ## Exclude From Pages/Git Backup
 
@@ -41,6 +45,9 @@ node_modules/
 Large raw datasets, private equipment notes, serial-port-specific local config,
 credentials, and keys should remain local. Record only the local path and
 reproduction procedure when needed.
+
+For GitHub Pages runs, raw UART logs are held in browser memory and must be
+downloaded with `Raw Log` before closing or refreshing the tab.
 
 ## Firmware
 

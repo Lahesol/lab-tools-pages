@@ -1,8 +1,8 @@
 # SMKang Light Web GUI
 
 This web GUI controls the `Neuro -KHKim_multipurpose` firmware through UART.
-It keeps the original commands and adds support for ADC input/rate firmware
-commands plus PC-controlled multi-channel DAC sweeps.
+It supports two transports: browser Web Serial for GitHub Pages/static hosting,
+and the local Python backend for localhost experiments.
 
 ## Run Locally
 
@@ -21,21 +21,38 @@ Open:
 http://127.0.0.1:8765/
 ```
 
+## GitHub Pages / Static Mode
+
+When opened from GitHub Pages, the GUI uses the browser Web Serial API directly.
+Use a Chromium-based browser such as Chrome or Edge over HTTPS. The browser asks
+the user to select the DAPLink virtual COM port before UART commands are sent.
+
+Static mode keeps raw TX/RX log lines in browser memory. Export `Raw Log` before
+closing or refreshing the tab when a run must be archived.
+
+## Local Backend Mode
+
+When opened from `http://127.0.0.1:8765/` with `web_gui_server.py` running, the
+GUI uses `/api/*` routes and pyserial. This mode writes timestamped raw UART log
+files automatically.
+
 ## Control Flow
 
 1. The browser loads static files from `web_gui/index.html`, `web_gui/app.js`,
    and `web_gui/styles.css`.
-2. The browser calls local API routes on `web_gui_server.py`.
-3. The backend opens the selected serial port with pyserial.
+2. On GitHub Pages/static hosting, the browser opens UART through Web Serial.
+   On localhost with `web_gui_server.py`, the browser calls local `/api/*`
+   routes and the backend opens UART through pyserial.
 4. UART commands are sent with the same carriage-return protocol as the Tkinter
    GUI: `ADC`, `D{channel}{mV}`, `F{channel}{mV}`, `Z{channel}{code}`,
    `SA{mV}`, `SZ{mV}`, `SF`, `SR`, `SC`, `SD`, `C{n}`, and `T{ms}`. New
    firmware commands are `AD{0..7}` for SAADC AIN selection and `AR{Hz}` for
    ADC auto-sampling rate.
-5. Per-channel sweep in the web GUI is PC-controlled: the backend sends
+5. Per-channel sweep in the web GUI is PC-controlled: the active transport sends
    timestamped `D{channel}{mV}` commands for A/B/C/D at each sweep point.
 6. The serial reader preserves raw RX/TX lines in a run folder and separately
-   parses numeric 14-bit ADC samples for plotting.
+   parses numeric 14-bit ADC samples for plotting. In static mode the run folder
+   is replaced by in-memory raw-log export.
 7. Every parsed ADC sample is saved with the current DAC A/B/C/D command values.
    The same records can be plotted against time or against one selected DAC
    voltage axis.
@@ -44,11 +61,11 @@ http://127.0.0.1:8765/
 9. CSV exports are available for current parsed ADC data, stored curves, and the raw
    UART log.
 10. Disconnect stops ADC if the GUI believes ADC is running, then closes the
-   serial port and the raw log file.
+   serial port.
 
 ## Data Outputs
 
-Each serial connection creates:
+Local backend mode creates:
 
 ```text
 measurements/web_gui_runs/<YYYYMMDD_HHMMSS>/
@@ -56,8 +73,9 @@ measurements/web_gui_runs/<YYYYMMDD_HHMMSS>/
   raw_uart_log.csv
 ```
 
-The raw UART log is written before any plotting/export analysis. Parsed CSV
-downloads should be treated as processed data.
+The raw UART log is written before any plotting/export analysis in backend mode.
+In static mode, raw UART lines are kept in memory and can be downloaded through
+`Raw Log`. Parsed CSV downloads should be treated as processed data.
 
 ## Firmware Change Summary
 
