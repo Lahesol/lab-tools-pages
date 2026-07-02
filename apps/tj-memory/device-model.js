@@ -1,30 +1,30 @@
 (function () {
   const PARAM_META = {
-    gain: { label: "Photocurrent gain", unit: "nA", min: 10, max: 220, step: 1 },
-    dark: { label: "Dark current", unit: "nA", min: 0, max: 15, step: 0.1 },
-    tauRise: { label: "Rise tau", unit: "s", min: 0.005, max: 0.3, step: 0.001 },
-    tauDecay: { label: "Decay tau", unit: "s", min: 0.03, max: 8, step: 0.01 },
-    retention: { label: "Retention", unit: "ratio", min: 0, max: 0.8, step: 0.005 },
-    noise: { label: "Ripple / noise", unit: "nA", min: 0, max: 5, step: 0.05 },
+    gain: { label: "Photocurrent gain", unit: "nA", min: 1, max: 6500, step: 5 },
+    dark: { label: "Dark current", unit: "nA", min: -600, max: 600, step: 1 },
+    tauRise: { label: "Rise tau", unit: "s", min: 0.005, max: 1.2, step: 0.005 },
+    tauDecay: { label: "Decay tau", unit: "s", min: 0.03, max: 120, step: 0.05 },
+    retention: { label: "Retention", unit: "ratio", min: 0, max: 0.95, step: 0.005 },
+    noise: { label: "Ripple / noise", unit: "nA", min: 0, max: 120, step: 1 },
   };
 
   function defaultModel() {
     return {
       STM: {
-        gain: 84,
-        dark: 1.1,
-        tauRise: 0.032,
-        tauDecay: 0.34,
-        retention: 0.035,
-        noise: 0.9,
+        gain: 4729.6,
+        dark: 156.3,
+        tauRise: 0.47,
+        tauDecay: 1.02,
+        retention: 0.12,
+        noise: 0,
       },
       LTM: {
-        gain: 118,
-        dark: 2.2,
-        tauRise: 0.075,
-        tauDecay: 2.8,
-        retention: 0.26,
-        noise: 0.9,
+        gain: 372.5,
+        dark: 428.8,
+        tauRise: 1.2,
+        tauDecay: 12.52,
+        retention: 0.371,
+        noise: 0,
       },
       route: {
         vdsGain: 1,

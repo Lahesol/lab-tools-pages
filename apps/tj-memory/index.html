@@ -594,6 +594,8 @@ Edge UV: UV_target(t) = UV_external residual + delayed emitted UV * coupling * s
               <div class="inline-actions">
                 <button id="saveDeviceParamsBtn" type="button" class="ghost-button light">Save params</button>
                 <button id="loadDeviceParamsBtn" type="button" class="ghost-button light">Load params</button>
+                <button id="loadStmCurveBtn" type="button" class="ghost-button light">Load STM.xlsx curve</button>
+                <button id="loadLtmCurveBtn" type="button" class="ghost-button light">Load LTM.xlsx curve</button>
                 <button id="loadDemoMeasurementBtn" type="button" class="ghost-button light">Load demo data</button>
                 <button id="autoFitParamsBtn" type="button" class="primary-button">Auto fit</button>
                 <input id="deviceParamsFileInput" type="file" accept=".json,application/json" hidden />
@@ -623,6 +625,7 @@ Edge UV: UV_target(t) = UV_external residual + delayed emitted UV * coupling * s
               <div class="panel param-panel">
                 <div class="panel-title"><span>Measured transient data</span><output id="measurementSummary">no data</output></div>
                 <p class="compact-note">Paste two-column data as <code>time_s,current_nA</code>. Header lines and comments are ignored.</p>
+                <p class="compact-note">The STM/LTM.xlsx buttons load dark-offset-corrected curves extracted from the project workbook files and apply the corresponding fitted compact parameters.</p>
                 <textarea id="measurementInput" class="measurement-input" spellcheck="false" placeholder="0.000,1.2&#10;0.010,8.7&#10;0.020,21.4"></textarea>
                 <div class="fit-metrics">
                   <div><dt>RMSE</dt><dd id="fitRmse">-</dd></div>
@@ -1080,8 +1083,9 @@ SNN: I_syn(t) drives LIF membrane</pre>
 
     <script src="datasets.js"></script>
     <script src="device-model.js"></script>
+    <script src="device-baseline-curves.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=7444594362a0"></script>
+    <script src="app.js?v=f4556176562b"></script>
   </body>
 </html>

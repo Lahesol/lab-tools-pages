@@ -46,6 +46,7 @@ const DATASET_GROUPS = window.DATASET_GROUPS || { ann: ["mnist", "uvtoy", "mitbi
 const NET = window.DEVICE_NETWORK;
 const GRAPH_SIM = window.SYNAPTIC_GRAPH_SIM;
 const MODEL = window.DEVICE_MODEL;
+const BASELINE_CURVES = window.DEVICE_BASELINE_CURVES || {};
 
 const defaults = {
   activeTab: "uv",
@@ -94,6 +95,7 @@ const defaults = {
   driverMax: 1.4,
   splitterLossDb: 1.5,
   transferModelVersion: 2,
+  deviceCurveModelVersion: 2,
   transferMode: "hybrid",
   ifTauMs: 120,
   ifThreshold: 0.18,
@@ -2312,6 +2314,39 @@ function loadDemoMeasurement() {
   drawParameterFit();
 }
 
+function loadBaselineCurve(mode) {
+  const modeKey = mode === "LTM" ? "LTM" : "STM";
+  const curve = BASELINE_CURVES[modeKey];
+  if (!curve) {
+    $("fitStatus").textContent = `${modeKey} curve missing`;
+    return;
+  }
+  state.paramMode = modeKey;
+  state.paramSwitchMethod = "vds";
+  state.measurementText = curve.csv || "";
+  state.deviceModel = MODEL.sanitizeModel(state.deviceModel);
+  if (curve.fit?.params) {
+    state.deviceModel[modeKey] = {
+      ...state.deviceModel[modeKey],
+      ...curve.fit.params,
+    };
+  }
+  if (curve.fit) {
+    state.programMode = "pwm";
+    state.frequency = Number(curve.fit.frequencyHz || 1);
+    state.duty = Math.round(Number(curve.fit.duty || 0.35) * 100);
+    state.pulseCount = Number(curve.fit.pulseCount || 30);
+    state.intensity = 1;
+  }
+  writeControls();
+  invalidateOptimizer("rerun recommended");
+  runAllSimulations();
+  const rmse = curve.fit?.rmseNa;
+  const offset = Number(curve.darkOffsetNa || 0);
+  const offsetText = Math.abs(offset) > 0.001 ? `, dark offset ${round(offset, 2)} nA` : "";
+  $("fitStatus").textContent = `${modeKey}.xlsx baseline${Number.isFinite(rmse) ? ` RMSE ${round(rmse, 2)} nA` : ""}${offsetText}`;
+}
+
 function autoFitParameters() {
   readControls();
   const measurement = MODEL.parseMeasurement(state.measurementText);
@@ -2959,6 +2994,8 @@ function bindEvents() {
     if (file) loadDeviceParametersFromFile(file);
     event.target.value = "";
   });
+  $("loadStmCurveBtn").addEventListener("click", () => loadBaselineCurve("STM"));
+  $("loadLtmCurveBtn").addEventListener("click", () => loadBaselineCurve("LTM"));
   $("loadDemoMeasurementBtn").addEventListener("click", loadDemoMeasurement);
   $("autoFitParamsBtn").addEventListener("click", autoFitParameters);
   $("runOptimizerBtn").addEventListener("click", runOptimizer);
@@ -3019,6 +3056,7 @@ function restore() {
     const saved = JSON.parse(window.localStorage.getItem("uv-stm-ltm-architecture-state") || "null");
     if (!saved || typeof saved !== "object") return;
     const savedTransferModelVersion = Number(saved.transferModelVersion || 0);
+    const savedDeviceCurveModelVersion = Number(saved.deviceCurveModelVersion || 0);
     Object.assign(state, deepClone(defaults), saved);
     if (!Array.isArray(state.layers) || state.layers.length < 2) state.layers = deepClone(defaults.layers);
     state.selectedLayer = safeLayerIndex(state.selectedLayer);
@@ -3055,6 +3093,11 @@ function restore() {
       state.ltmWriteThreshold = defaults.ltmWriteThreshold;
       state.ltmReadoutGain = defaults.ltmReadoutGain;
       state.ltmRetentionMs = defaults.ltmRetentionMs;
+    }
+    if (savedDeviceCurveModelVersion < defaults.deviceCurveModelVersion) {
+      state.deviceCurveModelVersion = defaults.deviceCurveModelVersion;
+      state.deviceModel = MODEL.defaultModel();
+      state.measurementText = defaults.measurementText;
     }
     state.paramMode = state.paramMode === "LTM" ? "LTM" : "STM";
     state.paramSwitchMethod = state.paramSwitchMethod === "gate" ? "gate" : "vds";

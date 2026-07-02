@@ -92,6 +92,7 @@ Implemented in `web_gui/`:
   - STM/LTM compact model parameters are editable with sliders.
   - VDS/Gate route gain and persistence multipliers are editable.
   - Two-column measured transient CSV can be pasted as `time_s,current_nA`.
+  - STM.xlsx and LTM.xlsx transient curves can be loaded as dark-offset-corrected baseline measurement data and fitted compact parameters.
   - Model and measurement traces are overlaid under the current UV pulse program.
   - A browser-side first-pass auto-fit adjusts gain, dark current, rise tau, decay tau, and retention.
   - Device parameter packages can be exported/imported as JSON, including STM/LTM compact parameters, route multipliers, fit target mode/route, current UV program, and pasted measured transient text.
@@ -109,6 +110,7 @@ Current limitation:
 - If the dataset requires more input/output channels than the current device layout, the GUI currently simulates the user's placed blocks with a virtual encoder/readout adapter.
 - ANN/SNN graph propagation currently uses a browser-side forward graph pass. Backward/recurrent edges need a delayed iterative solver or Python backend.
 - Device parameters can be manually tuned, roughly auto-fitted, and saved/loaded in-browser, but this is still a first-pass compact fit and not a statistically robust extraction workflow.
+- The LTM.xlsx baseline importer subtracts the late dark/negative offset before fitting; the abrupt late erase/drop segment is not yet represented by the compact retention model.
 - The Architecture Optimizer is a compact proxy optimizer. It screens structures quickly but does not replace trained ANN/SNN accuracy evaluation.
 - The integrate-fire emitter and LTM latch are compact system-level transfer models. Their parameters still need extraction from measured TIA/emitter circuit behavior or a circuit-level SPICE/Python backend.
 - Public dataset download commands exist, but decoded real samples are not yet streamed into the browser-side simulation.
