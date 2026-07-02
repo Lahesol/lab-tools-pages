@@ -55,6 +55,8 @@ files automatically.
    ADC auto-sampling rate.
 5. Per-channel sweep in the web GUI is PC-controlled: the active transport sends
    timestamped `D{channel}{mV}` commands for A/B/C/D at each sweep point.
+   Unchanged DAC channels are skipped, so fixed channels are not rewritten on
+   every point.
 6. The serial reader preserves raw RX/TX lines in a run folder and separately
    parses numeric 14-bit ADC samples for plotting. In static mode the run folder
    is replaced by in-memory raw-log export.

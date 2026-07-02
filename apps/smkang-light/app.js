@@ -1,7 +1,7 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
-const APP_VERSION = "smkang-light-web-gui-0.3.1";
+const APP_VERSION = "smkang-light-web-gui-0.3.2";
 const POLL_MS = 250;
 const ADC_BITS = 14;
 const ADC_VREF = 3.3;
@@ -720,19 +720,26 @@ async function runLocalSweep(points, config) {
   const delayMs = Math.max(0, Number.parseInt(config.delay_ms, 10) || 0);
   const autoAdc = Boolean(config.auto_adc);
   let startedAdc = false;
+  const lastSent = { ...state.currentDacMv };
+  let dacCommandsSent = 0;
+  let dacCommandsSkipped = 0;
   try {
     if (autoAdc && !state.adcRunning) {
       await sendSerialCommand("ADC", { startNewBlock: false });
       state.adcRunning = true;
       startedAdc = true;
     }
-    appendLogRow("INFO", `WEB_SWEEP started, points=${points.length}, delay=${delayMs}ms`);
+    appendLogRow("INFO", `WEB_SWEEP started, points=${points.length}, delay=${delayMs}ms, changed-only DAC writes`);
 
     for (let idx = 0; idx < points.length; idx += 1) {
       if (state.sweepStopRequested) break;
       const point = points[idx];
-      for (const channel of CHANNELS) {
+      const changedChannels = CHANNELS.filter((channel) => lastSent[channel] !== point[channel]);
+      dacCommandsSkipped += CHANNELS.length - changedChannels.length;
+      for (const channel of changedChannels) {
         await sendDirect(channel, point[channel], false);
+        lastSent[channel] = point[channel];
+        dacCommandsSent += 1;
         await sleep(3);
       }
       state.sweepStatus.points_done = idx + 1;
@@ -746,7 +753,7 @@ async function runLocalSweep(points, config) {
     storeCurrentCurveIfNeeded();
     state.sweepStatus.running = false;
     state.sweepStatus.error = null;
-    appendLogRow("INFO", "WEB_SWEEP finished");
+    appendLogRow("INFO", `WEB_SWEEP finished, DAC commands=${dacCommandsSent}, skipped=${dacCommandsSkipped}`);
   } catch (error) {
     state.sweepStatus.running = false;
     state.sweepStatus.error = error.message;

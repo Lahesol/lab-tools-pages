@@ -52,6 +52,10 @@ reproduction procedure when needed.
 For GitHub Pages runs, raw UART logs are held in browser memory and must be
 downloaded with `Raw Log` before closing or refreshing the tab.
 
+PC-controlled sweep sends only changed DAC values after comparing each point
+with the last commanded A/B/C/D state. Fixed channels are not rewritten at every
+point.
+
 ## Firmware
 
 Firmware source changed:
