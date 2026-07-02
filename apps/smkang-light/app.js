@@ -1,12 +1,15 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
-const APP_VERSION = "smkang-light-web-gui-0.3.3";
+const APP_VERSION = "smkang-light-web-gui-0.3.4";
 const POLL_MS = 250;
 const ADC_BITS = 14;
 const ADC_VREF = 3.3;
 const ADC_GAIN = 1.0;
-const DEFAULT_ADC_OVERSAMPLE_N = 8;
+const DEFAULT_ADC_RATE_HZ = 250;
+const DEFAULT_ADC_OVERSAMPLE_N = 4;
+const DEFAULT_ADC_FIRMWARE_AVERAGE_N = 4;
+const DEFAULT_ADC_SETTLE_DISCARD_N = 2;
 const MAX_LOG_ROWS = 1200;
 const DAPLINK_FILTERS = [{ usbVendorId: 0xc251, usbProductId: 0xf001 }];
 
@@ -26,8 +29,10 @@ const state = {
   portLabel: null,
   baud: 230400,
   adcInput: 1,
-  adcRateHz: 1000,
+  adcRateHz: DEFAULT_ADC_RATE_HZ,
   adcOversampleN: DEFAULT_ADC_OVERSAMPLE_N,
+  adcFirmwareAverageN: DEFAULT_ADC_FIRMWARE_AVERAGE_N,
+  adcSettleDiscardN: DEFAULT_ADC_SETTLE_DISCARD_N,
   adcOsBuffer: newOversampleBuffer(),
   currentDacMv: { A: 0, B: 0, C: 0, D: 0 },
   fixedMv: { ...FIXED_DEFAULTS },
@@ -81,6 +86,8 @@ function bindElements() {
     "adcInputSelect",
     "adcRateInput",
     "adcOversampleInput",
+    "adcFirmwareAverageInput",
+    "adcSettleDiscardInput",
     "applyAdcConfigBtn",
     "channelTable",
     "applyFixedBtn",
@@ -171,6 +178,8 @@ function bindActions() {
       input: readInt(els.adcInputSelect),
       rate_hz: readInt(els.adcRateInput),
       oversample_n: readInt(els.adcOversampleInput),
+      firmware_average_n: readInt(els.adcFirmwareAverageInput),
+      settle_discard_n: readInt(els.adcSettleDiscardInput),
     })
   );
 
@@ -445,7 +454,13 @@ async function handleLocalAction(path, body, afterLogId = null) {
       state.adcRunning = !state.adcRunning;
       break;
     case "/api/adc/config":
-      await setLocalAdcConfig(body.input, body.rate_hz, body.oversample_n);
+      await setLocalAdcConfig(
+        body.input,
+        body.rate_hz,
+        body.oversample_n,
+        body.firmware_average_n,
+        body.settle_discard_n
+      );
       break;
     case "/api/direct":
       await sendDirect(body.channel, Number.parseInt(body.value, 10), true);
@@ -648,11 +663,13 @@ async function sendSerialCommand(cmd, options = {}) {
   }
 }
 
-async function setLocalAdcConfig(input, rateHz, oversampleN) {
+async function setLocalAdcConfig(input, rateHz, oversampleN, firmwareAverageN, settleDiscardN) {
   if (
     (input !== undefined && input !== null && input !== "") ||
     (rateHz !== undefined && rateHz !== null && rateHz !== "") ||
-    (oversampleN !== undefined && oversampleN !== null && oversampleN !== "")
+    (oversampleN !== undefined && oversampleN !== null && oversampleN !== "") ||
+    (firmwareAverageN !== undefined && firmwareAverageN !== null && firmwareAverageN !== "") ||
+    (settleDiscardN !== undefined && settleDiscardN !== null && settleDiscardN !== "")
   ) {
     flushOversample();
   }
@@ -677,6 +694,20 @@ async function setLocalAdcConfig(input, rateHz, oversampleN) {
       state.adcOversampleN = oversample;
       appendLogRow("INFO", `ADC plot oversampling set to x${oversample}`);
     }
+  }
+  if (firmwareAverageN !== undefined && firmwareAverageN !== null && firmwareAverageN !== "") {
+    let firmwareAverage = Number.parseInt(firmwareAverageN, 10);
+    if (firmwareAverage < 1) throw new Error("ADC firmware average must be positive.");
+    firmwareAverage = Math.min(firmwareAverage, 256);
+    await sendSerialCommand(`AA${firmwareAverage}`, { startNewBlock: false });
+    state.adcFirmwareAverageN = firmwareAverage;
+  }
+  if (settleDiscardN !== undefined && settleDiscardN !== null && settleDiscardN !== "") {
+    let settleDiscard = Number.parseInt(settleDiscardN, 10);
+    if (settleDiscard < 0) throw new Error("ADC settle discard must be zero or positive.");
+    settleDiscard = Math.min(settleDiscard, 1000);
+    await sendSerialCommand(`AS${settleDiscard}`, { startNewBlock: false });
+    state.adcSettleDiscardN = settleDiscard;
   }
 }
 
@@ -837,8 +868,12 @@ function buildSweepPoints(config) {
 function resetLocalRun(baud, portLabel) {
   state.adcRunning = false;
   state.adcInput = Number.parseInt(els.adcInputSelect.value, 10) || 1;
-  state.adcRateHz = Number.parseInt(els.adcRateInput.value, 10) || 1000;
+  state.adcRateHz = Number.parseInt(els.adcRateInput.value, 10) || DEFAULT_ADC_RATE_HZ;
   state.adcOversampleN = Number.parseInt(els.adcOversampleInput.value, 10) || DEFAULT_ADC_OVERSAMPLE_N;
+  state.adcFirmwareAverageN =
+    Number.parseInt(els.adcFirmwareAverageInput.value, 10) || DEFAULT_ADC_FIRMWARE_AVERAGE_N;
+  const settleDiscard = Number.parseInt(els.adcSettleDiscardInput.value, 10);
+  state.adcSettleDiscardN = Number.isFinite(settleDiscard) ? settleDiscard : DEFAULT_ADC_SETTLE_DISCARD_N;
   state.adcOsBuffer = newOversampleBuffer();
   state.currentDacMv = { A: 0, B: 0, C: 0, D: 0 };
   state.fixedMv = { ...FIXED_DEFAULTS };
@@ -969,6 +1004,8 @@ function createLocalSnapshot(includeSamples = true, afterLogId = null) {
     adc_input: state.adcInput,
     adc_rate_hz: state.adcRateHz,
     adc_oversample_n: state.adcOversampleN,
+    adc_firmware_average_n: state.adcFirmwareAverageN,
+    adc_settle_discard_n: state.adcSettleDiscardN,
     current_dac_mv: { ...state.currentDacMv },
     fixed_mv: { ...state.fixedMv },
     zero_codes: { ...state.zeroCodes },
@@ -989,8 +1026,10 @@ function createLocalSnapshot(includeSamples = true, afterLogId = null) {
       zero_code: { ...ZERO_DEFAULTS },
       baud: 230400,
       adc_input: 1,
-      adc_rate_hz: 1000,
+      adc_rate_hz: DEFAULT_ADC_RATE_HZ,
       adc_oversample_n: DEFAULT_ADC_OVERSAMPLE_N,
+      adc_firmware_average_n: DEFAULT_ADC_FIRMWARE_AVERAGE_N,
+      adc_settle_discard_n: DEFAULT_ADC_SETTLE_DISCARD_N,
     },
   };
   if (includeSamples) payload.samples = state.samples.map((record) => cloneRecord(record));
@@ -1045,6 +1084,16 @@ function applySnapshot(data) {
     state.adcOversampleN = Number.parseInt(data.adc_oversample_n, 10) || DEFAULT_ADC_OVERSAMPLE_N;
     els.adcOversampleInput.value = String(state.adcOversampleN);
   }
+  if (data.adc_firmware_average_n !== undefined) {
+    state.adcFirmwareAverageN =
+      Number.parseInt(data.adc_firmware_average_n, 10) || DEFAULT_ADC_FIRMWARE_AVERAGE_N;
+    els.adcFirmwareAverageInput.value = String(state.adcFirmwareAverageN);
+  }
+  if (data.adc_settle_discard_n !== undefined) {
+    const settleDiscard = Number.parseInt(data.adc_settle_discard_n, 10);
+    state.adcSettleDiscardN = Number.isFinite(settleDiscard) ? settleDiscard : DEFAULT_ADC_SETTLE_DISCARD_N;
+    els.adcSettleDiscardInput.value = String(state.adcSettleDiscardN);
+  }
   updateBadges(data);
   updateSweepProgress(data.sweep || {});
   updateControlState();
@@ -1064,7 +1113,12 @@ function updateBadges(data) {
   const adcInput = data.adc_input ?? state.adcInput ?? "";
   const adcRate = data.adc_rate_hz ?? state.adcRateHz ?? "";
   const adcOversample = data.adc_oversample_n ?? state.adcOversampleN ?? DEFAULT_ADC_OVERSAMPLE_N;
-  els.adcBadge.textContent = state.adcRunning ? `ADC ${adcInput} @ ${adcRate} Hz | avg x${adcOversample}` : "ADC idle";
+  const firmwareAverage =
+    data.adc_firmware_average_n ?? state.adcFirmwareAverageN ?? DEFAULT_ADC_FIRMWARE_AVERAGE_N;
+  const settleDiscard = data.adc_settle_discard_n ?? state.adcSettleDiscardN ?? DEFAULT_ADC_SETTLE_DISCARD_N;
+  els.adcBadge.textContent = state.adcRunning
+    ? `ADC ${adcInput} @ ${adcRate} Hz | FW x${firmwareAverage} | plot x${adcOversample} | settle ${settleDiscard}`
+    : "ADC idle";
   els.adcBadge.className = `badge ${state.adcRunning ? "badge-warn" : "badge-idle"}`;
   els.sweepBadge.textContent = state.sweepRunning ? "Sweep running" : "Sweep idle";
   els.sweepBadge.className = `badge ${state.sweepRunning ? "badge-warn" : "badge-idle"}`;

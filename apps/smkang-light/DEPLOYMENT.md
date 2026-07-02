@@ -52,9 +52,10 @@ reproduction procedure when needed.
 For GitHub Pages runs, raw UART logs are held in browser memory and must be
 downloaded with `Raw Log` before closing or refreshing the tab.
 
-ADC plot and processed CSV exports use the GUI oversampling setting. Raw UART
-logs still include every RX line; processed CSV records include average count
-and raw sample count/min/max columns.
+ADC firmware output is stabilized with `AA` firmware averaging and `AS`
+settling-sample discard. ADC plot and processed CSV exports also use the GUI
+oversampling setting. Raw UART logs still include every RX line; processed CSV
+records include average count and raw sample count/min/max columns.
 
 PC-controlled sweep sends only changed DAC values after comparing each point
 with the last commanded A/B/C/D state. Fixed channels are not rewritten at every
@@ -85,6 +86,8 @@ New UART commands:
 ```text
 AD0..AD7   select SAADC AIN input
 AR1..AR1000 set ADC auto-sampling rate in Hz
+AA1..AA256 set firmware-side ADC averaging count
+AS0..AS1000 set ADC samples discarded after settling events
 ```
 
 Firmware upload for the connected board uses DAPLink/CMSIS-DAP, not J-Link.

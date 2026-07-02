@@ -60,11 +60,19 @@
               </label>
               <label>
                 Sampling rate (Hz)
-                <input id="adcRateInput" type="number" min="1" max="1000" step="1" value="1000" />
+                <input id="adcRateInput" type="number" min="1" max="1000" step="1" value="250" />
+              </label>
+              <label>
+                Firmware average
+                <input id="adcFirmwareAverageInput" type="number" min="1" max="256" step="1" value="4" />
+              </label>
+              <label>
+                Settle discard
+                <input id="adcSettleDiscardInput" type="number" min="0" max="1000" step="1" value="2" />
               </label>
               <label>
                 Oversampling (samples)
-                <input id="adcOversampleInput" type="number" min="1" max="1000" step="1" value="8" />
+                <input id="adcOversampleInput" type="number" min="1" max="1000" step="1" value="4" />
               </label>
             </div>
           </section>
@@ -214,6 +222,6 @@
       </div>
     </template>
 
-    <script src="app.js?v=49509ee699f1"></script>
+    <script src="app.js?v=66bda713c3dd"></script>
   </body>
 </html>

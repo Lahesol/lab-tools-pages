@@ -51,8 +51,9 @@ files automatically.
 4. UART commands are sent with the same carriage-return protocol as the Tkinter
    GUI: `ADC`, `D{channel}{mV}`, `F{channel}{mV}`, `Z{channel}{code}`,
    `SA{mV}`, `SZ{mV}`, `SF`, `SR`, `SC`, `SD`, `C{n}`, and `T{ms}`. New
-   firmware commands are `AD{0..7}` for SAADC AIN selection and `AR{Hz}` for
-   ADC auto-sampling rate.
+   firmware commands are `AD{0..7}` for SAADC AIN selection, `AR{Hz}` for
+   ADC auto-sampling rate, `AA{n}` for firmware-side averaging, and `AS{n}`
+   for settling-sample discard after DAC/input/rate changes.
 5. Per-channel sweep in the web GUI is PC-controlled: the active transport sends
    timestamped `D{channel}{mV}` commands for A/B/C/D at each sweep point.
    Unchanged DAC channels are skipped, so fixed channels are not rewritten on
@@ -60,16 +61,20 @@ files automatically.
 6. The serial reader preserves raw RX/TX lines in a run folder and separately
    parses numeric 14-bit ADC samples for plotting. In static mode the run folder
    is replaced by in-memory raw-log export.
-7. Plot and processed CSV records use configurable ADC oversampling. The default
-   is an 8-sample average; set oversampling to 1 to plot every numeric RX sample.
-8. Every processed ADC average is saved with the current DAC A/B/C/D command
+7. Firmware ADC output uses configurable averaging before UART transmission.
+   The stable default is 250 Hz trigger rate, firmware average x4, and settle
+   discard 2 samples after DAC/input/rate changes.
+8. Plot and processed CSV records use configurable GUI oversampling on top of
+   the received UART values. The default is a 4-sample average; set GUI
+   oversampling to 1 to plot every numeric RX sample.
+9. Every processed ADC average is saved with the current DAC A/B/C/D command
    values plus the raw sample count/min/max used for that average. The same
    records can be plotted against time or against one selected DAC voltage axis.
-9. A blank RX line during firmware `SC` stores the current samples as one `SC_cycleN`
+10. A blank RX line during firmware `SC` stores the current samples as one `SC_cycleN`
    curve, matching the original GUI behavior.
-10. CSV exports are available for current parsed ADC data, stored curves, and the raw
+11. CSV exports are available for current parsed ADC data, stored curves, and the raw
    UART log.
-11. Disconnect stops ADC if the GUI believes ADC is running, then closes the
+12. Disconnect stops ADC if the GUI believes ADC is running, then closes the
    serial port.
 
 ## Data Outputs
@@ -94,9 +99,14 @@ ADC CSV columns use `adc_count_avg` plus `adc_raw_count`, `adc_raw_min`, and
 
 - `AD{0..7}` selects SAADC AIN0..AIN7. Default remains AIN1.
 - `AR{Hz}` sets ADC auto-sampling rate, clamped to 1..1000 Hz.
+- `AA{n}` sets firmware averaging count, clamped to 1..256.
+- `AS{n}` sets post-DAC/input/rate-change discard count, clamped to 0..1000.
 - UART receive buffer was increased from 8 to 24 bytes with a bounds check.
 - `AD{0..7}` now changes the SAADC PSEL directly to avoid resetting the board
   during ADC input switching.
+- SAADC acquisition time is 10 us, ADC output is averaged in firmware before
+  UART, and the first settling samples after DAC/input/rate changes are
+  discarded.
 - Existing `ADC`, `D`, `F`, `Z`, `T`, `C`, `S*` commands remain in place.
 
 The connected programmer/debugger path is DAPLink/CMSIS-DAP. Use
