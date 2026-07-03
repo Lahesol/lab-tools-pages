@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=cb2bf99f29a6">
+  <link rel="stylesheet" href="./styles.css?v=ec1c7ad5a8ce">
 </head>
 <body>
   <main class="app-shell">
@@ -26,6 +26,7 @@
     <nav class="mode-tabs" aria-label="Control mode">
       <button id="manualTabButton" class="tab-button" type="button" aria-selected="true">Manual</button>
       <button id="timelineTabButton" class="tab-button" type="button" aria-selected="false">Timeline</button>
+      <button id="blocksTabButton" class="tab-button" type="button" aria-selected="false">Blocks</button>
     </nav>
 
     <section id="manualPanel" class="tab-panel is-active">
@@ -45,11 +46,102 @@
 
     <section id="timelinePanel" class="tab-panel" hidden>
       <div class="timeline-layout">
+        <section class="timeline-editor" aria-label="Timeline event editor">
+          <div class="timeline-toolbar">
+            <button id="addTimelineRowButton" type="button">Add Row</button>
+            <button id="sortTimelineRowsButton" type="button">Sort</button>
+            <button id="clearTimelineRowsButton" type="button">Clear</button>
+            <button id="runTimelineButton" class="primary-button" type="button">Run</button>
+            <button id="stopTimelineButton" type="button">Stop</button>
+          </div>
+
+          <div class="timeline-table" role="table" aria-label="Timeline program rows">
+            <div class="timeline-table-head" role="row">
+              <span role="columnheader">Time ms</span>
+              <span role="columnheader">Color</span>
+              <span role="columnheader">Brightness</span>
+              <span role="columnheader">Del</span>
+            </div>
+            <div id="timelineRows" class="timeline-rows" role="rowgroup"></div>
+          </div>
+        </section>
+
+        <section class="timeline-plot-panel" aria-label="Timeline event plot">
+          <div class="plot-head">
+            <span>Event Timeline</span>
+            <span id="timelineDuration">0 ms</span>
+          </div>
+          <svg id="timelinePlot" class="timeline-plot" viewBox="0 0 820 260" role="img" aria-label="Brightness over time"></svg>
+        </section>
+      </div>
+    </section>
+
+    <section id="blocksPanel" class="tab-panel" hidden>
+      <div class="timeline-layout">
         <section class="timeline-editor" aria-label="Timeline block editor">
           <div class="timeline-toolbar">
             <button id="addTimelineBlockButton" type="button">Add Block</button>
-            <button id="sortTimelineButton" type="button">Sort</button>
-            <button id="clearTimelineButton" type="button">Clear</button>
+            <button id="sortTimelineBlocksButton" type="button">Sort</button>
+            <button id="clearTimelineBlocksButton" type="button">Clear</button>
+            <button id="runBlocksButton" class="primary-button" type="button">Run</button>
+            <button id="stopBlocksButton" type="button">Stop</button>
+          </div>
+
+          <div class="digital-protocol" aria-label="Digital pulse generator">
+            <div class="protocol-grid">
+              <label>
+                <span>Channel</span>
+                <select id="digitalChannelInput"></select>
+              </label>
+              <label>
+                <span>Format</span>
+                <select id="digitalFormatInput">
+                  <option value="bin">Binary</option>
+                  <option value="hex" selected>Hex</option>
+                </select>
+              </label>
+              <label>
+                <span>Width</span>
+                <select id="digitalWidthInput">
+                  <option value="4">4 bit</option>
+                  <option value="8" selected>8 bit</option>
+                </select>
+              </label>
+              <label>
+                <span>Encoding</span>
+                <select id="digitalEncodingInput">
+                  <option value="ook">OOK NRZ</option>
+                  <option value="manchester">Manchester</option>
+                  <option value="pulse-width">Pulse Width</option>
+                </select>
+              </label>
+              <label class="protocol-wide">
+                <span>Data</span>
+                <input id="digitalDataInput" type="text" autocomplete="off" spellcheck="false" value="A5">
+              </label>
+              <label>
+                <span>Start ms</span>
+                <input id="digitalStartInput" type="number" min="0" step="1" value="0">
+              </label>
+              <label>
+                <span>Bit ms</span>
+                <input id="digitalBitMsInput" type="number" min="1" step="1" value="200">
+              </label>
+              <label>
+                <span>Gap ms</span>
+                <input id="digitalGapMsInput" type="number" min="0" step="1" value="0">
+              </label>
+              <label>
+                <span>Brightness</span>
+                <input id="digitalBrightnessInput" type="number" min="1" max="1000" step="10" value="1000">
+              </label>
+            </div>
+            <div class="protocol-actions">
+              <button id="generateDigitalBlocksButton" type="button">Generate</button>
+              <button id="appendDigitalBlocksButton" type="button">Append</button>
+              <button id="runDigitalBlocksButton" class="primary-button" type="button">Generate + Run</button>
+            </div>
+            <output id="digitalPreviewOutput" class="protocol-output"></output>
           </div>
 
           <div class="clip-editor">
@@ -78,15 +170,15 @@
         <section class="timeline-plot-panel" aria-label="Block timeline">
           <div class="plot-head">
             <span>Program Timeline</span>
-            <span id="timelineDuration">0 ms</span>
+            <span id="blockTimelineDuration">0 ms</span>
           </div>
-          <div id="timelineRuler" class="timeline-ruler"></div>
+          <div id="blockTimelineRuler" class="timeline-ruler"></div>
           <div id="clipTimeline" class="clip-timeline" aria-label="Channel lanes"></div>
           <div class="plot-head plot-head-secondary">
             <span>Intensity Preview</span>
             <span>0-1000</span>
           </div>
-          <svg id="timelinePlot" class="timeline-plot" viewBox="0 0 820 260" role="img" aria-label="Brightness over time"></svg>
+          <svg id="blockPreviewPlot" class="timeline-plot" viewBox="0 0 820 260" role="img" aria-label="Block brightness over time"></svg>
         </section>
       </div>
     </section>
@@ -153,6 +245,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=2cb430d0be17"></script>
+  <script src="./app.js?v=4e06a0e1cf76"></script>
 </body>
 </html>

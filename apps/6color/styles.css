@@ -25,7 +25,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -344,8 +345,141 @@ h1 {
 
 .timeline-toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.timeline-table {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.timeline-table-head,
+.timeline-row {
+  display: grid;
+  grid-template-columns: minmax(86px, 1fr) minmax(78px, 0.9fr) minmax(110px, 1fr) 44px;
+  gap: 0;
+  align-items: center;
+}
+
+.timeline-table-head {
+  min-height: 38px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.timeline-table-head span,
+.timeline-row > * {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+
+.timeline-table-head span {
+  padding: 0 10px;
+}
+
+.timeline-table-head span:last-child,
+.timeline-row > *:last-child {
+  border-right: 0;
+}
+
+.timeline-row {
+  min-height: 42px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.timeline-row input,
+.timeline-row select {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-radius: 0;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text);
+}
+
+.timeline-row input:focus,
+.timeline-row select:focus {
+  outline: 2px solid rgba(11, 127, 120, 0.35);
+  outline-offset: -2px;
+}
+
+.row-delete-button {
+  min-width: 0;
+  min-height: 42px;
+  border: 0;
+  border-radius: 0;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.timeline-empty {
+  min-height: 84px;
+  display: grid;
+  place-items: center;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.digital-protocol {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.protocol-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.protocol-grid label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.protocol-grid input,
+.protocol-grid select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 9px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.protocol-wide {
+  grid-column: 1 / -1;
+}
+
+.protocol-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.protocol-output {
+  min-height: 20px;
+  color: var(--muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .clip-editor {
@@ -635,8 +769,13 @@ h1 {
   }
 
   .mode-tabs,
-  .timeline-toolbar {
+  .timeline-toolbar,
+  .protocol-actions {
     display: grid;
+  }
+
+  .protocol-grid {
+    grid-template-columns: 1fr;
   }
 
   .timeline-plot {

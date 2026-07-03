@@ -18,6 +18,13 @@ const state = new Map(
   ]),
 );
 
+let timelineRowId = 1;
+const timelineRows = [
+  { id: timelineRowId++, timeMs: 0, color: "R", brightness: 0 },
+  { id: timelineRowId++, timeMs: 100, color: "R", brightness: 1000 },
+  { id: timelineRowId++, timeMs: 500, color: "R", brightness: 0 },
+];
+
 let timelineBlockId = 1;
 let selectedTimelineBlockId = 1;
 const timelineBlocks = [
@@ -26,6 +33,10 @@ const timelineBlocks = [
   { id: timelineBlockId++, startMs: 520, durationMs: 140, color: "B", brightness: 850 },
   { id: timelineBlockId++, startMs: 740, durationMs: 260, color: "IR", brightness: 500 },
 ];
+let blockTimelineMinimumEndMs = 1000;
+
+let programTimers = [];
+let runningProgramLabel = "";
 
 let device = null;
 let server = null;
@@ -54,11 +65,36 @@ const el = {
   logOutput: document.querySelector("#logOutput"),
   manualTabButton: document.querySelector("#manualTabButton"),
   timelineTabButton: document.querySelector("#timelineTabButton"),
+  blocksTabButton: document.querySelector("#blocksTabButton"),
   manualPanel: document.querySelector("#manualPanel"),
   timelinePanel: document.querySelector("#timelinePanel"),
+  blocksPanel: document.querySelector("#blocksPanel"),
+  addTimelineRowButton: document.querySelector("#addTimelineRowButton"),
+  sortTimelineRowsButton: document.querySelector("#sortTimelineRowsButton"),
+  clearTimelineRowsButton: document.querySelector("#clearTimelineRowsButton"),
+  runTimelineButton: document.querySelector("#runTimelineButton"),
+  stopTimelineButton: document.querySelector("#stopTimelineButton"),
+  timelineRows: document.querySelector("#timelineRows"),
+  timelinePlot: document.querySelector("#timelinePlot"),
+  timelineDuration: document.querySelector("#timelineDuration"),
   addTimelineBlockButton: document.querySelector("#addTimelineBlockButton"),
-  sortTimelineButton: document.querySelector("#sortTimelineButton"),
-  clearTimelineButton: document.querySelector("#clearTimelineButton"),
+  sortTimelineBlocksButton: document.querySelector("#sortTimelineBlocksButton"),
+  clearTimelineBlocksButton: document.querySelector("#clearTimelineBlocksButton"),
+  runBlocksButton: document.querySelector("#runBlocksButton"),
+  stopBlocksButton: document.querySelector("#stopBlocksButton"),
+  digitalChannelInput: document.querySelector("#digitalChannelInput"),
+  digitalFormatInput: document.querySelector("#digitalFormatInput"),
+  digitalWidthInput: document.querySelector("#digitalWidthInput"),
+  digitalEncodingInput: document.querySelector("#digitalEncodingInput"),
+  digitalDataInput: document.querySelector("#digitalDataInput"),
+  digitalStartInput: document.querySelector("#digitalStartInput"),
+  digitalBitMsInput: document.querySelector("#digitalBitMsInput"),
+  digitalGapMsInput: document.querySelector("#digitalGapMsInput"),
+  digitalBrightnessInput: document.querySelector("#digitalBrightnessInput"),
+  generateDigitalBlocksButton: document.querySelector("#generateDigitalBlocksButton"),
+  appendDigitalBlocksButton: document.querySelector("#appendDigitalBlocksButton"),
+  runDigitalBlocksButton: document.querySelector("#runDigitalBlocksButton"),
+  digitalPreviewOutput: document.querySelector("#digitalPreviewOutput"),
   deleteTimelineBlockButton: document.querySelector("#deleteTimelineBlockButton"),
   clipColorInput: document.querySelector("#clipColorInput"),
   clipStartInput: document.querySelector("#clipStartInput"),
@@ -66,9 +102,9 @@ const el = {
   clipBrightnessInput: document.querySelector("#clipBrightnessInput"),
   clipList: document.querySelector("#clipList"),
   clipTimeline: document.querySelector("#clipTimeline"),
-  timelineRuler: document.querySelector("#timelineRuler"),
-  timelinePlot: document.querySelector("#timelinePlot"),
-  timelineDuration: document.querySelector("#timelineDuration"),
+  blockTimelineRuler: document.querySelector("#blockTimelineRuler"),
+  blockPreviewPlot: document.querySelector("#blockPreviewPlot"),
+  blockTimelineDuration: document.querySelector("#blockTimelineDuration"),
 };
 
 function isConnected() {
@@ -179,28 +215,292 @@ async function sendCommand(command) {
 }
 
 function setActiveTab(tabName) {
+  const manualActive = tabName === "manual";
   const timelineActive = tabName === "timeline";
-  el.manualTabButton.setAttribute("aria-selected", String(!timelineActive));
+  const blocksActive = tabName === "blocks";
+
+  el.manualTabButton.setAttribute("aria-selected", String(manualActive));
   el.timelineTabButton.setAttribute("aria-selected", String(timelineActive));
-  el.manualPanel.hidden = timelineActive;
+  el.blocksTabButton.setAttribute("aria-selected", String(blocksActive));
+  el.manualPanel.hidden = !manualActive;
   el.timelinePanel.hidden = !timelineActive;
-  el.manualPanel.classList.toggle("is-active", !timelineActive);
+  el.blocksPanel.hidden = !blocksActive;
+  el.manualPanel.classList.toggle("is-active", manualActive);
   el.timelinePanel.classList.toggle("is-active", timelineActive);
+  el.blocksPanel.classList.toggle("is-active", blocksActive);
+
   if (timelineActive) {
     renderTimeline();
   }
+  if (blocksActive) {
+    renderBlocks();
+  }
+}
+
+function channelById(channelId) {
+  return channels.find((channel) => channel.id === channelId) || channels[0];
+}
+
+function channelOrder(channelId) {
+  return channels.findIndex((channel) => channel.id === channelId);
+}
+
+function timelineEventDurationMs() {
+  return Math.max(1000, ...timelineRows.map((row) => row.timeMs));
 }
 
 function timelineEndMs(block) {
   return block.startMs + block.durationMs;
 }
 
-function timelineDurationMs() {
-  return Math.max(1000, ...timelineBlocks.map(timelineEndMs));
+function blockTimelineDurationMs() {
+  return Math.max(blockTimelineMinimumEndMs, 1000, ...timelineBlocks.map(timelineEndMs));
 }
 
-function channelById(channelId) {
-  return channels.find((channel) => channel.id === channelId) || channels[0];
+function createSvgElement(name, attrs = {}) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [key, value] of Object.entries(attrs)) {
+    node.setAttribute(key, String(value));
+  }
+  return node;
+}
+
+function createChannelSelect(value, onChange) {
+  const select = document.createElement("select");
+  for (const channel of channels) {
+    const option = document.createElement("option");
+    option.value = channel.id;
+    option.textContent = channel.id;
+    select.appendChild(option);
+  }
+  select.value = value;
+  select.addEventListener("change", onChange);
+  return select;
+}
+
+function sortTimelineRows() {
+  timelineRows.sort((a, b) => {
+    if (a.timeMs !== b.timeMs) {
+      return a.timeMs - b.timeMs;
+    }
+    return channelOrder(a.color) - channelOrder(b.color);
+  });
+}
+
+function addTimelineRow(color = channels[0].id, timeMs = null) {
+  const maxTime = timelineRows.reduce((max, row) => Math.max(max, row.timeMs), 0);
+  timelineRows.push({
+    id: timelineRowId++,
+    timeMs: clampTimelineTime(timeMs ?? maxTime + 100),
+    color,
+    brightness: 1000,
+  });
+  renderTimeline();
+}
+
+function eventBrightnessAt(channelId, timeMs) {
+  const rows = timelineRows
+    .filter((row) => row.color === channelId)
+    .sort((a, b) => {
+      if (a.timeMs !== b.timeMs) {
+        return a.timeMs - b.timeMs;
+      }
+      return a.id - b.id;
+    });
+  let brightness = 0;
+  for (const row of rows) {
+    if (row.timeMs > timeMs) {
+      break;
+    }
+    brightness = row.brightness;
+  }
+  return brightness;
+}
+
+function drawIntensityPlot(svg, maxTime, readBrightness, collectTimes) {
+  svg.replaceChildren();
+
+  const width = 820;
+  const height = 260;
+  const margin = { top: 28, right: 98, bottom: 42, left: 58 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const duration = Math.max(1, maxTime);
+
+  const x = (timeMs) => margin.left + (timeMs / duration) * plotWidth;
+  const y = (brightness) => margin.top + (1 - brightness / 1000) * plotHeight;
+
+  for (const brightness of [0, 250, 500, 750, 1000]) {
+    const lineY = y(brightness);
+    svg.appendChild(createSvgElement("line", {
+      x1: margin.left,
+      y1: lineY,
+      x2: margin.left + plotWidth,
+      y2: lineY,
+      class: "plot-grid",
+    }));
+    const label = createSvgElement("text", {
+      x: margin.left - 10,
+      y: lineY + 4,
+      class: "plot-label",
+      "text-anchor": "end",
+    });
+    label.textContent = brightness;
+    svg.appendChild(label);
+  }
+
+  const timeTicks = [0, duration / 4, duration / 2, (duration * 3) / 4, duration];
+  for (const tick of timeTicks) {
+    const tickX = x(tick);
+    svg.appendChild(createSvgElement("line", {
+      x1: tickX,
+      y1: margin.top,
+      x2: tickX,
+      y2: margin.top + plotHeight,
+      class: "plot-grid",
+    }));
+    const label = createSvgElement("text", {
+      x: tickX,
+      y: margin.top + plotHeight + 24,
+      class: "plot-label",
+      "text-anchor": "middle",
+    });
+    label.textContent = `${Math.round(tick)}`;
+    svg.appendChild(label);
+  }
+
+  svg.appendChild(createSvgElement("line", {
+    x1: margin.left,
+    y1: margin.top + plotHeight,
+    x2: margin.left + plotWidth,
+    y2: margin.top + plotHeight,
+    class: "plot-axis",
+  }));
+  svg.appendChild(createSvgElement("line", {
+    x1: margin.left,
+    y1: margin.top,
+    x2: margin.left,
+    y2: margin.top + plotHeight,
+    class: "plot-axis",
+  }));
+
+  channels.forEach((channel, index) => {
+    const timePoints = new Set([0, duration, ...collectTimes(channel.id)]);
+    const sortedTimes = [...timePoints].sort((a, b) => a - b);
+    let pathData = `M ${x(0)} ${y(readBrightness(channel.id, 0))}`;
+
+    for (let i = 1; i < sortedTimes.length; i += 1) {
+      const nextTime = sortedTimes[i];
+      pathData += ` H ${x(nextTime)} V ${y(readBrightness(channel.id, nextTime))}`;
+    }
+    pathData += ` H ${x(duration)}`;
+
+    svg.appendChild(createSvgElement("path", {
+      d: pathData,
+      class: "plot-line",
+      stroke: channel.color,
+    }));
+
+    const legendY = margin.top + index * 20;
+    const legendX = margin.left + plotWidth + 22;
+    svg.appendChild(createSvgElement("line", {
+      x1: legendX,
+      y1: legendY,
+      x2: legendX + 18,
+      y2: legendY,
+      stroke: channel.color,
+      "stroke-width": 3,
+      "stroke-linecap": "round",
+    }));
+    const legend = createSvgElement("text", {
+      x: legendX + 26,
+      y: legendY + 4,
+      class: "plot-legend-text",
+    });
+    legend.textContent = channel.id;
+    svg.appendChild(legend);
+  });
+}
+
+function renderTimelineTable() {
+  el.timelineRows.replaceChildren();
+
+  if (timelineRows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "timeline-empty";
+    empty.textContent = "No timeline rows";
+    el.timelineRows.appendChild(empty);
+    return;
+  }
+
+  for (const row of timelineRows) {
+    const rowNode = document.createElement("div");
+    rowNode.className = "timeline-row";
+    rowNode.setAttribute("role", "row");
+
+    const timeInput = document.createElement("input");
+    timeInput.type = "number";
+    timeInput.min = "0";
+    timeInput.step = "1";
+    timeInput.value = row.timeMs;
+    timeInput.setAttribute("aria-label", "Time ms");
+    timeInput.addEventListener("input", () => {
+      row.timeMs = clampTimelineTime(timeInput.value);
+      renderEventTimelinePlot();
+    });
+
+    const colorSelect = createChannelSelect(row.color, () => {
+      row.color = colorSelect.value;
+      renderEventTimelinePlot();
+    });
+    colorSelect.setAttribute("aria-label", "Color");
+
+    const brightnessInput = document.createElement("input");
+    brightnessInput.type = "number";
+    brightnessInput.min = "0";
+    brightnessInput.max = "1000";
+    brightnessInput.step = "10";
+    brightnessInput.value = row.brightness;
+    brightnessInput.setAttribute("aria-label", "Brightness");
+    brightnessInput.addEventListener("input", () => {
+      row.brightness = clampTimelineBrightness(brightnessInput.value);
+      renderEventTimelinePlot();
+    });
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "row-delete-button";
+    deleteButton.type = "button";
+    deleteButton.textContent = "x";
+    deleteButton.setAttribute("aria-label", "Delete row");
+    deleteButton.addEventListener("click", () => {
+      const index = timelineRows.findIndex((candidate) => candidate.id === row.id);
+      if (index >= 0) {
+        timelineRows.splice(index, 1);
+        renderTimeline();
+      }
+    });
+
+    rowNode.append(timeInput, colorSelect, brightnessInput, deleteButton);
+    el.timelineRows.appendChild(rowNode);
+  }
+}
+
+function renderEventTimelinePlot() {
+  const maxTime = timelineEventDurationMs();
+  el.timelineDuration.textContent = `${maxTime} ms`;
+  drawIntensityPlot(
+    el.timelinePlot,
+    maxTime,
+    eventBrightnessAt,
+    (channelId) => timelineRows
+      .filter((row) => row.color === channelId)
+      .map((row) => row.timeMs),
+  );
+}
+
+function renderTimeline() {
+  renderTimelineTable();
+  renderEventTimelinePlot();
 }
 
 function selectedTimelineBlock() {
@@ -217,17 +517,17 @@ function addTimelineBlock(color = channels[0].id, startMs = null) {
     brightness: 1000,
   };
   timelineBlocks.push(block);
+  blockTimelineMinimumEndMs = Math.max(blockTimelineMinimumEndMs, timelineEndMs(block));
   selectedTimelineBlockId = block.id;
-  renderTimeline();
+  renderBlocks();
 }
 
-function sortTimelineRows() {
+function sortTimelineBlocks() {
   timelineBlocks.sort((a, b) => {
     if (a.startMs !== b.startMs) {
       return a.startMs - b.startMs;
     }
-    const channelDelta = channels.findIndex((channel) => channel.id === a.color) -
-      channels.findIndex((channel) => channel.id === b.color);
+    const channelDelta = channelOrder(a.color) - channelOrder(b.color);
     if (channelDelta !== 0) {
       return channelDelta;
     }
@@ -242,6 +542,187 @@ function renderClipColorOptions() {
     option.value = channel.id;
     option.textContent = channel.id;
     el.clipColorInput.appendChild(option);
+  }
+}
+
+function renderDigitalChannelOptions() {
+  el.digitalChannelInput.replaceChildren();
+  for (const channel of channels) {
+    const option = document.createElement("option");
+    option.value = channel.id;
+    option.textContent = channel.id;
+    el.digitalChannelInput.appendChild(option);
+  }
+  el.digitalChannelInput.value = channels[0].id;
+}
+
+function parseDigitalBits(input, format, bitWidth) {
+  const width = Number(bitWidth);
+  const raw = String(input).trim().replace(/[\s_,]/g, "");
+  if (!raw) {
+    throw new Error("Digital data is empty");
+  }
+
+  if (format === "bin") {
+    const normalized = raw.replace(/^0b/i, "");
+    if (!/^[01]+$/.test(normalized)) {
+      throw new Error("Binary data must contain only 0 or 1");
+    }
+    if (normalized.length > width) {
+      throw new Error(`Binary data exceeds ${width} bits`);
+    }
+    return normalized.padStart(width, "0");
+  }
+
+  const normalizedHex = raw.replace(/^0x/i, "");
+  if (!/^[0-9a-f]+$/i.test(normalizedHex)) {
+    throw new Error("Hex data must contain only 0-9 or A-F");
+  }
+
+  const value = Number.parseInt(normalizedHex, 16);
+  const maxValue = (2 ** width) - 1;
+  if (value > maxValue) {
+    throw new Error(`Hex data exceeds ${width} bits`);
+  }
+  return value.toString(2).padStart(width, "0");
+}
+
+function clampDigitalBitMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 200;
+  }
+  return Math.max(1, Math.round(numeric));
+}
+
+function clampDigitalGapMs(value, bitMs) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(bitMs - 1, Math.round(numeric)));
+}
+
+function pulseBlockDuration(durationMs, gapMs) {
+  return Math.max(1, Math.round(durationMs) - gapMs);
+}
+
+function readDigitalProtocolConfig() {
+  const bitMs = clampDigitalBitMs(el.digitalBitMsInput.value);
+  const gapMs = clampDigitalGapMs(el.digitalGapMsInput.value, bitMs);
+  const brightness = clampTimelineBrightness(el.digitalBrightnessInput.value);
+  if (brightness <= 0) {
+    throw new Error("Brightness must be greater than 0");
+  }
+
+  return {
+    channelId: el.digitalChannelInput.value,
+    format: el.digitalFormatInput.value,
+    bitWidth: Number(el.digitalWidthInput.value),
+    encoding: el.digitalEncodingInput.value,
+    data: el.digitalDataInput.value,
+    startMs: clampTimelineTime(el.digitalStartInput.value),
+    bitMs,
+    gapMs,
+    brightness,
+  };
+}
+
+function createDigitalProtocolBlocks(config) {
+  const bits = parseDigitalBits(config.data, config.format, config.bitWidth);
+  const blocks = [];
+
+  function pushBlock(startMs, durationMs) {
+    blocks.push({
+      startMs,
+      durationMs: pulseBlockDuration(durationMs, config.gapMs),
+      color: config.channelId,
+      brightness: config.brightness,
+    });
+  }
+
+  bits.split("").forEach((bit, index) => {
+    const bitStart = config.startMs + index * config.bitMs;
+
+    if (config.encoding === "ook") {
+      if (bit === "1") {
+        pushBlock(bitStart, config.bitMs);
+      }
+      return;
+    }
+
+    if (config.encoding === "manchester") {
+      const firstHalf = Math.max(1, Math.floor(config.bitMs / 2));
+      const secondHalf = Math.max(1, config.bitMs - firstHalf);
+      if (bit === "0") {
+        pushBlock(bitStart, firstHalf);
+      } else {
+        pushBlock(bitStart + firstHalf, secondHalf);
+      }
+      return;
+    }
+
+    const zeroWidth = Math.max(1, Math.round(config.bitMs * 0.25));
+    const oneWidth = Math.max(1, Math.round(config.bitMs * 0.75));
+    pushBlock(bitStart, bit === "1" ? oneWidth : zeroWidth);
+  });
+
+  return {
+    bits,
+    blocks,
+    totalDurationMs: config.bitMs * bits.length,
+    endMs: config.startMs + config.bitMs * bits.length,
+  };
+}
+
+function updateDigitalPreview() {
+  try {
+    const config = readDigitalProtocolConfig();
+    const preview = createDigitalProtocolBlocks(config);
+    el.digitalPreviewOutput.textContent =
+      `${preview.bits} | ${config.encoding} | ${preview.blocks.length} pulses | ${preview.totalDurationMs} ms`;
+  } catch (error) {
+    el.digitalPreviewOutput.textContent = error.message || String(error);
+  }
+}
+
+function generateDigitalBlocks({ append = false, run = false } = {}) {
+  let preview;
+  let config;
+  try {
+    config = readDigitalProtocolConfig();
+    preview = createDigitalProtocolBlocks(config);
+  } catch (error) {
+    appendLog("!", error.message || String(error));
+    updateDigitalPreview();
+    return;
+  }
+
+  if (!append) {
+    timelineBlocks.splice(0, timelineBlocks.length);
+    selectedTimelineBlockId = null;
+    blockTimelineMinimumEndMs = 1000;
+  }
+
+  const generatedBlocks = preview.blocks.map((block) => ({
+    id: timelineBlockId++,
+    ...block,
+  }));
+  timelineBlocks.push(...generatedBlocks);
+  if (generatedBlocks.length > 0) {
+    selectedTimelineBlockId = generatedBlocks[0].id;
+  }
+
+  blockTimelineMinimumEndMs = Math.max(blockTimelineMinimumEndMs, preview.endMs);
+  renderBlocks();
+  updateDigitalPreview();
+  appendLog(
+    "!",
+    `Generated ${preview.blocks.length} ${config.encoding} pulses from ${preview.bits} on ${config.channelId}`,
+  );
+
+  if (run) {
+    runProgram(buildBlockProgramEvents(), "Digital Blocks");
   }
 }
 
@@ -268,17 +749,9 @@ function syncClipEditor() {
   el.clipBrightnessInput.value = block.brightness;
 }
 
-function createSvgElement(name, attrs = {}) {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", name);
-  for (const [key, value] of Object.entries(attrs)) {
-    node.setAttribute(key, String(value));
-  }
-  return node;
-}
-
 function selectTimelineBlock(blockId) {
   selectedTimelineBlockId = blockId;
-  renderTimeline();
+  renderBlocks();
 }
 
 function renderClipList() {
@@ -317,7 +790,7 @@ function renderClipList() {
 }
 
 function renderTimelineRuler(maxTime) {
-  el.timelineRuler.replaceChildren();
+  el.blockTimelineRuler.replaceChildren();
   const tickCount = 5;
   for (let i = 0; i <= tickCount; i += 1) {
     const tick = document.createElement("div");
@@ -326,13 +799,13 @@ function renderTimelineRuler(maxTime) {
     const label = document.createElement("span");
     label.textContent = `${Math.round((maxTime * i) / tickCount)} ms`;
     tick.appendChild(label);
-    el.timelineRuler.appendChild(tick);
+    el.blockTimelineRuler.appendChild(tick);
   }
 }
 
 function renderClipTimeline() {
-  const maxTime = timelineDurationMs();
-  el.timelineDuration.textContent = `${maxTime} ms`;
+  const maxTime = blockTimelineDurationMs();
+  el.blockTimelineDuration.textContent = `${maxTime} ms`;
   renderTimelineRuler(maxTime);
   el.clipTimeline.replaceChildren();
 
@@ -373,7 +846,7 @@ function renderClipTimeline() {
   }
 }
 
-function brightnessAt(channelId, timeMs) {
+function blockBrightnessAt(channelId, timeMs) {
   return timelineBlocks
     .filter((block) =>
       block.color === channelId &&
@@ -382,132 +855,177 @@ function brightnessAt(channelId, timeMs) {
     .reduce((max, block) => Math.max(max, block.brightness), 0);
 }
 
-function renderTimelinePlot() {
-  const svg = el.timelinePlot;
-  svg.replaceChildren();
-
-  const width = 820;
-  const height = 260;
-  const margin = { top: 28, right: 98, bottom: 42, left: 58 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
-  const maxTime = timelineDurationMs();
-
-  const x = (timeMs) => margin.left + (timeMs / maxTime) * plotWidth;
-  const y = (brightness) => margin.top + (1 - brightness / 1000) * plotHeight;
-
-  for (const brightness of [0, 250, 500, 750, 1000]) {
-    const lineY = y(brightness);
-    svg.appendChild(createSvgElement("line", {
-      x1: margin.left,
-      y1: lineY,
-      x2: margin.left + plotWidth,
-      y2: lineY,
-      class: "plot-grid",
-    }));
-    const label = createSvgElement("text", {
-      x: margin.left - 10,
-      y: lineY + 4,
-      class: "plot-label",
-      "text-anchor": "end",
-    });
-    label.textContent = brightness;
-    svg.appendChild(label);
-  }
-
-  const timeTicks = [0, maxTime / 4, maxTime / 2, (maxTime * 3) / 4, maxTime];
-  for (const tick of timeTicks) {
-    const tickX = x(tick);
-    svg.appendChild(createSvgElement("line", {
-      x1: tickX,
-      y1: margin.top,
-      x2: tickX,
-      y2: margin.top + plotHeight,
-      class: "plot-grid",
-    }));
-    const label = createSvgElement("text", {
-      x: tickX,
-      y: margin.top + plotHeight + 24,
-      class: "plot-label",
-      "text-anchor": "middle",
-    });
-    label.textContent = `${Math.round(tick)}`;
-    svg.appendChild(label);
-  }
-
-  svg.appendChild(createSvgElement("line", {
-    x1: margin.left,
-    y1: margin.top + plotHeight,
-    x2: margin.left + plotWidth,
-    y2: margin.top + plotHeight,
-    class: "plot-axis",
-  }));
-  svg.appendChild(createSvgElement("line", {
-    x1: margin.left,
-    y1: margin.top,
-    x2: margin.left,
-    y2: margin.top + plotHeight,
-    class: "plot-axis",
-  }));
-
-  channels.forEach((channel, index) => {
-    const timePoints = new Set([0, maxTime]);
-    for (const block of timelineBlocks.filter((candidate) => candidate.color === channel.id)) {
-      timePoints.add(block.startMs);
-      timePoints.add(timelineEndMs(block));
-    }
-
-    const sortedTimes = [...timePoints].sort((a, b) => a - b);
-    let pathData = `M ${x(0)} ${y(brightnessAt(channel.id, 0))}`;
-
-    for (let i = 1; i < sortedTimes.length; i += 1) {
-      const previousTime = sortedTimes[i - 1];
-      const nextTime = sortedTimes[i];
-      const previousBrightness = brightnessAt(channel.id, previousTime);
-      const nextBrightness = brightnessAt(channel.id, nextTime);
-      pathData += ` H ${x(nextTime)} V ${y(nextBrightness)}`;
-      if (i === sortedTimes.length - 1 && previousBrightness !== nextBrightness) {
-        pathData += ` H ${x(maxTime)}`;
-      }
-    }
-
-    pathData += ` H ${x(maxTime)}`;
-
-    svg.appendChild(createSvgElement("path", {
-      d: pathData,
-      class: "plot-line",
-      stroke: channel.color,
-    }));
-
-    const legendY = margin.top + index * 20;
-    const legendX = margin.left + plotWidth + 22;
-    svg.appendChild(createSvgElement("line", {
-      x1: legendX,
-      y1: legendY,
-      x2: legendX + 18,
-      y2: legendY,
-      stroke: channel.color,
-      "stroke-width": 3,
-      "stroke-linecap": "round",
-    }));
-    const legend = createSvgElement("text", {
-      x: legendX + 26,
-      y: legendY + 4,
-      class: "plot-legend-text",
-    });
-    legend.textContent = channel.id;
-    svg.appendChild(legend);
-  });
+function renderBlockPreviewPlot() {
+  const maxTime = blockTimelineDurationMs();
+  drawIntensityPlot(
+    el.blockPreviewPlot,
+    maxTime,
+    blockBrightnessAt,
+    (channelId) => timelineBlocks
+      .filter((block) => block.color === channelId)
+      .flatMap((block) => [block.startMs, timelineEndMs(block)]),
+  );
 }
 
-function renderTimeline() {
+function renderBlocks() {
   if (!selectedTimelineBlock() && timelineBlocks.length > 0) {
     selectedTimelineBlockId = timelineBlocks[0].id;
   }
   syncClipEditor();
   renderClipList();
   renderClipTimeline();
-  renderTimelinePlot();
+  renderBlockPreviewPlot();
+}
+
+function brightnessCommands(channelId, brightness) {
+  const duty = clampTimelineBrightness(brightness);
+  if (duty <= 0) {
+    return [`OFF,${channelId}`];
+  }
+  return [`PWM,${channelId},${duty}`, `ON,${channelId}`];
+}
+
+function setStateBrightness(channelId, brightness) {
+  const current = state.get(channelId);
+  if (!current) {
+    return;
+  }
+  const duty = clampTimelineBrightness(brightness);
+  current.on = duty > 0;
+  current.pulse = false;
+  current.pwm = true;
+  current.duty = duty;
+}
+
+function addProgramEvent(grouped, timeMs, commands, updates) {
+  const time = clampTimelineTime(timeMs);
+  if (!grouped.has(time)) {
+    grouped.set(time, { timeMs: time, commands: [], updates: [] });
+  }
+  const event = grouped.get(time);
+  event.commands.push(...commands);
+  event.updates.push(...updates);
+}
+
+function buildTimelineProgramEvents() {
+  const grouped = new Map();
+  addProgramEvent(
+    grouped,
+    0,
+    ["OFF,ALL"],
+    channels.map((channel) => ({ channelId: channel.id, brightness: 0 })),
+  );
+
+  const sortedRows = [...timelineRows].sort((a, b) => {
+    if (a.timeMs !== b.timeMs) {
+      return a.timeMs - b.timeMs;
+    }
+    return a.id - b.id;
+  });
+
+  for (const row of sortedRows) {
+    const brightness = clampTimelineBrightness(row.brightness);
+    addProgramEvent(
+      grouped,
+      row.timeMs,
+      brightnessCommands(row.color, brightness),
+      [{ channelId: row.color, brightness }],
+    );
+  }
+
+  return [...grouped.values()].sort((a, b) => a.timeMs - b.timeMs);
+}
+
+function buildBlockProgramEvents() {
+  const grouped = new Map();
+  const times = new Set([0, blockTimelineDurationMs()]);
+  for (const block of timelineBlocks) {
+    times.add(block.startMs);
+    times.add(timelineEndMs(block));
+  }
+
+  const lastBrightness = new Map(channels.map((channel) => [channel.id, 0]));
+  addProgramEvent(
+    grouped,
+    0,
+    ["OFF,ALL"],
+    channels.map((channel) => ({ channelId: channel.id, brightness: 0 })),
+  );
+
+  for (const timeMs of [...times].sort((a, b) => a - b)) {
+    for (const channel of channels) {
+      const brightness = blockBrightnessAt(channel.id, timeMs);
+      if (brightness === lastBrightness.get(channel.id)) {
+        continue;
+      }
+      lastBrightness.set(channel.id, brightness);
+      addProgramEvent(
+        grouped,
+        timeMs,
+        brightnessCommands(channel.id, brightness),
+        [{ channelId: channel.id, brightness }],
+      );
+    }
+  }
+
+  addProgramEvent(grouped, blockTimelineDurationMs(), [], []);
+  return [...grouped.values()].sort((a, b) => a.timeMs - b.timeMs);
+}
+
+function clearProgramTimers() {
+  for (const timer of programTimers) {
+    window.clearTimeout(timer);
+  }
+  programTimers = [];
+  runningProgramLabel = "";
+}
+
+async function stopProgram() {
+  if (programTimers.length > 0) {
+    appendLog("!", `${runningProgramLabel || "Program"} stopped`);
+  }
+  clearProgramTimers();
+
+  for (const channel of channels) {
+    setStateBrightness(channel.id, 0);
+  }
+  syncAllCards();
+  if (isConnected()) {
+    await sendCommand("OFF,ALL");
+  }
+}
+
+function runProgram(events, label) {
+  if (!isConnected()) {
+    appendLog("!", `${label} Run requires BLE connection`);
+    return;
+  }
+
+  clearProgramTimers();
+  runningProgramLabel = label;
+  const maxTime = events.reduce((max, event) => Math.max(max, event.timeMs), 0);
+  appendLog("!", `${label} Run started: ${events.length} steps, ${maxTime} ms`);
+
+  for (const event of events) {
+    const timer = window.setTimeout(async () => {
+      for (const update of event.updates) {
+        setStateBrightness(update.channelId, update.brightness);
+      }
+      syncAllCards();
+      for (const command of event.commands) {
+        await sendCommand(command);
+      }
+    }, event.timeMs);
+    programTimers.push(timer);
+  }
+
+  const commandCount = events.reduce((sum, event) => sum + event.commands.length, 0);
+  const finishTimer = window.setTimeout(() => {
+    programTimers = [];
+    runningProgramLabel = "";
+    appendLog("!", `${label} Run finished`);
+  }, maxTime + commandCount * 90 + 120);
+  programTimers.push(finishTimer);
 }
 
 function renderChannel(channel) {
@@ -770,22 +1288,58 @@ el.allOffButton.addEventListener("click", () => sendAll(false));
 el.allMaxButton.addEventListener("click", () => sendAll(true, 1000));
 el.manualTabButton.addEventListener("click", () => setActiveTab("manual"));
 el.timelineTabButton.addEventListener("click", () => setActiveTab("timeline"));
-el.addTimelineBlockButton.addEventListener("click", () => addTimelineBlock());
-el.sortTimelineButton.addEventListener("click", () => {
+el.blocksTabButton.addEventListener("click", () => setActiveTab("blocks"));
+el.addTimelineRowButton.addEventListener("click", () => addTimelineRow());
+el.sortTimelineRowsButton.addEventListener("click", () => {
   sortTimelineRows();
   renderTimeline();
 });
-el.clearTimelineButton.addEventListener("click", () => {
+el.clearTimelineRowsButton.addEventListener("click", () => {
+  timelineRows.splice(0, timelineRows.length);
+  renderTimeline();
+});
+el.runTimelineButton.addEventListener("click", () => {
+  runProgram(buildTimelineProgramEvents(), "Timeline");
+});
+el.stopTimelineButton.addEventListener("click", stopProgram);
+el.addTimelineBlockButton.addEventListener("click", () => addTimelineBlock());
+el.sortTimelineBlocksButton.addEventListener("click", () => {
+  sortTimelineBlocks();
+  renderBlocks();
+});
+el.clearTimelineBlocksButton.addEventListener("click", () => {
   timelineBlocks.splice(0, timelineBlocks.length);
   selectedTimelineBlockId = null;
-  renderTimeline();
+  blockTimelineMinimumEndMs = 1000;
+  renderBlocks();
+});
+el.runBlocksButton.addEventListener("click", () => {
+  runProgram(buildBlockProgramEvents(), "Blocks");
+});
+el.stopBlocksButton.addEventListener("click", stopProgram);
+el.generateDigitalBlocksButton.addEventListener("click", () => generateDigitalBlocks({ append: false }));
+el.appendDigitalBlocksButton.addEventListener("click", () => generateDigitalBlocks({ append: true }));
+el.runDigitalBlocksButton.addEventListener("click", () => generateDigitalBlocks({ append: false, run: true }));
+[
+  el.digitalChannelInput,
+  el.digitalFormatInput,
+  el.digitalWidthInput,
+  el.digitalEncodingInput,
+  el.digitalDataInput,
+  el.digitalStartInput,
+  el.digitalBitMsInput,
+  el.digitalGapMsInput,
+  el.digitalBrightnessInput,
+].forEach((input) => {
+  input.addEventListener("input", updateDigitalPreview);
+  input.addEventListener("change", updateDigitalPreview);
 });
 el.deleteTimelineBlockButton.addEventListener("click", () => {
   const index = timelineBlocks.findIndex((block) => block.id === selectedTimelineBlockId);
   if (index >= 0) {
     timelineBlocks.splice(index, 1);
     selectedTimelineBlockId = timelineBlocks[0]?.id ?? null;
-    renderTimeline();
+    renderBlocks();
   }
 });
 el.clipColorInput.addEventListener("change", () => {
@@ -794,7 +1348,7 @@ el.clipColorInput.addEventListener("change", () => {
     return;
   }
   block.color = el.clipColorInput.value;
-  renderTimeline();
+  renderBlocks();
 });
 el.clipStartInput.addEventListener("input", () => {
   const block = selectedTimelineBlock();
@@ -802,7 +1356,7 @@ el.clipStartInput.addEventListener("input", () => {
     return;
   }
   block.startMs = clampTimelineTime(el.clipStartInput.value);
-  renderTimeline();
+  renderBlocks();
 });
 el.clipDurationInput.addEventListener("input", () => {
   const block = selectedTimelineBlock();
@@ -810,7 +1364,7 @@ el.clipDurationInput.addEventListener("input", () => {
     return;
   }
   block.durationMs = clampTimelineDuration(el.clipDurationInput.value);
-  renderTimeline();
+  renderBlocks();
 });
 el.clipBrightnessInput.addEventListener("input", () => {
   const block = selectedTimelineBlock();
@@ -818,7 +1372,7 @@ el.clipBrightnessInput.addEventListener("input", () => {
     return;
   }
   block.brightness = clampTimelineBrightness(el.clipBrightnessInput.value);
-  renderTimeline();
+  renderBlocks();
 });
 el.sendManualButton.addEventListener("click", () => sendCommand(el.manualInput.value));
 el.manualInput.addEventListener("keydown", (event) => {
@@ -832,5 +1386,8 @@ el.clearLogButton.addEventListener("click", () => {
 
 channels.forEach(renderChannel);
 renderClipColorOptions();
+renderDigitalChannelOptions();
+updateDigitalPreview();
 renderTimeline();
+renderBlocks();
 setConnectionStatus(false);
