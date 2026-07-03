@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=2b27e281cff2">
+  <link rel="stylesheet" href="./styles.css?v=cb2bf99f29a6">
 </head>
 <body>
   <main class="app-shell">
@@ -23,18 +23,73 @@
       </div>
     </header>
 
-    <section class="command-bar">
-      <button id="getButton" type="button">GET</button>
-      <button id="allOnButton" type="button">ALL ON</button>
-      <button id="allOffButton" type="button">ALL OFF</button>
-      <button id="allMaxButton" type="button">ALL 100%</button>
-      <div class="manual-command">
-        <input id="manualInput" type="text" autocomplete="off" spellcheck="false" placeholder="SET,R,1,800">
-        <button id="sendManualButton" type="button">SEND</button>
-      </div>
+    <nav class="mode-tabs" aria-label="Control mode">
+      <button id="manualTabButton" class="tab-button" type="button" aria-selected="true">Manual</button>
+      <button id="timelineTabButton" class="tab-button" type="button" aria-selected="false">Timeline</button>
+    </nav>
+
+    <section id="manualPanel" class="tab-panel is-active">
+      <section class="command-bar">
+        <button id="getButton" type="button">GET</button>
+        <button id="allOnButton" type="button">ALL ON</button>
+        <button id="allOffButton" type="button">ALL OFF</button>
+        <button id="allMaxButton" type="button">ALL 100%</button>
+        <div class="manual-command">
+          <input id="manualInput" type="text" autocomplete="off" spellcheck="false" placeholder="SET,R,1,800">
+          <button id="sendManualButton" type="button">SEND</button>
+        </div>
+      </section>
+
+      <section id="channelGrid" class="channel-grid" aria-label="Channel controls"></section>
     </section>
 
-    <section id="channelGrid" class="channel-grid" aria-label="Channel controls"></section>
+    <section id="timelinePanel" class="tab-panel" hidden>
+      <div class="timeline-layout">
+        <section class="timeline-editor" aria-label="Timeline block editor">
+          <div class="timeline-toolbar">
+            <button id="addTimelineBlockButton" type="button">Add Block</button>
+            <button id="sortTimelineButton" type="button">Sort</button>
+            <button id="clearTimelineButton" type="button">Clear</button>
+          </div>
+
+          <div class="clip-editor">
+            <label>
+              <span>Channel</span>
+              <select id="clipColorInput"></select>
+            </label>
+            <label>
+              <span>Start ms</span>
+              <input id="clipStartInput" type="number" min="0" step="1">
+            </label>
+            <label>
+              <span>Duration ms</span>
+              <input id="clipDurationInput" type="number" min="1" step="1">
+            </label>
+            <label>
+              <span>Brightness</span>
+              <input id="clipBrightnessInput" type="number" min="0" max="1000" step="10">
+            </label>
+            <button id="deleteTimelineBlockButton" class="danger-button" type="button">Delete Block</button>
+          </div>
+
+          <div id="clipList" class="clip-list" aria-label="Timeline blocks"></div>
+        </section>
+
+        <section class="timeline-plot-panel" aria-label="Block timeline">
+          <div class="plot-head">
+            <span>Program Timeline</span>
+            <span id="timelineDuration">0 ms</span>
+          </div>
+          <div id="timelineRuler" class="timeline-ruler"></div>
+          <div id="clipTimeline" class="clip-timeline" aria-label="Channel lanes"></div>
+          <div class="plot-head plot-head-secondary">
+            <span>Intensity Preview</span>
+            <span>0-1000</span>
+          </div>
+          <svg id="timelinePlot" class="timeline-plot" viewBox="0 0 820 260" role="img" aria-label="Brightness over time"></svg>
+        </section>
+      </div>
+    </section>
 
     <section class="terminal">
       <div class="terminal-head">
@@ -98,6 +153,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=6e318dd4aa2a"></script>
+  <script src="./app.js?v=2cb430d0be17"></script>
 </body>
 </html>

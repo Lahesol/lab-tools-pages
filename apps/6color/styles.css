@@ -117,11 +117,36 @@ h1 {
   margin-right: 4px;
 }
 
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.tab-button {
+  min-width: 112px;
+  font-weight: 650;
+}
+
+.tab-button[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.tab-panel {
+  margin-top: 16px;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
 .command-bar {
   display: grid;
   grid-template-columns: repeat(4, minmax(88px, auto)) minmax(240px, 1fr);
   gap: 10px;
-  margin: 16px 0;
+  margin: 0 0 16px;
   align-items: center;
 }
 
@@ -297,6 +322,238 @@ h1 {
   min-height: 36px;
 }
 
+.timeline-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.72fr) minmax(560px, 1.28fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.timeline-editor,
+.timeline-plot-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.timeline-editor {
+  padding: 14px;
+  min-width: 0;
+}
+
+.timeline-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.clip-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.clip-editor label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.clip-editor input,
+.clip-editor select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 9px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: rgba(173, 47, 53, 0.35);
+}
+
+.clip-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.clip-list-item {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.clip-list-item[aria-selected="true"] {
+  border-color: rgba(11, 127, 120, 0.45);
+  background: #e3f4f1;
+}
+
+.clip-list-color {
+  width: 10px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.clip-list-main {
+  display: grid;
+  gap: 2px;
+}
+
+.clip-list-title {
+  font-weight: 650;
+}
+
+.clip-list-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.timeline-plot-panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.plot-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.plot-head-secondary {
+  border-top: 1px solid var(--line);
+}
+
+.timeline-ruler {
+  position: relative;
+  height: 34px;
+  margin-left: 72px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+  overflow: hidden;
+}
+
+.ruler-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid #cbd6da;
+}
+
+.ruler-tick span {
+  position: absolute;
+  top: 8px;
+  left: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.clip-timeline {
+  display: grid;
+  max-height: 440px;
+  overflow: auto;
+  background: #fbfcfd;
+}
+
+.timeline-track {
+  display: grid;
+  grid-template-columns: 72px minmax(560px, 1fr);
+  min-height: 58px;
+  border-bottom: 1px solid var(--line);
+}
+
+.track-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  font-weight: 700;
+}
+
+.track-lane {
+  position: relative;
+  min-height: 58px;
+  background-image: linear-gradient(to right, rgba(126, 144, 150, 0.18) 1px, transparent 1px);
+  background-size: 10% 100%;
+}
+
+.timeline-clip {
+  position: absolute;
+  top: 10px;
+  height: 38px;
+  min-width: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 10px 9px 0;
+  cursor: pointer;
+}
+
+.timeline-clip[aria-selected="true"] {
+  outline: 2px solid #162024;
+  outline-offset: 1px;
+}
+
+.timeline-plot {
+  display: block;
+  width: 100%;
+  min-height: 240px;
+  background: #fbfcfd;
+}
+
+.plot-grid {
+  stroke: #e4ebee;
+  stroke-width: 1;
+}
+
+.plot-axis {
+  stroke: #7f9096;
+  stroke-width: 1.4;
+}
+
+.plot-label {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.plot-line {
+  fill: none;
+  stroke-width: 2.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.plot-legend-text {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .terminal {
   margin-top: 16px;
   background: #12191c;
@@ -352,6 +609,10 @@ h1 {
   .channel-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .timeline-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -363,12 +624,22 @@ h1 {
   .connection,
   .command-bar,
   .manual-command,
-  .channel-grid {
+  .channel-grid,
+  .timeline-toolbar {
     grid-template-columns: 1fr;
     width: 100%;
   }
 
   .connection {
     display: grid;
+  }
+
+  .mode-tabs,
+  .timeline-toolbar {
+    display: grid;
+  }
+
+  .timeline-plot {
+    min-height: 300px;
   }
 }
