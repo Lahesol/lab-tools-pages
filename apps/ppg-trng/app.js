@@ -445,12 +445,15 @@ function setAdcBias(source, value, options = {}) {
 function measureBiasFromSamples(options = {}) {
   const source = normalizeAdcSource(options.source) || state.adcSource;
   const candidates = state.samples
-    .filter((sample) => (sample.channel || "ADC") === "ADC")
+    .filter((sample) => {
+      const channel = sample.channel || "ADC";
+      return channel === "ADC" || channel === "A";
+    })
     .filter((sample) => (sample.adcSource || state.adcSource) === source)
     .slice(-ADC_BIAS_SAMPLE_COUNT);
 
   if (!candidates.length) {
-    if (!options.silent) addLog("SYS", `No ${source} ADC samples for bias`);
+    if (!options.silent) addLog("SYS", `No ${source} ADC/ambient samples for bias`);
     return null;
   }
 
@@ -482,11 +485,12 @@ function convertAdcSampleValue(sample, value = sample.value) {
     if (channel === "ADC") {
       return Number.isFinite(bias) ? (value - bias) * ADC_CURRENT_SCALE : value;
     }
-    return isDelta ? value * ADC_CURRENT_SCALE : value;
+    if (isDelta) return Number.isFinite(bias) ? value * ADC_CURRENT_SCALE : NaN;
+    return value;
   }
 
   if (isDelta && Number.isFinite(bias)) return bias + value;
-  return value;
+  return isDelta ? NaN : value;
 }
 
 function createViewSample(sample) {
@@ -518,12 +522,24 @@ function getValueDescription() {
   const bias = getAdcBias();
 
   if (getValueMode() === "current") {
-    if (hasPpgDelta) return "Current delta";
+    if (hasPpgDelta) return Number.isFinite(bias) ? `Current | bias ${bias.toFixed(0)}` : "Current | set bias";
     return Number.isFinite(bias) ? `Current | bias ${bias.toFixed(0)}` : "Current | set bias";
   }
 
   if (!hasPpgDelta) return "ADC code";
-  return Number.isFinite(bias) ? `ADC code | bias ${bias.toFixed(0)} + PPG delta` : "PPG delta | set bias";
+  return Number.isFinite(bias) ? `ADC code | bias ${bias.toFixed(0)}` : "ADC code | set bias";
+}
+
+function isWaitingForPpgBias() {
+  if (getValueMode() !== "adc" && getValueMode() !== "current") return false;
+  if (Number.isFinite(getAdcBias())) return false;
+  const selectedChannel = getSelectedChannel();
+  return state.samples.some((sample) => {
+    const channel = sample.channel || "ADC";
+    if (selectedChannel !== "all" && channel !== selectedChannel) return false;
+    if ((sample.adcSource || state.adcSource) !== state.adcSource) return false;
+    return isPpgDeltaSample(sample, channel);
+  });
 }
 
 function updateValueUi() {
@@ -1139,13 +1155,14 @@ function updateStats() {
   const displaySamples = getDisplaySamples();
   const values = displaySamples.map((sample) => sample.value);
   if (!values.length) {
+    const waitText = isWaitingForPpgBias() ? "Waiting for ADC bias" : "Waiting for samples";
     els.latestValue.textContent = "--";
     els.minValue.textContent = "--";
     els.maxValue.textContent = "--";
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
     els.sampleCount.textContent = String(state.totalSamples);
-    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
+    els.plotCaption.textContent = `${waitText} | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
     return;
   }
 
@@ -1460,7 +1477,9 @@ function getDisplaySamples(channel = getSelectedChannel()) {
   }
 
   const settings = getFilterSettings();
-  const samples = getSamplesForChannel(channel).map(createViewSample);
+  const samples = getSamplesForChannel(channel)
+    .map(createViewSample)
+    .filter((sample) => Number.isFinite(sample.value));
   if (settings.mode === "raw") {
     return samples;
   }
