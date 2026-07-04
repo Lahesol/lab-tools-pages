@@ -107,7 +107,7 @@
                   <span class="command-label">Query routes</span>
                 </button>
               </div>
-              <p class="command-note">ADC2 streams PPG. ADC3 streams noise bits.</p>
+              <p class="command-note">ADC2 streams PPG. ADC3 streams raw noise.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-bit-toggle="true" type="button" title="Start browser-side ADC3 bit extraction">
@@ -321,16 +321,26 @@
             <div class="plot-toolbar">
               <div>
                 <h2>PPG Encryption</h2>
-                <p id="encryptionStatus">ADC3 residual VN | key 0 bits | pending 0</p>
+                <p id="encryptionStatus">ADC3 residual VN | extraction off | key 0 bits | pending 0</p>
               </div>
               <div class="toolbar-actions">
                 <label class="compact-field" for="bitMethod">
                   <span>Bit method</span>
                   <select id="bitMethod">
+                    <option value="ma-threshold">ADC3 MA threshold</option>
+                    <option value="ma-threshold-vn">ADC3 MA threshold VN</option>
                     <option value="residual-vn" selected>ADC3 residual VN</option>
                     <option value="delta-vn">ADC3 delta VN</option>
                     <option value="lsb">ADC3 LSB</option>
                   </select>
+                </label>
+                <label id="liveMaWindowField" class="compact-field" for="liveMaWindow" title="Previous ADC3 samples used for the moving-average baseline.">
+                  <span>MA window</span>
+                  <input id="liveMaWindow" type="number" min="2" max="5001" step="1" value="33" />
+                </label>
+                <label id="liveMaOffsetField" class="compact-field" for="liveMaOffset" title="Threshold offset. The live rule is sample > moving_average + offset.">
+                  <span>Offset</span>
+                  <input id="liveMaOffset" type="number" step="0.001" value="0" />
                 </label>
               </div>
             </div>
@@ -641,7 +651,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=94aa0abe9e66" defer></script>
+    <script src="./app.js?v=cd9d95290ccd" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

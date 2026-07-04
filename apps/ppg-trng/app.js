@@ -29,6 +29,10 @@ const els = {
   sendRateButton: document.querySelector("#sendRateButton"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
   bitMethod: document.querySelector("#bitMethod"),
+  liveMaWindow: document.querySelector("#liveMaWindow"),
+  liveMaOffset: document.querySelector("#liveMaOffset"),
+  liveMaWindowField: document.querySelector("#liveMaWindowField"),
+  liveMaOffsetField: document.querySelector("#liveMaOffsetField"),
   keyBitCount: document.querySelector("#keyBitCount"),
   encryptionPending: document.querySelector("#encryptionPending"),
   encryptionCount: document.querySelector("#encryptionCount"),
@@ -151,6 +155,8 @@ const state = {
   encryptedCount: 0,
   droppedPpg: 0,
   lastEncrypted: null,
+  liveMaWindow: 33,
+  liveMaOffset: 0,
   noiseBaseline: null,
   noiseWarmup: 0,
   noisePairBit: null,
@@ -1055,21 +1061,64 @@ function getSelectedBitMethod() {
 }
 
 function getBitMethodLabel(method = state.bitGenerationMethod) {
+  if (method === "ma-threshold") return "ADC3 MA threshold";
+  if (method === "ma-threshold-vn") return "ADC3 MA threshold VN";
   if (method === "residual-vn") return "ADC3 residual VN";
   if (method === "delta-vn") return "ADC3 delta VN";
   if (method === "lsb") return "ADC3 LSB";
   return method || "--";
 }
 
-function setBitGenerationMethod(method = getSelectedBitMethod()) {
+function isMovingAverageBitMethod(method = state.bitGenerationMethod) {
+  return method === "ma-threshold" || method === "ma-threshold-vn";
+}
+
+function readLiveMaSettings() {
+  const windowSize = clampInteger(els.liveMaWindow?.value, 2, 5001, 33);
+  const offset = Number.parseFloat(els.liveMaOffset?.value);
+  return {
+    windowSize,
+    offset: Number.isFinite(offset) ? offset : 0,
+  };
+}
+
+function applyLiveMaSettings(options = {}) {
+  const settings = readLiveMaSettings();
+  const changed = settings.windowSize !== state.liveMaWindow || settings.offset !== state.liveMaOffset;
+  state.liveMaWindow = settings.windowSize;
+  state.liveMaOffset = settings.offset;
+  if (options.normalize !== false) {
+    if (els.liveMaWindow) els.liveMaWindow.value = String(settings.windowSize);
+    if (els.liveMaOffset) els.liveMaOffset.value = String(settings.offset);
+  }
+  if (changed && isMovingAverageBitMethod()) {
+    clearBits();
+    resetLiveEncryption();
+    updateBitStats();
+    updateEncryptionUi();
+  }
+}
+
+function updateLiveMaControls() {
+  const show = isMovingAverageBitMethod();
+  if (els.liveMaWindowField) els.liveMaWindowField.hidden = !show;
+  if (els.liveMaOffsetField) els.liveMaOffsetField.hidden = !show;
+}
+
+function setBitGenerationMethod(method = getSelectedBitMethod(), options = {}) {
   state.bitGenerationMethod = method || "residual-vn";
   if (els.bitMethod && els.bitMethod.value !== state.bitGenerationMethod) {
     els.bitMethod.value = state.bitGenerationMethod;
   }
+  updateLiveMaControls();
   clearBits();
   resetLiveEncryption();
-  updateBitStats();
-  updateEncryptionUi();
+  if (options.enable && !state.bitMode) {
+    setBitMode(true);
+  } else {
+    updateBitStats();
+    updateEncryptionUi();
+  }
 }
 
 function resetLiveEncryption() {
@@ -1096,6 +1145,8 @@ function getLiveBitExtractor(method, adcSource) {
       warmup: 0,
       previous: null,
       pairBit: null,
+      window: [],
+      sum: 0,
     };
   }
   return state.liveBitExtractors[key];
@@ -1126,6 +1177,27 @@ function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
   }
 
   const extractor = getLiveBitExtractor(method, source);
+
+  if (isMovingAverageBitMethod(method)) {
+    const windowSize = state.liveMaWindow;
+    const offset = state.liveMaOffset;
+    if (extractor.window.length >= windowSize) {
+      const threshold = (extractor.sum / extractor.window.length) + offset;
+      const rawBit = value > threshold ? 1 : 0;
+      if (method === "ma-threshold-vn") {
+        pushVonNeumannBit(rawBit, extractor, source, "ADC3 MA threshold VN", method);
+      } else {
+        handleGeneratedBits([rawBit], source, "ADC3 MA threshold", method);
+      }
+    }
+    extractor.window.push(value);
+    extractor.sum += value;
+    if (extractor.window.length > windowSize) {
+      extractor.sum -= extractor.window.shift();
+    }
+    return;
+  }
+
   if (method === "delta-vn") {
     if (extractor.previous === null) {
       extractor.previous = value;
@@ -1207,7 +1279,11 @@ function updateEncryptionUi() {
   if (els.encryptionCount) els.encryptionCount.textContent = String(state.encryptedCount);
   if (els.encryptionStatus) {
     const dropped = state.droppedPpg ? ` | dropped ${state.droppedPpg}` : "";
-    els.encryptionStatus.textContent = `${getBitMethodLabel()} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
+    const modeText = state.bitMode ? "extracting" : "extraction off";
+    const methodParams = isMovingAverageBitMethod()
+      ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
+      : "";
+    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${modeText} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
@@ -2899,7 +2975,11 @@ function bindEvents() {
     sendSampleRateCommand().catch((error) => addLog("ERR", error.message || error, true));
   });
   els.bitMethod?.addEventListener("change", () => {
-    setBitGenerationMethod(els.bitMethod.value);
+    setBitGenerationMethod(els.bitMethod.value, { enable: true });
+  });
+  [els.liveMaWindow, els.liveMaOffset].forEach((control) => {
+    control?.addEventListener("input", () => applyLiveMaSettings({ normalize: false }));
+    control?.addEventListener("change", () => applyLiveMaSettings());
   });
 
   els.plotAdcSource.addEventListener("change", async () => {
@@ -3000,6 +3080,7 @@ function init() {
   setSampleRateUi(DEFAULT_SAMPLE_RATE_HZ, rateHzToIntervalMs(DEFAULT_SAMPLE_RATE_HZ));
   setPpgRateUi(DEFAULT_PPG_RATE_HZ, 10, DEFAULT_PPG_LED_ON_MS);
   setDacValue(2056, "init");
+  applyLiveMaSettings();
   setBitGenerationMethod(getSelectedBitMethod());
   updateTransportControls();
   setConnectedUi(false);

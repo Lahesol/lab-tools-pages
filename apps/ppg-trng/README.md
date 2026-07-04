@@ -100,9 +100,9 @@ The top-bar `UI size` control switches the console density between compact, stan
 
 ## Bit Extraction
 
-Pressing `Bit extract` toggles browser-side ADC3 bit extraction. Firmware commands are not required for bit generation in this workflow.
+Pressing `Bit extract` toggles browser-side ADC3 bit extraction. Changing the live `Bit method` selector also enables extraction so the selected ADC3 method immediately feeds the bitmap and encryption key queue. Firmware commands are not required for bit generation in this workflow.
 
-The live `Bit method` selector chooses which ADC3 extraction method feeds the bitmap and encryption key queue: browser residual-sign plus Von Neumann, browser delta-sign plus Von Neumann, or ADC3 LSB parity.
+The live `Bit method` selector chooses which ADC3 extraction method feeds the bitmap and encryption key queue: moving-average threshold, moving-average threshold plus Von Neumann, browser residual-sign plus Von Neumann, browser delta-sign plus Von Neumann, or ADC3 LSB parity. The live moving-average rule matches the `Noise extractor` tab: `sample > moving_average(previous N samples) + offset`. Changing the live MA window or offset clears the current key queue and bitmap so bits from different threshold settings are not mixed.
 
 The PPG encryption panel treats each Green/IR/Red PPG sample as a 14-bit ADC code. It consumes 14 generated ADC3 bits as a key and displays `cipher = adc_code XOR key`. If key bits are slower than PPG samples, PPG samples wait in a pending queue.
 
