@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=ec1c7ad5a8ce">
+  <link rel="stylesheet" href="./styles.css?v=c34dc4b9759d">
 </head>
 <body>
   <main class="app-shell">
@@ -26,7 +26,7 @@
     <nav class="mode-tabs" aria-label="Control mode">
       <button id="manualTabButton" class="tab-button" type="button" aria-selected="true">Manual</button>
       <button id="timelineTabButton" class="tab-button" type="button" aria-selected="false">Timeline</button>
-      <button id="blocksTabButton" class="tab-button" type="button" aria-selected="false">Blocks</button>
+      <button id="blocksTabButton" class="tab-button" type="button" aria-selected="false">Protocols</button>
     </nav>
 
     <section id="manualPanel" class="tab-panel is-active">
@@ -51,8 +51,23 @@
             <button id="addTimelineRowButton" type="button">Add Row</button>
             <button id="sortTimelineRowsButton" type="button">Sort</button>
             <button id="clearTimelineRowsButton" type="button">Clear</button>
+            <button id="importTimelineCsvButton" type="button">Import CSV</button>
+            <button id="exportTimelineCsvButton" type="button">Export CSV</button>
             <button id="runTimelineButton" class="primary-button" type="button">Run</button>
             <button id="stopTimelineButton" type="button">Stop</button>
+            <input id="timelineCsvInput" type="file" accept=".csv,text/csv" hidden>
+          </div>
+
+          <div class="timeline-protocol-insert">
+            <label>
+              <span>Protocol</span>
+              <select id="timelineProtocolSelect"></select>
+            </label>
+            <label>
+              <span>Start ms</span>
+              <input id="timelineProtocolStartInput" type="number" min="0" step="1" value="0">
+            </label>
+            <button id="addProtocolToTimelineButton" type="button">Add Protocol</button>
           </div>
 
           <div class="timeline-table" role="table" aria-label="Timeline program rows">
@@ -78,17 +93,24 @@
 
     <section id="blocksPanel" class="tab-panel" hidden>
       <div class="timeline-layout">
-        <section class="timeline-editor" aria-label="Timeline block editor">
+        <section class="timeline-editor" aria-label="Protocol block editor">
           <div class="timeline-toolbar">
             <button id="addTimelineBlockButton" type="button">Add Block</button>
             <button id="sortTimelineBlocksButton" type="button">Sort</button>
             <button id="clearTimelineBlocksButton" type="button">Clear</button>
+            <button id="importProtocolCsvButton" type="button">Import CSV</button>
+            <button id="exportProtocolCsvButton" type="button">Export CSV</button>
             <button id="runBlocksButton" class="primary-button" type="button">Run</button>
             <button id="stopBlocksButton" type="button">Stop</button>
+            <input id="protocolCsvInput" type="file" accept=".csv,text/csv" hidden>
           </div>
 
           <div class="digital-protocol" aria-label="Digital pulse generator">
             <div class="protocol-grid">
+              <label class="protocol-wide">
+                <span>Name</span>
+                <input id="digitalNameInput" type="text" autocomplete="off" spellcheck="false" value="A5_OOK">
+              </label>
               <label>
                 <span>Channel</span>
                 <select id="digitalChannelInput"></select>
@@ -167,15 +189,16 @@
           <div id="clipList" class="clip-list" aria-label="Timeline blocks"></div>
         </section>
 
-        <section class="timeline-plot-panel" aria-label="Block timeline">
+        <section class="timeline-plot-panel" aria-label="Protocol waveform">
           <div class="plot-head">
-            <span>Program Timeline</span>
+            <span>Protocol Waveform</span>
             <span id="blockTimelineDuration">0 ms</span>
           </div>
+          <div id="protocolParameterList" class="parameter-list" aria-label="Protocol parameters"></div>
           <div id="blockTimelineRuler" class="timeline-ruler"></div>
-          <div id="clipTimeline" class="clip-timeline" aria-label="Channel lanes"></div>
+          <div id="clipTimeline" class="clip-timeline" aria-label="Protocol block lanes"></div>
           <div class="plot-head plot-head-secondary">
-            <span>Intensity Preview</span>
+            <span>Pulse Wave Preview</span>
             <span>0-1000</span>
           </div>
           <svg id="blockPreviewPlot" class="timeline-plot" viewBox="0 0 820 260" role="img" aria-label="Block brightness over time"></svg>
@@ -245,6 +268,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=235dd90d0b73"></script>
+  <script src="./app.js?v=ccc0207898a5"></script>
 </body>
 </html>

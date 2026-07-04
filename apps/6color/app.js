@@ -35,6 +35,9 @@ const timelineBlocks = [
 ];
 let blockTimelineMinimumEndMs = 1000;
 
+let protocolBlockId = 1;
+const protocolBlocks = [];
+
 let programTimers = [];
 let runningProgramLabel = "";
 
@@ -72,6 +75,12 @@ const el = {
   addTimelineRowButton: document.querySelector("#addTimelineRowButton"),
   sortTimelineRowsButton: document.querySelector("#sortTimelineRowsButton"),
   clearTimelineRowsButton: document.querySelector("#clearTimelineRowsButton"),
+  importTimelineCsvButton: document.querySelector("#importTimelineCsvButton"),
+  exportTimelineCsvButton: document.querySelector("#exportTimelineCsvButton"),
+  timelineCsvInput: document.querySelector("#timelineCsvInput"),
+  timelineProtocolSelect: document.querySelector("#timelineProtocolSelect"),
+  timelineProtocolStartInput: document.querySelector("#timelineProtocolStartInput"),
+  addProtocolToTimelineButton: document.querySelector("#addProtocolToTimelineButton"),
   runTimelineButton: document.querySelector("#runTimelineButton"),
   stopTimelineButton: document.querySelector("#stopTimelineButton"),
   timelineRows: document.querySelector("#timelineRows"),
@@ -80,8 +89,12 @@ const el = {
   addTimelineBlockButton: document.querySelector("#addTimelineBlockButton"),
   sortTimelineBlocksButton: document.querySelector("#sortTimelineBlocksButton"),
   clearTimelineBlocksButton: document.querySelector("#clearTimelineBlocksButton"),
+  importProtocolCsvButton: document.querySelector("#importProtocolCsvButton"),
+  exportProtocolCsvButton: document.querySelector("#exportProtocolCsvButton"),
+  protocolCsvInput: document.querySelector("#protocolCsvInput"),
   runBlocksButton: document.querySelector("#runBlocksButton"),
   stopBlocksButton: document.querySelector("#stopBlocksButton"),
+  digitalNameInput: document.querySelector("#digitalNameInput"),
   digitalChannelInput: document.querySelector("#digitalChannelInput"),
   digitalFormatInput: document.querySelector("#digitalFormatInput"),
   digitalWidthInput: document.querySelector("#digitalWidthInput"),
@@ -105,6 +118,7 @@ const el = {
   blockTimelineRuler: document.querySelector("#blockTimelineRuler"),
   blockPreviewPlot: document.querySelector("#blockPreviewPlot"),
   blockTimelineDuration: document.querySelector("#blockTimelineDuration"),
+  protocolParameterList: document.querySelector("#protocolParameterList"),
 };
 
 function isConnected() {
@@ -123,6 +137,112 @@ function appendLog(direction, text) {
   const time = new Date().toLocaleTimeString();
   el.logOutput.textContent += `[${time}] ${direction} ${text}\n`;
   el.logOutput.scrollTop = el.logOutput.scrollHeight;
+}
+
+function sanitizeFilename(value) {
+  return String(value || "protocol")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    || "protocol";
+}
+
+function downloadText(filename, text, type = "text/csv") {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function toCsv(headers, rows) {
+  const lines = [headers.map(csvEscape).join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((header) => csvEscape(row[header])).join(","));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        i += 1;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (char !== "\r") {
+      field += char;
+    }
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows.filter((candidate) => candidate.some((cell) => cell.trim() !== ""));
+}
+
+function csvToObjects(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) {
+    return [];
+  }
+
+  const headers = rows[0].map((header) => header.trim());
+  return rows.slice(1).map((row) => {
+    const object = {};
+    headers.forEach((header, index) => {
+      object[header] = row[index] ?? "";
+    });
+    return object;
+  });
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result ?? "")));
+    reader.addEventListener("error", () => reject(reader.error || new Error("File read failed")));
+    reader.readAsText(file);
+  });
 }
 
 function compactDuty(duty) {
@@ -243,6 +363,20 @@ function channelById(channelId) {
 
 function channelOrder(channelId) {
   return channels.findIndex((channel) => channel.id === channelId);
+}
+
+function normalizeChannelId(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  const channel = channels.find((candidate) => candidate.id === normalized);
+  if (!channel) {
+    throw new Error(`Unknown channel: ${value}`);
+  }
+  return channel.id;
+}
+
+function csvNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
 }
 
 function timelineEventDurationMs() {
@@ -501,6 +635,86 @@ function renderEventTimelinePlot() {
 function renderTimeline() {
   renderTimelineTable();
   renderEventTimelinePlot();
+  renderTimelineProtocolOptions();
+}
+
+function exportTimelineCsv() {
+  const rows = [...timelineRows]
+    .sort((a, b) => a.timeMs - b.timeMs || channelOrder(a.color) - channelOrder(b.color))
+    .map((row) => ({
+      time_ms: row.timeMs,
+      color: row.color,
+      brightness: row.brightness,
+    }));
+  downloadText("6color_timeline.csv", toCsv(["time_ms", "color", "brightness"], rows));
+  appendLog("!", `Exported ${rows.length} timeline rows`);
+}
+
+async function importTimelineCsv(file) {
+  const text = await readFileAsText(file);
+  const rows = csvToObjects(text);
+  const parsed = rows.map((row) => ({
+    id: timelineRowId++,
+    timeMs: clampTimelineTime(row.time_ms ?? row.time ?? row.ms),
+    color: normalizeChannelId(row.color ?? row.channel),
+    brightness: clampTimelineBrightness(csvNumber(row.brightness ?? row.duty, 0)),
+  }));
+
+  timelineRows.splice(0, timelineRows.length, ...parsed);
+  sortTimelineRows();
+  renderTimeline();
+  appendLog("!", `Imported ${parsed.length} timeline rows`);
+}
+
+function renderTimelineProtocolOptions() {
+  el.timelineProtocolSelect.replaceChildren();
+
+  if (protocolBlocks.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No protocol blocks";
+    el.timelineProtocolSelect.appendChild(option);
+    el.timelineProtocolSelect.disabled = true;
+    el.addProtocolToTimelineButton.disabled = true;
+    return;
+  }
+
+  el.timelineProtocolSelect.disabled = false;
+  el.addProtocolToTimelineButton.disabled = false;
+  for (const protocol of protocolBlocks) {
+    const option = document.createElement("option");
+    option.value = protocol.id;
+    option.textContent = `${protocol.name} (${protocol.bits || "custom"}, ${protocol.durationMs} ms)`;
+    el.timelineProtocolSelect.appendChild(option);
+  }
+}
+
+function addSelectedProtocolToTimeline() {
+  const protocol = protocolBlocks.find((candidate) => candidate.id === el.timelineProtocolSelect.value);
+  if (!protocol) {
+    appendLog("!", "No protocol block selected");
+    return;
+  }
+
+  const baseMs = clampTimelineTime(el.timelineProtocolStartInput.value);
+  for (const block of protocol.blocks) {
+    timelineRows.push({
+      id: timelineRowId++,
+      timeMs: baseMs + block.startMs,
+      color: block.color,
+      brightness: block.brightness,
+    });
+    timelineRows.push({
+      id: timelineRowId++,
+      timeMs: baseMs + block.startMs + block.durationMs,
+      color: block.color,
+      brightness: 0,
+    });
+  }
+
+  sortTimelineRows();
+  renderTimeline();
+  appendLog("!", `Added protocol ${protocol.name} to timeline at ${baseMs} ms`);
 }
 
 function selectedTimelineBlock() {
@@ -616,6 +830,7 @@ function readDigitalProtocolConfig() {
   }
 
   return {
+    name: sanitizeFilename(el.digitalNameInput.value || `${el.digitalDataInput.value}_${el.digitalEncodingInput.value}`),
     channelId: el.digitalChannelInput.value,
     format: el.digitalFormatInput.value,
     bitWidth: Number(el.digitalWidthInput.value),
