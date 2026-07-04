@@ -675,6 +675,22 @@ function createDigitalProtocolBlocks(config) {
   };
 }
 
+function buildDigitalTxCommand(config, preview) {
+  const format = config.format === "hex" ? "HEX" : "BIN";
+  const encoding = {
+    ook: "OOK",
+    manchester: "MAN",
+    "pulse-width": "PWM",
+  }[config.encoding] || "OOK";
+  const bitUs = config.bitMs * 1000;
+  const gapUs = config.gapMs * 1000;
+  const data = format === "HEX"
+    ? Number.parseInt(preview.bits, 2).toString(16).toUpperCase().padStart(config.bitWidth / 4, "0")
+    : preview.bits;
+
+  return `TXBITS,${config.channelId},${format},${config.bitWidth},${encoding},${bitUs},${gapUs},${config.brightness},${data}`;
+}
+
 function updateDigitalPreview() {
   try {
     const config = readDigitalProtocolConfig();
@@ -722,7 +738,7 @@ function generateDigitalBlocks({ append = false, run = false } = {}) {
   );
 
   if (run) {
-    runProgram(buildBlockProgramEvents(), "Digital Blocks");
+    sendCommand(buildDigitalTxCommand(config, preview));
   }
 }
 

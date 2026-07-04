@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-06-27-stream-smooth",
+  "version": "2026-07-04-raw-rate-control",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 17,
+  "appVersion": 18,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 76889,
-  "sha256": "f0dc5615480bceb53f28cf94f6a3fafc7b8093619d15849b962b004c3b8e5a1a",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-06-27 with stream smoothing updates: app UART on P0.25/P0.26, Green/IR/Red LED pins P0.11/P0.12/P0.13, DAC A/B bias amp commands, active single ADC streaming with selectable ADC3/ADC2/ADC0 input, PPG ambient-subtracted phase sampling, 50 Hz single LED PPG and 16.7 Hz/ch alternating PPG, single-source 9999 bitmap support, no intentional stream-frame skip after status frames, residual/delta TRNG mixing, Von Neumann extraction, and UART DFU bootloader entry."
+  "size": 77405,
+  "sha256": "4624ef7df2475fdffd49d39f8510ee9d2049df001eecccc263a787ff2e76d271",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04 with raw ADC sampling rate control: RATE? query and RATE<hz>/SR<hz>/HZ<hz> commands, 1-500 Hz accepted with integer-ms interval readback, app UART on P0.25/P0.26, Green/IR/Red LED pins P0.11/P0.12/P0.13, DAC A/B bias amp commands, active single ADC streaming with selectable ADC3/ADC2/ADC0 input, PPG ambient-subtracted phase sampling, single-source 9999 bitmap support, residual/delta TRNG mixing, Von Neumann extraction, and UART DFU bootloader entry."
 }

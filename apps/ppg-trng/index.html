@@ -226,14 +226,29 @@
               <div class="toolbar-actions">
                 <label class="compact-field" for="windowSize">
                   <span>Window</span>
-                  <select id="windowSize">
-                    <option value="500">500</option>
-                    <option value="1000">1000</option>
-                    <option value="2000" selected>2000</option>
-                    <option value="5000">5000</option>
-                    <option value="10000">10000</option>
-                  </select>
+                  <input id="windowSize" type="number" min="100" max="1000000" step="100" value="20000" list="windowSizePresets" inputmode="numeric" />
+                  <datalist id="windowSizePresets">
+                    <option value="500"></option>
+                    <option value="2000"></option>
+                    <option value="10000"></option>
+                    <option value="50000"></option>
+                    <option value="100000"></option>
+                    <option value="500000"></option>
+                  </datalist>
                 </label>
+                <label class="compact-field" for="sampleRate">
+                  <span>Rate Hz</span>
+                  <input id="sampleRate" type="number" min="1" max="500" step="1" value="200" list="sampleRatePresets" inputmode="numeric" />
+                  <datalist id="sampleRatePresets">
+                    <option value="10"></option>
+                    <option value="50"></option>
+                    <option value="100"></option>
+                    <option value="200"></option>
+                    <option value="250"></option>
+                    <option value="500"></option>
+                  </datalist>
+                </label>
+                <button id="sendRateButton" class="button secondary" type="button">Set</button>
                 <label class="compact-field" for="plotAdcSource">
                   <span>ADC input</span>
                   <select id="plotAdcSource">
@@ -593,7 +608,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=411e86833362" defer></script>
+    <script src="./app.js?v=3eb4cf153fd7" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

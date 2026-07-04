@@ -25,6 +25,8 @@ const els = {
   rateValue: document.querySelector("#rateValue"),
   sampleCount: document.querySelector("#sampleCount"),
   windowSize: document.querySelector("#windowSize"),
+  sampleRate: document.querySelector("#sampleRate"),
+  sendRateButton: document.querySelector("#sendRateButton"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
   channelMode: document.querySelector("#channelMode"),
   autoScale: document.querySelector("#autoScale"),
@@ -87,6 +89,13 @@ const els = {
   noiseBitCanvasWrap: document.querySelector(".noise-canvas-wrap"),
 };
 
+const DEFAULT_MAX_SAMPLES = 20000;
+const MIN_MAX_SAMPLES = 100;
+const MAX_MAX_SAMPLES = 1000000;
+const DEFAULT_SAMPLE_RATE_HZ = 200;
+const MIN_SAMPLE_RATE_HZ = 1;
+const MAX_SAMPLE_RATE_HZ = 500;
+
 const state = {
   transport: "none",
   port: null,
@@ -130,7 +139,9 @@ const state = {
   demoPhase: 0,
   liveSendTimer: null,
   writeQueue: Promise.resolve(),
-  maxSamples: 2000,
+  maxSamples: DEFAULT_MAX_SAMPLES,
+  sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
+  sampleIntervalMs: 5,
   maxPendingSamples: 4000,
   sampleDrainScheduled: false,
   nextSampleDrainAt: 0,
@@ -541,6 +552,7 @@ function queryDeviceStateSoon() {
     if (!isConnected()) return;
     await sendCommand("VER?");
     await sendCommand("ADC?");
+    await sendCommand("RATE?");
   }, 250);
 }
 
@@ -877,6 +889,7 @@ function parseTaggedSegment(segment) {
 function parseStatusSegment(segment) {
   if (parseFirmwareInfoSegment(segment)) return true;
   if (parseAdcStatusSegment(segment)) return true;
+  if (parseRateStatusSegment(segment)) return true;
 
   if (/^(DFU|PONG)\b/i.test(segment)) {
     addLog("RX", segment);
@@ -900,6 +913,17 @@ function parseAdcStatusSegment(segment) {
   const match = segment.match(/^ADC\s*[,=:]\s*(?:ACTIVE|SOURCE|SELECTED)\s*[,=:]\s*([023])\b/i);
   if (!match) return false;
   setAdcSource(`ADC${match[1]}`);
+  addLog("RX", segment);
+  return true;
+}
+
+function parseRateStatusSegment(segment) {
+  if (!/^RATE\b/i.test(segment)) return false;
+  const hzMatch = segment.match(/\bRAW_HZ\s*[,=:]\s*(\d+)\b/i);
+  const msMatch = segment.match(/\bRAW_MS\s*[,=:]\s*(\d+)\b/i);
+  const hz = hzMatch ? Number.parseInt(hzMatch[1], 10) : null;
+  const ms = msMatch ? Number.parseInt(msMatch[1], 10) : null;
+  setSampleRateUi(hz, ms, { normalizeInput: true });
   addLog("RX", segment);
   return true;
 }
@@ -945,7 +969,7 @@ function addSample(value, channel = "ADC", options = {}) {
 }
 
 function getSampleDrainIntervalMs(sample) {
-  return (sample.channel || "ADC") === "ADC" ? 5 : 20;
+  return (sample.channel || "ADC") === "ADC" ? state.sampleIntervalMs : 20;
 }
 
 function scheduleSampleDrain() {
@@ -1117,7 +1141,7 @@ function updateStats() {
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
     els.sampleCount.textContent = String(state.totalSamples);
-    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
+    els.plotCaption.textContent = `Waiting for samples | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
     return;
   }
 
@@ -1139,7 +1163,7 @@ function updateStats() {
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
   els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcPlotDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
+  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
 }
 
 function setBitMode(enabled) {
@@ -1249,6 +1273,60 @@ function clampInteger(value, min, max, fallback) {
   return Math.min(max, Math.max(min, number));
 }
 
+function applyWindowSizeInput(normalize = true) {
+  const rawValue = String(els.windowSize?.value ?? "").trim();
+  if (!rawValue) return;
+
+  const nextMaxSamples = clampInteger(
+    rawValue,
+    MIN_MAX_SAMPLES,
+    MAX_MAX_SAMPLES,
+    DEFAULT_MAX_SAMPLES,
+  );
+  state.maxSamples = nextMaxSamples;
+  if (normalize && els.windowSize) {
+    els.windowSize.value = String(nextMaxSamples);
+  }
+  if (state.samples.length > state.maxSamples) {
+    state.samples.splice(0, state.samples.length - state.maxSamples);
+  }
+  updateStats();
+  state.needsDraw = true;
+}
+
+function clampSampleRateHz(value) {
+  return clampInteger(value, MIN_SAMPLE_RATE_HZ, MAX_SAMPLE_RATE_HZ, DEFAULT_SAMPLE_RATE_HZ);
+}
+
+function rateHzToIntervalMs(rateHz) {
+  return Math.max(1, Math.round(1000 / clampSampleRateHz(rateHz)));
+}
+
+function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
+  const nextRate = clampSampleRateHz(rateHz ?? state.sampleRateHz);
+  const nextInterval = Number.isFinite(intervalMs) && intervalMs > 0
+    ? Math.max(1, Math.round(intervalMs))
+    : rateHzToIntervalMs(nextRate);
+  state.sampleIntervalMs = nextInterval;
+  state.sampleRateHz = Math.max(1, Math.round(1000 / nextInterval));
+
+  if (options.normalizeInput !== false && els.sampleRate) {
+    els.sampleRate.value = String(state.sampleRateHz);
+  }
+}
+
+function applySampleRateInput(normalize = false) {
+  const rawValue = String(els.sampleRate?.value ?? "").trim();
+  if (!rawValue) return;
+  const nextRate = clampSampleRateHz(rawValue);
+  setSampleRateUi(nextRate, null, { normalizeInput: normalize });
+}
+
+async function sendSampleRateCommand() {
+  applySampleRateInput(true);
+  await sendCommand(`RATE${state.sampleRateHz}`);
+}
+
 function clampPositive(value, fallback) {
   const number = Number.parseFloat(value);
   if (!Number.isFinite(number) || number <= 0) return fallback;
@@ -1281,6 +1359,10 @@ function getFilterDescription(settings = getFilterSettings()) {
     return `BP ${formatHz(settings.highCutoff)}-${formatHz(settings.lowCutoff)} Hz`;
   }
   return "Raw ADC";
+}
+
+function getSampleRateDescription() {
+  return `${state.sampleRateHz} Hz target`;
 }
 
 function getSelectedChannel() {
@@ -2689,13 +2771,12 @@ function bindEvents() {
     els.log.innerHTML = "";
   });
 
-  els.windowSize.addEventListener("change", () => {
-    state.maxSamples = Number.parseInt(els.windowSize.value, 10);
-    if (state.samples.length > state.maxSamples) {
-      state.samples.splice(0, state.samples.length - state.maxSamples);
-    }
-    updateStats();
-    state.needsDraw = true;
+  els.windowSize.addEventListener("input", () => applyWindowSizeInput(false));
+  els.windowSize.addEventListener("change", () => applyWindowSizeInput(true));
+  els.sampleRate.addEventListener("input", () => applySampleRateInput(false));
+  els.sampleRate.addEventListener("change", () => applySampleRateInput(true));
+  els.sendRateButton.addEventListener("click", () => {
+    sendSampleRateCommand().catch((error) => addLog("ERR", error.message || error, true));
   });
 
   els.plotAdcSource.addEventListener("change", async () => {
@@ -2801,6 +2882,8 @@ function bindEvents() {
 function init() {
   bindEvents();
   setUiScale(loadUiScale(), false);
+  applyWindowSizeInput();
+  setSampleRateUi(DEFAULT_SAMPLE_RATE_HZ, rateHzToIntervalMs(DEFAULT_SAMPLE_RATE_HZ));
   setDacValue(2056, "init");
   updateTransportControls();
   setConnectedUi(false);

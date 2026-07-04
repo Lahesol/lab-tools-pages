@@ -21,6 +21,7 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - Discrete device path B select: `ADC2\r`
 - Commercial PPG sensor select: `ADC0\r`
 - Active ADC input query: `ADC?\r`
+- Raw ADC sampling rate set/query: `RATE200\r` for 200 Hz, `RATE?\r` to read back. The firmware accepts 1-500 Hz and reports the actual integer-ms interval.
 - TRNG bit mode toggle: `9999\r`
 - DAC sweep/reset: `0000\r`
 - Green-only PPG mode toggle: `7761\r`
@@ -83,6 +84,8 @@ BLE notifications are parsed as text when they contain ASCII numeric payloads. N
 ## Signal Filtering
 
 The plot can display raw ADC data or browser-side filtered data without changing the firmware stream. Available filters are moving average, one-pole low-pass, one-pole high-pass, and high-pass plus low-pass band-pass. CSV export includes channel, raw, and filtered values when a filter is active.
+
+The `Window` field controls how many parsed samples are retained for plotting and CSV export. It accepts direct numeric input from 100 to 1,000,000 samples; the default is 20,000 samples.
 
 Tagged firmware streams are plotted as separate ADC, Green, IR, Red, and Ambient channels. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
 
