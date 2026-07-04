@@ -95,6 +95,7 @@ const MAX_MAX_SAMPLES = 1000000;
 const DEFAULT_SAMPLE_RATE_HZ = 200;
 const MIN_SAMPLE_RATE_HZ = 1;
 const MAX_SAMPLE_RATE_HZ = 500;
+const DEFAULT_PPG_RATE_HZ = 25;
 
 const state = {
   transport: "none",
@@ -142,6 +143,8 @@ const state = {
   maxSamples: DEFAULT_MAX_SAMPLES,
   sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
   sampleIntervalMs: 5,
+  ppgRateHz: DEFAULT_PPG_RATE_HZ,
+  ppgSampleIntervalMs: 40,
   maxPendingSamples: 4000,
   sampleDrainScheduled: false,
   nextSampleDrainAt: 0,
@@ -921,9 +924,14 @@ function parseRateStatusSegment(segment) {
   if (!/^RATE\b/i.test(segment)) return false;
   const hzMatch = segment.match(/\bRAW_HZ\s*[,=:]\s*(\d+)\b/i);
   const msMatch = segment.match(/\bRAW_MS\s*[,=:]\s*(\d+)\b/i);
+  const ppgHzMatch = segment.match(/\bPPG_HZ\s*[,=:]\s*(\d+)\b/i);
+  const ppgPhaseMatch = segment.match(/\bPPG_PHASE_MS\s*[,=:]\s*(\d+)\b/i);
   const hz = hzMatch ? Number.parseInt(hzMatch[1], 10) : null;
   const ms = msMatch ? Number.parseInt(msMatch[1], 10) : null;
+  const ppgHz = ppgHzMatch ? Number.parseInt(ppgHzMatch[1], 10) : null;
+  const ppgPhaseMs = ppgPhaseMatch ? Number.parseInt(ppgPhaseMatch[1], 10) : null;
   setSampleRateUi(hz, ms, { normalizeInput: true });
+  setPpgRateUi(ppgHz, ppgPhaseMs);
   addLog("RX", segment);
   return true;
 }
@@ -969,7 +977,7 @@ function addSample(value, channel = "ADC", options = {}) {
 }
 
 function getSampleDrainIntervalMs(sample) {
-  return (sample.channel || "ADC") === "ADC" ? state.sampleIntervalMs : 20;
+  return (sample.channel || "ADC") === "ADC" ? state.sampleIntervalMs : state.ppgSampleIntervalMs;
 }
 
 function scheduleSampleDrain() {
@@ -1315,6 +1323,18 @@ function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
   }
 }
 
+function setPpgRateUi(rateHz = null, phaseMs = null) {
+  const parsedRate = Number.parseInt(rateHz, 10);
+  const parsedPhaseMs = Number.parseInt(phaseMs, 10);
+  if (Number.isFinite(parsedRate) && parsedRate > 0) {
+    state.ppgRateHz = parsedRate;
+    state.ppgSampleIntervalMs = Math.max(1, Math.round(1000 / parsedRate));
+  } else if (Number.isFinite(parsedPhaseMs) && parsedPhaseMs > 0) {
+    state.ppgSampleIntervalMs = Math.max(1, parsedPhaseMs * 4);
+    state.ppgRateHz = Math.max(1, Math.round(1000 / state.ppgSampleIntervalMs));
+  }
+}
+
 function applySampleRateInput(normalize = false) {
   const rawValue = String(els.sampleRate?.value ?? "").trim();
   if (!rawValue) return;
@@ -1362,7 +1382,7 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `${state.sampleRateHz} Hz target`;
+  return `Raw ${state.sampleRateHz} Hz | PPG ${state.ppgRateHz} Hz`;
 }
 
 function getSelectedChannel() {
@@ -2884,6 +2904,7 @@ function init() {
   setUiScale(loadUiScale(), false);
   applyWindowSizeInput();
   setSampleRateUi(DEFAULT_SAMPLE_RATE_HZ, rateHzToIntervalMs(DEFAULT_SAMPLE_RATE_HZ));
+  setPpgRateUi(DEFAULT_PPG_RATE_HZ, 10);
   setDacValue(2056, "init");
   updateTransportControls();
   setConnectedUi(false);

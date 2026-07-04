@@ -45,7 +45,7 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 
 In PPG measurement modes, the firmware samples ambient light with LEDs off, discards one LED-on settling sample, averages two LED-on samples, then streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
 
-PPG timing displayed in the GUI follows the current firmware constants: 5 ms phase tick, 50 Hz output for single-channel Green/IR/Red PPG, and 16.7 Hz per optical channel for alternating Green/IR/Red PPG.
+PPG timing displayed in the GUI follows the current firmware constants: 10 ms phase tick, 25 Hz output for single-channel Green/IR/Red PPG, and 8.3 Hz per optical channel for alternating Green/IR/Red PPG. The LED pulse cadence follows the same PPG timing.
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 
@@ -89,7 +89,7 @@ The `Window` field controls how many parsed samples are retained for plotting an
 
 Tagged firmware streams are plotted as separate ADC, Green, IR, Red, and Ambient channels. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
 
-The browser may deliver Web Serial data in chunks instead of one line at a time. Parsed samples are therefore buffered briefly and released to the plot at the firmware cadence, 5 ms for raw ADC and 20 ms for tagged PPG/diagnostic samples, so the display advances continuously even when the USB driver batches reads.
+The browser may deliver Web Serial data in chunks instead of one line at a time. Parsed samples are therefore buffered briefly and released to the plot at the firmware cadence, using the `RATE?` raw ADC interval and the reported 25 Hz PPG interval, so the display advances continuously even when the USB driver batches reads.
 
 The `Value` control can show raw ADC code or a bias-corrected current calculation. Press `Measure bias` while the selected ADC input is at the bias condition, then `Current` displays `(adc - bias) / 8192 * 1.8`. CSV export keeps the original ADC code and bias code with the converted value.
 
