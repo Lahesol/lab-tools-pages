@@ -28,6 +28,15 @@ const els = {
   sampleRate: document.querySelector("#sampleRate"),
   sendRateButton: document.querySelector("#sendRateButton"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
+  bitMethod: document.querySelector("#bitMethod"),
+  keyBitCount: document.querySelector("#keyBitCount"),
+  encryptionPending: document.querySelector("#encryptionPending"),
+  encryptionCount: document.querySelector("#encryptionCount"),
+  encryptionPlain: document.querySelector("#encryptionPlain"),
+  encryptionKey: document.querySelector("#encryptionKey"),
+  encryptionCipher: document.querySelector("#encryptionCipher"),
+  encryptionChannel: document.querySelector("#encryptionChannel"),
+  encryptionStatus: document.querySelector("#encryptionStatus"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
@@ -91,11 +100,15 @@ const els = {
 const DEFAULT_MAX_SAMPLES = 20000;
 const MIN_MAX_SAMPLES = 100;
 const MAX_MAX_SAMPLES = 1000000;
-const DEFAULT_SAMPLE_RATE_HZ = 200;
+const DEFAULT_SAMPLE_RATE_HZ = 25;
 const MIN_SAMPLE_RATE_HZ = 1;
 const MAX_SAMPLE_RATE_HZ = 500;
 const DEFAULT_PPG_RATE_HZ = 25;
 const DEFAULT_PPG_LED_ON_MS = 10;
+const ENCRYPTION_BITS_PER_SAMPLE = 14;
+const MAX_KEY_BITS = 8192;
+const MAX_PENDING_PPG = 512;
+const MAX_ENCRYPTED_PPG = 4096;
 
 const state = {
   transport: "none",
@@ -115,7 +128,8 @@ const state = {
   totalSamples: 0,
   latest: null,
   latestChannel: "ADC",
-  adcSource: "ADC3",
+  adcSource: "ADC2",
+  bitAdcSource: "ADC3",
   valueMode: "adc",
   adcBias: { ADC3: null, ADC2: null, ADC0: null },
   dacValues: { A: 2048, B: 2056 },
@@ -130,10 +144,18 @@ const state = {
   bitPlaneCycles: 0,
   bitLanes: {},
   bitSource: "idle",
+  bitGenerationMethod: "firmware",
+  keyBits: [],
+  pendingPpg: [],
+  encryptedPpg: [],
+  encryptedCount: 0,
+  droppedPpg: 0,
+  lastEncrypted: null,
   noiseBaseline: null,
   noiseWarmup: 0,
   noisePairBit: null,
   noiseExtractors: {},
+  liveBitExtractors: {},
   paused: false,
   demoTimer: null,
   demoPhase: 0,
@@ -141,7 +163,7 @@ const state = {
   writeQueue: Promise.resolve(),
   maxSamples: DEFAULT_MAX_SAMPLES,
   sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
-  sampleIntervalMs: 5,
+  sampleIntervalMs: 40,
   ppgRateHz: DEFAULT_PPG_RATE_HZ,
   ppgSampleIntervalMs: 40,
   ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
@@ -194,18 +216,18 @@ const ADC_SOURCE_COLORS = {
 const ADC_SOURCE_INFO = {
   ADC3: {
     command: "ADC3",
-    label: "ADC3 device A",
-    detail: "Discrete device A · AIN3/P0.05",
+    label: "ADC3 noise/TRNG",
+    detail: "Noise/TRNG - AIN3/P0.05",
   },
   ADC2: {
     command: "ADC2",
-    label: "ADC2 device B",
-    detail: "Discrete device B · AIN2/P0.04",
+    label: "ADC2 PPG",
+    detail: "PPG - AIN2/P0.04",
   },
   ADC0: {
     command: "ADC0",
     label: "ADC0 commercial",
-    detail: "Commercial PPG · AIN0/P0.02",
+    detail: "Commercial PPG - AIN0/P0.02",
   },
 };
 
@@ -410,7 +432,7 @@ function normalizeAdcSource(value) {
 }
 
 function getAdcSourceInfo(source = state.adcSource) {
-  return ADC_SOURCE_INFO[normalizeAdcSource(source)] || ADC_SOURCE_INFO.ADC3;
+  return ADC_SOURCE_INFO[normalizeAdcSource(source)] || ADC_SOURCE_INFO.ADC2;
 }
 
 function getAdcSourceDescription(source = state.adcSource) {
@@ -537,7 +559,9 @@ function updateAdcSourceUi(options = {}) {
   const info = getAdcSourceInfo();
   const pending = Boolean(options.pending);
   if (els.adcSourceStatus) {
-    els.adcSourceStatus.textContent = pending ? `${info.label} pending` : info.label;
+    const bitInfo = getAdcSourceInfo(state.bitAdcSource);
+    const label = `${info.label} / ${bitInfo.label}`;
+    els.adcSourceStatus.textContent = pending ? `${label} pending` : label;
     els.adcSourceStatus.classList.toggle("is-muted", pending);
   }
   if (els.plotAdcSource && els.plotAdcSource.value !== state.adcSource) {
@@ -819,7 +843,7 @@ function ingestBinarySamples(bytes) {
     const value = low | (high << 8);
 
     if (state.bitMode) {
-      addBits([value ? 1 : 0]);
+      handleGeneratedBits([value ? 1 : 0], state.bitAdcSource, "Firmware 9999 VN", "firmware");
     } else {
       addSample(value);
     }
@@ -859,13 +883,13 @@ function parseSegment(segment) {
   if (!segment) return;
   if (parseStatusSegment(segment)) return;
 
+  if (parseTaggedBitSegment(segment)) return;
+  if (parseTaggedSegment(segment)) return;
+
   if (state.bitMode) {
-    if (parseTaggedBitSegment(segment)) return;
-    parseBitSegment(segment);
+    if (parseBitSegment(segment)) return;
     return;
   }
-
-  if (parseTaggedSegment(segment)) return;
 
   const match = segment.match(/[-+]?\d+(?:\.\d+)?/);
   if (!match) return;
@@ -924,6 +948,18 @@ function parseFirmwareInfoSegment(segment) {
 }
 
 function parseAdcStatusSegment(segment) {
+  const dualMatch = segment.match(/^ADC\b/i) && segment.match(/\bPPG\s*[,=:]\s*([023])\b/i);
+  if (dualMatch) {
+    const bitMatch = segment.match(/\bBIT\s*[,=:]\s*([023])\b/i);
+    state.adcSource = `ADC${dualMatch[1]}`;
+    state.bitAdcSource = bitMatch ? `ADC${bitMatch[1]}` : "ADC3";
+    updateAdcSourceUi();
+    updateBitStats();
+    updateEncryptionUi();
+    addLog("RX", segment);
+    return true;
+  }
+
   const match = segment.match(/^ADC\s*[,=:]\s*(?:ACTIVE|SOURCE|SELECTED)\s*[,=:]\s*([023])\b/i);
   if (!match) return false;
   setAdcSource(`ADC${match[1]}`);
@@ -957,7 +993,7 @@ function parseRateStatusSegment(segment) {
 function parseBitSegment(segment) {
   const compact = segment.replace(/[\s,]+/g, "");
   if (!compact || /[^01]/.test(compact)) return false;
-  addBits([...compact].map((bit) => Number(bit)), state.adcSource);
+  handleGeneratedBits([...compact].map((bit) => Number(bit)), state.bitAdcSource, "Firmware 9999 VN", "firmware");
   return true;
 }
 
@@ -966,7 +1002,7 @@ function parseTaggedBitSegment(segment) {
   if (!matches.length) return false;
 
   matches.forEach((match) => {
-    addBits([Number(match[2])], `ADC${match[1]}`, "9999 mode");
+    handleGeneratedBits([Number(match[2])], `ADC${match[1]}`, "Firmware 9999 VN", "firmware");
   });
   return true;
 }
@@ -976,6 +1012,9 @@ function addSample(value, channel = "ADC", options = {}) {
 
   const normalizedChannel = normalizeChannel(channel) || "ADC";
   const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
+  if (normalizedChannel === "ADC" && adcSource === state.bitAdcSource) {
+    extractLiveBitsFromNoiseSample(value, adcSource);
+  }
   if (normalizedChannel === "ADC" && adcSource !== state.adcSource) return;
   const valueKind = options.valueKind || "raw";
   commitSample(value, normalizedChannel, adcSource, valueKind);
@@ -1003,7 +1042,8 @@ function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSou
     state.lastStatsAt = now;
     updateStats();
   }
-  if (sample.channel === "ADC") extractNoiseBit(value, sample.adcSource);
+  if (sample.channel === "ADC") extractLiveBitsFromNoiseSample(value, sample.adcSource);
+  enqueuePpgEncryption(sample);
   state.needsDraw = true;
 }
 
@@ -1052,6 +1092,173 @@ function resetNoiseExtractor() {
   state.noiseWarmup = 0;
   state.noisePairBit = null;
   state.noiseExtractors = {};
+  state.liveBitExtractors = {};
+}
+
+function getSelectedBitMethod() {
+  return els.bitMethod?.value || state.bitGenerationMethod || "firmware";
+}
+
+function getBitMethodLabel(method = state.bitGenerationMethod) {
+  if (method === "firmware") return "Firmware 9999 VN";
+  if (method === "residual-vn") return "ADC3 residual VN";
+  if (method === "delta-vn") return "ADC3 delta VN";
+  if (method === "lsb") return "ADC3 LSB";
+  return method || "--";
+}
+
+function setBitGenerationMethod(method = getSelectedBitMethod()) {
+  state.bitGenerationMethod = method || "firmware";
+  if (els.bitMethod && els.bitMethod.value !== state.bitGenerationMethod) {
+    els.bitMethod.value = state.bitGenerationMethod;
+  }
+  clearBits();
+  resetLiveEncryption();
+  updateBitStats();
+  updateEncryptionUi();
+}
+
+function resetLiveEncryption() {
+  state.keyBits = [];
+  state.pendingPpg = [];
+  state.encryptedPpg = [];
+  state.encryptedCount = 0;
+  state.droppedPpg = 0;
+  state.lastEncrypted = null;
+  state.liveBitExtractors = {};
+}
+
+function handleGeneratedBits(bits, adcSource, source, method) {
+  if (method !== state.bitGenerationMethod) return;
+  addBits(bits, adcSource, source);
+}
+
+function getLiveBitExtractor(method, adcSource) {
+  const key = `${method}:${normalizeAdcSource(adcSource) || state.bitAdcSource}`;
+  if (!state.liveBitExtractors[key]) {
+    state.liveBitExtractors[key] = {
+      baseline: null,
+      warmup: 0,
+      previous: null,
+      pairBit: null,
+    };
+  }
+  return state.liveBitExtractors[key];
+}
+
+function pushVonNeumannBit(rawBit, extractor, adcSource, source, method) {
+  if (extractor.pairBit === null) {
+    extractor.pairBit = rawBit;
+    return;
+  }
+
+  const previousBit = extractor.pairBit;
+  extractor.pairBit = null;
+  if (previousBit === rawBit) return;
+  handleGeneratedBits([previousBit === 0 && rawBit === 1 ? 0 : 1], adcSource, source, method);
+}
+
+function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
+  const source = normalizeAdcSource(adcSource) || state.bitAdcSource;
+  if (source !== state.bitAdcSource || !Number.isFinite(value)) return;
+
+  const method = state.bitGenerationMethod;
+  if (method === "firmware") return;
+
+  if (method === "lsb") {
+    handleGeneratedBits([Math.round(value) & 1], source, "ADC3 LSB", method);
+    return;
+  }
+
+  const extractor = getLiveBitExtractor(method, source);
+  if (method === "delta-vn") {
+    if (extractor.previous === null) {
+      extractor.previous = value;
+      return;
+    }
+    const delta = value - extractor.previous;
+    extractor.previous = value;
+    if (delta === 0) return;
+    pushVonNeumannBit(delta > 0 ? 1 : 0, extractor, source, "ADC3 delta VN", method);
+    return;
+  }
+
+  if (extractor.baseline === null) {
+    extractor.baseline = value;
+    extractor.warmup = 1;
+    return;
+  }
+
+  const residual = value - extractor.baseline;
+  extractor.baseline += NOISE_BASELINE_ALPHA * residual;
+  extractor.warmup += 1;
+
+  if (extractor.warmup < NOISE_WARMUP_SAMPLES || residual === 0) return;
+  pushVonNeumannBit(residual > 0 ? 1 : 0, extractor, source, "ADC3 residual VN", method);
+}
+
+function bitsToNumber(bits) {
+  return bits.reduce((value, bit) => ((value << 1) | (bit ? 1 : 0)), 0);
+}
+
+function formatHex(value, width = 4) {
+  if (!Number.isFinite(value)) return "--";
+  return `0x${Math.max(0, value).toString(16).toUpperCase().padStart(width, "0")}`;
+}
+
+function enqueuePpgEncryption(sample) {
+  if (!["G", "I", "R"].includes(sample.channel)) return;
+  const adcCode = clampInteger(sample.value, 0, 16383, 0);
+  state.pendingPpg.push({
+    t: sample.t,
+    channel: sample.channel,
+    adcSource: sample.adcSource,
+    adcCode,
+  });
+  if (state.pendingPpg.length > MAX_PENDING_PPG) {
+    state.pendingPpg.shift();
+    state.droppedPpg += 1;
+  }
+  processEncryptionQueue();
+}
+
+function processEncryptionQueue() {
+  while (state.pendingPpg.length && state.keyBits.length >= ENCRYPTION_BITS_PER_SAMPLE) {
+    const sample = state.pendingPpg.shift();
+    const keyBits = state.keyBits.splice(0, ENCRYPTION_BITS_PER_SAMPLE);
+    const key = bitsToNumber(keyBits);
+    const cipher = sample.adcCode ^ key;
+    const record = {
+      ...sample,
+      key,
+      cipher,
+      method: state.bitGenerationMethod,
+      bitSource: state.bitAdcSource,
+    };
+    state.encryptedPpg.push(record);
+    state.encryptedCount += 1;
+    state.lastEncrypted = record;
+    if (state.encryptedPpg.length > MAX_ENCRYPTED_PPG) {
+      state.encryptedPpg.splice(0, state.encryptedPpg.length - MAX_ENCRYPTED_PPG);
+    }
+  }
+  updateEncryptionUi();
+}
+
+function updateEncryptionUi() {
+  if (els.keyBitCount) els.keyBitCount.textContent = String(state.keyBits.length);
+  if (els.encryptionPending) els.encryptionPending.textContent = String(state.pendingPpg.length);
+  if (els.encryptionCount) els.encryptionCount.textContent = String(state.encryptedCount);
+  if (els.encryptionStatus) {
+    const dropped = state.droppedPpg ? ` | dropped ${state.droppedPpg}` : "";
+    els.encryptionStatus.textContent = `${getBitMethodLabel()} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
+  }
+
+  const latest = state.lastEncrypted;
+  if (els.encryptionPlain) els.encryptionPlain.textContent = latest ? String(latest.adcCode) : "--";
+  if (els.encryptionKey) els.encryptionKey.textContent = latest ? formatHex(latest.key) : "--";
+  if (els.encryptionCipher) els.encryptionCipher.textContent = latest ? formatHex(latest.cipher) : "--";
+  if (els.encryptionChannel) els.encryptionChannel.textContent = latest ? CHANNEL_LABELS[latest.channel] || latest.channel : "--";
 }
 
 function createBitLane(capacity = state.bitPlaneCapacity || 0) {
@@ -1073,7 +1280,7 @@ function ensureBitLane(source) {
 }
 
 function getBitSourceOrder() {
-  return [state.adcSource];
+  return [state.bitAdcSource];
 }
 
 function getBitLanes() {
@@ -1083,8 +1290,8 @@ function getBitLanes() {
 function addBits(bits, adcSource = state.adcSource, source = state.bitMode ? "9999 mode" : "ADC noise") {
   if (state.paused || !bits.length) return;
 
-  const normalizedSource = normalizeAdcSource(adcSource) || state.adcSource;
-  if (normalizedSource !== state.adcSource) return;
+  const normalizedSource = normalizeAdcSource(adcSource) || state.bitAdcSource;
+  if (normalizedSource !== state.bitAdcSource) return;
   const normalizedBits = bits.map((bit) => (bit ? 1 : 0));
   const now = performance.now();
   state.bits.push(...normalizedBits.map((bit) => ({
@@ -1095,6 +1302,10 @@ function addBits(bits, adcSource = state.adcSource, source = state.bitMode ? "99
   })));
   state.totalBits += normalizedBits.length;
   state.bitSource = source;
+  state.keyBits.push(...normalizedBits);
+  if (state.keyBits.length > MAX_KEY_BITS) {
+    state.keyBits.splice(0, state.keyBits.length - MAX_KEY_BITS);
+  }
 
   if (state.bits.length > state.maxBits) {
     state.bits.splice(0, state.bits.length - state.maxBits);
@@ -1103,6 +1314,7 @@ function addBits(bits, adcSource = state.adcSource, source = state.bitMode ? "99
   updateBitModeUi();
   ensureBitPlaneCapacity();
   normalizedBits.forEach((bit) => writeBitToPlane(bit, normalizedSource));
+  processEncryptionQueue();
   updateBitStats();
   state.needsBitDraw = true;
   window.requestAnimationFrame(resizeBitCanvas);
@@ -1167,7 +1379,7 @@ function updateBitStats() {
   const zeros = planeBits.length - ones;
   const ratio = planeBits.length ? ones / planeBits.length : null;
   const capacity = (state.bitPlaneCapacity || getBitPlaneGeometry().capacity) * lanes.length;
-  const source = state.bitMode ? "9999 mode" : "ADC noise";
+  const source = getBitMethodLabel();
 
   const filled = lanes.reduce((sum, [, lane]) => sum + lane.filled, 0);
   els.bitCount.textContent = `${filled}/${capacity}`;
@@ -1175,11 +1387,10 @@ function updateBitStats() {
   els.zeroCount.textContent = String(zeros);
   els.onesRatio.textContent = ratio === null ? "--" : ratio.toFixed(4);
   els.bitCaption.textContent = planeBits.length
-    ? `${source} | ${getAdcSourceInfo(state.adcSource).label} | total ${state.totalBits}`
-    : state.bitMode
-      ? "Waiting for bits"
-      : "Waiting for ADC noise bits";
+    ? `${source} | ${getAdcSourceInfo(state.bitAdcSource).label} | total ${state.totalBits}`
+    : `Waiting for ${source} bits`;
   updateBitModeUi();
+  updateEncryptionUi();
 }
 
 function getBitColumns() {
@@ -1637,9 +1848,16 @@ function clearBits() {
   state.totalBits = 0;
   state.bitLanes = {};
   state.bitPlaneCapacity = 0;
-  state.bitSource = state.bitMode ? "mode" : "noise";
+  state.bitSource = getBitMethodLabel();
+  state.keyBits = [];
+  state.pendingPpg = [];
+  state.encryptedPpg = [];
+  state.encryptedCount = 0;
+  state.droppedPpg = 0;
+  state.lastEncrypted = null;
   ensureBitPlaneCapacity();
   updateBitStats();
+  updateEncryptionUi();
   state.needsBitDraw = true;
   drawBitMap();
 }
@@ -2358,8 +2576,7 @@ function toggleDemo() {
   state.demoTimer = window.setInterval(() => {
     if (state.bitMode) {
       const batch = Array.from({ length: 4 }, () => (Math.random() > 0.5 ? 1 : 0));
-      addBits(batch, state.adcSource, "demo");
-      return;
+      handleGeneratedBits(batch, state.bitAdcSource, "Firmware 9999 VN", "firmware");
     }
 
     const dac = clampDac(els.dacInput.value);
@@ -2367,9 +2584,11 @@ function toggleDemo() {
     const baseline = 7200 + (dac - 2056) * 0.42;
     const ppg = Math.sin(state.demoPhase) * 160 + Math.sin(state.demoPhase * 0.31) * 38;
     const noise = (Math.random() - 0.5) * 42;
-    addSample(Math.round(ppg + noise), "G");
-    addSample(Math.round(ppg * 0.82 + Math.sin(state.demoPhase * 0.73) * 22 + noise * 0.45), "I");
-    addSample(Math.round(ppg * 0.62 + noise * 0.55), "R");
+    const noiseAdc = 7550 + Math.round((Math.random() - 0.5) * 80);
+    addSample(noiseAdc, "ADC", { adcSource: state.bitAdcSource });
+    addSample(Math.round(baseline + ppg + noise), "G", { adcSource: state.adcSource });
+    addSample(Math.round(baseline + ppg * 0.82 + Math.sin(state.demoPhase * 0.73) * 22 + noise * 0.45), "I", { adcSource: state.adcSource });
+    addSample(Math.round(baseline + ppg * 0.62 + noise * 0.55), "R", { adcSource: state.adcSource });
     addSample(Math.round(baseline + noise * 0.2), "A");
   }, 33);
   els.demoButton.textContent = "Stop demo";
@@ -2718,6 +2937,9 @@ function bindEvents() {
   els.sendRateButton.addEventListener("click", () => {
     sendSampleRateCommand().catch((error) => addLog("ERR", error.message || error, true));
   });
+  els.bitMethod?.addEventListener("change", () => {
+    setBitGenerationMethod(els.bitMethod.value);
+  });
 
   els.plotAdcSource.addEventListener("change", async () => {
     const source = normalizeAdcSource(els.plotAdcSource.value);
@@ -2817,6 +3039,7 @@ function init() {
   setSampleRateUi(DEFAULT_SAMPLE_RATE_HZ, rateHzToIntervalMs(DEFAULT_SAMPLE_RATE_HZ));
   setPpgRateUi(DEFAULT_PPG_RATE_HZ, 10, DEFAULT_PPG_LED_ON_MS);
   setDacValue(2056, "init");
+  setBitGenerationMethod(getSelectedBitMethod());
   updateTransportControls();
   setConnectedUi(false);
   updateAdcSourceUi();

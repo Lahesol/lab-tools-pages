@@ -229,6 +229,7 @@ select {
 
 .panel,
 .plot-panel,
+.encryption-panel,
 .bit-panel,
 .dfu-panel,
 .noise-panel {
@@ -678,6 +679,14 @@ canvas {
   background: #fbfdfc;
 }
 
+.encryption-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 16px 16px;
+  background: #fbfdfc;
+}
+
 .bit-stat {
   min-height: 62px;
   padding: 10px 11px;
@@ -1096,6 +1105,10 @@ canvas {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .encryption-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .log-panel {
     grid-column: 1 / -1;
   }
@@ -1121,6 +1134,7 @@ canvas {
   .side-panel,
   .metric-grid,
   .bit-stats,
+  .encryption-grid,
     .dfu-grid,
     .noise-grid,
     .noise-explain-grid,

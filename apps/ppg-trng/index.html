@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=aaaecf2d3f64" />
+    <link rel="stylesheet" href="./styles.css?v=24a0bf5d2a60" />
   </head>
   <body>
     <div class="app-shell">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-04 ppg-raw-adc</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-04 dual-adc-encrypt</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -90,28 +90,24 @@
             </div>
             <div class="subpanel">
               <div class="panel-heading compact-heading">
-                <h3>Active ADC</h3>
-                <span id="adcSourceStatus" class="mode-pill">ADC3 device A</span>
+                <h3>ADC Routes</h3>
+                <span id="adcSourceStatus" class="mode-pill">ADC2 PPG / ADC3 noise</span>
               </div>
               <div class="quick-grid">
-                <button class="button secondary command-button" data-adc-source="ADC3" data-command="ADC3" type="button" title="Select ADC3 / AIN3 / P0.05 discrete device path">
-                  <span class="command-code">ADC3</span>
-                  <span class="command-label">Device A · AIN3/P0.05</span>
-                </button>
-                <button class="button secondary command-button" data-adc-source="ADC2" data-command="ADC2" type="button" title="Select ADC2 / AIN2 / P0.04 discrete device path">
+                <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query dual ADC routing">
                   <span class="command-code">ADC2</span>
-                  <span class="command-label">Device B · AIN2/P0.04</span>
+                  <span class="command-label">PPG · AIN2/P0.04</span>
                 </button>
-                <button class="button secondary command-button" data-adc-source="ADC0" data-command="ADC0" type="button" title="Select ADC0 / AIN0 / P0.02 commercial PPG sensor">
-                  <span class="command-code">ADC0</span>
-                  <span class="command-label">Commercial PPG · AIN0/P0.02</span>
+                <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query dual ADC routing">
+                  <span class="command-code">ADC3</span>
+                  <span class="command-label">Noise/TRNG · AIN3/P0.05</span>
                 </button>
-                <button class="button secondary command-button" data-command="ADC?" type="button" title="Query active ADC input">
+                <button class="button secondary command-button" data-command="ADC?" type="button" title="Query dual ADC routing">
                   <span class="command-code">ADC?</span>
-                  <span class="command-label">Query active ADC</span>
+                  <span class="command-label">Query routes</span>
                 </button>
               </div>
-              <p class="command-note">Raw, 9999, and PPG modes use the active ADC only.</p>
+              <p class="command-note">ADC2 streams PPG. ADC3 streams noise bits.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-command="9999" type="button" title="Toggle random bit mode">
@@ -238,9 +234,10 @@
                 </label>
                 <label class="compact-field" for="sampleRate">
                   <span>Rate Hz</span>
-                  <input id="sampleRate" type="number" min="1" max="500" step="1" value="200" list="sampleRatePresets" inputmode="numeric" />
+                  <input id="sampleRate" type="number" min="1" max="500" step="1" value="25" list="sampleRatePresets" inputmode="numeric" />
                   <datalist id="sampleRatePresets">
                     <option value="10"></option>
+                    <option value="25"></option>
                     <option value="50"></option>
                     <option value="100"></option>
                     <option value="200"></option>
@@ -250,11 +247,9 @@
                 </label>
                 <button id="sendRateButton" class="button secondary" type="button">Set</button>
                 <label class="compact-field" for="plotAdcSource">
-                  <span>ADC input</span>
+                  <span>PPG input</span>
                   <select id="plotAdcSource">
-                    <option value="ADC3" selected>ADC3 device A</option>
-                    <option value="ADC2">ADC2 device B</option>
-                    <option value="ADC0">ADC0 commercial</option>
+                    <option value="ADC2" selected>ADC2 PPG</option>
                   </select>
                 </label>
                 <label class="switch">
@@ -322,6 +317,56 @@
             </div>
           </section>
 
+          <section class="encryption-panel">
+            <div class="plot-toolbar">
+              <div>
+                <h2>PPG Encryption</h2>
+                <p id="encryptionStatus">Firmware 9999 VN | key 0 bits | pending 0</p>
+              </div>
+              <div class="toolbar-actions">
+                <label class="compact-field" for="bitMethod">
+                  <span>Bit method</span>
+                  <select id="bitMethod">
+                    <option value="firmware" selected>Firmware 9999 VN</option>
+                    <option value="residual-vn">ADC3 residual VN</option>
+                    <option value="delta-vn">ADC3 delta VN</option>
+                    <option value="lsb">ADC3 LSB</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div class="encryption-grid" aria-live="polite">
+              <div class="bit-stat">
+                <span>Channel</span>
+                <strong id="encryptionChannel">--</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Plain ADC</span>
+                <strong id="encryptionPlain">--</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Key</span>
+                <strong id="encryptionKey">--</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Cipher</span>
+                <strong id="encryptionCipher">--</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Key bits</span>
+                <strong id="keyBitCount">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Pending</span>
+                <strong id="encryptionPending">0</strong>
+              </div>
+              <div class="bit-stat">
+                <span>Encrypted</span>
+                <strong id="encryptionCount">0</strong>
+              </div>
+            </div>
+          </section>
+
           <section id="bitPanel" class="bit-panel" hidden>
             <div class="plot-toolbar">
               <div>
@@ -383,7 +428,7 @@
               </label>
               <label class="compact-field" for="dfuAppVersion">
                 <span>App ver</span>
-                <input id="dfuAppVersion" type="number" min="1" value="17" />
+                <input id="dfuAppVersion" type="number" min="1" value="26" />
               </label>
               <label class="compact-field" for="dfuBaud">
                 <span>DFU baud</span>
@@ -597,7 +642,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=e51c1c57c317" defer></script>
+    <script src="./app.js?v=7c094c4bb58e" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

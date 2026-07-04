@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-07-04-ppg-raw-adc",
+  "version": "2026-07-04-ppg-dual-adc2-ppg-adc3-trng",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 24,
+  "appVersion": 26,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 77469,
-  "sha256": "60ec788d17c84633be3e444fa7c3a8d7a12c5a1c8442aacd5ffc1561fb85e286",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04. Normal PPG modes now stream selected LED-on raw ADC code with G/I/R tags instead of LED-ambient delta. Bias is not applied in firmware payloads; GUI code mode plots received ADC code directly and Current mode applies bias only for current conversion. RATE scheduling, active single ADC selection, 25 Hz single-color PPG timing, 8.3 Hz/ch alternating timing, 9999 TRNG, and UART DFU bootloader entry are preserved."
+  "size": 77133,
+  "sha256": "22cd09ef7be5131e002f8b0286644a71451d0eadb88499d006d0ffaf07263425",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04. Firmware now initializes two SAADC routes together: ADC2/AIN2 for PPG and ADC3/AIN3 for noise/TRNG bits. PPG modes stream selected LED-on raw ADC code with G/I/R tags while 9999 mode can emit BIT3 frames from ADC3. Raw ADC default is 25 Hz and raw mode emits both ADC2 and ADC3. GUI plots ADC2 PPG, generates bits from the selected ADC3 method, and XOR-encrypts 14-bit PPG samples."
 }
