@@ -145,7 +145,6 @@ const state = {
   ppgRateHz: DEFAULT_PPG_RATE_HZ,
   ppgSampleIntervalMs: 40,
   ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
-  ppgSampleKind: "delta",
   saadcOversample: 0,
   lastStatsAt: 0,
   needsDraw: true,
@@ -170,7 +169,6 @@ const ADC_BIAS_SAMPLE_COUNT = 128;
 const UI_SCALE_STORAGE_KEY = "ppgTrngUiScale";
 const UI_SCALE_VALUES = new Set(["compact", "standard", "large", "touch"]);
 const CHANNEL_ORDER = ["ADC", "G", "I", "R", "A"];
-const PPG_DELTA_CHANNELS = new Set(["G", "I", "R"]);
 const CHANNEL_LABELS = {
   ADC: "ADC",
   G: "Green",
@@ -461,31 +459,12 @@ function measureBiasFromSamples(options = {}) {
   return bias;
 }
 
-function isPpgDeltaChannel(channel) {
-  return PPG_DELTA_CHANNELS.has(normalizeChannel(channel));
-}
-
-function getSampleValueKind(sample, channel = sample.channel) {
-  if (sample?.valueKind === "raw" || sample?.valueKind === "delta") return sample.valueKind;
-  return isPpgDeltaChannel(channel) ? state.ppgSampleKind : "raw";
-}
-
-function isPpgDeltaSample(sample, channel = sample.channel) {
-  return isPpgDeltaChannel(channel) && getSampleValueKind(sample, channel) === "delta";
-}
-
 function convertAdcSampleValue(sample, value = sample.value) {
-  const channel = sample.channel || "ADC";
   const adcSource = sample.adcSource || state.adcSource;
-  const isDelta = isPpgDeltaSample(sample, channel);
   const bias = getAdcBias(adcSource);
 
   if (getValueMode() === "current") {
-    if (channel === "ADC") {
-      return Number.isFinite(bias) ? (value - bias) * ADC_CURRENT_SCALE : value;
-    }
-    if (isDelta) return value * ADC_CURRENT_SCALE;
-    return value;
+    return Number.isFinite(bias) ? (value - bias) * ADC_CURRENT_SCALE : value;
   }
 
   return value;
@@ -494,8 +473,8 @@ function convertAdcSampleValue(sample, value = sample.value) {
 function createViewSample(sample) {
   const channel = normalizeChannel(sample.channel) || "ADC";
   const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
-  const valueKind = getSampleValueKind(sample, channel);
-  const bias = getValueMode() === "current" && channel === "ADC" ? getAdcBias(adcSource) : null;
+  const valueKind = "raw";
+  const bias = getValueMode() === "current" ? getAdcBias(adcSource) : null;
   const normalizedSample = { ...sample, channel, adcSource, valueKind };
   const value = convertAdcSampleValue(normalizedSample);
   return {
@@ -512,16 +491,13 @@ function createViewSample(sample) {
 }
 
 function getValueDescription() {
-  const hasPpgDelta = getSamplesForAdcSource().some((sample) => isPpgDeltaSample(sample));
   const bias = getAdcBias();
 
   if (getValueMode() === "current") {
-    if (hasPpgDelta) return "Current delta";
     return Number.isFinite(bias) ? `Current | bias ${bias.toFixed(0)}` : "Current | set bias";
   }
 
-  if (!hasPpgDelta) return "ADC code";
-  return "PPG LED-ambient code";
+  return "ADC code";
 }
 
 function updateValueUi() {
@@ -917,8 +893,7 @@ function parseTaggedSegment(segment) {
     const channel = adcSource ? "ADC" : normalizeChannel(match[1]);
     const value = Number(match[2]);
     if (channel && Number.isFinite(value)) {
-      const valueKind = channel === "ADC" || channel === "A" ? "raw" : state.ppgSampleKind;
-      addSample(value, channel, { adcSource, valueKind });
+      addSample(value, channel, { adcSource, valueKind: "raw" });
       parsed = true;
     }
   });
@@ -1002,7 +977,7 @@ function addSample(value, channel = "ADC", options = {}) {
   const normalizedChannel = normalizeChannel(channel) || "ADC";
   const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
   if (normalizedChannel === "ADC" && adcSource !== state.adcSource) return;
-  const valueKind = options.valueKind || (isPpgDeltaChannel(normalizedChannel) ? state.ppgSampleKind : "raw");
+  const valueKind = options.valueKind || "raw";
   commitSample(value, normalizedChannel, adcSource, valueKind);
 }
 
@@ -1576,25 +1551,20 @@ async function toggleBitModeCommand() {
 
 function applyPpgCommandPreset(command) {
   if (command === "7769") {
-    state.ppgSampleKind = "raw";
     els.filterMode.value = "raw";
   } else if (command === "7761") {
-    state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
   } else if (command === "7762") {
-    state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
   } else if (command === "7763") {
-    state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
   } else if (command === "7764" || command === "7777") {
-    state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";

@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-07-04-rawrate-coop",
+  "version": "2026-07-04-ppg-raw-adc",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 23,
+  "appVersion": 24,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 77613,
-  "sha256": "992886f4bbe2315791134e24c05879f2cfebec188d72eb816c9a0fa7eacc84f7",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04 with cooperative raw ADC RATE scheduling: RATE<hz>/SR<hz>/HZ<hz> changes the actual raw nrfx_saadc_sample interval, while raw mode waits in 1 ms slices so DAC/ADC commands are serviced with low latency. PPG timing remains SAADC hardware oversampling disabled, 10 ms phase timer, 40 ms frame, about 10 ms LED-on pulse, single Green/IR/Red PPG output 25 Hz, alternating Green/IR/Red output 8.3 Hz per channel, RATE? query includes PPG_LED_ON_MS and SAADC_OVERSAMPLE, 1-500 Hz accepted with integer-ms interval readback, app UART on P0.25/P0.26, Green/IR/Red LED pins P0.11/P0.12/P0.13, DAC A/B bias amp commands, active single ADC streaming with selectable ADC3/ADC2/ADC0 input, PPG ambient-subtracted phase sampling, single-source 9999 bitmap support, residual/delta TRNG mixing, Von Neumann extraction, and UART DFU bootloader entry."
+  "size": 77469,
+  "sha256": "60ec788d17c84633be3e444fa7c3a8d7a12c5a1c8442aacd5ffc1561fb85e286",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04. Normal PPG modes now stream selected LED-on raw ADC code with G/I/R tags instead of LED-ambient delta. Bias is not applied in firmware payloads; GUI code mode plots received ADC code directly and Current mode applies bias only for current conversion. RATE scheduling, active single ADC selection, 25 Hz single-color PPG timing, 8.3 Hz/ch alternating timing, 9999 TRNG, and UART DFU bootloader entry are preserved."
 }

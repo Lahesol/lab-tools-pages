@@ -40,10 +40,10 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - Enter UART DFU bootloader: `DFU\r`
 - Firmware version query: `VER?\r`
 - Raw ADC receive format: tagged UART text stream from the active ADC only, for example `ADC3,7568\n;`, `ADC2,7559\n;`, or `ADC0,10820\n;`
-- Tagged PPG receive format: `G,-123\n;`, `I,-71\n;`, `R,85\n;`, or `A,7340\n;`
+- Tagged PPG receive format: `G,7482\n;`, `I,7440\n;`, `R,7411\n;`, or diagnostic ambient `A,7340\n;`
 - Random bit receive format in `9999` mode: tagged ADC bit stream from the active ADC only, for example `BIT3,0\n;`, `BIT2,1\n;`, or `BIT0,0\n;`
 
-In PPG measurement modes, the firmware uses a 40 ms frame: LEDs-off ambient sample, one 10 ms LEDs-off wait phase, one 10 ms selected-LED settling phase, then one selected-LED sample before turning the LEDs off. It streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
+In PPG measurement modes, the firmware uses a 40 ms frame: LEDs-off ambient sample, one 10 ms LEDs-off wait phase, one 10 ms selected-LED settling phase, then one selected-LED sample before turning the LEDs off. Normal PPG modes stream the selected LED-on raw ADC code with a channel tag; bias is not added, subtracted, or otherwise applied in the firmware payload. Raw diagnostic mode streams both the ambient and LED-on raw phase values.
 
 PPG timing displayed in the GUI follows the current firmware constants: 10 ms phase tick, 40 ms frame, about 10 ms LED-on pulse, 25 Hz output for single-channel Green/IR/Red PPG, and 8.3 Hz per optical channel for alternating Green/IR/Red PPG.
 
@@ -97,7 +97,7 @@ Tagged firmware values are plotted as one active ADC stream. The GUI no longer e
 
 The browser may deliver Web Serial data in chunks instead of one line at a time. The GUI parses complete text segments as soon as they arrive and commits samples immediately to reduce control-response latency after DAC changes. Plot redraw is still limited by the browser animation frame.
 
-The `Value` control can show the firmware-received code/value or a current calculation. In code mode the GUI does not add or subtract bias; normal PPG `G`/`I`/`R` samples are plotted exactly as the firmware streams them, which is the signed `LED - ambient` code difference. Bias is used only by the `Current` mode. Press `Measure bias` while the selected ADC input or ambient `A` stream is at the bias condition; raw ADC current displays `(adc - bias) / 8192 * 1.8`, while PPG delta current displays `delta / 8192 * 1.8`. CSV export keeps the original ADC code and bias code with the converted value.
+The `Value` control can show the firmware-received ADC code or a current calculation. In code mode the GUI does not add or subtract bias; normal PPG `G`/`I`/`R` samples are plotted exactly as the firmware streams them, now as selected LED-on raw ADC codes. Bias is used only by the `Current` mode. Press `Measure bias` while the selected ADC input or ambient `A` stream is at the bias condition; current displays `(adc - bias) / 8192 * 1.8`. CSV export keeps the original ADC code and bias code with the converted value.
 
 The top-bar `UI size` control switches the console density between compact, standard, large, and touch-sized layouts. The selected size is saved in local browser storage.
 
