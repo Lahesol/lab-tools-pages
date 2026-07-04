@@ -113,7 +113,6 @@ const state = {
   parseBuffer: "",
   binaryBuffer: [],
   samples: [],
-  pendingSamples: [],
   totalSamples: 0,
   latest: null,
   latestChannel: "ADC",
@@ -148,9 +147,6 @@ const state = {
   ppgSampleIntervalMs: 40,
   ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
   saadcOversample: 0,
-  maxPendingSamples: 4000,
-  sampleDrainScheduled: false,
-  nextSampleDrainAt: 0,
   lastStatsAt: 0,
   needsDraw: true,
   lastDrawAt: 0,
@@ -509,14 +505,12 @@ function setAdcSource(source, options = {}) {
   state.adcSource = normalized;
   if (changed) {
     state.samples = [];
-    state.pendingSamples = [];
     state.totalSamples = 0;
     state.latest = null;
     state.bits = [];
     state.totalBits = 0;
     state.bitLanes = {};
     state.bitPlaneCapacity = 0;
-    state.nextSampleDrainAt = 0;
   }
   resetNoiseExtractor();
   updateAdcSourceUi(options);
@@ -970,58 +964,7 @@ function addSample(value, channel = "ADC", options = {}) {
   const normalizedChannel = normalizeChannel(channel) || "ADC";
   const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
   if (normalizedChannel === "ADC" && adcSource !== state.adcSource) return;
-  const wasEmpty = state.pendingSamples.length === 0;
-  state.pendingSamples.push({
-    value,
-    channel: normalizedChannel,
-    adcSource,
-  });
-
-  if (state.pendingSamples.length > state.maxPendingSamples) {
-    state.pendingSamples.splice(0, state.pendingSamples.length - state.maxPendingSamples);
-  }
-
-  if (wasEmpty) {
-    state.nextSampleDrainAt = performance.now();
-  }
-  scheduleSampleDrain();
-}
-
-function getSampleDrainIntervalMs(sample) {
-  return (sample.channel || "ADC") === "ADC" ? state.sampleIntervalMs : state.ppgSampleIntervalMs;
-}
-
-function scheduleSampleDrain() {
-  if (state.sampleDrainScheduled) return;
-  state.sampleDrainScheduled = true;
-  window.requestAnimationFrame(drainSampleQueue);
-}
-
-function drainSampleQueue(now = performance.now()) {
-  state.sampleDrainScheduled = false;
-
-  if (!state.pendingSamples.length) {
-    state.nextSampleDrainAt = 0;
-    return;
-  }
-
-  if (!state.nextSampleDrainAt) {
-    state.nextSampleDrainAt = now;
-  }
-
-  let emitted = 0;
-  while (state.pendingSamples.length && state.nextSampleDrainAt <= now && emitted < 8) {
-    const sample = state.pendingSamples.shift();
-    commitSample(sample.value, sample.channel, sample.adcSource);
-    state.nextSampleDrainAt += getSampleDrainIntervalMs(sample);
-    emitted += 1;
-  }
-
-  if (state.pendingSamples.length) {
-    scheduleSampleDrain();
-  } else {
-    state.nextSampleDrainAt = 0;
-  }
+  commitSample(value, normalizedChannel, adcSource);
 }
 
 function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSource) {
@@ -1667,10 +1610,8 @@ function applyPpgCommandPreset(command) {
 
 function clearSamples() {
   state.samples = [];
-  state.pendingSamples = [];
   state.totalSamples = 0;
   state.latest = null;
-  state.nextSampleDrainAt = 0;
   resetNoiseExtractor();
   updateStats();
   state.needsDraw = true;
@@ -2872,10 +2813,6 @@ function bindEvents() {
 
   els.pauseButton.addEventListener("click", () => {
     state.paused = !state.paused;
-    if (state.paused) {
-      state.pendingSamples = [];
-      state.nextSampleDrainAt = 0;
-    }
     els.pauseButton.textContent = state.paused ? "Resume" : "Pause";
     addLog("SYS", state.paused ? "Plot paused" : "Plot resumed");
     state.needsDraw = true;

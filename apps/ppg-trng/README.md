@@ -95,7 +95,7 @@ The `Window` field controls how many parsed samples are retained for plotting an
 
 Tagged firmware streams are plotted as separate ADC, Green, IR, Red, and Ambient channels. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
 
-The browser may deliver Web Serial data in chunks instead of one line at a time. Parsed samples are therefore buffered briefly and released to the plot at the firmware cadence, using the `RATE?` raw ADC interval and the reported 25 Hz PPG interval, so the display advances continuously even when the USB driver batches reads.
+The browser may deliver Web Serial data in chunks instead of one line at a time. The GUI parses complete text segments as soon as they arrive and commits samples immediately to reduce control-response latency after DAC changes. Plot redraw is still limited by the browser animation frame.
 
 The `Value` control can show raw ADC code or a bias-corrected current calculation. Press `Measure bias` while the selected ADC input is at the bias condition, then `Current` displays `(adc - bias) / 8192 * 1.8`. CSV export keeps the original ADC code and bias code with the converted value.
 
