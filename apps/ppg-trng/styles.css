@@ -580,8 +580,9 @@ input[type="range"] {
   margin-top: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
-  font-size: clamp(18px, 2.3vw, 29px);
+  font-size: clamp(17px, 2.05vw, 29px);
   line-height: 1;
 }
 
