@@ -144,7 +144,7 @@ const state = {
   bitPlaneCycles: 0,
   bitLanes: {},
   bitSource: "idle",
-  bitGenerationMethod: "firmware",
+  bitGenerationMethod: "residual-vn",
   keyBits: [],
   pendingPpg: [],
   encryptedPpg: [],
@@ -843,7 +843,7 @@ function ingestBinarySamples(bytes) {
     const value = low | (high << 8);
 
     if (state.bitMode) {
-      handleGeneratedBits([value ? 1 : 0], state.bitAdcSource, "Firmware 9999 VN", "firmware");
+      addSample(value, "ADC", { adcSource: state.bitAdcSource });
     } else {
       addSample(value);
     }
@@ -993,7 +993,6 @@ function parseRateStatusSegment(segment) {
 function parseBitSegment(segment) {
   const compact = segment.replace(/[\s,]+/g, "");
   if (!compact || /[^01]/.test(compact)) return false;
-  handleGeneratedBits([...compact].map((bit) => Number(bit)), state.bitAdcSource, "Firmware 9999 VN", "firmware");
   return true;
 }
 
@@ -1001,9 +1000,6 @@ function parseTaggedBitSegment(segment) {
   const matches = [...segment.matchAll(/\b(?:BIT|TRNG|RNG)([023])\b\s*[,=:]\s*([01])/gi)];
   if (!matches.length) return false;
 
-  matches.forEach((match) => {
-    handleGeneratedBits([Number(match[2])], `ADC${match[1]}`, "Firmware 9999 VN", "firmware");
-  });
   return true;
 }
 
@@ -1042,49 +1038,8 @@ function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSou
     state.lastStatsAt = now;
     updateStats();
   }
-  if (sample.channel === "ADC") extractLiveBitsFromNoiseSample(value, sample.adcSource);
   enqueuePpgEncryption(sample);
   state.needsDraw = true;
-}
-
-function extractNoiseBit(value, adcSource = state.adcSource) {
-  if (state.bitMode || !Number.isFinite(value)) return;
-  const source = normalizeAdcSource(adcSource) || state.adcSource;
-  const extractor = state.noiseExtractors[source] || {
-    baseline: null,
-    warmup: 0,
-    pairBit: null,
-  };
-
-  if (extractor.baseline === null) {
-    extractor.baseline = value;
-    extractor.warmup = 1;
-    state.noiseExtractors[source] = extractor;
-    return;
-  }
-
-  const residual = value - extractor.baseline;
-  extractor.baseline += NOISE_BASELINE_ALPHA * residual;
-  extractor.warmup += 1;
-
-  if (extractor.warmup < NOISE_WARMUP_SAMPLES || residual === 0) {
-    state.noiseExtractors[source] = extractor;
-    return;
-  }
-
-  const rawBit = residual > 0 ? 1 : 0;
-  if (extractor.pairBit === null) {
-    extractor.pairBit = rawBit;
-    state.noiseExtractors[source] = extractor;
-    return;
-  }
-
-  const previousBit = extractor.pairBit;
-  extractor.pairBit = null;
-  state.noiseExtractors[source] = extractor;
-
-  if (previousBit === rawBit) return;
-  addBits([previousBit === 0 && rawBit === 1 ? 0 : 1], source, "ADC noise");
 }
 
 function resetNoiseExtractor() {
@@ -1096,11 +1051,10 @@ function resetNoiseExtractor() {
 }
 
 function getSelectedBitMethod() {
-  return els.bitMethod?.value || state.bitGenerationMethod || "firmware";
+  return els.bitMethod?.value || state.bitGenerationMethod || "residual-vn";
 }
 
 function getBitMethodLabel(method = state.bitGenerationMethod) {
-  if (method === "firmware") return "Firmware 9999 VN";
   if (method === "residual-vn") return "ADC3 residual VN";
   if (method === "delta-vn") return "ADC3 delta VN";
   if (method === "lsb") return "ADC3 LSB";
@@ -1108,7 +1062,7 @@ function getBitMethodLabel(method = state.bitGenerationMethod) {
 }
 
 function setBitGenerationMethod(method = getSelectedBitMethod()) {
-  state.bitGenerationMethod = method || "firmware";
+  state.bitGenerationMethod = method || "residual-vn";
   if (els.bitMethod && els.bitMethod.value !== state.bitGenerationMethod) {
     els.bitMethod.value = state.bitGenerationMethod;
   }
@@ -1129,6 +1083,7 @@ function resetLiveEncryption() {
 }
 
 function handleGeneratedBits(bits, adcSource, source, method) {
+  if (!state.bitMode) return;
   if (method !== state.bitGenerationMethod) return;
   addBits(bits, adcSource, source);
 }
@@ -1161,9 +1116,9 @@ function pushVonNeumannBit(rawBit, extractor, adcSource, source, method) {
 function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
   const source = normalizeAdcSource(adcSource) || state.bitAdcSource;
   if (source !== state.bitAdcSource || !Number.isFinite(value)) return;
+  if (!state.bitMode) return;
 
   const method = state.bitGenerationMethod;
-  if (method === "firmware") return;
 
   if (method === "lsb") {
     handleGeneratedBits([Math.round(value) & 1], source, "ADC3 LSB", method);
@@ -1207,6 +1162,7 @@ function formatHex(value, width = 4) {
 }
 
 function enqueuePpgEncryption(sample) {
+  if (!state.bitMode) return;
   if (!["G", "I", "R"].includes(sample.channel)) return;
   const adcCode = clampInteger(sample.value, 0, 16383, 0);
   state.pendingPpg.push({
@@ -1287,7 +1243,7 @@ function getBitLanes() {
   return getBitSourceOrder().map((source) => [source, ensureBitLane(source)]);
 }
 
-function addBits(bits, adcSource = state.adcSource, source = state.bitMode ? "9999 mode" : "ADC noise") {
+function addBits(bits, adcSource = state.bitAdcSource, source = getBitMethodLabel()) {
   if (state.paused || !bits.length) return;
 
   const normalizedSource = normalizeAdcSource(adcSource) || state.bitAdcSource;
@@ -1356,8 +1312,17 @@ function setBitMode(enabled) {
   state.bitMode = enabled;
   state.parseBuffer = "";
   resetNoiseExtractor();
+  resetLiveEncryption();
+  if (enabled) {
+    state.bits = [];
+    state.totalBits = 0;
+    state.bitLanes = {};
+    state.bitPlaneCapacity = 0;
+  }
   updateBitModeUi();
-  addLog("SYS", `Random bit mode ${enabled ? "enabled" : "disabled"}`);
+  updateBitStats();
+  updateEncryptionUi();
+  addLog("SYS", `Web bit extraction ${enabled ? "enabled" : "disabled"}`);
 
   if (enabled) {
     state.needsBitDraw = true;
@@ -1367,7 +1332,7 @@ function setBitMode(enabled) {
 
 function updateBitModeUi() {
   els.bitModeButton.classList.toggle("is-active", state.bitMode);
-  els.bitModeStatus.textContent = state.bitMode ? "Bit mode on" : "Bit mode off";
+  els.bitModeStatus.textContent = state.bitMode ? "Bit extraction on" : "Bit extraction off";
   els.bitModeStatus.classList.toggle("is-muted", !state.bitMode);
   els.bitPanel.hidden = !state.bitMode && state.bits.length === 0;
 }
@@ -1756,7 +1721,6 @@ async function writeBluetoothPayload(payload) {
 }
 
 async function toggleBitModeCommand() {
-  await sendCommand("9999");
   setBitMode(!state.bitMode);
 }
 
@@ -2574,11 +2538,6 @@ function toggleDemo() {
   }
 
   state.demoTimer = window.setInterval(() => {
-    if (state.bitMode) {
-      const batch = Array.from({ length: 4 }, () => (Math.random() > 0.5 ? 1 : 0));
-      handleGeneratedBits(batch, state.bitAdcSource, "Firmware 9999 VN", "firmware");
-    }
-
     const dac = clampDac(els.dacInput.value);
     state.demoPhase += 0.18;
     const baseline = 7200 + (dac - 2056) * 0.42;
@@ -2912,12 +2871,14 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-bit-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      toggleBitModeCommand();
+    });
+  });
+
   document.querySelectorAll("[data-command]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (button.dataset.command === "9999") {
-        toggleBitModeCommand();
-        return;
-      }
       if (button.dataset.adcSource && isConnected()) {
         setAdcSource(button.dataset.adcSource, { pending: true });
       }

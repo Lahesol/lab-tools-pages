@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-07-04-ppg-dual-adc2-ppg-adc3-trng",
+  "version": "2026-07-04-dual-adc-web-bits",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 26,
+  "appVersion": 27,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 77133,
-  "sha256": "22cd09ef7be5131e002f8b0286644a71451d0eadb88499d006d0ffaf07263425",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04. Firmware now initializes two SAADC routes together: ADC2/AIN2 for PPG and ADC3/AIN3 for noise/TRNG bits. PPG modes stream selected LED-on raw ADC code with G/I/R tags while 9999 mode can emit BIT3 frames from ADC3. Raw ADC default is 25 Hz and raw mode emits both ADC2 and ADC3. GUI plots ADC2 PPG, generates bits from the selected ADC3 method, and XOR-encrypts 14-bit PPG samples."
+  "size": 76317,
+  "sha256": "5805e4f48590e8fa9d62e2646714168983f7712b0533db8963e10287cbcad08a",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04. Firmware initializes two SAADC routes together: ADC2/AIN2 for PPG and ADC3/AIN3 for raw noise. PPG modes stream selected LED-on raw ADC code with G/I/R tags and also stream ADC3 raw samples. Firmware no longer emits BIT frames; the Web GUI toggles browser-side ADC3 bit extraction and selects residual VN, delta VN, or LSB before XOR-encrypting 14-bit PPG samples."
 }

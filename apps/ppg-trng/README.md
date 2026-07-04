@@ -19,7 +19,7 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - DAC B set: `B2056\r`
 - Dual ADC routing query: `ADC?\r`
 - Raw ADC sampling rate set/query: `RATE25\r` for 25 Hz, `RATE?\r` to read back. The firmware accepts 1-500 Hz and reports the actual integer-ms interval.
-- TRNG bit mode toggle: `9999\r`
+- Legacy firmware bit command: `9999\r` is not required; bit generation is selected and run in the browser from ADC3 raw samples.
 - DAC sweep/reset: `0000\r`
 - Green-only PPG mode toggle: `7761\r`
 - IR-only PPG mode toggle: `7762\r`
@@ -38,7 +38,7 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - Firmware version query: `VER?\r`
 - Raw ADC receive format: tagged UART text stream from the fixed dual route, for example `ADC2,7559\n;` for PPG and `ADC3,7568\n;` for noise/TRNG
 - Tagged PPG receive format: `G,7482\n;`, `I,7440\n;`, `R,7411\n;`, or diagnostic ambient `A,7340\n;`
-- Random bit receive format in `9999` mode: tagged ADC3 bit stream, for example `BIT3,0\n;`
+- Browser-side bit extraction uses the streamed `ADC3,<code>\n;` samples.
 
 In PPG measurement modes, the firmware uses a 40 ms frame: LEDs-off ambient sample, one 10 ms LEDs-off wait phase, one 10 ms selected-LED settling phase, then one selected-LED sample before turning the LEDs off. Normal PPG modes stream the selected LED-on raw ADC code with a channel tag; bias is not added, subtracted, or otherwise applied in the firmware payload. Raw diagnostic mode streams both the ambient and LED-on raw phase values.
 
@@ -52,7 +52,7 @@ The firmware initializes two SAADC channels together: ADC2 / AIN2 / P0.04 for PP
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 
-The current PCB analog mapping uses ADC2 for PPG and ADC3 for noise/TRNG. Current firmware uses a high-pass residual and sample-delta raw bit mixer followed by Von Neumann pair extraction for `BIT3` frames. `ADC?` returns a dual-route status with `STREAM,DUAL`.
+The current PCB analog mapping uses ADC2 for PPG and ADC3 for noise/TRNG. Firmware streams ADC3 raw codes; the web GUI applies the selected bit extraction method. `ADC?` returns a dual-route status with `STREAM,DUAL`.
 
 ## DFU
 
@@ -82,7 +82,7 @@ Bluetooth uses Nordic UART Service:
 - RX write: `6e400002-b5a3-f393-e0a9-e50e24dcca9e`
 - TX notify: `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
 
-BLE notifications are parsed as text when they contain ASCII numeric payloads. Non-text BLE notifications are parsed as little-endian 16-bit values; in `9999` bit mode, nonzero values become `1` and zero values become `0`.
+BLE notifications are parsed as text when they contain ASCII numeric payloads. Non-text BLE notifications are parsed as little-endian 16-bit ADC codes; while browser-side bit extraction is enabled, those values are treated as ADC3 raw noise samples and passed through the selected bit method.
 
 ## Signal Filtering
 
@@ -100,9 +100,9 @@ The top-bar `UI size` control switches the console density between compact, stan
 
 ## Bit Extraction
 
-Pressing `9999` toggles the local random bit mode indicator and sends the firmware command. While bit mode is active, incoming `BIT3` frames are stored separately from ADC samples and rendered in one bitmap plane.
+Pressing `Bit extract` toggles browser-side ADC3 bit extraction. Firmware commands are not required for bit generation in this workflow.
 
-The live `Bit method` selector chooses which ADC3 bitstream feeds the bitmap and encryption key queue: firmware `BIT3`, browser residual-sign plus Von Neumann, browser delta-sign plus Von Neumann, or ADC3 LSB parity.
+The live `Bit method` selector chooses which ADC3 extraction method feeds the bitmap and encryption key queue: browser residual-sign plus Von Neumann, browser delta-sign plus Von Neumann, or ADC3 LSB parity.
 
 The PPG encryption panel treats each Green/IR/Red PPG sample as a 14-bit ADC code. It consumes 14 generated ADC3 bits as a key and displays `cipher = adc_code XOR key`. If key bits are slower than PPG samples, PPG samples wait in a pending queue.
 

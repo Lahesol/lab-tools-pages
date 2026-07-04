@@ -86,7 +86,7 @@
           <section class="panel">
             <div class="panel-heading">
               <h2>Commands</h2>
-              <span id="bitModeStatus" class="mode-pill is-muted">Bit mode off</span>
+              <span id="bitModeStatus" class="mode-pill is-muted">Bit extraction off</span>
             </div>
             <div class="subpanel">
               <div class="panel-heading compact-heading">
@@ -110,9 +110,9 @@
               <p class="command-note">ADC2 streams PPG. ADC3 streams noise bits.</p>
             </div>
             <div class="quick-grid">
-              <button id="bitModeButton" class="button secondary command-button" data-command="9999" type="button" title="Toggle random bit mode">
-                <span class="command-code">9999</span>
-                <span class="command-label">랜덤 비트</span>
+              <button id="bitModeButton" class="button secondary command-button" data-bit-toggle="true" type="button" title="Start browser-side ADC3 bit extraction">
+                <span class="command-code">WEB</span>
+                <span class="command-label">Bit extract</span>
               </button>
               <button class="button secondary warn command-button" data-command="0000" type="button" title="DAC sweep, then reset">
                 <span class="command-code">0000</span>
@@ -321,14 +321,13 @@
             <div class="plot-toolbar">
               <div>
                 <h2>PPG Encryption</h2>
-                <p id="encryptionStatus">Firmware 9999 VN | key 0 bits | pending 0</p>
+                <p id="encryptionStatus">ADC3 residual VN | key 0 bits | pending 0</p>
               </div>
               <div class="toolbar-actions">
                 <label class="compact-field" for="bitMethod">
                   <span>Bit method</span>
                   <select id="bitMethod">
-                    <option value="firmware" selected>Firmware 9999 VN</option>
-                    <option value="residual-vn">ADC3 residual VN</option>
+                    <option value="residual-vn" selected>ADC3 residual VN</option>
                     <option value="delta-vn">ADC3 delta VN</option>
                     <option value="lsb">ADC3 LSB</option>
                   </select>
@@ -642,7 +641,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=7c094c4bb58e" defer></script>
+    <script src="./app.js?v=94aa0abe9e66" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>
