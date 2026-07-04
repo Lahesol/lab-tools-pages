@@ -26,16 +26,12 @@ const timelineRows = [
 ];
 
 let timelineBlockId = 1;
-let selectedTimelineBlockId = 1;
-const timelineBlocks = [
-  { id: timelineBlockId++, startMs: 0, durationMs: 220, color: "R", brightness: 1000 },
-  { id: timelineBlockId++, startMs: 260, durationMs: 180, color: "G", brightness: 650 },
-  { id: timelineBlockId++, startMs: 520, durationMs: 140, color: "B", brightness: 850 },
-  { id: timelineBlockId++, startMs: 740, durationMs: 260, color: "IR", brightness: 500 },
-];
+let selectedTimelineBlockId = null;
+const timelineBlocks = [];
 let blockTimelineMinimumEndMs = 1000;
 
 let protocolBlockId = 1;
+let selectedProtocolBlockId = null;
 const protocolBlocks = [];
 
 let programTimers = [];
@@ -99,6 +95,7 @@ const el = {
   digitalFormatInput: document.querySelector("#digitalFormatInput"),
   digitalWidthInput: document.querySelector("#digitalWidthInput"),
   digitalEncodingInput: document.querySelector("#digitalEncodingInput"),
+  digitalLevelsInput: document.querySelector("#digitalLevelsInput"),
   digitalDataInput: document.querySelector("#digitalDataInput"),
   digitalStartInput: document.querySelector("#digitalStartInput"),
   digitalBitMsInput: document.querySelector("#digitalBitMsInput"),
@@ -114,6 +111,7 @@ const el = {
   clipDurationInput: document.querySelector("#clipDurationInput"),
   clipBrightnessInput: document.querySelector("#clipBrightnessInput"),
   clipList: document.querySelector("#clipList"),
+  protocolBlockList: document.querySelector("#protocolBlockList"),
   clipTimeline: document.querySelector("#clipTimeline"),
   blockTimelineRuler: document.querySelector("#blockTimelineRuler"),
   blockPreviewPlot: document.querySelector("#blockPreviewPlot"),
@@ -685,7 +683,7 @@ function renderTimelineProtocolOptions() {
   for (const protocol of protocolBlocks) {
     const option = document.createElement("option");
     option.value = protocol.id;
-    option.textContent = `${protocol.name} (${protocol.bits || "custom"}, ${protocol.durationMs} ms)`;
+    option.textContent = `${protocol.name} (${protocolSummary(protocol)}, ${protocol.durationMs} ms)`;
     el.timelineProtocolSelect.appendChild(option);
   }
 }
@@ -771,6 +769,12 @@ function renderDigitalChannelOptions() {
   el.digitalChannelInput.value = channels[0].id;
 }
 
+function setSelectValue(select, value, fallback) {
+  const normalized = String(value ?? "");
+  const hasValue = [...select.options].some((option) => option.value === normalized);
+  select.value = hasValue ? normalized : fallback;
+}
+
 function parseDigitalBits(input, format, bitWidth) {
   const width = Number(bitWidth);
   const raw = String(input).trim().replace(/[\s_,]/g, "");
@@ -802,6 +806,60 @@ function parseDigitalBits(input, format, bitWidth) {
   return value.toString(2).padStart(width, "0");
 }
 
+function clampProtocolLevels(value) {
+  const normalized = Number(value);
+  return [8, 16, 32, 64].includes(normalized) ? normalized : 16;
+}
+
+function parseLevelSequence(input, levels) {
+  const raw = String(input).trim();
+  if (!raw) {
+    throw new Error("Level sequence is empty");
+  }
+
+  const tokens = raw.split(/[\s,;_]+/).filter(Boolean);
+  const symbols = tokens.map((token) => {
+    const value = /^0x/i.test(token) ? Number.parseInt(token, 16) : Number(token);
+    if (!Number.isInteger(value) || value < 0 || value >= levels) {
+      throw new Error(`Level values must be integers from 0 to ${levels - 1}`);
+    }
+    return value;
+  });
+
+  if (symbols.length === 0) {
+    throw new Error("Level sequence is empty");
+  }
+  return symbols;
+}
+
+function parseIntensitySymbols(input, format, bitWidth, levels) {
+  if (format === "levels") {
+    const symbols = parseLevelSequence(input, levels);
+    return {
+      bits: "",
+      sourceBits: "",
+      symbols,
+      symbolText: symbols.join(","),
+    };
+  }
+
+  const symbolBits = Math.log2(levels);
+  const sourceBits = parseDigitalBits(input, format, bitWidth);
+  const paddedLength = Math.ceil(sourceBits.length / symbolBits) * symbolBits;
+  const bits = sourceBits.padStart(paddedLength, "0");
+  const symbols = [];
+  for (let index = 0; index < bits.length; index += symbolBits) {
+    symbols.push(Number.parseInt(bits.slice(index, index + symbolBits), 2));
+  }
+
+  return {
+    bits,
+    sourceBits,
+    symbols,
+    symbolText: symbols.join(","),
+  };
+}
+
 function clampDigitalPeriodMs(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -822,6 +880,12 @@ function pulseBlockDuration(durationMs, gapMs) {
   return Math.max(1, Math.round(durationMs) - gapMs);
 }
 
+function syncProtocolModeControls() {
+  const levelMode = el.digitalEncodingInput.value === "levels";
+  el.digitalLevelsInput.disabled = !levelMode;
+  el.digitalGapMsInput.disabled = levelMode;
+}
+
 function readDigitalProtocolConfig() {
   const periodMs = clampDigitalPeriodMs(el.digitalBitMsInput.value);
   const pulseWidthMs = clampDigitalPulseWidthMs(el.digitalGapMsInput.value, periodMs);
@@ -836,6 +900,7 @@ function readDigitalProtocolConfig() {
     format: el.digitalFormatInput.value,
     bitWidth: Number(el.digitalWidthInput.value),
     encoding: el.digitalEncodingInput.value,
+    levels: clampProtocolLevels(el.digitalLevelsInput.value),
     data: el.digitalDataInput.value,
     startMs: clampTimelineTime(el.digitalStartInput.value),
     bitMs: periodMs,
@@ -847,6 +912,38 @@ function readDigitalProtocolConfig() {
 }
 
 function createDigitalProtocolBlocks(config) {
+  if (config.encoding === "levels") {
+    const levelData = parseIntensitySymbols(config.data, config.format, config.bitWidth, config.levels);
+    const blocks = [];
+    levelData.symbols.forEach((symbol, index) => {
+      const brightness = Math.round((symbol / (config.levels - 1)) * config.brightness);
+      if (brightness <= 0) {
+        return;
+      }
+      blocks.push({
+        startMs: config.startMs + index * config.bitMs,
+        durationMs: config.bitMs,
+        color: config.channelId,
+        brightness,
+        level: symbol,
+      });
+    });
+
+    return {
+      bits: levelData.bits,
+      sourceBits: levelData.sourceBits,
+      symbols: levelData.symbols,
+      symbolText: levelData.symbolText,
+      blocks,
+      totalDurationMs: config.bitMs * levelData.symbols.length,
+      endMs: config.startMs + config.bitMs * levelData.symbols.length,
+    };
+  }
+
+  if (config.format === "levels") {
+    throw new Error("Level Sequence format requires Intensity Levels encoding");
+  }
+
   const bits = parseDigitalBits(config.data, config.format, config.bitWidth);
   const blocks = [];
 
@@ -887,6 +984,9 @@ function createDigitalProtocolBlocks(config) {
 
   return {
     bits,
+    sourceBits: bits,
+    symbols: bits.split("").map((bit) => Number(bit)),
+    symbolText: bits,
     blocks,
     totalDurationMs: config.bitMs * bits.length,
     endMs: config.startMs + config.bitMs * bits.length,
@@ -894,6 +994,10 @@ function createDigitalProtocolBlocks(config) {
 }
 
 function buildDigitalTxCommand(config, preview) {
+  if (config.encoding === "levels") {
+    return "";
+  }
+
   const format = config.format === "hex" ? "HEX" : "BIN";
   const encoding = {
     ook: "OOK",
@@ -927,6 +1031,7 @@ function protocolFromGenerated(config, preview, generatedBlocks) {
     name: config.name,
     config: { ...config },
     bits: preview.bits,
+    symbols: preview.symbolText || "",
     command: buildDigitalTxCommand(config, preview),
     durationMs: preview.totalDurationMs,
     blocks: generatedBlocks.map((block) => ({
@@ -934,6 +1039,7 @@ function protocolFromGenerated(config, preview, generatedBlocks) {
       durationMs: block.durationMs,
       color: block.color,
       brightness: block.brightness,
+      level: block.level ?? "",
     })),
   };
 }
@@ -946,7 +1052,9 @@ function upsertProtocolBlock(protocol) {
   } else {
     protocolBlocks.push(protocol);
   }
+  selectedProtocolBlockId = protocol.id;
   renderTimelineProtocolOptions();
+  renderProtocolBlockList();
 }
 
 function protocolFromCurrentBlocks() {
@@ -963,6 +1071,7 @@ function protocolFromCurrentBlocks() {
       format: el.digitalFormatInput.value,
       bitWidth: Number(el.digitalWidthInput.value),
       encoding: el.digitalEncodingInput.value,
+      levels: clampProtocolLevels(el.digitalLevelsInput.value),
       data: el.digitalDataInput.value,
       startMs: minStart,
       bitMs: clampDigitalPeriodMs(el.digitalBitMsInput.value),
@@ -976,6 +1085,7 @@ function protocolFromCurrentBlocks() {
       brightness: clampTimelineBrightness(el.digitalBrightnessInput.value),
     },
     bits: "",
+    symbols: "",
     command: "",
     durationMs: Math.max(0, maxEnd - minStart),
     blocks: timelineBlocks.map((block) => ({
@@ -987,12 +1097,121 @@ function protocolFromCurrentBlocks() {
   };
 }
 
+function previewFromProtocol(protocol) {
+  const encoding = protocol.config?.encoding || "";
+  const symbols = encoding === "levels" && protocol.symbols
+    ? String(protocol.symbols).split(/[\s,;_]+/).filter(Boolean).map((symbol) => Number(symbol))
+    : String(protocol.bits || "").split("").map((symbol) => Number(symbol)).filter((symbol) => Number.isFinite(symbol));
+  return {
+    bits: protocol.bits || "",
+    sourceBits: protocol.bits || "",
+    symbols,
+    symbolText: protocol.symbols || protocol.bits || "",
+    blocks: protocol.blocks,
+    totalDurationMs: protocol.durationMs,
+    endMs: protocol.durationMs,
+  };
+}
+
+function applyProtocolToForm(protocol) {
+  const config = protocol.config || {};
+  el.digitalNameInput.value = protocol.name || config.name || "";
+  setSelectValue(el.digitalChannelInput, config.channelId, channels[0].id);
+  setSelectValue(el.digitalFormatInput, config.format, "hex");
+  setSelectValue(el.digitalWidthInput, config.bitWidth, "8");
+  setSelectValue(el.digitalEncodingInput, config.encoding, "ook");
+  setSelectValue(el.digitalLevelsInput, config.levels, "16");
+  el.digitalDataInput.value = config.data || "";
+  el.digitalStartInput.value = config.startMs || 0;
+  el.digitalBitMsInput.value = protocolPeriodMs(config);
+  el.digitalGapMsInput.value = protocolPulseWidthMs(config);
+  el.digitalBrightnessInput.value = config.brightness || 1000;
+  syncProtocolModeControls();
+}
+
+function loadProtocolPreview(protocol) {
+  timelineBlocks.splice(0, timelineBlocks.length, ...protocol.blocks.map((block) => ({
+    id: timelineBlockId++,
+    ...block,
+  })));
+  selectedTimelineBlockId = timelineBlocks[0]?.id ?? null;
+  blockTimelineMinimumEndMs = Math.max(1000, protocol.durationMs);
+}
+
+function selectProtocolBlock(protocolId) {
+  const protocol = protocolBlocks.find((candidate) => candidate.id === protocolId);
+  if (!protocol) {
+    return;
+  }
+  selectedProtocolBlockId = protocol.id;
+  applyProtocolToForm(protocol);
+  loadProtocolPreview(protocol);
+  renderProtocolParameterList(protocol.config, previewFromProtocol(protocol));
+  renderProtocolTermDiagram(protocol.config, previewFromProtocol(protocol));
+  renderBlocks();
+}
+
+function protocolSummary(protocol) {
+  if (protocol.config?.encoding === "levels") {
+    return `${protocol.config.levels || 16} levels | ${protocol.symbols || "levels"}`;
+  }
+  return `${protocol.bits || "custom"} | ${protocol.config?.encoding || "custom"}`;
+}
+
+function renderProtocolBlockList() {
+  el.protocolBlockList.replaceChildren();
+
+  if (protocolBlocks.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "protocol-empty";
+    empty.textContent = "No protocol blocks";
+    el.protocolBlockList.appendChild(empty);
+    return;
+  }
+
+  for (const protocol of protocolBlocks) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "protocol-block-item";
+    button.setAttribute("aria-selected", String(protocol.id === selectedProtocolBlockId));
+    button.addEventListener("click", () => selectProtocolBlock(protocol.id));
+
+    const title = document.createElement("span");
+    title.className = "protocol-block-title";
+    title.textContent = protocol.name;
+
+    const meta = document.createElement("span");
+    meta.className = "protocol-block-meta";
+    meta.textContent = `${protocol.config?.channelId || channels[0].id} | ${protocolSummary(protocol)} | ${protocol.durationMs} ms`;
+
+    button.append(title, meta);
+    el.protocolBlockList.appendChild(button);
+  }
+}
+
 function renderProtocolParameterList(config = null, preview = null) {
   el.protocolParameterList.replaceChildren();
   const periodMs = config ? protocolPeriodMs(config) : 1;
   const pulseWidthMs = config ? protocolPulseWidthMs(config) : 1;
-  const items = config && preview
-    ? [
+  let items = [["Protocol", "No valid protocol"]];
+
+  if (config && preview) {
+    if (config.encoding === "levels") {
+      items = [
+        ["Name", config.name],
+        ["Channel", config.channelId],
+        ["Format", config.format.toUpperCase()],
+        ["Encoding", "Intensity levels"],
+        ["Levels", config.levels],
+        ["Data", config.data],
+        ["Symbols", preview.symbolText || preview.symbols.join(",")],
+        ["Symbol period T", `${periodMs} ms`],
+        ["Max amplitude", config.brightness],
+        ["Active symbols", preview.blocks.length],
+        ["Duration", `${preview.totalDurationMs} ms`],
+      ];
+    } else {
+      items = [
         ["Name", config.name],
         ["Channel", config.channelId],
         ["Format", config.format.toUpperCase()],
@@ -1006,8 +1225,9 @@ function renderProtocolParameterList(config = null, preview = null) {
         ["Amplitude", config.brightness],
         ["Pulses", preview.blocks.length],
         ["Duration", `${preview.totalDurationMs} ms`],
-      ]
-    : [["Protocol", "No valid protocol"]];
+      ];
+    }
+  }
 
   for (const [label, value] of items) {
     const item = document.createElement("div");
@@ -1100,6 +1320,88 @@ function renderProtocolTermDiagram(config = null, preview = null) {
   });
   label.textContent = "Start delay";
   svg.appendChild(label);
+
+  if (config.encoding === "levels") {
+    const symbols = (preview.symbols.length > 0 ? preview.symbols : [0]).slice(0, 5);
+    for (let index = 0; index < symbols.length; index += 1) {
+      const symbol = symbols[index];
+      const x0 = firstPulseX + index * periodPx;
+      const levelRatio = Math.max(0, Math.min(1, symbol / (config.levels - 1)));
+      const levelHeight = (baseline - highY) * levelRatio;
+      const slot = createSvgElement("rect", {
+        x: x0,
+        y: highY,
+        width: periodPx,
+        height: baseline - highY,
+        class: "term-zero",
+      });
+      svg.appendChild(slot);
+
+      if (levelHeight > 0) {
+        const pulse = createSvgElement("rect", {
+          x: x0,
+          y: baseline - levelHeight,
+          width: periodPx,
+          height: levelHeight,
+          class: "term-pulse",
+        });
+        pulse.setAttribute("fill", color);
+        pulse.setAttribute("fill-opacity", "0.18");
+        svg.appendChild(pulse);
+      }
+
+      const levelText = createSvgElement("text", {
+        x: x0 + periodPx / 2,
+        y: baseline + 18,
+        class: "term-muted",
+        "text-anchor": "middle",
+      });
+      levelText.textContent = `L${symbol}`;
+      svg.appendChild(levelText);
+    }
+
+    svg.appendChild(createSvgElement("line", {
+      x1: firstPulseX,
+      y1: highY - 18,
+      x2: firstPulseX + periodPx,
+      y2: highY - 18,
+      class: "term-arrow",
+    }));
+    label = createSvgElement("text", {
+      x: firstPulseX + periodPx / 2,
+      y: highY - 28,
+      class: "term-label",
+      "text-anchor": "middle",
+    });
+    label.textContent = "Symbol period T";
+    svg.appendChild(label);
+
+    svg.appendChild(createSvgElement("line", {
+      x1: firstPulseX - 28,
+      y1: highY,
+      x2: firstPulseX - 28,
+      y2: baseline,
+      class: "term-arrow",
+    }));
+    label = createSvgElement("text", {
+      x: firstPulseX - 38,
+      y: (highY + baseline) / 2,
+      class: "term-label",
+      "text-anchor": "end",
+    });
+    label.textContent = "Max amplitude";
+    svg.appendChild(label);
+
+    const footer = createSvgElement("text", {
+      x: right - 4,
+      y: baseline + 48,
+      class: "term-muted",
+      "text-anchor": "end",
+    });
+    footer.textContent = `Amplitude = level / ${config.levels - 1} x max`;
+    svg.appendChild(footer);
+    return;
+  }
 
   for (let index = 0; index < bits.length; index += 1) {
     const bit = bits[index];
@@ -1196,33 +1498,24 @@ function renderProtocolTermDiagram(config = null, preview = null) {
 
 function protocolRowsForCsv() {
   const sourceProtocols = protocolBlocks.length > 0 ? protocolBlocks : [protocolFromCurrentBlocks()];
-  const rows = [];
-
-  for (const protocol of sourceProtocols) {
-    for (const block of protocol.blocks) {
-      rows.push({
-        name: protocol.name,
-        channel: protocol.config.channelId || block.color,
-        format: protocol.config.format || "",
-        width: protocol.config.bitWidth || "",
-        encoding: protocol.config.encoding || "",
-        data: protocol.config.data || "",
-        bits: protocol.bits || "",
-        period_ms: protocolPeriodMs(protocol.config),
-        pulse_width_ms: protocolPulseWidthMs(protocol.config),
-        duty_cycle_pct: Math.round((protocolPulseWidthMs(protocol.config) / protocolPeriodMs(protocol.config)) * 100),
-        amplitude: protocol.config.brightness || "",
-        total_duration_ms: protocol.durationMs,
-        command: protocol.command || "",
-        start_ms: block.startMs,
-        duration_ms: block.durationMs,
-        color: block.color,
-        brightness: block.brightness,
-      });
-    }
-  }
-
-  return rows;
+  return sourceProtocols.map((protocol) => ({
+    name: protocol.name,
+    channel: protocol.config.channelId || channels[0].id,
+    format: protocol.config.format || "",
+    width: protocol.config.bitWidth || "",
+    encoding: protocol.config.encoding || "",
+    levels: protocol.config.levels || "",
+    data: protocol.config.data || "",
+    bits: protocol.bits || "",
+    symbols: protocol.symbols || "",
+    start_delay_ms: protocol.config.startMs || 0,
+    period_ms: protocolPeriodMs(protocol.config),
+    pulse_width_ms: protocolPulseWidthMs(protocol.config),
+    duty_cycle_pct: Math.round((protocolPulseWidthMs(protocol.config) / protocolPeriodMs(protocol.config)) * 100),
+    amplitude: protocol.config.brightness || "",
+    total_duration_ms: protocol.durationMs,
+    command: protocol.command || "",
+  }));
 }
 
 function exportProtocolCsv() {
@@ -1232,22 +1525,21 @@ function exportProtocolCsv() {
     "format",
     "width",
     "encoding",
+    "levels",
     "data",
     "bits",
+    "symbols",
+    "start_delay_ms",
     "period_ms",
     "pulse_width_ms",
     "duty_cycle_pct",
     "amplitude",
     "total_duration_ms",
     "command",
-    "start_ms",
-    "duration_ms",
-    "color",
-    "brightness",
   ];
   const rows = protocolRowsForCsv();
   downloadText("6color_protocol_blocks.csv", toCsv(headers, rows));
-  appendLog("!", `Exported ${rows.length} protocol block rows`);
+  appendLog("!", `Exported ${rows.length} protocol blocks`);
 }
 
 async function importProtocolCsv(file) {
@@ -1258,31 +1550,34 @@ async function importProtocolCsv(file) {
   for (const row of rows) {
     const name = sanitizeFilename(row.name || "imported_protocol");
     if (!groups.has(name)) {
+      const periodMs = csvNumber(row.period_ms || row.bit_ms, 1);
+      const pulseWidthMs = csvNumber(
+        row.pulse_width_ms,
+        Math.max(1, periodMs - csvNumber(row.gap_ms, 0)),
+      );
       groups.set(name, {
         id: `protocol-${protocolBlockId++}`,
         name,
         config: {
           name,
           channelId: row.channel ? normalizeChannelId(row.channel) : channels[0].id,
-          format: row.format || "csv",
-          bitWidth: csvNumber(row.width, 0),
-          encoding: row.encoding || "custom",
+          format: row.format || "hex",
+          bitWidth: csvNumber(row.width, 8),
+          encoding: row.encoding || "ook",
+          levels: clampProtocolLevels(row.levels),
           data: row.data || "",
-          startMs: 0,
-          bitMs: csvNumber(row.period_ms || row.bit_ms, 1),
-          periodMs: csvNumber(row.period_ms || row.bit_ms, 1),
-          pulseWidthMs: csvNumber(
-            row.pulse_width_ms,
-            Math.max(1, csvNumber(row.period_ms || row.bit_ms, 1) - csvNumber(row.gap_ms, 0)),
-          ),
+          startMs: clampTimelineTime(row.start_delay_ms || 0),
+          bitMs: periodMs,
+          periodMs,
+          pulseWidthMs,
           gapMs: Math.max(
             0,
-            csvNumber(row.period_ms || row.bit_ms, 1) -
-              csvNumber(row.pulse_width_ms, Math.max(1, csvNumber(row.period_ms || row.bit_ms, 1) - csvNumber(row.gap_ms, 0))),
+            periodMs - pulseWidthMs,
           ),
           brightness: clampTimelineBrightness(csvNumber(row.amplitude || row.protocol_brightness || row.brightness, 1000)),
         },
         bits: row.bits || "",
+        symbols: row.symbols || "",
         command: row.command || "",
         durationMs: clampTimelineTime(row.total_duration_ms),
         blocks: [],
@@ -1290,43 +1585,65 @@ async function importProtocolCsv(file) {
     }
 
     const protocol = groups.get(name);
-    const block = {
-      startMs: clampTimelineTime(row.start_ms),
-      durationMs: clampTimelineDuration(row.duration_ms),
-      color: normalizeChannelId(row.color || row.channel),
-      brightness: clampTimelineBrightness(csvNumber(row.brightness, 0)),
-    };
-    protocol.blocks.push(block);
-    protocol.durationMs = Math.max(protocol.durationMs, block.startMs + block.durationMs);
+    if (row.start_ms !== undefined && row.duration_ms !== undefined) {
+      const block = {
+        startMs: clampTimelineTime(row.start_ms),
+        durationMs: clampTimelineDuration(row.duration_ms),
+        color: normalizeChannelId(row.color || row.channel),
+        brightness: clampTimelineBrightness(csvNumber(row.brightness, 0)),
+        level: row.level || "",
+      };
+      protocol.blocks.push(block);
+      protocol.durationMs = Math.max(protocol.durationMs, block.startMs + block.durationMs);
+    }
+  }
+
+  for (const protocol of groups.values()) {
+    if (protocol.blocks.length > 0) {
+      continue;
+    }
+    try {
+      const preview = createDigitalProtocolBlocks(protocol.config);
+      protocol.bits = protocol.bits || preview.bits;
+      protocol.symbols = protocol.symbols || preview.symbolText || "";
+      protocol.command = protocol.command || buildDigitalTxCommand(protocol.config, preview);
+      protocol.durationMs = preview.totalDurationMs;
+      protocol.blocks = preview.blocks.map((block) => ({
+        startMs: Math.max(0, block.startMs - protocol.config.startMs),
+        durationMs: block.durationMs,
+        color: block.color,
+        brightness: block.brightness,
+        level: block.level ?? "",
+      }));
+    } catch (error) {
+      appendLog("!", `${protocol.name}: ${error.message || String(error)}`);
+    }
   }
 
   protocolBlocks.splice(0, protocolBlocks.length, ...groups.values());
   const first = protocolBlocks[0];
   if (first) {
-    timelineBlocks.splice(0, timelineBlocks.length, ...first.blocks.map((block) => ({
-      id: timelineBlockId++,
-      ...block,
-    })));
-    selectedTimelineBlockId = timelineBlocks[0]?.id ?? null;
-    blockTimelineMinimumEndMs = Math.max(1000, first.durationMs);
-    renderProtocolParameterList(first.config, {
-      bits: first.bits || "imported",
-      blocks: first.blocks,
-      totalDurationMs: first.durationMs,
-    });
+    selectedProtocolBlockId = first.id;
+    applyProtocolToForm(first);
+    loadProtocolPreview(first);
+    renderProtocolParameterList(first.config, previewFromProtocol(first));
+    renderProtocolTermDiagram(first.config, previewFromProtocol(first));
   }
 
   renderBlocks();
   renderTimelineProtocolOptions();
+  renderProtocolBlockList();
   appendLog("!", `Imported ${protocolBlocks.length} protocol blocks`);
 }
 
 function updateDigitalPreview() {
+  syncProtocolModeControls();
   try {
     const config = readDigitalProtocolConfig();
     const preview = createDigitalProtocolBlocks(config);
-    el.digitalPreviewOutput.textContent =
-      `${preview.bits} | ${config.encoding} | T=${config.bitMs} ms | PW=${config.pulseWidthMs} ms | ${preview.blocks.length} pulses`;
+    el.digitalPreviewOutput.textContent = config.encoding === "levels"
+      ? `levels ${config.levels}: ${preview.symbolText} | T=${config.bitMs} ms | max=${config.brightness} | ${preview.blocks.length} active symbols`
+      : `${preview.bits} | ${config.encoding} | T=${config.bitMs} ms | PW=${config.pulseWidthMs} ms | ${preview.blocks.length} pulses`;
     renderProtocolParameterList(config, preview);
     renderProtocolTermDiagram(config, preview);
   } catch (error) {
@@ -1369,11 +1686,17 @@ function generateDigitalBlocks({ append = false, run = false } = {}) {
   updateDigitalPreview();
   appendLog(
     "!",
-    `Generated ${preview.blocks.length} ${config.encoding} pulses from ${preview.bits} on ${config.channelId}`,
+    `Saved protocol ${config.name}: ${config.encoding} on ${config.channelId}`,
   );
 
   if (run) {
-    sendCommand(buildDigitalTxCommand(config, preview));
+    const command = buildDigitalTxCommand(config, preview);
+    if (command) {
+      sendCommand(command);
+    } else {
+      appendLog("!", "Intensity-level run uses browser-timed PWM/ON/OFF commands until firmware adds a native level protocol command");
+      runProgram(buildBlockProgramEvents(), config.name);
+    }
   }
 }
 
@@ -1469,11 +1792,6 @@ function renderClipTimeline() {
 
   const lane = document.createElement("div");
   lane.className = "track-lane";
-  lane.addEventListener("dblclick", (event) => {
-    const rect = lane.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    addTimelineBlock(el.digitalChannelInput.value || channels[0].id, Math.round(ratio * maxTime));
-  });
 
   for (const block of [...timelineBlocks].sort((a, b) => a.startMs - b.startMs)) {
     const channel = channelById(block.color);
@@ -1609,6 +1927,7 @@ function renderBlocks() {
   }
   syncClipEditor();
   renderClipList();
+  renderProtocolBlockList();
   renderClipTimeline();
   renderBlockPreviewPlot();
 }
@@ -2060,10 +2379,15 @@ el.sortTimelineBlocksButton.addEventListener("click", () => {
   renderBlocks();
 });
 el.clearTimelineBlocksButton.addEventListener("click", () => {
+  protocolBlocks.splice(0, protocolBlocks.length);
+  selectedProtocolBlockId = null;
   timelineBlocks.splice(0, timelineBlocks.length);
   selectedTimelineBlockId = null;
   blockTimelineMinimumEndMs = 1000;
   renderBlocks();
+  renderTimelineProtocolOptions();
+  updateDigitalPreview();
+  appendLog("!", "Cleared protocol blocks");
 });
 el.importProtocolCsvButton.addEventListener("click", () => {
   el.protocolCsvInput.click();
@@ -2093,6 +2417,7 @@ el.runDigitalBlocksButton.addEventListener("click", () => generateDigitalBlocks(
   el.digitalFormatInput,
   el.digitalWidthInput,
   el.digitalEncodingInput,
+  el.digitalLevelsInput,
   el.digitalDataInput,
   el.digitalStartInput,
   el.digitalBitMsInput,

@@ -493,13 +493,20 @@ h1 {
   color: var(--text);
 }
 
+.protocol-grid input:disabled,
+.protocol-grid select:disabled {
+  color: var(--muted);
+  background: #eef3f4;
+  cursor: not-allowed;
+}
+
 .protocol-wide {
   grid-column: 1 / -1;
 }
 
 .protocol-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
 }
 
@@ -510,6 +517,53 @@ h1 {
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.protocol-library {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.protocol-block-list {
+  display: grid;
+  gap: 7px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.protocol-block-item {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.protocol-block-item[aria-selected="true"] {
+  border-color: rgba(11, 127, 120, 0.45);
+  background: #e3f4f1;
+}
+
+.protocol-block-title {
+  min-width: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.protocol-block-meta,
+.protocol-empty {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.protocol-empty {
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
 }
 
 .parameter-list {

@@ -104,7 +104,7 @@ Pressing `Bit extract` toggles browser-side ADC3 bit extraction. Changing the li
 
 The live `Bit method` selector chooses which ADC3 extraction method feeds the bitmap and encryption key queue: moving-average threshold, moving-average threshold plus Von Neumann, browser residual-sign plus Von Neumann, browser delta-sign plus Von Neumann, or ADC3 LSB parity. The live moving-average rule matches the `Noise extractor` tab: `sample > moving_average(previous N samples) + offset`. Changing the live MA window or offset clears the current key queue and bitmap so bits from different threshold settings are not mixed.
 
-The PPG encryption panel treats each Green/IR/Red PPG sample as a 14-bit ADC code. It consumes 14 generated ADC3 bits as a key and displays `cipher = adc_code XOR key`. If key bits are slower than PPG samples, PPG samples wait in a pending queue.
+The PPG encryption panel treats each Green/IR/Red PPG sample as a 14-bit ADC code. It consumes 14 generated ADC3 bits as a key and displays `cipher = adc_code XOR key`. If key bits are slower than PPG samples, PPG samples wait in a pending queue. The same panel plots the recent cipher values on a 14-bit y-axis and `Cipher CSV` exports the encrypted history with plain ADC, key bits, key value, cipher value, method, and bit source.
 
 The bitmap is a fixed plane whose columns and rows can be entered directly in the live panel. After all cells in the plane are filled, the next bit clears only the visible plane and writing restarts from the first cell. CSV export uses the separate buffered bit history, not the current visible plane. The `History` field controls that export buffer size; when the buffer exceeds the limit, the oldest bits are dropped.
 

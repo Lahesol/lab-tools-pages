@@ -687,6 +687,13 @@ canvas {
   background: #fbfdfc;
 }
 
+.cipher-canvas-wrap {
+  height: 190px;
+  min-height: 160px;
+  padding: 0 16px 16px;
+  background: #fbfdfc;
+}
+
 .bit-stat {
   min-height: 62px;
   padding: 10px 11px;

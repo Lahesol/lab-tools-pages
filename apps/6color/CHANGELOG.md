@@ -19,4 +19,6 @@
 - Reworked the Protocols tab to use conventional pulse terms: period, pulse width, duty cycle, and amplitude.
 - Added a pulse terminology diagram that updates from the current protocol parameters.
 - Simplified the Protocols waveform panel to a single pulse lane because one protocol block uses one wavelength.
-- Improved the generated block list so blocks can be reviewed, selected, and edited more directly.
+- Reworked the Protocols tab so one saved protocol is treated as one block; generated pulse segments are now internal preview data instead of editable blocks.
+- Added 8/16/32/64-level intensity encoding for protocol data, with level-sequence, binary, and hexadecimal input support.
+- Changed protocol CSV export to one row per saved protocol block while keeping import compatibility for older segment-row CSV files.

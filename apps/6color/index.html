@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=d55e1ba3d30a">
+  <link rel="stylesheet" href="./styles.css?v=de25852665d6">
 </head>
 <body>
   <main class="app-shell">
@@ -95,12 +95,12 @@
       <div class="timeline-layout">
         <section class="timeline-editor" aria-label="Protocol block editor">
           <div class="timeline-toolbar">
-            <button id="addTimelineBlockButton" type="button">Add Block</button>
-            <button id="sortTimelineBlocksButton" type="button">Sort</button>
-            <button id="clearTimelineBlocksButton" type="button">Clear</button>
+            <button id="addTimelineBlockButton" type="button" hidden>Add Segment</button>
+            <button id="sortTimelineBlocksButton" type="button" hidden>Sort Segments</button>
+            <button id="clearTimelineBlocksButton" type="button">Clear Protocols</button>
             <button id="importProtocolCsvButton" type="button">Import CSV</button>
             <button id="exportProtocolCsvButton" type="button">Export CSV</button>
-            <button id="runBlocksButton" class="primary-button" type="button">Run</button>
+            <button id="runBlocksButton" class="primary-button" type="button">Run Preview</button>
             <button id="stopBlocksButton" type="button">Stop</button>
             <input id="protocolCsvInput" type="file" accept=".csv,.scv,text/csv" hidden>
           </div>
@@ -120,6 +120,7 @@
                 <select id="digitalFormatInput">
                   <option value="bin">Binary</option>
                   <option value="hex" selected>Hex</option>
+                  <option value="levels">Level Sequence</option>
                 </select>
               </label>
               <label>
@@ -127,14 +128,26 @@
                 <select id="digitalWidthInput">
                   <option value="4">4 bit</option>
                   <option value="8" selected>8 bit</option>
+                  <option value="16">16 bit</option>
+                  <option value="32">32 bit</option>
                 </select>
               </label>
               <label>
                 <span>Encoding</span>
                 <select id="digitalEncodingInput">
                   <option value="ook">OOK NRZ</option>
+                  <option value="pulse-width">PWM Width</option>
+                  <option value="levels">Intensity Levels</option>
                   <option value="manchester">Manchester</option>
-                  <option value="pulse-width">Pulse Width</option>
+                </select>
+              </label>
+              <label>
+                <span>Levels</span>
+                <select id="digitalLevelsInput">
+                  <option value="8">8</option>
+                  <option value="16" selected>16</option>
+                  <option value="32">32</option>
+                  <option value="64">64</option>
                 </select>
               </label>
               <label class="protocol-wide">
@@ -159,14 +172,19 @@
               </label>
             </div>
             <div class="protocol-actions">
-              <button id="generateDigitalBlocksButton" type="button">Generate</button>
-              <button id="appendDigitalBlocksButton" type="button">Append</button>
-              <button id="runDigitalBlocksButton" class="primary-button" type="button">Generate + Run</button>
+              <button id="generateDigitalBlocksButton" type="button">Save Protocol</button>
+              <button id="appendDigitalBlocksButton" type="button" hidden>Append Segments</button>
+              <button id="runDigitalBlocksButton" class="primary-button" type="button">Save + Run</button>
             </div>
             <output id="digitalPreviewOutput" class="protocol-output"></output>
           </div>
 
-          <div class="clip-editor">
+          <div class="protocol-library">
+            <div class="editor-title">Protocol Blocks</div>
+            <div id="protocolBlockList" class="protocol-block-list" aria-label="Protocol blocks"></div>
+          </div>
+
+          <div class="clip-editor" hidden>
             <div class="editor-title">Selected Block</div>
             <label>
               <span>Channel</span>
@@ -187,8 +205,8 @@
             <button id="deleteTimelineBlockButton" class="danger-button" type="button">Delete Block</button>
           </div>
 
-          <div class="editor-title">Generated Blocks</div>
-          <div id="clipList" class="clip-list" aria-label="Timeline blocks"></div>
+          <div class="editor-title" hidden>Generated Segments</div>
+          <div id="clipList" class="clip-list" aria-label="Generated protocol segments" hidden></div>
         </section>
 
         <section class="timeline-plot-panel" aria-label="Protocol waveform">
@@ -199,7 +217,7 @@
           <div id="protocolParameterList" class="parameter-list" aria-label="Protocol parameters"></div>
           <svg id="protocolTermDiagram" class="term-diagram" viewBox="0 0 820 220" role="img" aria-label="Protocol pulse terminology diagram"></svg>
           <div id="blockTimelineRuler" class="timeline-ruler"></div>
-          <div id="clipTimeline" class="clip-timeline" aria-label="Protocol block lanes"></div>
+          <div id="clipTimeline" class="clip-timeline" aria-label="Generated protocol waveform segments" hidden></div>
           <div class="plot-head plot-head-secondary">
             <span>Pulse Wave Preview</span>
             <span>0-1000</span>
@@ -271,6 +289,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=a6b28e125243"></script>
+  <script src="./app.js?v=ecd626f55a3c"></script>
 </body>
 </html>

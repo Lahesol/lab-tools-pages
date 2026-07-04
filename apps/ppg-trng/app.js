@@ -41,6 +41,9 @@ const els = {
   encryptionCipher: document.querySelector("#encryptionCipher"),
   encryptionChannel: document.querySelector("#encryptionChannel"),
   encryptionStatus: document.querySelector("#encryptionStatus"),
+  exportCipherButton: document.querySelector("#exportCipherButton"),
+  cipherCanvas: document.querySelector("#cipherCanvas"),
+  cipherCanvasWrap: document.querySelector(".cipher-canvas-wrap"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
@@ -183,6 +186,8 @@ const state = {
   lastDrawAt: 0,
   needsBitDraw: true,
   lastBitDrawAt: 0,
+  needsCipherDraw: true,
+  lastCipherDrawAt: 0,
   noiseTable: null,
   noiseFileName: "",
   noiseResults: [],
@@ -250,6 +255,13 @@ const plot = {
 
 const bitMap = {
   ctx: els.bitCanvas.getContext("2d"),
+  width: 0,
+  height: 0,
+  dpr: 1,
+};
+
+const cipherPlot = {
+  ctx: els.cipherCanvas.getContext("2d"),
   width: 0,
   height: 0,
   dpr: 1,
@@ -1133,6 +1145,7 @@ function resetLiveEncryption() {
   state.droppedPpg = 0;
   state.lastEncrypted = null;
   state.liveBitExtractors = {};
+  state.needsCipherDraw = true;
 }
 
 function handleGeneratedBits(bits, adcSource, source, method) {
@@ -1263,6 +1276,7 @@ function processEncryptionQueue() {
     const record = {
       ...sample,
       key,
+      keyBits: keyBits.join(""),
       cipher,
       method: state.bitGenerationMethod,
       bitSource: state.bitAdcSource,
@@ -1273,6 +1287,7 @@ function processEncryptionQueue() {
     if (state.encryptedPpg.length > MAX_ENCRYPTED_PPG) {
       state.encryptedPpg.splice(0, state.encryptedPpg.length - MAX_ENCRYPTED_PPG);
     }
+    state.needsCipherDraw = true;
   }
   updateEncryptionUi();
 }
@@ -1922,6 +1937,43 @@ function exportCsv() {
   addLog("SYS", `Exported ${displaySamples.length} samples`);
 }
 
+function exportCipherCsv() {
+  if (!state.encryptedPpg.length) {
+    addLog("SYS", "No cipher samples to export");
+    return;
+  }
+
+  const start = state.encryptedPpg[0]?.t || performance.now();
+  const rows = [
+    "index,time_ms,channel,adc_input,plain_adc,key_bits,key_dec,key_hex,cipher_dec,cipher_hex,method,bit_source",
+  ];
+  state.encryptedPpg.forEach((entry, index) => {
+    rows.push([
+      index,
+      (entry.t - start).toFixed(3),
+      csvCell(entry.channel),
+      csvCell(entry.adcSource),
+      entry.adcCode,
+      csvCell(entry.keyBits || ""),
+      entry.key,
+      csvCell(formatHex(entry.key)),
+      entry.cipher,
+      csvCell(formatHex(entry.cipher)),
+      csvCell(entry.method),
+      csvCell(entry.bitSource),
+    ].join(","));
+  });
+
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `ppg_cipher_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${state.encryptedPpg.length} cipher samples`);
+}
+
 function clearBits() {
   state.bits = [];
   state.totalBits = 0;
@@ -1938,7 +1990,9 @@ function clearBits() {
   updateBitStats();
   updateEncryptionUi();
   state.needsBitDraw = true;
+  state.needsCipherDraw = true;
   drawBitMap();
+  drawCipherPlot();
 }
 
 function exportBitsCsv() {
@@ -2696,6 +2750,18 @@ function resizeBitCanvas() {
   drawBitMap();
 }
 
+function resizeCipherCanvas() {
+  const rect = els.cipherCanvas.getBoundingClientRect();
+  cipherPlot.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  cipherPlot.width = Math.floor(rect.width);
+  cipherPlot.height = Math.floor(rect.height);
+  els.cipherCanvas.width = Math.floor(cipherPlot.width * cipherPlot.dpr);
+  els.cipherCanvas.height = Math.floor(cipherPlot.height * cipherPlot.dpr);
+  cipherPlot.ctx.setTransform(cipherPlot.dpr, 0, 0, cipherPlot.dpr, 0, 0);
+  state.needsCipherDraw = true;
+  drawCipherPlot();
+}
+
 function getYRange(values) {
   if (!values.length) return { min: 0, max: 16384 };
 
@@ -2862,6 +2928,64 @@ function drawGrid(ctx, margin, chartW, chartH, min, max) {
   ctx.strokeRect(margin.left, margin.top, chartW, chartH);
 }
 
+function drawCipherPlot() {
+  const ctx = cipherPlot.ctx;
+  const width = cipherPlot.width;
+  const height = cipherPlot.height;
+  if (!width || !height) return;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  const margin = { left: 58, right: 18, top: 22, bottom: 28 };
+  const chartW = width - margin.left - margin.right;
+  const chartH = height - margin.top - margin.bottom;
+  if (chartW <= 0 || chartH <= 0) return;
+
+  const min = 0;
+  const max = 16383;
+  drawGrid(ctx, margin, chartW, chartH, min, max);
+
+  const records = state.encryptedPpg;
+  if (!records.length) {
+    ctx.fillStyle = "#66746f";
+    ctx.font = "700 13px Segoe UI, sans-serif";
+    ctx.fillText("No encrypted PPG samples", margin.left + 12, margin.top + 28);
+    return;
+  }
+
+  const start = Math.max(0, records.length - 600);
+  const visible = records.slice(start);
+  const span = Math.max(1, visible.length - 1);
+  const yFor = (value) => margin.top + (1 - (value - min) / (max - min)) * chartH;
+
+  ctx.save();
+  ctx.beginPath();
+  visible.forEach((record, index) => {
+    const x = margin.left + (index / span) * chartW;
+    const y = yFor(record.cipher);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#b86800";
+  ctx.lineWidth = 1.7;
+  ctx.stroke();
+
+  const latest = visible.at(-1);
+  const latestX = margin.left + ((visible.length - 1) / span) * chartW;
+  const latestY = yFor(latest.cipher);
+  ctx.fillStyle = "#b86800";
+  ctx.beginPath();
+  ctx.arc(latestX, latestY, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.font = "800 12px Segoe UI, sans-serif";
+  ctx.fillStyle = "#30423d";
+  ctx.fillText(`Cipher | latest ${formatHex(latest.cipher)} | plotted ${visible.length}/${records.length}`, margin.left, margin.top - 7);
+  ctx.restore();
+}
+
 function drawBitMap() {
   if (els.bitPanel.hidden) return;
 
@@ -2950,6 +3074,11 @@ function animationLoop() {
     drawBitMap();
     state.lastBitDrawAt = now;
     state.needsBitDraw = false;
+  }
+  if (state.needsCipherDraw && now - state.lastCipherDrawAt > 33) {
+    drawCipherPlot();
+    state.lastCipherDrawAt = now;
+    state.needsCipherDraw = false;
   }
   requestAnimationFrame(animationLoop);
 }
@@ -3081,6 +3210,7 @@ function bindEvents() {
 
   els.clearSamplesButton.addEventListener("click", clearSamples);
   els.exportButton.addEventListener("click", exportCsv);
+  els.exportCipherButton.addEventListener("click", exportCipherCsv);
   [els.bitColumns, els.bitRows, els.bitHistoryLimit].forEach((control) => {
     control?.addEventListener("input", () => applyBitMapSettings({ normalize: false }));
     control?.addEventListener("change", () => applyBitMapSettings());
@@ -3133,8 +3263,10 @@ function init() {
   updateFilterUi();
   updateBitStats();
   resizeCanvas();
+  resizeCipherCanvas();
   new ResizeObserver(resizeCanvas).observe(els.canvasWrap || els.plotCanvas);
   new ResizeObserver(resizeBitCanvas).observe(els.bitCanvasWrap || els.bitCanvas);
+  new ResizeObserver(resizeCipherCanvas).observe(els.cipherCanvasWrap || els.cipherCanvas);
   new ResizeObserver(resizeNoiseBitCanvas).observe(els.noiseBitCanvasWrap || els.noiseBitCanvas);
   updateStats();
   animationLoop();
