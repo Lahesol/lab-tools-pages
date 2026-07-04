@@ -28,7 +28,6 @@ const els = {
   sampleRate: document.querySelector("#sampleRate"),
   sendRateButton: document.querySelector("#sendRateButton"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
-  channelMode: document.querySelector("#channelMode"),
   autoScale: document.querySelector("#autoScale"),
   manualScale: document.querySelector("#manualScale"),
   yMin: document.querySelector("#yMin"),
@@ -485,29 +484,27 @@ function convertAdcSampleValue(sample, value = sample.value) {
     if (channel === "ADC") {
       return Number.isFinite(bias) ? (value - bias) * ADC_CURRENT_SCALE : value;
     }
-    if (isDelta) return Number.isFinite(bias) ? value * ADC_CURRENT_SCALE : NaN;
+    if (isDelta) return value * ADC_CURRENT_SCALE;
     return value;
   }
 
-  if (isDelta && Number.isFinite(bias)) return bias + value;
-  return isDelta ? NaN : value;
+  return value;
 }
 
 function createViewSample(sample) {
   const channel = normalizeChannel(sample.channel) || "ADC";
   const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
   const valueKind = getSampleValueKind(sample, channel);
-  const bias = channel === "ADC" || valueKind === "delta" ? getAdcBias(adcSource) : null;
+  const bias = getValueMode() === "current" && channel === "ADC" ? getAdcBias(adcSource) : null;
   const normalizedSample = { ...sample, channel, adcSource, valueKind };
   const value = convertAdcSampleValue(normalizedSample);
-  const adcCode = valueKind === "delta" && Number.isFinite(bias) ? sample.value + bias : sample.value;
   return {
     ...sample,
     channel,
     adcSource,
     valueKind,
     deviceValue: sample.value,
-    adcCode,
+    adcCode: sample.value,
     biasCode: bias,
     rawValue: value,
     value,
@@ -515,31 +512,16 @@ function createViewSample(sample) {
 }
 
 function getValueDescription() {
-  const selectedChannel = getSelectedChannel();
-  const hasPpgDelta = selectedChannel === "all"
-    ? state.samples.some((sample) => isPpgDeltaSample(sample))
-    : isPpgDeltaChannel(selectedChannel) && state.ppgSampleKind === "delta";
+  const hasPpgDelta = getSamplesForAdcSource().some((sample) => isPpgDeltaSample(sample));
   const bias = getAdcBias();
 
   if (getValueMode() === "current") {
-    if (hasPpgDelta) return Number.isFinite(bias) ? `Current | bias ${bias.toFixed(0)}` : "Current | set bias";
+    if (hasPpgDelta) return "Current delta";
     return Number.isFinite(bias) ? `Current | bias ${bias.toFixed(0)}` : "Current | set bias";
   }
 
   if (!hasPpgDelta) return "ADC code";
-  return Number.isFinite(bias) ? `ADC code | bias ${bias.toFixed(0)}` : "ADC code | set bias";
-}
-
-function isWaitingForPpgBias() {
-  if (getValueMode() !== "adc" && getValueMode() !== "current") return false;
-  if (Number.isFinite(getAdcBias())) return false;
-  const selectedChannel = getSelectedChannel();
-  return state.samples.some((sample) => {
-    const channel = sample.channel || "ADC";
-    if (selectedChannel !== "all" && channel !== selectedChannel) return false;
-    if ((sample.adcSource || state.adcSource) !== state.adcSource) return false;
-    return isPpgDeltaSample(sample, channel);
-  });
+  return "PPG LED-ambient code";
 }
 
 function updateValueUi() {
@@ -1155,14 +1137,13 @@ function updateStats() {
   const displaySamples = getDisplaySamples();
   const values = displaySamples.map((sample) => sample.value);
   if (!values.length) {
-    const waitText = isWaitingForPpgBias() ? "Waiting for ADC bias" : "Waiting for samples";
     els.latestValue.textContent = "--";
     els.minValue.textContent = "--";
     els.maxValue.textContent = "--";
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
     els.sampleCount.textContent = String(state.totalSamples);
-    els.plotCaption.textContent = `${waitText} | ${getChannelDescription()} | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
+    els.plotCaption.textContent = `Waiting for samples | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
     return;
   }
 
@@ -1175,16 +1156,13 @@ function updateStats() {
   const rate = displaySamples.length > 1 ? (displaySamples.length - 1) / elapsed : 0;
 
   const latest = displaySamples.at(-1);
-  const latestSource = latest.channel === "ADC"
-    ? normalizeAdcSource(latest.adcSource) || state.adcSource
-    : latest.channel || "ADC";
-  els.latestValue.textContent = `${formatNumber(latest.value)}/${latestSource}`;
+  els.latestValue.textContent = formatNumber(latest.value);
   els.minValue.textContent = formatNumber(min);
   els.maxValue.textContent = formatNumber(max);
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
   els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view | ${getChannelDescription(displaySamples)} | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
+  els.plotCaption.textContent = `${values.length} samples in view | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
 }
 
 function setBitMode(enabled) {
@@ -1402,10 +1380,6 @@ function getSampleRateDescription() {
   return `Raw ${state.sampleRateHz} Hz | PPG ${state.ppgRateHz} Hz | LED ${state.ppgLedOnMs} ms | SAADC OS ${state.saadcOversample}`;
 }
 
-function getSelectedChannel() {
-  return normalizeChannel(els.channelMode?.value) || "all";
-}
-
 function getSelectedAdcPlotSources() {
   return [state.adcSource];
 }
@@ -1420,43 +1394,12 @@ function getAdcPlotDescription() {
   return getAdcSourceInfo(state.adcSource).label;
 }
 
-function getSamplesForChannel(channel = getSelectedChannel()) {
-  const samples = getSamplesForAdcSource();
-  if (channel === "all") return samples;
-  return samples.filter((sample) => (sample.channel || "ADC") === channel);
-}
-
-function getChannelsInSamples(samples) {
-  const present = new Set(samples.map((sample) => sample.channel || "ADC"));
-  return CHANNEL_ORDER.filter((channel) => present.has(channel));
-}
-
-function getSampleSeriesKey(sample) {
-  const channel = sample.channel || "ADC";
-  if (channel === "ADC") return sample.adcSource || state.adcSource;
-  return channel;
-}
-
-function getSeriesKeysInSamples(samples) {
-  const present = new Set(samples.map(getSampleSeriesKey));
-  return SERIES_ORDER.filter((series) => present.has(series));
-}
-
 function getSeriesLabel(series) {
   return ADC_SOURCE_INFO[series]?.label || CHANNEL_LABELS[series] || series;
 }
 
 function getSeriesColor(series) {
   return ADC_SOURCE_COLORS[series] || CHANNEL_COLORS[series] || CHANNEL_COLORS.ADC;
-}
-
-function getChannelDescription(samples = getDisplaySamples()) {
-  const selected = getSelectedChannel();
-  if (selected !== "all") return CHANNEL_LABELS[selected] || selected;
-
-  const channels = getChannelsInSamples(samples);
-  if (!channels.length) return "All channels";
-  return channels.map((channel) => CHANNEL_LABELS[channel] || channel).join(" + ");
 }
 
 function updateFilterUi() {
@@ -1468,16 +1411,9 @@ function updateFilterUi() {
   els.filterSummary.textContent = getFilterDescription();
 }
 
-function getDisplaySamples(channel = getSelectedChannel()) {
-  if (channel === "all") {
-    const samples = getSamplesForChannel("all");
-    return getChannelsInSamples(samples)
-      .flatMap((visibleChannel) => getDisplaySamples(visibleChannel))
-      .sort((left, right) => left.t - right.t);
-  }
-
+function getDisplaySamples() {
   const settings = getFilterSettings();
-  const samples = getSamplesForChannel(channel)
+  const samples = getSamplesForAdcSource()
     .map(createViewSample)
     .filter((sample) => Number.isFinite(sample.value));
   if (settings.mode === "raw") {
@@ -1642,31 +1578,26 @@ function applyPpgCommandPreset(command) {
   if (command === "7769") {
     state.ppgSampleKind = "raw";
     els.filterMode.value = "raw";
-    els.channelMode.value = "all";
   } else if (command === "7761") {
     state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
-    els.channelMode.value = "G";
   } else if (command === "7762") {
     state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
-    els.channelMode.value = "I";
   } else if (command === "7763") {
     state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
-    els.channelMode.value = "R";
   } else if (command === "7764" || command === "7777") {
     state.ppgSampleKind = "delta";
     els.filterMode.value = "band-pass";
     els.highCutoff.value = "0.5";
     els.lowCutoff.value = "5";
-    els.channelMode.value = "all";
   } else {
     return;
   }
@@ -2564,20 +2495,15 @@ function drawPlot() {
     return;
   }
 
-  const seriesKeys = getSeriesKeysInSamples(displaySamples);
-
   ctx.save();
   ctx.beginPath();
   ctx.rect(margin.left, margin.top, chartW, chartH);
   ctx.clip();
 
-  seriesKeys.forEach((seriesKey) => {
-    const series = displaySamples.filter((sample) => getSampleSeriesKey(sample) === seriesKey);
-    drawSeries(ctx, series, seriesKey, margin, chartW, chartH, min, max, timeRange);
-  });
+  drawSeries(ctx, displaySamples, state.adcSource, margin, chartW, chartH, min, max, timeRange);
   ctx.restore();
 
-  drawLegend(ctx, seriesKeys, margin, chartW);
+  drawLegend(ctx, [state.adcSource], margin, chartW);
 }
 
 function drawSeries(ctx, samples, seriesKey, margin, chartW, chartH, min, max, timeRange) {
@@ -2829,11 +2755,6 @@ function bindEvents() {
     const connected = isConnected();
     setAdcSource(source, { pending: connected });
     if (connected) await sendCommand(source);
-  });
-
-  els.channelMode.addEventListener("change", () => {
-    updateStats();
-    state.needsDraw = true;
   });
 
   els.valueMode.addEventListener("change", () => {

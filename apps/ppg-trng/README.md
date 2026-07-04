@@ -93,11 +93,11 @@ The plot can display raw ADC data or browser-side filtered data without changing
 
 The `Window` field controls how many parsed samples are retained for plotting and CSV export. It accepts direct numeric input from 100 to 1,000,000 samples; the default is 20,000 samples.
 
-Tagged firmware streams are plotted as separate ADC, Green, IR, Red, and Ambient channels. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
+Tagged firmware values are plotted as one active ADC stream. The GUI no longer exposes a channel selector because the firmware initializes and streams only the selected ADC input; Green, IR, Red, and Ambient tags are kept in CSV/log metadata but are not split into separate plot traces. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
 
 The browser may deliver Web Serial data in chunks instead of one line at a time. The GUI parses complete text segments as soon as they arrive and commits samples immediately to reduce control-response latency after DAC changes. Plot redraw is still limited by the browser animation frame.
 
-The `Value` control can show ADC code or a bias-corrected current calculation. Normal PPG `G`/`I`/`R` samples arrive from the firmware as signed `LED - ambient` deltas, so the GUI only plots those optical channels as ADC-code values after a bias is available. It displays `bias + delta` on the y-axis and shows `ADC code | bias <code>` in the caption; if no bias is set, PPG samples wait for bias instead of being plotted as deltas. Press `Measure bias` while the selected ADC input or ambient `A` stream is at the bias condition, then `Current` displays `(adc - bias) / 8192 * 1.8`. CSV export keeps the original ADC code and bias code with the converted value.
+The `Value` control can show the firmware-received code/value or a current calculation. In code mode the GUI does not add or subtract bias; normal PPG `G`/`I`/`R` samples are plotted exactly as the firmware streams them, which is the signed `LED - ambient` code difference. Bias is used only by the `Current` mode. Press `Measure bias` while the selected ADC input or ambient `A` stream is at the bias condition; raw ADC current displays `(adc - bias) / 8192 * 1.8`, while PPG delta current displays `delta / 8192 * 1.8`. CSV export keeps the original ADC code and bias code with the converted value.
 
 The top-bar `UI size` control switches the console density between compact, standard, large, and touch-sized layouts. The selected size is saved in local browser storage.
 
