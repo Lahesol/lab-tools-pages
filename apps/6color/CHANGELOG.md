@@ -16,3 +16,7 @@
 - Added CSV import/export for generated protocol blocks.
 - Added a protocol parameter summary beside the pulse waveform preview.
 - Added a Timeline dropdown to insert saved protocol blocks as timeline events.
+- Reworked the Protocols tab to use conventional pulse terms: period, pulse width, duty cycle, and amplitude.
+- Added a pulse terminology diagram that updates from the current protocol parameters.
+- Simplified the Protocols waveform panel to a single pulse lane because one protocol block uses one wavelength.
+- Improved the generated block list so blocks can be reviewed, selected, and edited more directly.

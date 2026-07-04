@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=c34dc4b9759d">
+  <link rel="stylesheet" href="./styles.css?v=d55e1ba3d30a">
 </head>
 <body>
   <main class="app-shell">
@@ -142,19 +142,19 @@
                 <input id="digitalDataInput" type="text" autocomplete="off" spellcheck="false" value="A5">
               </label>
               <label>
-                <span>Start ms</span>
+                <span>Start delay ms</span>
                 <input id="digitalStartInput" type="number" min="0" step="1" value="0">
               </label>
               <label>
-                <span>Bit ms</span>
+                <span>Period ms</span>
                 <input id="digitalBitMsInput" type="number" min="1" step="1" value="200">
               </label>
               <label>
-                <span>Gap ms</span>
-                <input id="digitalGapMsInput" type="number" min="0" step="1" value="0">
+                <span>Pulse width ms</span>
+                <input id="digitalGapMsInput" type="number" min="1" step="1" value="200">
               </label>
               <label>
-                <span>Brightness</span>
+                <span>Amplitude</span>
                 <input id="digitalBrightnessInput" type="number" min="1" max="1000" step="10" value="1000">
               </label>
             </div>
@@ -167,6 +167,7 @@
           </div>
 
           <div class="clip-editor">
+            <div class="editor-title">Selected Block</div>
             <label>
               <span>Channel</span>
               <select id="clipColorInput"></select>
@@ -186,6 +187,7 @@
             <button id="deleteTimelineBlockButton" class="danger-button" type="button">Delete Block</button>
           </div>
 
+          <div class="editor-title">Generated Blocks</div>
           <div id="clipList" class="clip-list" aria-label="Timeline blocks"></div>
         </section>
 
@@ -195,6 +197,7 @@
             <span id="blockTimelineDuration">0 ms</span>
           </div>
           <div id="protocolParameterList" class="parameter-list" aria-label="Protocol parameters"></div>
+          <svg id="protocolTermDiagram" class="term-diagram" viewBox="0 0 820 220" role="img" aria-label="Protocol pulse terminology diagram"></svg>
           <div id="blockTimelineRuler" class="timeline-ruler"></div>
           <div id="clipTimeline" class="clip-timeline" aria-label="Protocol block lanes"></div>
           <div class="plot-head plot-head-secondary">
@@ -268,6 +271,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=a3f6eef07ef8"></script>
+  <script src="./app.js?v=a6b28e125243"></script>
 </body>
 </html>

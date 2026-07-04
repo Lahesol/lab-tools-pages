@@ -119,6 +119,7 @@ const el = {
   blockPreviewPlot: document.querySelector("#blockPreviewPlot"),
   blockTimelineDuration: document.querySelector("#blockTimelineDuration"),
   protocolParameterList: document.querySelector("#protocolParameterList"),
+  protocolTermDiagram: document.querySelector("#protocolTermDiagram"),
 };
 
 function isConnected() {
@@ -801,7 +802,7 @@ function parseDigitalBits(input, format, bitWidth) {
   return value.toString(2).padStart(width, "0");
 }
 
-function clampDigitalBitMs(value) {
+function clampDigitalPeriodMs(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return 200;
@@ -809,12 +810,12 @@ function clampDigitalBitMs(value) {
   return Math.max(1, Math.round(numeric));
 }
 
-function clampDigitalGapMs(value, bitMs) {
+function clampDigitalPulseWidthMs(value, periodMs) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
-    return 0;
+    return periodMs;
   }
-  return Math.max(0, Math.min(bitMs - 1, Math.round(numeric)));
+  return Math.max(1, Math.min(periodMs, Math.round(numeric)));
 }
 
 function pulseBlockDuration(durationMs, gapMs) {
@@ -822,11 +823,11 @@ function pulseBlockDuration(durationMs, gapMs) {
 }
 
 function readDigitalProtocolConfig() {
-  const bitMs = clampDigitalBitMs(el.digitalBitMsInput.value);
-  const gapMs = clampDigitalGapMs(el.digitalGapMsInput.value, bitMs);
+  const periodMs = clampDigitalPeriodMs(el.digitalBitMsInput.value);
+  const pulseWidthMs = clampDigitalPulseWidthMs(el.digitalGapMsInput.value, periodMs);
   const brightness = clampTimelineBrightness(el.digitalBrightnessInput.value);
   if (brightness <= 0) {
-    throw new Error("Brightness must be greater than 0");
+    throw new Error("Amplitude must be greater than 0");
   }
 
   return {
@@ -837,8 +838,10 @@ function readDigitalProtocolConfig() {
     encoding: el.digitalEncodingInput.value,
     data: el.digitalDataInput.value,
     startMs: clampTimelineTime(el.digitalStartInput.value),
-    bitMs,
-    gapMs,
+    bitMs: periodMs,
+    periodMs,
+    pulseWidthMs,
+    gapMs: periodMs - pulseWidthMs,
     brightness,
   };
 }
@@ -906,6 +909,18 @@ function buildDigitalTxCommand(config, preview) {
   return `TXBITS,${config.channelId},${format},${config.bitWidth},${encoding},${bitUs},${gapUs},${config.brightness},${data}`;
 }
 
+function protocolPeriodMs(config) {
+  return Math.max(1, Number(config.periodMs || config.bitMs || 1));
+}
+
+function protocolPulseWidthMs(config) {
+  const periodMs = protocolPeriodMs(config);
+  if (Number.isFinite(Number(config.pulseWidthMs)) && Number(config.pulseWidthMs) > 0) {
+    return Math.min(periodMs, Number(config.pulseWidthMs));
+  }
+  return Math.max(1, periodMs - Number(config.gapMs || 0));
+}
+
 function protocolFromGenerated(config, preview, generatedBlocks) {
   return {
     id: `protocol-${protocolBlockId++}`,
@@ -950,8 +965,14 @@ function protocolFromCurrentBlocks() {
       encoding: el.digitalEncodingInput.value,
       data: el.digitalDataInput.value,
       startMs: minStart,
-      bitMs: clampDigitalBitMs(el.digitalBitMsInput.value),
-      gapMs: clampDigitalGapMs(el.digitalGapMsInput.value, clampDigitalBitMs(el.digitalBitMsInput.value)),
+      bitMs: clampDigitalPeriodMs(el.digitalBitMsInput.value),
+      periodMs: clampDigitalPeriodMs(el.digitalBitMsInput.value),
+      pulseWidthMs: clampDigitalPulseWidthMs(
+        el.digitalGapMsInput.value,
+        clampDigitalPeriodMs(el.digitalBitMsInput.value),
+      ),
+      gapMs: clampDigitalPeriodMs(el.digitalBitMsInput.value) -
+        clampDigitalPulseWidthMs(el.digitalGapMsInput.value, clampDigitalPeriodMs(el.digitalBitMsInput.value)),
       brightness: clampTimelineBrightness(el.digitalBrightnessInput.value),
     },
     bits: "",
@@ -968,6 +989,8 @@ function protocolFromCurrentBlocks() {
 
 function renderProtocolParameterList(config = null, preview = null) {
   el.protocolParameterList.replaceChildren();
+  const periodMs = config ? protocolPeriodMs(config) : 1;
+  const pulseWidthMs = config ? protocolPulseWidthMs(config) : 1;
   const items = config && preview
     ? [
         ["Name", config.name],
@@ -977,9 +1000,10 @@ function renderProtocolParameterList(config = null, preview = null) {
         ["Encoding", config.encoding],
         ["Data", config.data],
         ["Bits", preview.bits],
-        ["Bit", `${config.bitMs} ms`],
-        ["Gap", `${config.gapMs} ms`],
-        ["Brightness", config.brightness],
+        ["Period T", `${periodMs} ms`],
+        ["Pulse width PW", `${pulseWidthMs} ms`],
+        ["Duty cycle", `${Math.round((pulseWidthMs / periodMs) * 100)}%`],
+        ["Amplitude", config.brightness],
         ["Pulses", preview.blocks.length],
         ["Duration", `${preview.totalDurationMs} ms`],
       ]
@@ -997,6 +1021,179 @@ function renderProtocolParameterList(config = null, preview = null) {
   }
 }
 
+function renderProtocolTermDiagram(config = null, preview = null) {
+  const svg = el.protocolTermDiagram;
+  svg.replaceChildren();
+
+  const defs = createSvgElement("defs");
+  const marker = createSvgElement("marker", {
+    id: "term-arrow",
+    markerWidth: 8,
+    markerHeight: 8,
+    refX: 4,
+    refY: 4,
+    orient: "auto-start-reverse",
+  });
+  marker.appendChild(createSvgElement("path", {
+    d: "M 0 0 L 8 4 L 0 8 z",
+    fill: "#075c57",
+  }));
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  const width = 820;
+  const baseline = 154;
+  const highY = 58;
+  const left = 78;
+  const right = 760;
+
+  svg.appendChild(createSvgElement("line", {
+    x1: left,
+    y1: baseline,
+    x2: right,
+    y2: baseline,
+    class: "term-axis",
+  }));
+
+  if (!config || !preview) {
+    const label = createSvgElement("text", {
+      x: width / 2,
+      y: 110,
+      class: "term-muted",
+      "text-anchor": "middle",
+    });
+    label.textContent = "Set a valid protocol to show pulse terminology";
+    svg.appendChild(label);
+    return;
+  }
+
+  const bits = preview.bits.slice(0, 4).padEnd(Math.min(4, preview.bits.length), "0");
+  const periodPx = 128;
+  const periodMs = protocolPeriodMs(config);
+  const pulseWidthMs = protocolPulseWidthMs(config);
+  const pulsePx = Math.max(6, Math.min(periodPx, (pulseWidthMs / periodMs) * periodPx));
+  const startX = left + 42;
+  const firstPulseX = startX + 42;
+  const startDelayX = left + 10;
+  const color = channelById(config.channelId).color;
+
+  svg.appendChild(createSvgElement("line", {
+    x1: firstPulseX,
+    y1: baseline + 16,
+    x2: firstPulseX,
+    y2: highY - 18,
+    class: "term-guide",
+  }));
+
+  svg.appendChild(createSvgElement("line", {
+    x1: startDelayX,
+    y1: baseline + 30,
+    x2: firstPulseX,
+    y2: baseline + 30,
+    class: "term-arrow",
+  }));
+  let label = createSvgElement("text", {
+    x: (startDelayX + firstPulseX) / 2,
+    y: baseline + 48,
+    class: "term-label",
+    "text-anchor": "middle",
+  });
+  label.textContent = "Start delay";
+  svg.appendChild(label);
+
+  for (let index = 0; index < bits.length; index += 1) {
+    const bit = bits[index];
+    const x0 = firstPulseX + index * periodPx;
+    const bitBox = createSvgElement("rect", {
+      x: x0,
+      y: highY,
+      width: periodPx,
+      height: baseline - highY,
+      class: "term-zero",
+    });
+    svg.appendChild(bitBox);
+
+    if (bit === "1" || config.encoding !== "ook") {
+      const pulse = createSvgElement("rect", {
+        x: x0,
+        y: highY,
+        width: config.encoding === "manchester" ? Math.max(6, pulsePx / 2) : pulsePx,
+        height: baseline - highY,
+        class: "term-pulse",
+      });
+      pulse.setAttribute("fill", color);
+      pulse.setAttribute("fill-opacity", "0.18");
+      svg.appendChild(pulse);
+    }
+
+    const bitText = createSvgElement("text", {
+      x: x0 + periodPx / 2,
+      y: baseline + 18,
+      class: "term-muted",
+      "text-anchor": "middle",
+    });
+    bitText.textContent = `bit ${bit}`;
+    svg.appendChild(bitText);
+  }
+
+  svg.appendChild(createSvgElement("line", {
+    x1: firstPulseX,
+    y1: highY - 18,
+    x2: firstPulseX + periodPx,
+    y2: highY - 18,
+    class: "term-arrow",
+  }));
+  label = createSvgElement("text", {
+    x: firstPulseX + periodPx / 2,
+    y: highY - 28,
+    class: "term-label",
+    "text-anchor": "middle",
+  });
+  label.textContent = "Period T";
+  svg.appendChild(label);
+
+  svg.appendChild(createSvgElement("line", {
+    x1: firstPulseX,
+    y1: highY + 16,
+    x2: firstPulseX + pulsePx,
+    y2: highY + 16,
+    class: "term-arrow",
+  }));
+  label = createSvgElement("text", {
+    x: firstPulseX + pulsePx / 2,
+    y: highY + 36,
+    class: "term-label",
+    "text-anchor": "middle",
+  });
+  label.textContent = "Pulse width PW";
+  svg.appendChild(label);
+
+  svg.appendChild(createSvgElement("line", {
+    x1: firstPulseX - 28,
+    y1: highY,
+    x2: firstPulseX - 28,
+    y2: baseline,
+    class: "term-arrow",
+  }));
+  label = createSvgElement("text", {
+    x: firstPulseX - 38,
+    y: (highY + baseline) / 2,
+    class: "term-label",
+    "text-anchor": "end",
+  });
+  label.textContent = "Amplitude";
+  svg.appendChild(label);
+
+  const footer = createSvgElement("text", {
+    x: right - 4,
+    y: baseline + 48,
+    class: "term-muted",
+    "text-anchor": "end",
+  });
+  footer.textContent = `Duty cycle = PW / T = ${Math.round((pulseWidthMs / periodMs) * 100)}%`;
+  svg.appendChild(footer);
+}
+
 function protocolRowsForCsv() {
   const sourceProtocols = protocolBlocks.length > 0 ? protocolBlocks : [protocolFromCurrentBlocks()];
   const rows = [];
@@ -1011,9 +1208,10 @@ function protocolRowsForCsv() {
         encoding: protocol.config.encoding || "",
         data: protocol.config.data || "",
         bits: protocol.bits || "",
-        bit_ms: protocol.config.bitMs || "",
-        gap_ms: protocol.config.gapMs || "",
-        protocol_brightness: protocol.config.brightness || "",
+        period_ms: protocolPeriodMs(protocol.config),
+        pulse_width_ms: protocolPulseWidthMs(protocol.config),
+        duty_cycle_pct: Math.round((protocolPulseWidthMs(protocol.config) / protocolPeriodMs(protocol.config)) * 100),
+        amplitude: protocol.config.brightness || "",
         total_duration_ms: protocol.durationMs,
         command: protocol.command || "",
         start_ms: block.startMs,
@@ -1036,9 +1234,10 @@ function exportProtocolCsv() {
     "encoding",
     "data",
     "bits",
-    "bit_ms",
-    "gap_ms",
-    "protocol_brightness",
+    "period_ms",
+    "pulse_width_ms",
+    "duty_cycle_pct",
+    "amplitude",
     "total_duration_ms",
     "command",
     "start_ms",
@@ -1070,9 +1269,18 @@ async function importProtocolCsv(file) {
           encoding: row.encoding || "custom",
           data: row.data || "",
           startMs: 0,
-          bitMs: csvNumber(row.bit_ms, 0),
-          gapMs: csvNumber(row.gap_ms, 0),
-          brightness: clampTimelineBrightness(csvNumber(row.protocol_brightness || row.brightness, 1000)),
+          bitMs: csvNumber(row.period_ms || row.bit_ms, 1),
+          periodMs: csvNumber(row.period_ms || row.bit_ms, 1),
+          pulseWidthMs: csvNumber(
+            row.pulse_width_ms,
+            Math.max(1, csvNumber(row.period_ms || row.bit_ms, 1) - csvNumber(row.gap_ms, 0)),
+          ),
+          gapMs: Math.max(
+            0,
+            csvNumber(row.period_ms || row.bit_ms, 1) -
+              csvNumber(row.pulse_width_ms, Math.max(1, csvNumber(row.period_ms || row.bit_ms, 1) - csvNumber(row.gap_ms, 0))),
+          ),
+          brightness: clampTimelineBrightness(csvNumber(row.amplitude || row.protocol_brightness || row.brightness, 1000)),
         },
         bits: row.bits || "",
         command: row.command || "",
@@ -1118,11 +1326,13 @@ function updateDigitalPreview() {
     const config = readDigitalProtocolConfig();
     const preview = createDigitalProtocolBlocks(config);
     el.digitalPreviewOutput.textContent =
-      `${preview.bits} | ${config.encoding} | ${preview.blocks.length} pulses | ${preview.totalDurationMs} ms`;
+      `${preview.bits} | ${config.encoding} | T=${config.bitMs} ms | PW=${config.pulseWidthMs} ms | ${preview.blocks.length} pulses`;
     renderProtocolParameterList(config, preview);
+    renderProtocolTermDiagram(config, preview);
   } catch (error) {
     el.digitalPreviewOutput.textContent = error.message || String(error);
     renderProtocolParameterList();
+    renderProtocolTermDiagram();
   }
 }
 
@@ -1199,7 +1409,7 @@ function renderClipList() {
   el.clipList.replaceChildren();
 
   const sortedBlocks = [...timelineBlocks].sort((a, b) => a.startMs - b.startMs);
-  for (const block of sortedBlocks) {
+  sortedBlocks.forEach((block, index) => {
     const channel = channelById(block.color);
     const button = document.createElement("button");
     button.className = "clip-list-item";
@@ -1215,10 +1425,10 @@ function renderClipList() {
     main.className = "clip-list-main";
     const title = document.createElement("span");
     title.className = "clip-list-title";
-    title.textContent = `${block.color} ${block.brightness}`;
+    title.textContent = `Block ${index + 1} | ${block.color} | A=${block.brightness}`;
     const meta = document.createElement("span");
     meta.className = "clip-list-meta";
-    meta.textContent = `${block.startMs}-${timelineEndMs(block)} ms`;
+    meta.textContent = `start ${block.startMs} ms, width ${block.durationMs} ms`;
     main.append(title, meta);
 
     const duration = document.createElement("span");
@@ -1227,7 +1437,7 @@ function renderClipList() {
 
     button.append(swatch, main, duration);
     el.clipList.appendChild(button);
-  }
+  });
 }
 
 function renderTimelineRuler(maxTime) {
@@ -1250,41 +1460,39 @@ function renderClipTimeline() {
   renderTimelineRuler(maxTime);
   el.clipTimeline.replaceChildren();
 
-  for (const channel of channels) {
-    const track = document.createElement("div");
-    track.className = "timeline-track";
+  const track = document.createElement("div");
+  track.className = "timeline-track";
 
-    const label = document.createElement("div");
-    label.className = "track-label";
-    label.textContent = channel.id;
+  const label = document.createElement("div");
+  label.className = "track-label";
+  label.textContent = "Pulse";
 
-    const lane = document.createElement("div");
-    lane.className = "track-lane";
-    lane.addEventListener("dblclick", (event) => {
-      const rect = lane.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-      addTimelineBlock(channel.id, Math.round(ratio * maxTime));
-    });
+  const lane = document.createElement("div");
+  lane.className = "track-lane";
+  lane.addEventListener("dblclick", (event) => {
+    const rect = lane.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    addTimelineBlock(el.digitalChannelInput.value || channels[0].id, Math.round(ratio * maxTime));
+  });
 
-    const blocks = timelineBlocks.filter((block) => block.color === channel.id);
-    for (const block of blocks) {
-      const clip = document.createElement("button");
-      clip.className = "timeline-clip";
-      clip.type = "button";
-      clip.style.left = `${(block.startMs / maxTime) * 100}%`;
-      clip.style.width = `${Math.max(0.8, (block.durationMs / maxTime) * 100)}%`;
-      clip.style.background = channel.color;
-      clip.style.opacity = String(0.3 + (block.brightness / 1000) * 0.7);
-      clip.setAttribute("aria-selected", String(block.id === selectedTimelineBlockId));
-      clip.textContent = `${block.brightness}`;
-      clip.title = `${block.color}: ${block.startMs}-${timelineEndMs(block)} ms, ${block.brightness}/1000`;
-      clip.addEventListener("click", () => selectTimelineBlock(block.id));
-      lane.appendChild(clip);
-    }
-
-    track.append(label, lane);
-    el.clipTimeline.appendChild(track);
+  for (const block of [...timelineBlocks].sort((a, b) => a.startMs - b.startMs)) {
+    const channel = channelById(block.color);
+    const clip = document.createElement("button");
+    clip.className = "timeline-clip";
+    clip.type = "button";
+    clip.style.left = `${(block.startMs / maxTime) * 100}%`;
+    clip.style.width = `${Math.max(0.8, (block.durationMs / maxTime) * 100)}%`;
+    clip.style.background = channel.color;
+    clip.style.opacity = String(0.3 + (block.brightness / 1000) * 0.7);
+    clip.setAttribute("aria-selected", String(block.id === selectedTimelineBlockId));
+    clip.textContent = `${block.color} ${block.brightness}`;
+    clip.title = `${block.color}: ${block.startMs}-${timelineEndMs(block)} ms, ${block.brightness}/1000`;
+    clip.addEventListener("click", () => selectTimelineBlock(block.id));
+    lane.appendChild(clip);
   }
+
+  track.append(label, lane);
+  el.clipTimeline.appendChild(track);
 }
 
 function blockBrightnessAt(channelId, timeMs) {
@@ -1296,16 +1504,103 @@ function blockBrightnessAt(channelId, timeMs) {
     .reduce((max, block) => Math.max(max, block.brightness), 0);
 }
 
+function protocolBrightnessAt(timeMs) {
+  return timelineBlocks
+    .filter((block) => block.startMs <= timeMs && timeMs < timelineEndMs(block))
+    .reduce((max, block) => Math.max(max, block.brightness), 0);
+}
+
+function drawSingleProtocolPlot(svg, maxTime) {
+  svg.replaceChildren();
+
+  const width = 820;
+  const height = 260;
+  const margin = { top: 28, right: 40, bottom: 42, left: 58 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const duration = Math.max(1, maxTime);
+  const color = channelById(timelineBlocks[0]?.color || el.digitalChannelInput.value || channels[0].id).color;
+
+  const x = (timeMs) => margin.left + (timeMs / duration) * plotWidth;
+  const y = (brightness) => margin.top + (1 - brightness / 1000) * plotHeight;
+
+  for (const brightness of [0, 250, 500, 750, 1000]) {
+    const lineY = y(brightness);
+    svg.appendChild(createSvgElement("line", {
+      x1: margin.left,
+      y1: lineY,
+      x2: margin.left + plotWidth,
+      y2: lineY,
+      class: "plot-grid",
+    }));
+    const label = createSvgElement("text", {
+      x: margin.left - 10,
+      y: lineY + 4,
+      class: "plot-label",
+      "text-anchor": "end",
+    });
+    label.textContent = brightness;
+    svg.appendChild(label);
+  }
+
+  for (const tick of [0, duration / 4, duration / 2, (duration * 3) / 4, duration]) {
+    const tickX = x(tick);
+    svg.appendChild(createSvgElement("line", {
+      x1: tickX,
+      y1: margin.top,
+      x2: tickX,
+      y2: margin.top + plotHeight,
+      class: "plot-grid",
+    }));
+    const label = createSvgElement("text", {
+      x: tickX,
+      y: margin.top + plotHeight + 24,
+      class: "plot-label",
+      "text-anchor": "middle",
+    });
+    label.textContent = `${Math.round(tick)}`;
+    svg.appendChild(label);
+  }
+
+  svg.appendChild(createSvgElement("line", {
+    x1: margin.left,
+    y1: margin.top + plotHeight,
+    x2: margin.left + plotWidth,
+    y2: margin.top + plotHeight,
+    class: "plot-axis",
+  }));
+  svg.appendChild(createSvgElement("line", {
+    x1: margin.left,
+    y1: margin.top,
+    x2: margin.left,
+    y2: margin.top + plotHeight,
+    class: "plot-axis",
+  }));
+
+  const timePoints = new Set([0, duration]);
+  for (const block of timelineBlocks) {
+    timePoints.add(block.startMs);
+    timePoints.add(timelineEndMs(block));
+  }
+
+  const sortedTimes = [...timePoints].sort((a, b) => a - b);
+  let pathData = `M ${x(0)} ${y(protocolBrightnessAt(0))}`;
+  for (let i = 1; i < sortedTimes.length; i += 1) {
+    const nextTime = sortedTimes[i];
+    pathData += ` H ${x(nextTime)} V ${y(protocolBrightnessAt(nextTime))}`;
+  }
+  pathData += ` H ${x(duration)}`;
+
+  svg.appendChild(createSvgElement("path", {
+    d: pathData,
+    class: "plot-line",
+    stroke: color,
+  }));
+}
+
 function renderBlockPreviewPlot() {
   const maxTime = blockTimelineDurationMs();
-  drawIntensityPlot(
-    el.blockPreviewPlot,
-    maxTime,
-    blockBrightnessAt,
-    (channelId) => timelineBlocks
-      .filter((block) => block.color === channelId)
-      .flatMap((block) => [block.startMs, timelineEndMs(block)]),
-  );
+  drawSingleProtocolPlot(el.blockPreviewPlot, maxTime);
 }
 
 function renderBlocks() {
