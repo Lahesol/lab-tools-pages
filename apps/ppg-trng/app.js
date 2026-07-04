@@ -96,6 +96,7 @@ const DEFAULT_SAMPLE_RATE_HZ = 200;
 const MIN_SAMPLE_RATE_HZ = 1;
 const MAX_SAMPLE_RATE_HZ = 500;
 const DEFAULT_PPG_RATE_HZ = 25;
+const DEFAULT_PPG_LED_ON_MS = 10;
 
 const state = {
   transport: "none",
@@ -145,6 +146,7 @@ const state = {
   sampleIntervalMs: 5,
   ppgRateHz: DEFAULT_PPG_RATE_HZ,
   ppgSampleIntervalMs: 40,
+  ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
   maxPendingSamples: 4000,
   sampleDrainScheduled: false,
   nextSampleDrainAt: 0,
@@ -926,12 +928,14 @@ function parseRateStatusSegment(segment) {
   const msMatch = segment.match(/\bRAW_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgHzMatch = segment.match(/\bPPG_HZ\s*[,=:]\s*(\d+)\b/i);
   const ppgPhaseMatch = segment.match(/\bPPG_PHASE_MS\s*[,=:]\s*(\d+)\b/i);
+  const ppgLedOnMatch = segment.match(/\bPPG_LED_ON_MS\s*[,=:]\s*(\d+)\b/i);
   const hz = hzMatch ? Number.parseInt(hzMatch[1], 10) : null;
   const ms = msMatch ? Number.parseInt(msMatch[1], 10) : null;
   const ppgHz = ppgHzMatch ? Number.parseInt(ppgHzMatch[1], 10) : null;
   const ppgPhaseMs = ppgPhaseMatch ? Number.parseInt(ppgPhaseMatch[1], 10) : null;
+  const ppgLedOnMs = ppgLedOnMatch ? Number.parseInt(ppgLedOnMatch[1], 10) : null;
   setSampleRateUi(hz, ms, { normalizeInput: true });
-  setPpgRateUi(ppgHz, ppgPhaseMs);
+  setPpgRateUi(ppgHz, ppgPhaseMs, ppgLedOnMs);
   addLog("RX", segment);
   return true;
 }
@@ -1323,15 +1327,19 @@ function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
   }
 }
 
-function setPpgRateUi(rateHz = null, phaseMs = null) {
+function setPpgRateUi(rateHz = null, phaseMs = null, ledOnMs = null) {
   const parsedRate = Number.parseInt(rateHz, 10);
   const parsedPhaseMs = Number.parseInt(phaseMs, 10);
+  const parsedLedOnMs = Number.parseInt(ledOnMs, 10);
   if (Number.isFinite(parsedRate) && parsedRate > 0) {
     state.ppgRateHz = parsedRate;
     state.ppgSampleIntervalMs = Math.max(1, Math.round(1000 / parsedRate));
   } else if (Number.isFinite(parsedPhaseMs) && parsedPhaseMs > 0) {
     state.ppgSampleIntervalMs = Math.max(1, parsedPhaseMs * 4);
     state.ppgRateHz = Math.max(1, Math.round(1000 / state.ppgSampleIntervalMs));
+  }
+  if (Number.isFinite(parsedLedOnMs) && parsedLedOnMs > 0) {
+    state.ppgLedOnMs = parsedLedOnMs;
   }
 }
 
@@ -1382,7 +1390,7 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `Raw ${state.sampleRateHz} Hz | PPG ${state.ppgRateHz} Hz`;
+  return `Raw ${state.sampleRateHz} Hz | PPG ${state.ppgRateHz} Hz | LED ${state.ppgLedOnMs} ms`;
 }
 
 function getSelectedChannel() {
@@ -2904,7 +2912,7 @@ function init() {
   setUiScale(loadUiScale(), false);
   applyWindowSizeInput();
   setSampleRateUi(DEFAULT_SAMPLE_RATE_HZ, rateHzToIntervalMs(DEFAULT_SAMPLE_RATE_HZ));
-  setPpgRateUi(DEFAULT_PPG_RATE_HZ, 10);
+  setPpgRateUi(DEFAULT_PPG_RATE_HZ, 10, DEFAULT_PPG_LED_ON_MS);
   setDacValue(2056, "init");
   updateTransportControls();
   setConnectedUi(false);

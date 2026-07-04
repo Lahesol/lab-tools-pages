@@ -43,9 +43,9 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - Tagged PPG receive format: `G,-123\n;`, `I,-71\n;`, `R,85\n;`, or `A,7340\n;`
 - Random bit receive format in `9999` mode: tagged ADC bit stream from the active ADC only, for example `BIT3,0\n;`, `BIT2,1\n;`, or `BIT0,0\n;`
 
-In PPG measurement modes, the firmware samples ambient light with LEDs off, discards one LED-on settling sample, averages two LED-on samples, then streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
+In PPG measurement modes, the firmware uses a 40 ms frame: LEDs-off ambient sample, one 10 ms LEDs-off wait phase, one 10 ms selected-LED settling phase, then one selected-LED sample before turning the LEDs off. It streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
 
-PPG timing displayed in the GUI follows the current firmware constants: 10 ms phase tick, 25 Hz output for single-channel Green/IR/Red PPG, and 8.3 Hz per optical channel for alternating Green/IR/Red PPG. The LED pulse cadence follows the same PPG timing.
+PPG timing displayed in the GUI follows the current firmware constants: 10 ms phase tick, 40 ms frame, about 10 ms LED-on pulse, 25 Hz output for single-channel Green/IR/Red PPG, and 8.3 Hz per optical channel for alternating Green/IR/Red PPG.
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 
