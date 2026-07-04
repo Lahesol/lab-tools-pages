@@ -29,9 +29,9 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - Red-only PPG mode toggle: `7763\r`
 - Alternating Green/IR/Red PPG mode toggle: `7764\r`
 - Raw diagnostic mode toggle: `7769\r`
-- Green LED toggle: `8881\r`
-- IR LED toggle: `8882\r`
-- Red LED toggle: `8883\r`
+- Green LED manual static toggle: `8881\r`
+- IR LED manual static toggle: `8882\r`
+- Red LED manual static toggle: `8883\r`
 - All LEDs off: `8880\r`
 - All LEDs toggle: `8888\r`
 - All LEDs on: `8889\r`
@@ -46,6 +46,12 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 In PPG measurement modes, the firmware uses a 40 ms frame: LEDs-off ambient sample, one 10 ms LEDs-off wait phase, one 10 ms selected-LED settling phase, then one selected-LED sample before turning the LEDs off. It streams signed `LED - ambient` values with a channel tag. Raw diagnostic mode streams the ambient and LED-on raw phase values.
 
 PPG timing displayed in the GUI follows the current firmware constants: 10 ms phase tick, 40 ms frame, about 10 ms LED-on pulse, 25 Hz output for single-channel Green/IR/Red PPG, and 8.3 Hz per optical channel for alternating Green/IR/Red PPG.
+
+The `888x` LED commands are manual static GPIO controls and do not generate a 25 Hz waveform. Use `7761`, `7762`, or `7763` to measure the 25 Hz single-color PPG LED pulse timing.
+
+The GUI sends the currently selected ADC source to the firmware after connection. The firmware initializes only that active ADC input, then the GUI plots the active stream; it is not an all-ADC acquisition with a plot-only selector.
+
+`RATE?` includes `SAADC_OVERSAMPLE`. The 25 Hz PPG timing firmware keeps this at `0` so one 10 ms timer trigger produces one SAADC callback.
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 

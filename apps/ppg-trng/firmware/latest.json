@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-07-04-ppg25-ledpulse",
+  "version": "2026-07-04-ppg25-saadc-sync",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 20,
+  "appVersion": 21,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 77517,
-  "sha256": "8fbc98fdb520ff1b6e0a3091c67b4b76c3b401986521900fd4e28779d7ce1b90",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04 with corrected PPG 25 Hz LED pulse timing and raw ADC sampling rate control: PPG phase tick 10 ms, 40 ms frame, about 10 ms LED-on pulse, single Green/IR/Red PPG output 25 Hz, alternating Green/IR/Red output 8.3 Hz per channel, RATE? query including PPG_LED_ON_MS, RATE<hz>/SR<hz>/HZ<hz> raw ADC commands, 1-500 Hz accepted with integer-ms interval readback, app UART on P0.25/P0.26, Green/IR/Red LED pins P0.11/P0.12/P0.13, DAC A/B bias amp commands, active single ADC streaming with selectable ADC3/ADC2/ADC0 input, PPG ambient-subtracted phase sampling, single-source 9999 bitmap support, residual/delta TRNG mixing, Von Neumann extraction, and UART DFU bootloader entry."
+  "size": 77533,
+  "sha256": "a1ab03a60107a3f9abeeb36596d1e89e49897e2e9f34983f3f02ce51844df8be",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04 with corrected PPG 25 Hz timing: SAADC hardware oversampling disabled so one 10 ms timer trigger produces one SAADC callback, 40 ms PPG frame, about 10 ms LED-on pulse, single Green/IR/Red PPG output 25 Hz, alternating Green/IR/Red output 8.3 Hz per channel, RATE? query including PPG_LED_ON_MS and SAADC_OVERSAMPLE, RATE<hz>/SR<hz>/HZ<hz> raw ADC commands, 1-500 Hz accepted with integer-ms interval readback, app UART on P0.25/P0.26, Green/IR/Red LED pins P0.11/P0.12/P0.13, DAC A/B bias amp commands, active single ADC streaming with selectable ADC3/ADC2/ADC0 input, PPG ambient-subtracted phase sampling, single-source 9999 bitmap support, residual/delta TRNG mixing, Von Neumann extraction, and UART DFU bootloader entry."
 }

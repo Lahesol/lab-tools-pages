@@ -122,23 +122,23 @@
                 <span class="command-code">0000</span>
                 <span class="command-label">DAC sweep/reset</span>
               </button>
-              <button class="button secondary command-button" data-command="8881" type="button" title="Toggle Green LED">
+              <button class="button secondary command-button" data-command="8881" type="button" title="Manual static Green LED on/off toggle">
                 <span class="command-code">8881</span>
-                <span class="command-label">Green LED</span>
+                <span class="command-label">Green LED 수동</span>
               </button>
-              <button class="button secondary command-button" data-command="8882" type="button" title="Toggle IR LED">
+              <button class="button secondary command-button" data-command="8882" type="button" title="Manual static IR LED on/off toggle">
                 <span class="command-code">8882</span>
-                <span class="command-label">IR LED</span>
+                <span class="command-label">IR LED 수동</span>
               </button>
-              <button class="button secondary command-button" data-command="8883" type="button" title="Toggle Red LED">
+              <button class="button secondary command-button" data-command="8883" type="button" title="Manual static Red LED on/off toggle">
                 <span class="command-code">8883</span>
-                <span class="command-label">Red LED</span>
+                <span class="command-label">Red LED 수동</span>
               </button>
               <button class="button secondary command-button" data-command="8880" type="button" title="Turn all LEDs off">
                 <span class="command-code">8880</span>
                 <span class="command-label">LED 모두 off</span>
               </button>
-              <button class="button secondary command-button" data-command="8888" type="button" title="Toggle all LEDs">
+              <button class="button secondary command-button" data-command="8888" type="button" title="Manual static all-LED on/off toggle">
                 <span class="command-code">8888</span>
                 <span class="command-label">LED 모두 toggle</span>
               </button>
@@ -171,7 +171,7 @@
                 <span class="command-label">호환 PPG · 8.3 Hz/ch</span>
               </button>
             </div>
-            <p class="command-note">PPG frame: 40 ms. Single LED output: 25 Hz with ~10 ms LED-on pulse. 3-channel alternating output: 8.3 Hz/ch.</p>
+            <p class="command-note">888x LED commands are manual static GPIO controls, not 25 Hz pulse modes. Use 7761/7762/7763 for 25 Hz single-color PPG LED pulses.</p>
           </section>
 
           <section class="panel log-panel">
@@ -608,7 +608,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=0c19cbcfd624" defer></script>
+    <script src="./app.js?v=1e192b63cdf9" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

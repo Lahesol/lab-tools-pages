@@ -147,6 +147,7 @@ const state = {
   ppgRateHz: DEFAULT_PPG_RATE_HZ,
   ppgSampleIntervalMs: 40,
   ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
+  saadcOversample: 0,
   maxPendingSamples: 4000,
   sampleDrainScheduled: false,
   nextSampleDrainAt: 0,
@@ -556,6 +557,7 @@ function queryDeviceStateSoon() {
   window.setTimeout(async () => {
     if (!isConnected()) return;
     await sendCommand("VER?");
+    if (state.adcSource) await sendCommand(state.adcSource);
     await sendCommand("ADC?");
     await sendCommand("RATE?");
   }, 250);
@@ -929,13 +931,18 @@ function parseRateStatusSegment(segment) {
   const ppgHzMatch = segment.match(/\bPPG_HZ\s*[,=:]\s*(\d+)\b/i);
   const ppgPhaseMatch = segment.match(/\bPPG_PHASE_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgLedOnMatch = segment.match(/\bPPG_LED_ON_MS\s*[,=:]\s*(\d+)\b/i);
+  const saadcOversampleMatch = segment.match(/\bSAADC_OVERSAMPLE\s*[,=:]\s*(\d+)\b/i);
   const hz = hzMatch ? Number.parseInt(hzMatch[1], 10) : null;
   const ms = msMatch ? Number.parseInt(msMatch[1], 10) : null;
   const ppgHz = ppgHzMatch ? Number.parseInt(ppgHzMatch[1], 10) : null;
   const ppgPhaseMs = ppgPhaseMatch ? Number.parseInt(ppgPhaseMatch[1], 10) : null;
   const ppgLedOnMs = ppgLedOnMatch ? Number.parseInt(ppgLedOnMatch[1], 10) : null;
+  const saadcOversample = saadcOversampleMatch ? Number.parseInt(saadcOversampleMatch[1], 10) : null;
   setSampleRateUi(hz, ms, { normalizeInput: true });
   setPpgRateUi(ppgHz, ppgPhaseMs, ppgLedOnMs);
+  if (Number.isFinite(saadcOversample)) {
+    state.saadcOversample = saadcOversample;
+  }
   addLog("RX", segment);
   return true;
 }
@@ -1390,7 +1397,7 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `Raw ${state.sampleRateHz} Hz | PPG ${state.ppgRateHz} Hz | LED ${state.ppgLedOnMs} ms`;
+  return `Raw ${state.sampleRateHz} Hz | PPG ${state.ppgRateHz} Hz | LED ${state.ppgLedOnMs} ms | SAADC OS ${state.saadcOversample}`;
 }
 
 function getSelectedChannel() {
