@@ -385,11 +385,15 @@
               <div class="toolbar-actions">
                 <label class="compact-field" for="bitColumns">
                   <span>Columns</span>
-                  <select id="bitColumns">
-                    <option value="64">64</option>
-                    <option value="128" selected>128</option>
-                    <option value="256">256</option>
-                  </select>
+                  <input id="bitColumns" type="number" min="8" max="2048" step="1" value="128" />
+                </label>
+                <label class="compact-field" for="bitRows">
+                  <span>Rows</span>
+                  <input id="bitRows" type="number" min="8" max="1024" step="1" value="128" />
+                </label>
+                <label class="compact-field" for="bitHistoryLimit" title="Maximum generated bits kept for CSV export. The visible bitmap plane can wrap without deleting this history.">
+                  <span>History</span>
+                  <input id="bitHistoryLimit" type="number" min="100" max="1000000" step="100" value="32768" />
                 </label>
                 <button id="clearBitsButton" class="button secondary" type="button">Clear</button>
                 <button id="exportBitsButton" class="button secondary" type="button">CSV</button>
@@ -651,7 +655,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=cd9d95290ccd" defer></script>
+    <script src="./app.js?v=ac11a833ee6c" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

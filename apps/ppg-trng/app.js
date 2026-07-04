@@ -66,6 +66,8 @@ const els = {
   bitPanel: document.querySelector("#bitPanel"),
   bitCaption: document.querySelector("#bitCaption"),
   bitColumns: document.querySelector("#bitColumns"),
+  bitRows: document.querySelector("#bitRows"),
+  bitHistoryLimit: document.querySelector("#bitHistoryLimit"),
   clearBitsButton: document.querySelector("#clearBitsButton"),
   exportBitsButton: document.querySelector("#exportBitsButton"),
   bitCount: document.querySelector("#bitCount"),
@@ -141,6 +143,8 @@ const state = {
   bits: [],
   totalBits: 0,
   maxBits: 32768,
+  bitColumns: 128,
+  bitRows: 128,
   bitPlane: [],
   bitPlaneIndex: 0,
   bitPlaneFilled: 0,
@@ -1428,18 +1432,53 @@ function updateBitStats() {
   els.zeroCount.textContent = String(zeros);
   els.onesRatio.textContent = ratio === null ? "--" : ratio.toFixed(4);
   els.bitCaption.textContent = planeBits.length
-    ? `${source} | ${getAdcSourceInfo(state.bitAdcSource).label} | total ${state.totalBits}`
-    : `Waiting for ${source} bits`;
+    ? `${source} | ${getAdcSourceInfo(state.bitAdcSource).label} | plane ${state.bitColumns}x${state.bitRows} | saved ${state.bits.length}/${state.maxBits} | total ${state.totalBits}`
+    : `Waiting for ${source} bits | plane ${state.bitColumns}x${state.bitRows} | saved ${state.bits.length}/${state.maxBits}`;
   updateBitModeUi();
   updateEncryptionUi();
 }
 
 function getBitColumns() {
-  return clampInteger(els.bitColumns.value, 32, 256, 128);
+  return clampInteger(els.bitColumns?.value, 8, 2048, 128);
+}
+
+function getBitRows() {
+  return clampInteger(els.bitRows?.value, 8, 1024, 128);
+}
+
+function applyBitMapSettings(options = {}) {
+  const columns = getBitColumns();
+  const rows = getBitRows();
+  const historyLimit = clampInteger(els.bitHistoryLimit?.value, 100, 1000000, 32768);
+  const geometryChanged = columns !== state.bitColumns || rows !== state.bitRows;
+
+  state.bitColumns = columns;
+  state.bitRows = rows;
+  state.maxBits = historyLimit;
+
+  if (options.normalize !== false) {
+    if (els.bitColumns) els.bitColumns.value = String(columns);
+    if (els.bitRows) els.bitRows.value = String(rows);
+    if (els.bitHistoryLimit) els.bitHistoryLimit.value = String(historyLimit);
+  }
+
+  if (state.bits.length > state.maxBits) {
+    state.bits.splice(0, state.bits.length - state.maxBits);
+  }
+
+  if (geometryChanged) {
+    state.bitLanes = {};
+    state.bitPlaneCapacity = 0;
+    ensureBitPlaneCapacity();
+    state.needsBitDraw = true;
+  }
+
+  updateBitStats();
 }
 
 function getBitPlaneGeometry() {
   const columns = getBitColumns();
+  const rows = getBitRows();
   const rect = els.bitCanvas.getBoundingClientRect();
   const width = bitMap.width || Math.floor(rect.width);
   const height = bitMap.height || Math.floor(rect.height);
@@ -1447,11 +1486,11 @@ function getBitPlaneGeometry() {
   const labelHeight = 22;
 
   if (!width || !height) {
-    return { columns, rows: 32, cell: 2, capacity: columns * 32, laneHeight, labelHeight };
+    return { columns, rows, cell: 2, capacity: columns * rows, laneHeight, labelHeight };
   }
 
-  const cell = Math.max(2, Math.floor(width / columns));
-  const rows = Math.max(1, Math.floor((laneHeight - labelHeight) / cell));
+  const usableHeight = Math.max(1, laneHeight - labelHeight);
+  const cell = Math.max(0.1, Math.min(width / columns, usableHeight / rows));
   return { columns, rows, cell, capacity: columns * rows, laneHeight, labelHeight };
 }
 
@@ -3042,6 +3081,10 @@ function bindEvents() {
 
   els.clearSamplesButton.addEventListener("click", clearSamples);
   els.exportButton.addEventListener("click", exportCsv);
+  [els.bitColumns, els.bitRows, els.bitHistoryLimit].forEach((control) => {
+    control?.addEventListener("input", () => applyBitMapSettings({ normalize: false }));
+    control?.addEventListener("change", () => applyBitMapSettings());
+  });
   els.clearBitsButton.addEventListener("click", clearBits);
   els.exportBitsButton.addEventListener("click", exportBitsCsv);
   els.noiseCsvFile.addEventListener("change", () => {
@@ -3082,6 +3125,7 @@ function init() {
   setDacValue(2056, "init");
   applyLiveMaSettings();
   setBitGenerationMethod(getSelectedBitMethod());
+  applyBitMapSettings();
   updateTransportControls();
   setConnectedUi(false);
   updateAdcSourceUi();

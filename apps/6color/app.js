@@ -906,14 +906,223 @@ function buildDigitalTxCommand(config, preview) {
   return `TXBITS,${config.channelId},${format},${config.bitWidth},${encoding},${bitUs},${gapUs},${config.brightness},${data}`;
 }
 
+function protocolFromGenerated(config, preview, generatedBlocks) {
+  return {
+    id: `protocol-${protocolBlockId++}`,
+    name: config.name,
+    config: { ...config },
+    bits: preview.bits,
+    command: buildDigitalTxCommand(config, preview),
+    durationMs: preview.totalDurationMs,
+    blocks: generatedBlocks.map((block) => ({
+      startMs: Math.max(0, block.startMs - config.startMs),
+      durationMs: block.durationMs,
+      color: block.color,
+      brightness: block.brightness,
+    })),
+  };
+}
+
+function upsertProtocolBlock(protocol) {
+  const index = protocolBlocks.findIndex((candidate) => candidate.name === protocol.name);
+  if (index >= 0) {
+    protocol.id = protocolBlocks[index].id;
+    protocolBlocks[index] = protocol;
+  } else {
+    protocolBlocks.push(protocol);
+  }
+  renderTimelineProtocolOptions();
+}
+
+function protocolFromCurrentBlocks() {
+  const minStart = timelineBlocks.length > 0
+    ? timelineBlocks.reduce((min, block) => Math.min(min, block.startMs), timelineBlocks[0].startMs)
+    : 0;
+  const maxEnd = timelineBlocks.reduce((max, block) => Math.max(max, timelineEndMs(block)), blockTimelineDurationMs());
+  return {
+    id: `protocol-${protocolBlockId++}`,
+    name: sanitizeFilename(el.digitalNameInput.value || "current_protocol"),
+    config: {
+      name: sanitizeFilename(el.digitalNameInput.value || "current_protocol"),
+      channelId: el.digitalChannelInput.value,
+      format: el.digitalFormatInput.value,
+      bitWidth: Number(el.digitalWidthInput.value),
+      encoding: el.digitalEncodingInput.value,
+      data: el.digitalDataInput.value,
+      startMs: minStart,
+      bitMs: clampDigitalBitMs(el.digitalBitMsInput.value),
+      gapMs: clampDigitalGapMs(el.digitalGapMsInput.value, clampDigitalBitMs(el.digitalBitMsInput.value)),
+      brightness: clampTimelineBrightness(el.digitalBrightnessInput.value),
+    },
+    bits: "",
+    command: "",
+    durationMs: Math.max(0, maxEnd - minStart),
+    blocks: timelineBlocks.map((block) => ({
+      startMs: Math.max(0, block.startMs - minStart),
+      durationMs: block.durationMs,
+      color: block.color,
+      brightness: block.brightness,
+    })),
+  };
+}
+
+function renderProtocolParameterList(config = null, preview = null) {
+  el.protocolParameterList.replaceChildren();
+  const items = config && preview
+    ? [
+        ["Name", config.name],
+        ["Channel", config.channelId],
+        ["Format", config.format.toUpperCase()],
+        ["Width", `${config.bitWidth} bit`],
+        ["Encoding", config.encoding],
+        ["Data", config.data],
+        ["Bits", preview.bits],
+        ["Bit", `${config.bitMs} ms`],
+        ["Gap", `${config.gapMs} ms`],
+        ["Brightness", config.brightness],
+        ["Pulses", preview.blocks.length],
+        ["Duration", `${preview.totalDurationMs} ms`],
+      ]
+    : [["Protocol", "No valid protocol"]];
+
+  for (const [label, value] of items) {
+    const item = document.createElement("div");
+    item.className = "parameter-item";
+    const key = document.createElement("span");
+    key.textContent = label;
+    const val = document.createElement("strong");
+    val.textContent = String(value);
+    item.append(key, val);
+    el.protocolParameterList.appendChild(item);
+  }
+}
+
+function protocolRowsForCsv() {
+  const sourceProtocols = protocolBlocks.length > 0 ? protocolBlocks : [protocolFromCurrentBlocks()];
+  const rows = [];
+
+  for (const protocol of sourceProtocols) {
+    for (const block of protocol.blocks) {
+      rows.push({
+        name: protocol.name,
+        channel: protocol.config.channelId || block.color,
+        format: protocol.config.format || "",
+        width: protocol.config.bitWidth || "",
+        encoding: protocol.config.encoding || "",
+        data: protocol.config.data || "",
+        bits: protocol.bits || "",
+        bit_ms: protocol.config.bitMs || "",
+        gap_ms: protocol.config.gapMs || "",
+        protocol_brightness: protocol.config.brightness || "",
+        total_duration_ms: protocol.durationMs,
+        command: protocol.command || "",
+        start_ms: block.startMs,
+        duration_ms: block.durationMs,
+        color: block.color,
+        brightness: block.brightness,
+      });
+    }
+  }
+
+  return rows;
+}
+
+function exportProtocolCsv() {
+  const headers = [
+    "name",
+    "channel",
+    "format",
+    "width",
+    "encoding",
+    "data",
+    "bits",
+    "bit_ms",
+    "gap_ms",
+    "protocol_brightness",
+    "total_duration_ms",
+    "command",
+    "start_ms",
+    "duration_ms",
+    "color",
+    "brightness",
+  ];
+  const rows = protocolRowsForCsv();
+  downloadText("6color_protocol_blocks.csv", toCsv(headers, rows));
+  appendLog("!", `Exported ${rows.length} protocol block rows`);
+}
+
+async function importProtocolCsv(file) {
+  const text = await readFileAsText(file);
+  const rows = csvToObjects(text);
+  const groups = new Map();
+
+  for (const row of rows) {
+    const name = sanitizeFilename(row.name || "imported_protocol");
+    if (!groups.has(name)) {
+      groups.set(name, {
+        id: `protocol-${protocolBlockId++}`,
+        name,
+        config: {
+          name,
+          channelId: row.channel ? normalizeChannelId(row.channel) : channels[0].id,
+          format: row.format || "csv",
+          bitWidth: csvNumber(row.width, 0),
+          encoding: row.encoding || "custom",
+          data: row.data || "",
+          startMs: 0,
+          bitMs: csvNumber(row.bit_ms, 0),
+          gapMs: csvNumber(row.gap_ms, 0),
+          brightness: clampTimelineBrightness(csvNumber(row.protocol_brightness || row.brightness, 1000)),
+        },
+        bits: row.bits || "",
+        command: row.command || "",
+        durationMs: clampTimelineTime(row.total_duration_ms),
+        blocks: [],
+      });
+    }
+
+    const protocol = groups.get(name);
+    const block = {
+      startMs: clampTimelineTime(row.start_ms),
+      durationMs: clampTimelineDuration(row.duration_ms),
+      color: normalizeChannelId(row.color || row.channel),
+      brightness: clampTimelineBrightness(csvNumber(row.brightness, 0)),
+    };
+    protocol.blocks.push(block);
+    protocol.durationMs = Math.max(protocol.durationMs, block.startMs + block.durationMs);
+  }
+
+  protocolBlocks.splice(0, protocolBlocks.length, ...groups.values());
+  const first = protocolBlocks[0];
+  if (first) {
+    timelineBlocks.splice(0, timelineBlocks.length, ...first.blocks.map((block) => ({
+      id: timelineBlockId++,
+      ...block,
+    })));
+    selectedTimelineBlockId = timelineBlocks[0]?.id ?? null;
+    blockTimelineMinimumEndMs = Math.max(1000, first.durationMs);
+    renderProtocolParameterList(first.config, {
+      bits: first.bits || "imported",
+      blocks: first.blocks,
+      totalDurationMs: first.durationMs,
+    });
+  }
+
+  renderBlocks();
+  renderTimelineProtocolOptions();
+  appendLog("!", `Imported ${protocolBlocks.length} protocol blocks`);
+}
+
 function updateDigitalPreview() {
   try {
     const config = readDigitalProtocolConfig();
     const preview = createDigitalProtocolBlocks(config);
     el.digitalPreviewOutput.textContent =
       `${preview.bits} | ${config.encoding} | ${preview.blocks.length} pulses | ${preview.totalDurationMs} ms`;
+    renderProtocolParameterList(config, preview);
   } catch (error) {
     el.digitalPreviewOutput.textContent = error.message || String(error);
+    renderProtocolParameterList();
   }
 }
 
@@ -944,6 +1153,7 @@ function generateDigitalBlocks({ append = false, run = false } = {}) {
     selectedTimelineBlockId = generatedBlocks[0].id;
   }
 
+  upsertProtocolBlock(protocolFromGenerated(config, preview, generatedBlocks));
   blockTimelineMinimumEndMs = Math.max(blockTimelineMinimumEndMs, preview.endMs);
   renderBlocks();
   updateDigitalPreview();
@@ -1529,6 +1739,22 @@ el.clearTimelineRowsButton.addEventListener("click", () => {
   timelineRows.splice(0, timelineRows.length);
   renderTimeline();
 });
+el.importTimelineCsvButton.addEventListener("click", () => {
+  el.timelineCsvInput.click();
+});
+el.exportTimelineCsvButton.addEventListener("click", exportTimelineCsv);
+el.timelineCsvInput.addEventListener("change", async () => {
+  const [file] = el.timelineCsvInput.files;
+  if (file) {
+    try {
+      await importTimelineCsv(file);
+    } catch (error) {
+      appendLog("!", error.message || String(error));
+    }
+  }
+  el.timelineCsvInput.value = "";
+});
+el.addProtocolToTimelineButton.addEventListener("click", addSelectedProtocolToTimeline);
 el.runTimelineButton.addEventListener("click", () => {
   runProgram(buildTimelineProgramEvents(), "Timeline");
 });
@@ -1544,14 +1770,30 @@ el.clearTimelineBlocksButton.addEventListener("click", () => {
   blockTimelineMinimumEndMs = 1000;
   renderBlocks();
 });
+el.importProtocolCsvButton.addEventListener("click", () => {
+  el.protocolCsvInput.click();
+});
+el.exportProtocolCsvButton.addEventListener("click", exportProtocolCsv);
+el.protocolCsvInput.addEventListener("change", async () => {
+  const [file] = el.protocolCsvInput.files;
+  if (file) {
+    try {
+      await importProtocolCsv(file);
+    } catch (error) {
+      appendLog("!", error.message || String(error));
+    }
+  }
+  el.protocolCsvInput.value = "";
+});
 el.runBlocksButton.addEventListener("click", () => {
-  runProgram(buildBlockProgramEvents(), "Blocks");
+  runProgram(buildBlockProgramEvents(), "Protocols");
 });
 el.stopBlocksButton.addEventListener("click", stopProgram);
 el.generateDigitalBlocksButton.addEventListener("click", () => generateDigitalBlocks({ append: false }));
 el.appendDigitalBlocksButton.addEventListener("click", () => generateDigitalBlocks({ append: true }));
 el.runDigitalBlocksButton.addEventListener("click", () => generateDigitalBlocks({ append: false, run: true }));
 [
+  el.digitalNameInput,
   el.digitalChannelInput,
   el.digitalFormatInput,
   el.digitalWidthInput,

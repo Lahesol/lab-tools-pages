@@ -106,7 +106,7 @@ The live `Bit method` selector chooses which ADC3 extraction method feeds the bi
 
 The PPG encryption panel treats each Green/IR/Red PPG sample as a 14-bit ADC code. It consumes 14 generated ADC3 bits as a key and displays `cipher = adc_code XOR key`. If key bits are slower than PPG samples, PPG samples wait in a pending queue.
 
-The bitmap is a fixed plane. After all cells in the plane are filled, the next bit clears the plane and writing restarts from the first cell. The panel tracks current-plane bits, ones, zeros, and ones ratio, and CSV export keeps the buffered bit history.
+The bitmap is a fixed plane whose columns and rows can be entered directly in the live panel. After all cells in the plane are filled, the next bit clears only the visible plane and writing restarts from the first cell. CSV export uses the separate buffered bit history, not the current visible plane. The `History` field controls that export buffer size; when the buffer exceeds the limit, the oldest bits are dropped.
 
 ## Noise Extractor
 
