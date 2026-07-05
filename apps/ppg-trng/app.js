@@ -110,10 +110,12 @@ const DEFAULT_MAX_SAMPLES = 20000;
 const MIN_MAX_SAMPLES = 100;
 const MAX_MAX_SAMPLES = 1000000;
 const DEFAULT_SAMPLE_RATE_HZ = 25;
-const MIN_SAMPLE_RATE_HZ = 1;
-const MAX_SAMPLE_RATE_HZ = 500;
+const MIN_SAMPLE_RATE_HZ = 25;
+const MAX_SAMPLE_RATE_HZ = 100;
 const DEFAULT_PPG_RATE_HZ = 25;
 const DEFAULT_PPG_LED_ON_MS = 10;
+const DEFAULT_ADC3_RATE_HZ = 1000;
+const DEFAULT_ADC3_BATCH_MAX = 64;
 const ENCRYPTION_BITS_PER_SAMPLE = 14;
 const MAX_KEY_BITS = 8192;
 const MAX_PENDING_PPG = 512;
@@ -162,6 +164,8 @@ const state = {
   encryptedCount: 0,
   droppedPpg: 0,
   lastEncrypted: null,
+  lastAdc3BatchCount: 0,
+  totalAdc3BatchSamples: 0,
   liveMaWindow: 33,
   liveMaOffset: 0,
   noiseBaseline: null,
@@ -180,6 +184,8 @@ const state = {
   ppgRateHz: DEFAULT_PPG_RATE_HZ,
   ppgSampleIntervalMs: 40,
   ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
+  adc3RateHz: DEFAULT_ADC3_RATE_HZ,
+  adc3BatchMax: DEFAULT_ADC3_BATCH_MAX,
   saadcOversample: 0,
   lastStatsAt: 0,
   needsDraw: true,
@@ -889,12 +895,13 @@ function ingestText(text) {
     return;
   }
 
-  if (state.parseBuffer.length > 96) {
-    if (state.bitMode) {
-      parseBitSegment(state.parseBuffer);
-      state.parseBuffer = "";
-      return;
-    }
+  if (state.parseBuffer.length > 4096) {
+    addLog("ERR", "RX segment too long; dropping partial frame", true);
+    state.parseBuffer = "";
+    return;
+  }
+
+  if (state.parseBuffer.length > 96 && /^[-+0-9.,\s]+$/.test(state.parseBuffer)) {
     const matches = state.parseBuffer.match(/[-+]?\d+(?:\.\d+)?/g) || [];
     matches.slice(0, -1).forEach((value) => addSample(Number(value)));
     state.parseBuffer = matches.at(-1) || "";
@@ -906,6 +913,7 @@ function parseSegment(segment) {
   if (parseStatusSegment(segment)) return;
 
   if (parseTaggedBitSegment(segment)) return;
+  if (parseAdcBatchSegment(segment)) return;
   if (parseTaggedSegment(segment)) return;
 
   if (state.bitMode) {
@@ -927,6 +935,32 @@ function normalizeChannel(channel) {
   if (key === "AMBIENT") return "A";
   if (CHANNEL_ORDER.includes(key)) return key;
   return null;
+}
+
+function parseAdcBatchSegment(segment) {
+  const match = segment.match(/^ADC([023])B\s*[,=:]\s*(\d+)\s*,\s*(.+)$/i);
+  if (!match) return false;
+
+  const adcSource = `ADC${match[1]}`;
+  const expectedCount = Number.parseInt(match[2], 10);
+  const values = (match[3].match(/[-+]?\d+(?:\.\d+)?/g) || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  const limitedValues = Number.isFinite(expectedCount) && expectedCount >= 0
+    ? values.slice(0, expectedCount)
+    : values;
+
+  limitedValues.forEach((value) => {
+    addSample(value, "ADC", { adcSource, valueKind: "raw" });
+  });
+
+  state.lastAdc3BatchCount = limitedValues.length;
+  state.totalAdc3BatchSamples = (state.totalAdc3BatchSamples || 0) + limitedValues.length;
+  if (expectedCount !== limitedValues.length) {
+    addLog("RX", `ADC${match[1]}B count ${limitedValues.length}/${expectedCount}`);
+  }
+  updateEncryptionUi();
+  return true;
 }
 
 function parseTaggedSegment(segment) {
@@ -994,17 +1028,38 @@ function parseRateStatusSegment(segment) {
   const hzMatch = segment.match(/\bRAW_HZ\s*[,=:]\s*(\d+)\b/i);
   const msMatch = segment.match(/\bRAW_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgHzMatch = segment.match(/\bPPG_HZ\s*[,=:]\s*(\d+)\b/i);
+  const ppgFrameMatch = segment.match(/\bPPG_FRAME_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgPhaseMatch = segment.match(/\bPPG_PHASE_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgLedOnMatch = segment.match(/\bPPG_LED_ON_MS\s*[,=:]\s*(\d+)\b/i);
+  const adc3HzMatch = segment.match(/\bADC3_HZ\s*[,=:]\s*(\d+)\b/i);
+  const adc3BatchMaxMatch = segment.match(/\bADC3_BATCH_MAX\s*[,=:]\s*(\d+)\b/i);
   const saadcOversampleMatch = segment.match(/\bSAADC_OVERSAMPLE\s*[,=:]\s*(\d+)\b/i);
   const hz = hzMatch ? Number.parseInt(hzMatch[1], 10) : null;
   const ms = msMatch ? Number.parseInt(msMatch[1], 10) : null;
   const ppgHz = ppgHzMatch ? Number.parseInt(ppgHzMatch[1], 10) : null;
+  const ppgFrameMs = ppgFrameMatch ? Number.parseInt(ppgFrameMatch[1], 10) : null;
   const ppgPhaseMs = ppgPhaseMatch ? Number.parseInt(ppgPhaseMatch[1], 10) : null;
   const ppgLedOnMs = ppgLedOnMatch ? Number.parseInt(ppgLedOnMatch[1], 10) : null;
+  const adc3Hz = adc3HzMatch ? Number.parseInt(adc3HzMatch[1], 10) : null;
+  const adc3BatchMax = adc3BatchMaxMatch ? Number.parseInt(adc3BatchMaxMatch[1], 10) : null;
   const saadcOversample = saadcOversampleMatch ? Number.parseInt(saadcOversampleMatch[1], 10) : null;
-  setSampleRateUi(hz, ms, { normalizeInput: true });
-  setPpgRateUi(ppgHz, ppgPhaseMs, ppgLedOnMs);
+  const normalizedPpgFrameMs = Number.isFinite(ppgFrameMs) && ppgFrameMs > 0
+    ? ppgFrameMs
+    : (Number.isFinite(ppgPhaseMs) && ppgPhaseMs > 0 ? ppgPhaseMs * 4 : null);
+  const normalizedPpgHz = Number.isFinite(ppgHz) && ppgHz > 0
+    ? ppgHz
+    : (Number.isFinite(normalizedPpgFrameMs) && normalizedPpgFrameMs > 0
+      ? Math.round(1000 / normalizedPpgFrameMs)
+      : null);
+
+  setSampleRateUi(normalizedPpgHz ?? hz, normalizedPpgFrameMs ?? ms, { normalizeInput: true });
+  setPpgRateUi(normalizedPpgHz, normalizedPpgFrameMs, ppgLedOnMs);
+  if (Number.isFinite(adc3Hz) && adc3Hz > 0) {
+    state.adc3RateHz = adc3Hz;
+  }
+  if (Number.isFinite(adc3BatchMax) && adc3BatchMax > 0) {
+    state.adc3BatchMax = adc3BatchMax;
+  }
   if (Number.isFinite(saadcOversample)) {
     state.saadcOversample = saadcOversample;
   }
@@ -1145,6 +1200,8 @@ function resetLiveEncryption() {
   state.droppedPpg = 0;
   state.lastEncrypted = null;
   state.liveBitExtractors = {};
+  state.lastAdc3BatchCount = 0;
+  state.totalAdc3BatchSamples = 0;
   state.needsCipherDraw = true;
 }
 
@@ -1302,7 +1359,10 @@ function updateEncryptionUi() {
     const methodParams = isMovingAverageBitMethod()
       ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
       : "";
-    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${modeText} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
+    const batchText = state.totalAdc3BatchSamples
+      ? ` | ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}`
+      : "";
+    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${modeText}${batchText} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
@@ -1595,15 +1655,17 @@ function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
   }
 }
 
-function setPpgRateUi(rateHz = null, phaseMs = null, ledOnMs = null) {
+function setPpgRateUi(rateHz = null, frameMs = null, ledOnMs = null) {
   const parsedRate = Number.parseInt(rateHz, 10);
-  const parsedPhaseMs = Number.parseInt(phaseMs, 10);
+  const parsedFrameMs = Number.parseInt(frameMs, 10);
   const parsedLedOnMs = Number.parseInt(ledOnMs, 10);
   if (Number.isFinite(parsedRate) && parsedRate > 0) {
     state.ppgRateHz = parsedRate;
-    state.ppgSampleIntervalMs = Math.max(1, Math.round(1000 / parsedRate));
-  } else if (Number.isFinite(parsedPhaseMs) && parsedPhaseMs > 0) {
-    state.ppgSampleIntervalMs = Math.max(1, parsedPhaseMs * 4);
+    state.ppgSampleIntervalMs = Number.isFinite(parsedFrameMs) && parsedFrameMs > 0
+      ? Math.max(1, parsedFrameMs)
+      : Math.max(1, Math.round(1000 / parsedRate));
+  } else if (Number.isFinite(parsedFrameMs) && parsedFrameMs > 0) {
+    state.ppgSampleIntervalMs = Math.max(1, parsedFrameMs);
     state.ppgRateHz = Math.max(1, Math.round(1000 / state.ppgSampleIntervalMs));
   }
   if (Number.isFinite(parsedLedOnMs) && parsedLedOnMs > 0) {
@@ -1658,7 +1720,7 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `Raw ${state.sampleRateHz} Hz | PPG ${state.ppgRateHz} Hz | LED ${state.ppgLedOnMs} ms | SAADC OS ${state.saadcOversample}`;
+  return `PPG ${state.ppgRateHz} Hz | ADC3 ${state.adc3RateHz} Hz batch | LED ${state.ppgLedOnMs} ms | SAADC OS ${state.saadcOversample}`;
 }
 
 function getSelectedAdcPlotSources() {

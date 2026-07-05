@@ -18,7 +18,7 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - DAC A set: `A2048\r`
 - DAC B set: `B2056\r`
 - Dual ADC routing query: `ADC?\r`
-- Raw ADC sampling rate set/query: `RATE25\r` for 25 Hz, `RATE?\r` to read back. The firmware accepts 1-500 Hz and reports the actual integer-ms interval.
+- PPG/raw sampling rate set/query: `RATE25\r`, `RATE50\r`, or `RATE100\r`; `RATE?\r` reads back the actual timing. The GUI clamps this control to the PPG-safe 25-100 Hz range.
 - Legacy firmware bit command: `9999\r` is not required; bit generation is selected and run in the browser from ADC3 raw samples.
 - DAC sweep/reset: `0000\r`
 - Green-only PPG mode toggle: `7761\r`
@@ -36,19 +36,20 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - DFU capability query: `DFU?\r`
 - Enter UART DFU bootloader: `DFU\r`
 - Firmware version query: `VER?\r`
-- Raw ADC receive format: tagged UART text stream from the fixed dual route, for example `ADC2,7559\n;` for PPG and `ADC3,7568\n;` for noise/TRNG
+- Raw ADC receive format outside PPG mode: tagged UART text stream from the fixed dual route, for example `ADC2,7559\n;` for PPG.
 - Tagged PPG receive format: `G,7482\n;`, `I,7440\n;`, `R,7411\n;`, or diagnostic ambient `A,7340\n;`
-- Browser-side bit extraction uses the streamed `ADC3,<code>\n;` samples.
+- ADC3 noise receive format in PPG mode: one batch per emitted PPG sample, for example `ADC3B,40,7568,7562,...\n;`. The count is normally 40 at 25 Hz, 20 at 50 Hz, and 10 at 100 Hz because ADC3 is sampled at 1 kHz internally.
+- Browser-side bit extraction uses the streamed ADC3 batch samples.
 
-In PPG measurement modes, the firmware uses a 40 ms frame: LEDs-off ambient sample, one 10 ms LEDs-off wait phase, one 10 ms selected-LED settling phase, then one selected-LED sample before turning the LEDs off. Normal PPG modes stream the selected LED-on raw ADC code with a channel tag; bias is not added, subtracted, or otherwise applied in the firmware payload. Raw diagnostic mode streams both the ambient and LED-on raw phase values.
+In PPG measurement modes, the firmware samples SAADC every 1 ms. It starts each frame with LEDs off, turns the selected LED on near the end of the frame, samples the selected LED-on ADC2 value, then turns LEDs off again. Normal PPG modes stream the selected LED-on raw ADC code with a channel tag; bias is not added, subtracted, or otherwise applied in the firmware payload. Raw diagnostic mode streams both the ambient and LED-on raw phase values.
 
-PPG timing displayed in the GUI follows the current firmware constants: 10 ms phase tick, 40 ms frame, about 10 ms LED-on pulse, 25 Hz output for single-channel Green/IR/Red PPG, and 8.3 Hz per optical channel for alternating Green/IR/Red PPG.
+PPG timing displayed in the GUI follows `RATE?`: 25 Hz uses a 40 ms frame with about 10 ms LED-on time, 50 Hz uses a 20 ms frame with about 5 ms LED-on time, and 100 Hz uses a 10 ms frame with about 2 ms LED-on time. Alternating Green/IR/Red mode divides the selected PPG rate across the three optical channels.
 
 The `888x` LED commands are manual static GPIO controls and do not generate a 25 Hz waveform. Use `7761`, `7762`, or `7763` to measure the 25 Hz single-color PPG LED pulse timing.
 
-The firmware initializes two SAADC channels together: ADC2 / AIN2 / P0.04 for PPG and ADC3 / AIN3 / P0.05 for noise/TRNG. The GUI plots ADC2 PPG and uses ADC3 for bit generation.
+The firmware initializes two SAADC channels together: ADC2 / AIN2 / P0.04 for PPG and ADC3 / AIN3 / P0.05 for noise/TRNG. The GUI plots ADC2 PPG and uses the ADC3 1 kHz batch stream for bit generation and PPG XOR encryption.
 
-`RATE?` includes `SAADC_OVERSAMPLE`. The 25 Hz PPG timing firmware keeps this at `0` so one 10 ms timer trigger produces one SAADC callback.
+`RATE?` includes `PPG_HZ`, `PPG_FRAME_MS`, `PPG_LED_ON_MS`, `ADC3_HZ`, `ADC3_BATCH_MAX`, and `SAADC_OVERSAMPLE`. The batch firmware keeps oversampling at `0` so each 1 ms timer trigger produces one SAADC callback.
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 
@@ -82,7 +83,7 @@ Bluetooth uses Nordic UART Service:
 - RX write: `6e400002-b5a3-f393-e0a9-e50e24dcca9e`
 - TX notify: `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
 
-BLE notifications are parsed as text when they contain ASCII numeric payloads. Non-text BLE notifications are parsed as little-endian 16-bit ADC codes; while browser-side bit extraction is enabled, those values are treated as ADC3 raw noise samples and passed through the selected bit method.
+BLE notifications are parsed as text when they contain ASCII numeric payloads. Non-text BLE notifications are parsed as little-endian 16-bit ADC codes; while browser-side bit extraction is enabled, those values are treated as ADC3 raw noise samples and passed through the selected bit method. The firmware chunks outgoing BLE NUS text payloads to the negotiated MTU so long `ADC3B` frames do not trigger a long-notify send error.
 
 ## Signal Filtering
 
@@ -90,7 +91,7 @@ The plot can display raw ADC data or browser-side filtered data without changing
 
 The `Window` field controls how many parsed samples are retained for plotting and CSV export. It accepts direct numeric input from 100 to 1,000,000 samples; the default is 20,000 samples.
 
-Tagged PPG firmware values are plotted as one ADC2 stream. ADC3 raw values feed the selected bit generator and are not plotted in the PPG trace. Green, IR, Red, and Ambient tags are kept in CSV/log metadata. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
+Tagged PPG firmware values are plotted as one ADC2 stream. ADC3 batch values feed the selected bit generator and are not plotted in the PPG trace. Green, IR, Red, and Ambient tags are kept in CSV/log metadata. The PPG command buttons switch the plot to a `0.5-5 Hz` band-pass preset for normal PPG modes and raw view for diagnostic mode.
 
 The browser may deliver Web Serial data in chunks instead of one line at a time. The GUI parses complete text segments as soon as they arrive and commits samples immediately to reduce control-response latency after DAC changes. Plot redraw is still limited by the browser animation frame.
 

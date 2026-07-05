@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=de25852665d6">
+  <link rel="stylesheet" href="./styles.css?v=c44d1632a862">
 </head>
 <body>
   <main class="app-shell">
@@ -70,6 +70,18 @@
             <button id="addProtocolToTimelineButton" type="button">Add Protocol</button>
           </div>
 
+          <div class="editor-title">Timeline Protocols</div>
+          <div class="timeline-protocol-table" role="table" aria-label="Timeline protocol instances">
+            <div class="timeline-protocol-head" role="row">
+              <span role="columnheader">Start ms</span>
+              <span role="columnheader">Protocol</span>
+              <span role="columnheader">Duration</span>
+              <span role="columnheader">Del</span>
+            </div>
+            <div id="timelineProtocolRows" class="timeline-protocol-rows" role="rowgroup"></div>
+          </div>
+
+          <div class="editor-title">Manual Events</div>
           <div class="timeline-table" role="table" aria-label="Timeline program rows">
             <div class="timeline-table-head" role="row">
               <span role="columnheader">Time ms</span>
@@ -164,7 +176,7 @@
               </label>
               <label>
                 <span>Pulse width ms</span>
-                <input id="digitalGapMsInput" type="number" min="1" step="1" value="200">
+                <input id="digitalGapMsInput" type="number" min="1" step="1" value="100">
               </label>
               <label>
                 <span>Amplitude</span>
@@ -289,6 +301,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=ecd626f55a3c"></script>
+  <script src="./app.js?v=f728a0bb7969"></script>
 </body>
 </html>

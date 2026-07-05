@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-07-04-dual-adc-web-bits",
+  "version": "2026-07-05-adc3-1khz-batch",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 27,
+  "appVersion": 28,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 76317,
-  "sha256": "5805e4f48590e8fa9d62e2646714168983f7712b0533db8963e10287cbcad08a",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-04. Firmware initializes two SAADC routes together: ADC2/AIN2 for PPG and ADC3/AIN3 for raw noise. PPG modes stream selected LED-on raw ADC code with G/I/R tags and also stream ADC3 raw samples. Firmware no longer emits BIT frames; the Web GUI toggles browser-side ADC3 bit extraction and selects residual VN, delta VN, or LSB before XOR-encrypting 14-bit PPG samples."
+  "size": 77281,
+  "sha256": "d788a60a1aa05e0aa915f962be3330b2bc17dd494833e6fd18e40db3bf14bb28",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-05. Firmware samples ADC2 PPG at the selected 25-100 Hz PPG frame rate and samples ADC3 noise at 1 kHz internally. Each PPG sample is followed by an ADC3B batch frame so the Web GUI can extract key bits in the browser and XOR-encrypt 14-bit PPG samples without streaming every ADC3 sample as a separate UART line. BLE NUS text output is chunked to the negotiated MTU to avoid long-frame send errors."
 }

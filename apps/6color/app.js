@@ -24,6 +24,8 @@ const timelineRows = [
   { id: timelineRowId++, timeMs: 100, color: "R", brightness: 1000 },
   { id: timelineRowId++, timeMs: 500, color: "R", brightness: 0 },
 ];
+let timelineProtocolInstanceId = 1;
+const timelineProtocolInstances = [];
 
 let timelineBlockId = 1;
 let selectedTimelineBlockId = null;
@@ -79,6 +81,7 @@ const el = {
   addProtocolToTimelineButton: document.querySelector("#addProtocolToTimelineButton"),
   runTimelineButton: document.querySelector("#runTimelineButton"),
   stopTimelineButton: document.querySelector("#stopTimelineButton"),
+  timelineProtocolRows: document.querySelector("#timelineProtocolRows"),
   timelineRows: document.querySelector("#timelineRows"),
   timelinePlot: document.querySelector("#timelinePlot"),
   timelineDuration: document.querySelector("#timelineDuration"),
@@ -379,11 +382,19 @@ function csvNumber(value, fallback = 0) {
 }
 
 function timelineEventDurationMs() {
-  return Math.max(1000, ...timelineRows.map((row) => row.timeMs));
+  return Math.max(
+    1000,
+    ...timelineRows.map((row) => row.timeMs),
+    ...timelineProtocolInstances.map(timelineProtocolInstanceEndMs),
+  );
 }
 
 function timelineEndMs(block) {
   return block.startMs + block.durationMs;
+}
+
+function timelineProtocolInstanceEndMs(instance) {
+  return instance.startMs + instance.durationMs;
 }
 
 function blockTimelineDurationMs() {
@@ -420,8 +431,17 @@ function sortTimelineRows() {
   });
 }
 
+function sortTimelineProtocolInstances() {
+  timelineProtocolInstances.sort((a, b) => {
+    if (a.startMs !== b.startMs) {
+      return a.startMs - b.startMs;
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
 function addTimelineRow(color = channels[0].id, timeMs = null) {
-  const maxTime = timelineRows.reduce((max, row) => Math.max(max, row.timeMs), 0);
+  const maxTime = timelineEventDurationMs();
   timelineRows.push({
     id: timelineRowId++,
     timeMs: clampTimelineTime(timeMs ?? maxTime + 100),
@@ -448,6 +468,53 @@ function eventBrightnessAt(channelId, timeMs) {
     brightness = row.brightness;
   }
   return brightness;
+}
+
+function timelineProtocolBrightnessAt(channelId, timeMs) {
+  let brightness = 0;
+  for (const instance of timelineProtocolInstances) {
+    const relativeMs = timeMs - instance.startMs;
+    if (relativeMs < 0 || relativeMs >= instance.durationMs) {
+      continue;
+    }
+    for (const block of instance.blocks) {
+      if (
+        block.color === channelId &&
+        block.startMs <= relativeMs &&
+        relativeMs < timelineEndMs(block)
+      ) {
+        brightness = Math.max(brightness, block.brightness);
+      }
+    }
+  }
+  return brightness;
+}
+
+function timelineBrightnessAt(channelId, timeMs) {
+  return Math.max(
+    eventBrightnessAt(channelId, timeMs),
+    timelineProtocolBrightnessAt(channelId, timeMs),
+  );
+}
+
+function collectTimelineTimes(channelId) {
+  const times = new Set(
+    timelineRows
+      .filter((row) => row.color === channelId)
+      .map((row) => row.timeMs),
+  );
+
+  for (const instance of timelineProtocolInstances) {
+    for (const block of instance.blocks) {
+      if (block.color !== channelId) {
+        continue;
+      }
+      times.add(instance.startMs + block.startMs);
+      times.add(instance.startMs + timelineEndMs(block));
+    }
+  }
+
+  return [...times];
 }
 
 function drawIntensityPlot(svg, maxTime, readBrightness, collectTimes) {
@@ -618,51 +685,183 @@ function renderTimelineTable() {
   }
 }
 
+function renderTimelineProtocolTable() {
+  el.timelineProtocolRows.replaceChildren();
+
+  if (timelineProtocolInstances.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "timeline-empty";
+    empty.textContent = "No timeline protocols";
+    el.timelineProtocolRows.appendChild(empty);
+    return;
+  }
+
+  for (const instance of timelineProtocolInstances) {
+    const rowNode = document.createElement("div");
+    rowNode.className = "timeline-protocol-row";
+    rowNode.setAttribute("role", "row");
+
+    const timeInput = document.createElement("input");
+    timeInput.type = "number";
+    timeInput.min = "0";
+    timeInput.step = "1";
+    timeInput.value = instance.startMs;
+    timeInput.setAttribute("aria-label", "Protocol start ms");
+    timeInput.addEventListener("input", () => {
+      instance.startMs = clampTimelineTime(timeInput.value);
+      renderEventTimelinePlot();
+    });
+
+    const name = document.createElement("div");
+    name.className = "timeline-protocol-name";
+    const title = document.createElement("strong");
+    title.textContent = instance.name;
+    const meta = document.createElement("span");
+    meta.textContent = instance.summary;
+    name.append(title, meta);
+
+    const duration = document.createElement("div");
+    duration.className = "timeline-protocol-duration";
+    duration.textContent = `${instance.durationMs} ms`;
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "row-delete-button";
+    deleteButton.type = "button";
+    deleteButton.textContent = "x";
+    deleteButton.setAttribute("aria-label", "Delete protocol");
+    deleteButton.addEventListener("click", () => {
+      const index = timelineProtocolInstances.findIndex((candidate) => candidate.id === instance.id);
+      if (index >= 0) {
+        timelineProtocolInstances.splice(index, 1);
+        renderTimeline();
+      }
+    });
+
+    rowNode.append(timeInput, name, duration, deleteButton);
+    el.timelineProtocolRows.appendChild(rowNode);
+  }
+}
+
 function renderEventTimelinePlot() {
   const maxTime = timelineEventDurationMs();
   el.timelineDuration.textContent = `${maxTime} ms`;
   drawIntensityPlot(
     el.timelinePlot,
     maxTime,
-    eventBrightnessAt,
-    (channelId) => timelineRows
-      .filter((row) => row.color === channelId)
-      .map((row) => row.timeMs),
+    timelineBrightnessAt,
+    collectTimelineTimes,
   );
 }
 
 function renderTimeline() {
+  renderTimelineProtocolTable();
   renderTimelineTable();
   renderEventTimelinePlot();
   renderTimelineProtocolOptions();
 }
 
 function exportTimelineCsv() {
-  const rows = [...timelineRows]
+  const manualRows = [...timelineRows]
     .sort((a, b) => a.timeMs - b.timeMs || channelOrder(a.color) - channelOrder(b.color))
     .map((row) => ({
+      type: "manual",
       time_ms: row.timeMs,
       color: row.color,
       brightness: row.brightness,
+      protocol_id: "",
+      protocol_name: "",
+      protocol_summary: "",
+      duration_ms: "",
+      format: "",
+      width: "",
+      encoding: "",
+      levels: "",
+      data: "",
+      bits: "",
+      symbols: "",
+      period_ms: "",
+      pulse_width_ms: "",
+      amplitude: "",
     }));
-  downloadText("6color_timeline.csv", toCsv(["time_ms", "color", "brightness"], rows));
-  appendLog("!", `Exported ${rows.length} timeline rows`);
+  const protocolRows = [...timelineProtocolInstances]
+    .sort((a, b) => a.startMs - b.startMs || a.name.localeCompare(b.name))
+    .map((instance) => ({
+      type: "protocol",
+      time_ms: instance.startMs,
+      color: instance.config.channelId || "",
+      brightness: "",
+      protocol_id: instance.protocolId || "",
+      protocol_name: instance.name,
+      protocol_summary: instance.summary,
+      duration_ms: instance.durationMs,
+      format: instance.config.format || "",
+      width: instance.config.bitWidth || "",
+      encoding: instance.config.encoding || "",
+      levels: instance.config.levels || "",
+      data: instance.config.data || "",
+      bits: instance.bits || "",
+      symbols: instance.symbols || "",
+      period_ms: protocolPeriodMs(instance.config),
+      pulse_width_ms: protocolPulseWidthMs(instance.config),
+      amplitude: instance.config.brightness || "",
+    }));
+  const rows = [...manualRows, ...protocolRows];
+  const headers = [
+    "type",
+    "time_ms",
+    "color",
+    "brightness",
+    "protocol_id",
+    "protocol_name",
+    "protocol_summary",
+    "duration_ms",
+    "format",
+    "width",
+    "encoding",
+    "levels",
+    "data",
+    "bits",
+    "symbols",
+    "period_ms",
+    "pulse_width_ms",
+    "amplitude",
+  ];
+  downloadText("6color_timeline.csv", toCsv(headers, rows));
+  appendLog("!", `Exported ${manualRows.length} manual rows and ${protocolRows.length} protocol instances`);
 }
 
 async function importTimelineCsv(file) {
   const text = await readFileAsText(file);
   const rows = csvToObjects(text);
-  const parsed = rows.map((row) => ({
-    id: timelineRowId++,
-    timeMs: clampTimelineTime(row.time_ms ?? row.time ?? row.ms),
-    color: normalizeChannelId(row.color ?? row.channel),
-    brightness: clampTimelineBrightness(csvNumber(row.brightness ?? row.duty, 0)),
-  }));
+  const parsedRows = [];
+  const parsedProtocols = [];
 
-  timelineRows.splice(0, timelineRows.length, ...parsed);
+  for (const row of rows) {
+    const type = String(row.type || row.kind || "").trim().toLowerCase();
+    if (type === "protocol" || row.protocol_name) {
+      try {
+        const protocol = protocolFromTimelineCsvRow(row);
+        parsedProtocols.push(cloneProtocolForTimeline(protocol, clampTimelineTime(row.time_ms ?? row.time ?? row.ms)));
+      } catch (error) {
+        appendLog("!", `Timeline protocol import skipped: ${error.message || String(error)}`);
+      }
+      continue;
+    }
+
+    parsedRows.push({
+      id: timelineRowId++,
+      timeMs: clampTimelineTime(row.time_ms ?? row.time ?? row.ms),
+      color: normalizeChannelId(row.color ?? row.channel),
+      brightness: clampTimelineBrightness(csvNumber(row.brightness ?? row.duty, 0)),
+    });
+  }
+
+  timelineRows.splice(0, timelineRows.length, ...parsedRows);
+  timelineProtocolInstances.splice(0, timelineProtocolInstances.length, ...parsedProtocols);
   sortTimelineRows();
+  sortTimelineProtocolInstances();
   renderTimeline();
-  appendLog("!", `Imported ${parsed.length} timeline rows`);
+  appendLog("!", `Imported ${parsedRows.length} manual rows and ${parsedProtocols.length} protocol instances`);
 }
 
 function renderTimelineProtocolOptions() {
@@ -688,6 +887,82 @@ function renderTimelineProtocolOptions() {
   }
 }
 
+function protocolFromTimelineCsvRow(row) {
+  const protocolId = String(row.protocol_id || "").trim();
+  const name = sanitizeFilename(row.protocol_name || row.name || "imported_protocol");
+  const existing = protocolBlocks.find((candidate) =>
+    (protocolId && candidate.id === protocolId) ||
+    candidate.name === name);
+  if (existing) {
+    return existing;
+  }
+
+  const encoding = row.encoding || (row.symbols ? "levels" : "ook");
+  const format = row.format || (encoding === "levels" ? "levels" : "bin");
+  const data = row.data || (format === "levels" ? row.symbols : row.bits);
+  const periodMs = clampDigitalPeriodMs(row.period_ms || row.bit_ms || 1);
+  const pulseWidthMs = clampDigitalPulseWidthMs(
+    row.pulse_width_ms || periodMs,
+    periodMs,
+  );
+  const defaultBitWidth = String(row.bits || "").length || 8;
+  const config = {
+    name,
+    channelId: row.color ? normalizeChannelId(row.color) : channels[0].id,
+    format,
+    bitWidth: row.width ? csvNumber(row.width, defaultBitWidth) : defaultBitWidth,
+    encoding,
+    levels: clampProtocolLevels(row.levels),
+    data,
+    startMs: 0,
+    bitMs: periodMs,
+    periodMs,
+    pulseWidthMs,
+    gapMs: Math.max(0, periodMs - pulseWidthMs),
+    brightness: clampTimelineBrightness(csvNumber(row.amplitude || row.protocol_brightness || row.brightness || 1000, 1000)),
+  };
+  const preview = createDigitalProtocolBlocks(config);
+  const blocks = preview.blocks.map((block) => ({
+    startMs: block.startMs,
+    durationMs: block.durationMs,
+    color: block.color,
+    brightness: block.brightness,
+    level: block.level ?? "",
+  }));
+
+  return {
+    id: `imported-${protocolBlockId++}`,
+    name,
+    config,
+    bits: row.bits || preview.bits,
+    symbols: row.symbols || preview.symbolText || "",
+    command: buildDigitalTxCommand(config, preview),
+    durationMs: csvNumber(row.duration_ms || row.total_duration_ms, preview.totalDurationMs),
+    blocks,
+  };
+}
+
+function cloneProtocolForTimeline(protocol, startMs) {
+  return {
+    id: `timeline-protocol-${timelineProtocolInstanceId++}`,
+    protocolId: protocol.id,
+    name: protocol.name,
+    summary: protocolSummary(protocol),
+    startMs,
+    durationMs: protocol.durationMs,
+    config: { ...protocol.config },
+    bits: protocol.bits || "",
+    symbols: protocol.symbols || "",
+    blocks: protocol.blocks.map((block) => ({
+      startMs: block.startMs,
+      durationMs: block.durationMs,
+      color: block.color,
+      brightness: block.brightness,
+      level: block.level ?? "",
+    })),
+  };
+}
+
 function addSelectedProtocolToTimeline() {
   const protocol = protocolBlocks.find((candidate) => candidate.id === el.timelineProtocolSelect.value);
   if (!protocol) {
@@ -696,24 +971,10 @@ function addSelectedProtocolToTimeline() {
   }
 
   const baseMs = clampTimelineTime(el.timelineProtocolStartInput.value);
-  for (const block of protocol.blocks) {
-    timelineRows.push({
-      id: timelineRowId++,
-      timeMs: baseMs + block.startMs,
-      color: block.color,
-      brightness: block.brightness,
-    });
-    timelineRows.push({
-      id: timelineRowId++,
-      timeMs: baseMs + block.startMs + block.durationMs,
-      color: block.color,
-      brightness: 0,
-    });
-  }
-
-  sortTimelineRows();
+  timelineProtocolInstances.push(cloneProtocolForTimeline(protocol, baseMs));
+  sortTimelineProtocolInstances();
   renderTimeline();
-  appendLog("!", `Added protocol ${protocol.name} to timeline at ${baseMs} ms`);
+  appendLog("!", `Added protocol instance ${protocol.name} to timeline at ${baseMs} ms`);
 }
 
 function selectedTimelineBlock() {
@@ -881,9 +1142,11 @@ function pulseBlockDuration(durationMs, gapMs) {
 }
 
 function syncProtocolModeControls() {
-  const levelMode = el.digitalEncodingInput.value === "levels";
+  const encoding = el.digitalEncodingInput.value;
+  const levelMode = encoding === "levels";
+  const usesConfiguredPulseWidth = encoding === "ook";
   el.digitalLevelsInput.disabled = !levelMode;
-  el.digitalGapMsInput.disabled = levelMode;
+  el.digitalGapMsInput.disabled = !usesConfiguredPulseWidth;
 }
 
 function readDigitalProtocolConfig() {
@@ -1210,6 +1473,37 @@ function renderProtocolParameterList(config = null, preview = null) {
         ["Active symbols", preview.blocks.length],
         ["Duration", `${preview.totalDurationMs} ms`],
       ];
+    } else if (config.encoding === "manchester") {
+      items = [
+        ["Name", config.name],
+        ["Channel", config.channelId],
+        ["Format", config.format.toUpperCase()],
+        ["Width", `${config.bitWidth} bit`],
+        ["Encoding", "Manchester"],
+        ["Data", config.data],
+        ["Bits", preview.bits],
+        ["Bit period T", `${periodMs} ms`],
+        ["Half-bit width", `${Math.round(periodMs / 2)} ms`],
+        ["Amplitude", config.brightness],
+        ["Pulses", preview.blocks.length],
+        ["Duration", `${preview.totalDurationMs} ms`],
+      ];
+    } else if (config.encoding === "pulse-width") {
+      items = [
+        ["Name", config.name],
+        ["Channel", config.channelId],
+        ["Format", config.format.toUpperCase()],
+        ["Width", `${config.bitWidth} bit`],
+        ["Encoding", "PWM width"],
+        ["Data", config.data],
+        ["Bits", preview.bits],
+        ["Bit period T", `${periodMs} ms`],
+        ["0 width", `${Math.round(periodMs * 0.25)} ms`],
+        ["1 width", `${Math.round(periodMs * 0.75)} ms`],
+        ["Amplitude", config.brightness],
+        ["Pulses", preview.blocks.length],
+        ["Duration", `${preview.totalDurationMs} ms`],
+      ];
     } else {
       items = [
         ["Name", config.name],
@@ -1287,7 +1581,8 @@ function renderProtocolTermDiagram(config = null, preview = null) {
     return;
   }
 
-  const bits = preview.bits.slice(0, 4).padEnd(Math.min(4, preview.bits.length), "0");
+  const visibleBits = preview.bits.slice(0, 4);
+  const bits = visibleBits || "0";
   const periodPx = 128;
   const periodMs = protocolPeriodMs(config);
   const pulseWidthMs = protocolPulseWidthMs(config);
@@ -1403,6 +1698,7 @@ function renderProtocolTermDiagram(config = null, preview = null) {
     return;
   }
 
+  let firstPulse = null;
   for (let index = 0; index < bits.length; index += 1) {
     const bit = bits[index];
     const x0 = firstPulseX + index * periodPx;
@@ -1415,11 +1711,35 @@ function renderProtocolTermDiagram(config = null, preview = null) {
     });
     svg.appendChild(bitBox);
 
-    if (bit === "1" || config.encoding !== "ook") {
+    const pulseSegments = [];
+    if (config.encoding === "ook") {
+      if (bit === "1") {
+        pulseSegments.push({ offsetPx: 0, widthPx: pulsePx });
+      }
+    } else if (config.encoding === "manchester") {
+      const halfPx = periodPx / 2;
+      pulseSegments.push({
+        offsetPx: bit === "1" ? halfPx : 0,
+        widthPx: halfPx,
+      });
+    } else if (config.encoding === "pulse-width") {
+      pulseSegments.push({
+        offsetPx: 0,
+        widthPx: bit === "1" ? periodPx * 0.75 : periodPx * 0.25,
+      });
+    }
+
+    for (const segment of pulseSegments) {
+      if (!firstPulse) {
+        firstPulse = {
+          x1: x0 + segment.offsetPx,
+          x2: x0 + segment.offsetPx + segment.widthPx,
+        };
+      }
       const pulse = createSvgElement("rect", {
-        x: x0,
+        x: x0 + segment.offsetPx,
         y: highY,
-        width: config.encoding === "manchester" ? Math.max(6, pulsePx / 2) : pulsePx,
+        width: Math.max(6, segment.widthPx),
         height: baseline - highY,
         class: "term-pulse",
       });
@@ -1454,21 +1774,23 @@ function renderProtocolTermDiagram(config = null, preview = null) {
   label.textContent = "Period T";
   svg.appendChild(label);
 
-  svg.appendChild(createSvgElement("line", {
-    x1: firstPulseX,
-    y1: highY + 16,
-    x2: firstPulseX + pulsePx,
-    y2: highY + 16,
-    class: "term-arrow",
-  }));
-  label = createSvgElement("text", {
-    x: firstPulseX + pulsePx / 2,
-    y: highY + 36,
-    class: "term-label",
-    "text-anchor": "middle",
-  });
-  label.textContent = "Pulse width PW";
-  svg.appendChild(label);
+  if (firstPulse) {
+    svg.appendChild(createSvgElement("line", {
+      x1: firstPulse.x1,
+      y1: highY + 16,
+      x2: firstPulse.x2,
+      y2: highY + 16,
+      class: "term-arrow",
+    }));
+    label = createSvgElement("text", {
+      x: (firstPulse.x1 + firstPulse.x2) / 2,
+      y: highY + 36,
+      class: "term-label",
+      "text-anchor": "middle",
+    });
+    label.textContent = config.encoding === "pulse-width" ? "Encoded width" : "Pulse width PW";
+    svg.appendChild(label);
+  }
 
   svg.appendChild(createSvgElement("line", {
     x1: firstPulseX - 28,
@@ -1492,7 +1814,13 @@ function renderProtocolTermDiagram(config = null, preview = null) {
     class: "term-muted",
     "text-anchor": "end",
   });
-  footer.textContent = `Duty cycle = PW / T = ${Math.round((pulseWidthMs / periodMs) * 100)}%`;
+  if (config.encoding === "manchester") {
+    footer.textContent = "Manchester: bit 0 = first half high, bit 1 = second half high";
+  } else if (config.encoding === "pulse-width") {
+    footer.textContent = "PWM width: bit 0 = 25% T high, bit 1 = 75% T high";
+  } else {
+    footer.textContent = `Duty cycle = PW / T = ${Math.round((pulseWidthMs / periodMs) * 100)}%`;
+  }
   svg.appendChild(footer);
 }
 
@@ -1641,9 +1969,19 @@ function updateDigitalPreview() {
   try {
     const config = readDigitalProtocolConfig();
     const preview = createDigitalProtocolBlocks(config);
-    el.digitalPreviewOutput.textContent = config.encoding === "levels"
-      ? `levels ${config.levels}: ${preview.symbolText} | T=${config.bitMs} ms | max=${config.brightness} | ${preview.blocks.length} active symbols`
-      : `${preview.bits} | ${config.encoding} | T=${config.bitMs} ms | PW=${config.pulseWidthMs} ms | ${preview.blocks.length} pulses`;
+    if (config.encoding === "levels") {
+      el.digitalPreviewOutput.textContent =
+        `levels ${config.levels}: ${preview.symbolText} | T=${config.bitMs} ms | max=${config.brightness} | ${preview.blocks.length} active symbols`;
+    } else if (config.encoding === "manchester") {
+      el.digitalPreviewOutput.textContent =
+        `${preview.bits} | Manchester | T=${config.bitMs} ms | half=${Math.round(config.bitMs / 2)} ms | ${preview.blocks.length} pulses`;
+    } else if (config.encoding === "pulse-width") {
+      el.digitalPreviewOutput.textContent =
+        `${preview.bits} | PWM width | T=${config.bitMs} ms | W0=${Math.round(config.bitMs * 0.25)} ms | W1=${Math.round(config.bitMs * 0.75)} ms`;
+    } else {
+      el.digitalPreviewOutput.textContent =
+        `${preview.bits} | OOK | T=${config.bitMs} ms | PW=${config.pulseWidthMs} ms | ${preview.blocks.length} pulses`;
+    }
     renderProtocolParameterList(config, preview);
     renderProtocolTermDiagram(config, preview);
   } catch (error) {
@@ -1964,6 +2302,7 @@ function addProgramEvent(grouped, timeMs, commands, updates) {
 
 function buildTimelineProgramEvents() {
   const grouped = new Map();
+  const lastBrightness = new Map(channels.map((channel) => [channel.id, 0]));
   addProgramEvent(
     grouped,
     0,
@@ -1971,21 +2310,31 @@ function buildTimelineProgramEvents() {
     channels.map((channel) => ({ channelId: channel.id, brightness: 0 })),
   );
 
-  const sortedRows = [...timelineRows].sort((a, b) => {
-    if (a.timeMs !== b.timeMs) {
-      return a.timeMs - b.timeMs;
+  const times = new Set([0, timelineEventDurationMs()]);
+  for (const row of timelineRows) {
+    times.add(row.timeMs);
+  }
+  for (const instance of timelineProtocolInstances) {
+    for (const block of instance.blocks) {
+      times.add(instance.startMs + block.startMs);
+      times.add(instance.startMs + timelineEndMs(block));
     }
-    return a.id - b.id;
-  });
+  }
 
-  for (const row of sortedRows) {
-    const brightness = clampTimelineBrightness(row.brightness);
-    addProgramEvent(
-      grouped,
-      row.timeMs,
-      brightnessCommands(row.color, brightness),
-      [{ channelId: row.color, brightness }],
-    );
+  for (const timeMs of [...times].sort((a, b) => a - b)) {
+    for (const channel of channels) {
+      const brightness = timelineBrightnessAt(channel.id, timeMs);
+      if (brightness === lastBrightness.get(channel.id)) {
+        continue;
+      }
+      lastBrightness.set(channel.id, brightness);
+      addProgramEvent(
+        grouped,
+        timeMs,
+        brightnessCommands(channel.id, brightness),
+        [{ channelId: channel.id, brightness }],
+      );
+    }
   }
 
   return [...grouped.values()].sort((a, b) => a.timeMs - b.timeMs);
@@ -2347,10 +2696,12 @@ el.blocksTabButton.addEventListener("click", () => setActiveTab("blocks"));
 el.addTimelineRowButton.addEventListener("click", () => addTimelineRow());
 el.sortTimelineRowsButton.addEventListener("click", () => {
   sortTimelineRows();
+  sortTimelineProtocolInstances();
   renderTimeline();
 });
 el.clearTimelineRowsButton.addEventListener("click", () => {
   timelineRows.splice(0, timelineRows.length);
+  timelineProtocolInstances.splice(0, timelineProtocolInstances.length);
   renderTimeline();
 });
 el.importTimelineCsvButton.addEventListener("click", () => {

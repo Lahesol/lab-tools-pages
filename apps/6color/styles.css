@@ -354,14 +354,33 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.timeline-protocol-table {
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.timeline-table-head,
+.timeline-row,
+.timeline-protocol-head,
+.timeline-protocol-row {
+  display: grid;
+  gap: 0;
+  align-items: center;
 }
 
 .timeline-table-head,
 .timeline-row {
-  display: grid;
   grid-template-columns: minmax(86px, 1fr) minmax(78px, 0.9fr) minmax(110px, 1fr) 44px;
-  gap: 0;
-  align-items: center;
+}
+
+.timeline-protocol-head,
+.timeline-protocol-row {
+  grid-template-columns: minmax(86px, 0.75fr) minmax(150px, 1.5fr) minmax(82px, 0.7fr) 44px;
 }
 
 .timeline-table-head {
@@ -373,29 +392,45 @@ h1 {
   text-transform: uppercase;
 }
 
+.timeline-protocol-head {
+  min-height: 38px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .timeline-table-head span,
-.timeline-row > * {
+.timeline-row > *,
+.timeline-protocol-head span,
+.timeline-protocol-row > * {
   min-width: 0;
   border-right: 1px solid var(--line);
 }
 
-.timeline-table-head span {
+.timeline-table-head span,
+.timeline-protocol-head span {
   padding: 0 10px;
 }
 
 .timeline-table-head span:last-child,
-.timeline-row > *:last-child {
+.timeline-row > *:last-child,
+.timeline-protocol-head span:last-child,
+.timeline-protocol-row > *:last-child {
   border-right: 0;
 }
 
-.timeline-row {
+.timeline-row,
+.timeline-protocol-row {
   min-height: 42px;
   border-top: 1px solid var(--line);
   background: var(--panel);
 }
 
 .timeline-row input,
-.timeline-row select {
+.timeline-row select,
+.timeline-protocol-row input {
   width: 100%;
   min-height: 42px;
   border: 0;
@@ -406,9 +441,35 @@ h1 {
 }
 
 .timeline-row input:focus,
-.timeline-row select:focus {
+.timeline-row select:focus,
+.timeline-protocol-row input:focus {
   outline: 2px solid rgba(11, 127, 120, 0.35);
   outline-offset: -2px;
+}
+
+.timeline-protocol-name,
+.timeline-protocol-duration {
+  display: grid;
+  align-content: center;
+  min-height: 42px;
+  padding: 6px 10px;
+}
+
+.timeline-protocol-name {
+  gap: 2px;
+}
+
+.timeline-protocol-name strong {
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.timeline-protocol-name span,
+.timeline-protocol-duration {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .row-delete-button {

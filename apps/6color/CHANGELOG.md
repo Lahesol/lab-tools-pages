@@ -22,3 +22,7 @@
 - Reworked the Protocols tab so one saved protocol is treated as one block; generated pulse segments are now internal preview data instead of editable blocks.
 - Added 8/16/32/64-level intensity encoding for protocol data, with level-sequence, binary, and hexadecimal input support.
 - Changed protocol CSV export to one row per saved protocol block while keeping import compatibility for older segment-row CSV files.
+- Corrected the protocol terminology diagram so period, pulse width, Manchester half-bit timing, and PWM-width coding are drawn separately.
+- Changed the default OOK pulse example to 50% duty cycle to avoid showing period and pulse width as identical.
+- Changed Timeline protocol insertion so a saved protocol is added as one timeline protocol instance instead of expanding into individual manual brightness rows.
+- Updated Timeline plotting, running, CSV import, and CSV export to preserve protocol instances while expanding their internal pulses only for execution/preview calculations.
