@@ -35,6 +35,7 @@ const els = {
   liveMaOffset: document.querySelector("#liveMaOffset"),
   liveMaWindowField: document.querySelector("#liveMaWindowField"),
   liveMaOffsetField: document.querySelector("#liveMaOffsetField"),
+  encryptionToggle: document.querySelector("#encryptionToggle"),
   keyBitCount: document.querySelector("#keyBitCount"),
   encryptionPending: document.querySelector("#encryptionPending"),
   encryptionCount: document.querySelector("#encryptionCount"),
@@ -149,6 +150,7 @@ const state = {
   adcBias: { ADC3: null, ADC2: null, ADC0: null },
   dacValues: { A: 2048, B: 2056 },
   bitMode: false,
+  encryptionEnabled: false,
   bits: [],
   totalBits: 0,
   maxBits: 32768,
@@ -248,8 +250,8 @@ const ADC_SOURCE_INFO = {
   },
   ADC2: {
     command: "ADC2",
-    label: "ADC2 PPG",
-    detail: "PPG - AIN2/P0.04",
+    label: "ADC2 signal",
+    detail: "Signal - AIN2/P0.04",
   },
   ADC0: {
     command: "ADC0",
@@ -609,6 +611,24 @@ function updateAdcSourceUi(options = {}) {
   updateValueUi();
 }
 
+function setEncryptionEnabled(enabled, options = {}) {
+  const nextEnabled = Boolean(enabled);
+  if (state.encryptionEnabled === nextEnabled && !options.force) {
+    updateEncryptionUi();
+    return;
+  }
+
+  state.encryptionEnabled = nextEnabled;
+  if (nextEnabled) {
+    resetLiveEncryption();
+  } else {
+    state.pendingPpg = [];
+  }
+  updateEncryptionUi();
+  state.needsCipherDraw = true;
+  addLog("SYS", `ADC encryption ${nextEnabled ? "enabled" : "disabled"}`);
+}
+
 function setConnectedUi(connected) {
   els.connectButton.textContent = connected ? "Disconnect" : "Connect";
   updateTransportControls();
@@ -922,10 +942,7 @@ function parseSegment(segment) {
   if (parseAdcBatchSegment(segment)) return;
   if (parseTaggedSegment(segment)) return;
 
-  if (state.bitMode) {
-    if (parseBitSegment(segment)) return;
-    return;
-  }
+  if (state.bitMode && parseBitSegment(segment)) return;
 
   const match = segment.match(/[-+]?\d+(?:\.\d+)?/);
   if (!match) return;
@@ -1089,6 +1106,7 @@ function parseRateStatusSegment(segment) {
 function parseBitSegment(segment) {
   const compact = segment.replace(/[\s,]+/g, "");
   if (!compact || /[^01]/.test(compact)) return false;
+  handleGeneratedBits([...compact].map((bit) => Number(bit)), state.bitAdcSource, "UART bit stream", state.bitGenerationMethod);
   return true;
 }
 
@@ -1096,6 +1114,16 @@ function parseTaggedBitSegment(segment) {
   const matches = [...segment.matchAll(/\b(?:BIT|TRNG|RNG)([023])\b\s*[,=:]\s*([01])/gi)];
   if (!matches.length) return false;
 
+  const groupedBits = new Map();
+  matches.forEach((match) => {
+    const adcSource = `ADC${match[1]}`;
+    const bits = groupedBits.get(adcSource) || [];
+    bits.push(Number(match[2]));
+    groupedBits.set(adcSource, bits);
+  });
+  groupedBits.forEach((bits, adcSource) => {
+    handleGeneratedBits(bits, adcSource, "UART tagged bits", state.bitGenerationMethod);
+  });
   return true;
 }
 
@@ -1327,13 +1355,15 @@ function formatHex(value, width = 4) {
 }
 
 function enqueuePpgEncryption(sample) {
-  if (!state.bitMode) return;
-  if (!["G", "I", "R"].includes(sample.channel)) return;
+  if (!state.encryptionEnabled) return;
+  if (!Number.isFinite(sample.value)) return;
+  const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
+  if (adcSource !== state.adcSource) return;
   const adcCode = clampInteger(sample.value, 0, 16383, 0);
   state.pendingPpg.push({
     t: sample.t,
     channel: sample.channel,
-    adcSource: sample.adcSource,
+    adcSource,
     adcCode,
   });
   if (state.pendingPpg.length > MAX_PENDING_PPG) {
@@ -1369,11 +1399,15 @@ function processEncryptionQueue() {
 }
 
 function updateEncryptionUi() {
+  if (els.encryptionToggle) {
+    els.encryptionToggle.checked = state.encryptionEnabled;
+  }
   if (els.keyBitCount) els.keyBitCount.textContent = String(state.keyBits.length);
   if (els.encryptionPending) els.encryptionPending.textContent = String(state.pendingPpg.length);
   if (els.encryptionCount) els.encryptionCount.textContent = String(state.encryptedCount);
   if (els.encryptionStatus) {
     const dropped = state.droppedPpg ? ` | dropped ${state.droppedPpg}` : "";
+    const encryptionText = state.encryptionEnabled ? "encryption on" : "encryption off";
     const modeText = state.bitMode ? "extracting" : "extraction off";
     const methodParams = isMovingAverageBitMethod()
       ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
@@ -1381,14 +1415,18 @@ function updateEncryptionUi() {
     const batchText = state.totalAdc3BatchSamples
       ? ` | ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}`
       : "";
-    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${modeText}${batchText} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
+    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${encryptionText} | ${modeText}${batchText} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
   if (els.encryptionPlain) els.encryptionPlain.textContent = latest ? String(latest.adcCode) : "--";
   if (els.encryptionKey) els.encryptionKey.textContent = latest ? formatHex(latest.key) : "--";
   if (els.encryptionCipher) els.encryptionCipher.textContent = latest ? formatHex(latest.cipher) : "--";
-  if (els.encryptionChannel) els.encryptionChannel.textContent = latest ? CHANNEL_LABELS[latest.channel] || latest.channel : "--";
+  if (els.encryptionChannel) {
+    els.encryptionChannel.textContent = latest
+      ? `${latest.adcSource} ${CHANNEL_LABELS[latest.channel] || latest.channel}`
+      : "--";
+  }
 }
 
 function createBitLane(capacity = state.bitPlaneCapacity || 0) {
@@ -1777,7 +1815,7 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `ADC2 PPG ${state.ppgRateHz} Hz | ADC3 noise ${state.adc3RateHz} Hz | LED ${state.ppgLedOnMs} ms | SAADC base ${state.saadcBaseHz} Hz | OS ${state.saadcOversample}`;
+  return `ADC2 pulse ${state.ppgRateHz} Hz | ADC3 noise ${state.adc3RateHz} Hz | LED ${state.ppgLedOnMs} ms | SAADC base ${state.saadcBaseHz} Hz | OS ${state.saadcOversample}`;
 }
 
 function getSelectedAdcPlotSources() {
@@ -2050,7 +2088,7 @@ function exportCsv() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `ppg_adc_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.download = `adc_signal_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
   addLog("SYS", `Exported ${displaySamples.length} samples`);
@@ -2087,7 +2125,7 @@ function exportCipherCsv() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `ppg_cipher_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.download = `adc_cipher_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
   addLog("SYS", `Exported ${state.encryptedPpg.length} cipher samples`);
@@ -3070,7 +3108,7 @@ function drawCipherPlot() {
   if (!records.length) {
     ctx.fillStyle = "#66746f";
     ctx.font = "700 13px Segoe UI, sans-serif";
-    ctx.fillText("No encrypted PPG samples", margin.left + 12, margin.top + 28);
+    ctx.fillText(state.encryptionEnabled ? "Waiting for encrypted samples" : "Encryption off", margin.left + 12, margin.top + 28);
     return;
   }
 
@@ -3269,6 +3307,9 @@ function bindEvents() {
   els.bitMethod?.addEventListener("change", () => {
     setBitGenerationMethod(els.bitMethod.value, { enable: true });
   });
+  els.encryptionToggle?.addEventListener("change", () => {
+    setEncryptionEnabled(els.encryptionToggle.checked);
+  });
   [els.liveMaWindow, els.liveMaOffset].forEach((control) => {
     control?.addEventListener("input", () => applyLiveMaSettings({ normalize: false }));
     control?.addEventListener("change", () => applyLiveMaSettings());
@@ -3387,6 +3428,7 @@ function init() {
   updateValueUi();
   updateFilterUi();
   updateBitStats();
+  updateEncryptionUi();
   resizeCanvas();
   resizeCipherCanvas();
   new ResizeObserver(resizeCanvas).observe(els.canvasWrap || els.plotCanvas);

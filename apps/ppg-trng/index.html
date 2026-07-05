@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-04 dual-adc-encrypt</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-05 led-pulse-encrypt-toggle</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -91,12 +91,12 @@
             <div class="subpanel">
               <div class="panel-heading compact-heading">
                 <h3>ADC Routes</h3>
-                <span id="adcSourceStatus" class="mode-pill">ADC2 PPG / ADC3 noise</span>
+                <span id="adcSourceStatus" class="mode-pill">ADC2 signal / ADC3 noise</span>
               </div>
               <div class="quick-grid">
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query dual ADC routing">
                   <span class="command-code">ADC2</span>
-                  <span class="command-label">PPG · AIN2/P0.04</span>
+                  <span class="command-label">Signal - AIN2/P0.04</span>
                 </button>
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query dual ADC routing">
                   <span class="command-code">ADC3</span>
@@ -107,7 +107,7 @@
                   <span class="command-label">Query routes</span>
                 </button>
               </div>
-              <p class="command-note">ADC2 streams PPG. ADC3 streams raw noise.</p>
+              <p class="command-note">ADC2 streams the measured signal. ADC3 streams raw noise for key bits.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-bit-toggle="true" type="button" title="Start browser-side ADC3 bit extraction">
@@ -120,54 +120,54 @@
               </button>
               <button class="button secondary command-button" data-command="8881" type="button" title="Manual static Green LED on/off toggle">
                 <span class="command-code">8881</span>
-                <span class="command-label">Green LED 수동</span>
+                <span class="command-label">Green LED manual</span>
               </button>
               <button class="button secondary command-button" data-command="8882" type="button" title="Manual static IR LED on/off toggle">
                 <span class="command-code">8882</span>
-                <span class="command-label">IR LED 수동</span>
+                <span class="command-label">IR LED manual</span>
               </button>
               <button class="button secondary command-button" data-command="8883" type="button" title="Manual static Red LED on/off toggle">
                 <span class="command-code">8883</span>
-                <span class="command-label">Red LED 수동</span>
+                <span class="command-label">Red LED manual</span>
               </button>
               <button class="button secondary command-button" data-command="8880" type="button" title="Turn all LEDs off">
                 <span class="command-code">8880</span>
-                <span class="command-label">LED 모두 off</span>
+                <span class="command-label">All LEDs off</span>
               </button>
               <button class="button secondary command-button" data-command="8888" type="button" title="Manual static all-LED on/off toggle">
                 <span class="command-code">8888</span>
-                <span class="command-label">LED 모두 toggle</span>
+                <span class="command-label">All LEDs toggle</span>
               </button>
               <button class="button secondary command-button" data-command="8889" type="button" title="Turn all LEDs on">
                 <span class="command-code">8889</span>
-                <span class="command-label">LED 모두 on</span>
+                <span class="command-label">All LEDs on</span>
               </button>
-              <button class="button secondary command-button" data-command="7761" type="button" title="Green-only PPG sampling">
+              <button class="button secondary command-button" data-command="7761" type="button" title="Green LED pulse sampling">
                 <span class="command-code">7761</span>
-                <span class="command-label">Green PPG · 25 Hz</span>
+                <span class="command-label">Green LED pulse - 25 Hz</span>
               </button>
-              <button class="button secondary command-button" data-command="7762" type="button" title="IR-only PPG sampling">
+              <button class="button secondary command-button" data-command="7762" type="button" title="IR LED pulse sampling">
                 <span class="command-code">7762</span>
-                <span class="command-label">IR PPG · 25 Hz</span>
+                <span class="command-label">IR LED pulse - 25 Hz</span>
               </button>
-              <button class="button secondary command-button" data-command="7763" type="button" title="Red-only PPG sampling">
+              <button class="button secondary command-button" data-command="7763" type="button" title="Red LED pulse sampling">
                 <span class="command-code">7763</span>
-                <span class="command-label">Red PPG · 25 Hz</span>
+                <span class="command-label">Red LED pulse - 25 Hz</span>
               </button>
-              <button class="button secondary command-button" data-command="7764" type="button" title="Alternating Green/IR/Red PPG sampling">
+              <button class="button secondary command-button" data-command="7764" type="button" title="Alternating Green/IR/Red LED pulse sampling">
                 <span class="command-code">7764</span>
-                <span class="command-label">G/I/R PPG · 8.3 Hz/ch</span>
+                <span class="command-label">G/I/R LED pulse - 8.3 Hz/ch</span>
               </button>
               <button class="button secondary command-button" data-command="7769" type="button" title="Raw ambient and LED diagnostic stream">
                 <span class="command-code">7769</span>
-                <span class="command-label">Raw 진단 · 8.3 Hz/ch</span>
+                <span class="command-label">Pulse diagnostic - 8.3 Hz/ch</span>
               </button>
-              <button class="button secondary command-button" data-command="7777" type="button" title="Legacy toggle for alternating Green/IR/Red PPG sampling">
+              <button class="button secondary command-button" data-command="7777" type="button" title="Legacy toggle for alternating Green/IR/Red LED pulse sampling">
                 <span class="command-code">7777</span>
-                <span class="command-label">호환 PPG · 8.3 Hz/ch</span>
+                <span class="command-label">Legacy LED pulse - 8.3 Hz/ch</span>
               </button>
             </div>
-            <p class="command-note">888x LED commands are manual static GPIO controls, not 25 Hz pulse modes. Use 7761/7762/7763 for 25 Hz single-color PPG LED pulses.</p>
+            <p class="command-note">888x LED commands are manual static GPIO controls. 776x commands are LED pulse sampling modes.</p>
           </section>
 
           <section class="panel log-panel">
@@ -233,7 +233,7 @@
                   </datalist>
                 </label>
                 <label class="compact-field" for="sampleRate">
-                  <span>ADC2 PPG Hz</span>
+                  <span>ADC2 pulse Hz</span>
                   <input id="sampleRate" type="number" min="25" max="100" step="1" value="25" list="sampleRatePresets" inputmode="numeric" />
                   <datalist id="sampleRatePresets">
                     <option value="25"></option>
@@ -254,9 +254,9 @@
                 </label>
                 <button id="sendAdc3RateButton" class="button secondary" type="button">Set</button>
                 <label class="compact-field" for="plotAdcSource">
-                  <span>PPG input</span>
+                  <span>Signal input</span>
                   <select id="plotAdcSource">
-                    <option value="ADC2" selected>ADC2 PPG</option>
+                    <option value="ADC2" selected>ADC2 signal</option>
                   </select>
                 </label>
                 <label class="switch">
@@ -327,10 +327,14 @@
           <section class="encryption-panel">
             <div class="plot-toolbar">
               <div>
-                <h2>PPG Encryption</h2>
-                <p id="encryptionStatus">ADC3 residual VN | extraction off | key 0 bits | pending 0</p>
+                <h2>ADC Encryption</h2>
+                <p id="encryptionStatus">ADC3 residual VN | encryption off | extraction off | key 0 bits | pending 0</p>
               </div>
               <div class="toolbar-actions">
+                <label class="switch" title="Encrypt incoming signal samples with ADC3-derived key bits">
+                  <input id="encryptionToggle" type="checkbox" />
+                  <span>Encryption</span>
+                </label>
                 <label class="compact-field" for="bitMethod">
                   <span>Bit method</span>
                   <select id="bitMethod">
@@ -383,7 +387,7 @@
               </div>
             </div>
             <div class="cipher-canvas-wrap">
-              <canvas id="cipherCanvas" aria-label="Encrypted PPG cipher plot"></canvas>
+              <canvas id="cipherCanvas" aria-label="Encrypted ADC cipher plot"></canvas>
             </div>
           </section>
 
@@ -666,7 +670,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=c78da153ec60" defer></script>
+    <script src="./app.js?v=d4c761bb46e6" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>
