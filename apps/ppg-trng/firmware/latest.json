@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-07-05-adc3-1khz-batch",
+  "version": "2026-07-05-adc-rate-split",
   "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 28,
+  "appVersion": 29,
   "package": "./ppg_trng_latest_dfu.zip",
-  "size": 77281,
-  "sha256": "d788a60a1aa05e0aa915f962be3330b2bc17dd494833e6fd18e40db3bf14bb28",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-05. Firmware samples ADC2 PPG at the selected 25-100 Hz PPG frame rate and samples ADC3 noise at 1 kHz internally. Each PPG sample is followed by an ADC3B batch frame so the Web GUI can extract key bits in the browser and XOR-encrypt 14-bit PPG samples without streaming every ADC3 sample as a separate UART line. BLE NUS text output is chunked to the negotiated MTU to avoid long-frame send errors."
+  "size": 78393,
+  "sha256": "b979a176da12984f71f65c5211cc8fdf4c9a68bd0df269eee18b542e095f1141",
+  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-05. Firmware exposes independent ADC2 PPG and ADC3 noise sampling controls: ADC2RATE sets the 25-100 Hz PPG/LED frame, while ADC3RATE sets the 25-1000 Hz ADC3 noise decimation from the 1 ms SAADC base tick. RATE? reports ADC2_HZ, ADC2_FRAME_MS, ADC3_HZ, ADC3_MS, SAADC_BASE_HZ, and related limits. SAADC channels are not reinitialized for rate changes; only software frame/decimation intervals are updated."
 }

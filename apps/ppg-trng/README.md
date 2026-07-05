@@ -18,7 +18,8 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - DAC A set: `A2048\r`
 - DAC B set: `B2056\r`
 - Dual ADC routing query: `ADC?\r`
-- PPG/raw sampling rate set/query: `RATE25\r`, `RATE50\r`, or `RATE100\r`; `RATE?\r` reads back the actual timing. The GUI clamps this control to the PPG-safe 25-100 Hz range.
+- ADC2 PPG sampling rate set/query: `ADC2RATE25\r`, `ADC2RATE50\r`, or `ADC2RATE100\r`; `RATE?\r` reads back the actual timing. Legacy `RATE25\r` still changes the ADC2/PPG rate. The GUI clamps this control to the PPG-safe 25-100 Hz range.
+- ADC3 noise sampling rate set/query: `ADC3RATE1000\r`, `ADC3RATE500\r`, `ADC3RATE250\r`, etc. The firmware clamps this control to 25-1000 Hz and reports the effective integer-ms decimated rate.
 - Legacy firmware bit command: `9999\r` is not required; bit generation is selected and run in the browser from ADC3 raw samples.
 - DAC sweep/reset: `0000\r`
 - Green-only PPG mode toggle: `7761\r`
@@ -38,18 +39,18 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - Firmware version query: `VER?\r`
 - Raw ADC receive format outside PPG mode: tagged UART text stream from the fixed dual route, for example `ADC2,7559\n;` for PPG.
 - Tagged PPG receive format: `G,7482\n;`, `I,7440\n;`, `R,7411\n;`, or diagnostic ambient `A,7340\n;`
-- ADC3 noise receive format in PPG mode: one batch per emitted PPG sample, for example `ADC3B,40,7568,7562,...\n;`. The count is normally 40 at 25 Hz, 20 at 50 Hz, and 10 at 100 Hz because ADC3 is sampled at 1 kHz internally.
+- ADC3 noise receive format in PPG mode: one batch per emitted PPG sample, for example `ADC3B,40,7568,7562,...\n;`. With ADC3 set to 1 kHz, the count is normally 40 at ADC2/PPG 25 Hz, 20 at 50 Hz, and 10 at 100 Hz.
 - Browser-side bit extraction uses the streamed ADC3 batch samples.
 
 In PPG measurement modes, the firmware samples SAADC every 1 ms. It starts each frame with LEDs off, turns the selected LED on near the end of the frame, samples the selected LED-on ADC2 value, then turns LEDs off again. Normal PPG modes stream the selected LED-on raw ADC code with a channel tag; bias is not added, subtracted, or otherwise applied in the firmware payload. Raw diagnostic mode streams both the ambient and LED-on raw phase values.
 
-PPG timing displayed in the GUI follows `RATE?`: 25 Hz uses a 40 ms frame with about 10 ms LED-on time, 50 Hz uses a 20 ms frame with about 5 ms LED-on time, and 100 Hz uses a 10 ms frame with about 2 ms LED-on time. Alternating Green/IR/Red mode divides the selected PPG rate across the three optical channels.
+PPG timing displayed in the GUI follows `RATE?`: 25 Hz uses a 40 ms frame with about 10 ms LED-on time, 50 Hz uses a 20 ms frame with about 5 ms LED-on time, and 100 Hz uses a 10 ms frame with about 2 ms LED-on time. Alternating Green/IR/Red mode divides the selected PPG rate across the three optical channels. ADC3 noise sampling is independent of the ADC2 PPG frame and is decimated from the 1 ms SAADC base tick.
 
 The `888x` LED commands are manual static GPIO controls and do not generate a 25 Hz waveform. Use `7761`, `7762`, or `7763` to measure the 25 Hz single-color PPG LED pulse timing.
 
 The firmware initializes two SAADC channels together: ADC2 / AIN2 / P0.04 for PPG and ADC3 / AIN3 / P0.05 for noise/TRNG. The GUI plots ADC2 PPG and uses the ADC3 1 kHz batch stream for bit generation and PPG XOR encryption.
 
-`RATE?` includes `PPG_HZ`, `PPG_FRAME_MS`, `PPG_LED_ON_MS`, `ADC3_HZ`, `ADC3_BATCH_MAX`, and `SAADC_OVERSAMPLE`. The batch firmware keeps oversampling at `0` so each 1 ms timer trigger produces one SAADC callback.
+`RATE?` includes `ADC2_HZ`, `ADC2_FRAME_MS`, `PPG_HZ`, `PPG_FRAME_MS`, `PPG_LED_ON_MS`, `ADC3_HZ`, `ADC3_MS`, `ADC3_BATCH_MAX`, `SAADC_BASE_HZ`, and `SAADC_OVERSAMPLE`. The batch firmware keeps oversampling at `0` so each 1 ms timer trigger produces one SAADC callback. Rate changes do not reinitialize SAADC channels; they update software frame intervals/decimation counters.
 
 The inspected firmware uses UART RX `25`, TX `26`, and `115200` baud.
 

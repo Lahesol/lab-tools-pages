@@ -27,6 +27,8 @@ const els = {
   windowSize: document.querySelector("#windowSize"),
   sampleRate: document.querySelector("#sampleRate"),
   sendRateButton: document.querySelector("#sendRateButton"),
+  adc3Rate: document.querySelector("#adc3Rate"),
+  sendAdc3RateButton: document.querySelector("#sendAdc3RateButton"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
   bitMethod: document.querySelector("#bitMethod"),
   liveMaWindow: document.querySelector("#liveMaWindow"),
@@ -115,6 +117,8 @@ const MAX_SAMPLE_RATE_HZ = 100;
 const DEFAULT_PPG_RATE_HZ = 25;
 const DEFAULT_PPG_LED_ON_MS = 10;
 const DEFAULT_ADC3_RATE_HZ = 1000;
+const MIN_ADC3_RATE_HZ = 25;
+const MAX_ADC3_RATE_HZ = 1000;
 const DEFAULT_ADC3_BATCH_MAX = 64;
 const ENCRYPTION_BITS_PER_SAMPLE = 14;
 const MAX_KEY_BITS = 8192;
@@ -185,7 +189,9 @@ const state = {
   ppgSampleIntervalMs: 40,
   ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
   adc3RateHz: DEFAULT_ADC3_RATE_HZ,
+  adc3SampleIntervalMs: 1,
   adc3BatchMax: DEFAULT_ADC3_BATCH_MAX,
+  saadcBaseHz: 1000,
   saadcOversample: 0,
   lastStatsAt: 0,
   needsDraw: true,
@@ -1027,26 +1033,38 @@ function parseRateStatusSegment(segment) {
   if (!/^RATE\b/i.test(segment)) return false;
   const hzMatch = segment.match(/\bRAW_HZ\s*[,=:]\s*(\d+)\b/i);
   const msMatch = segment.match(/\bRAW_MS\s*[,=:]\s*(\d+)\b/i);
+  const adc2HzMatch = segment.match(/\bADC2_HZ\s*[,=:]\s*(\d+)\b/i);
+  const adc2FrameMatch = segment.match(/\bADC2_FRAME_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgHzMatch = segment.match(/\bPPG_HZ\s*[,=:]\s*(\d+)\b/i);
   const ppgFrameMatch = segment.match(/\bPPG_FRAME_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgPhaseMatch = segment.match(/\bPPG_PHASE_MS\s*[,=:]\s*(\d+)\b/i);
   const ppgLedOnMatch = segment.match(/\bPPG_LED_ON_MS\s*[,=:]\s*(\d+)\b/i);
   const adc3HzMatch = segment.match(/\bADC3_HZ\s*[,=:]\s*(\d+)\b/i);
+  const adc3MsMatch = segment.match(/\bADC3_MS\s*[,=:]\s*(\d+)\b/i);
   const adc3BatchMaxMatch = segment.match(/\bADC3_BATCH_MAX\s*[,=:]\s*(\d+)\b/i);
+  const saadcBaseHzMatch = segment.match(/\bSAADC_BASE_HZ\s*[,=:]\s*(\d+)\b/i);
   const saadcOversampleMatch = segment.match(/\bSAADC_OVERSAMPLE\s*[,=:]\s*(\d+)\b/i);
   const hz = hzMatch ? Number.parseInt(hzMatch[1], 10) : null;
   const ms = msMatch ? Number.parseInt(msMatch[1], 10) : null;
+  const adc2Hz = adc2HzMatch ? Number.parseInt(adc2HzMatch[1], 10) : null;
+  const adc2FrameMs = adc2FrameMatch ? Number.parseInt(adc2FrameMatch[1], 10) : null;
   const ppgHz = ppgHzMatch ? Number.parseInt(ppgHzMatch[1], 10) : null;
   const ppgFrameMs = ppgFrameMatch ? Number.parseInt(ppgFrameMatch[1], 10) : null;
   const ppgPhaseMs = ppgPhaseMatch ? Number.parseInt(ppgPhaseMatch[1], 10) : null;
   const ppgLedOnMs = ppgLedOnMatch ? Number.parseInt(ppgLedOnMatch[1], 10) : null;
   const adc3Hz = adc3HzMatch ? Number.parseInt(adc3HzMatch[1], 10) : null;
+  const adc3Ms = adc3MsMatch ? Number.parseInt(adc3MsMatch[1], 10) : null;
   const adc3BatchMax = adc3BatchMaxMatch ? Number.parseInt(adc3BatchMaxMatch[1], 10) : null;
+  const saadcBaseHz = saadcBaseHzMatch ? Number.parseInt(saadcBaseHzMatch[1], 10) : null;
   const saadcOversample = saadcOversampleMatch ? Number.parseInt(saadcOversampleMatch[1], 10) : null;
-  const normalizedPpgFrameMs = Number.isFinite(ppgFrameMs) && ppgFrameMs > 0
+  const normalizedPpgFrameMs = Number.isFinite(adc2FrameMs) && adc2FrameMs > 0
+    ? adc2FrameMs
+    : Number.isFinite(ppgFrameMs) && ppgFrameMs > 0
     ? ppgFrameMs
     : (Number.isFinite(ppgPhaseMs) && ppgPhaseMs > 0 ? ppgPhaseMs * 4 : null);
-  const normalizedPpgHz = Number.isFinite(ppgHz) && ppgHz > 0
+  const normalizedPpgHz = Number.isFinite(adc2Hz) && adc2Hz > 0
+    ? adc2Hz
+    : Number.isFinite(ppgHz) && ppgHz > 0
     ? ppgHz
     : (Number.isFinite(normalizedPpgFrameMs) && normalizedPpgFrameMs > 0
       ? Math.round(1000 / normalizedPpgFrameMs)
@@ -1054,11 +1072,12 @@ function parseRateStatusSegment(segment) {
 
   setSampleRateUi(normalizedPpgHz ?? hz, normalizedPpgFrameMs ?? ms, { normalizeInput: true });
   setPpgRateUi(normalizedPpgHz, normalizedPpgFrameMs, ppgLedOnMs);
-  if (Number.isFinite(adc3Hz) && adc3Hz > 0) {
-    state.adc3RateHz = adc3Hz;
-  }
+  setAdc3RateUi(adc3Hz, adc3Ms, { normalizeInput: true });
   if (Number.isFinite(adc3BatchMax) && adc3BatchMax > 0) {
     state.adc3BatchMax = adc3BatchMax;
+  }
+  if (Number.isFinite(saadcBaseHz) && saadcBaseHz > 0) {
+    state.saadcBaseHz = saadcBaseHz;
   }
   if (Number.isFinite(saadcOversample)) {
     state.saadcOversample = saadcOversample;
@@ -1638,8 +1657,16 @@ function clampSampleRateHz(value) {
   return clampInteger(value, MIN_SAMPLE_RATE_HZ, MAX_SAMPLE_RATE_HZ, DEFAULT_SAMPLE_RATE_HZ);
 }
 
+function clampAdc3RateHz(value) {
+  return clampInteger(value, MIN_ADC3_RATE_HZ, MAX_ADC3_RATE_HZ, DEFAULT_ADC3_RATE_HZ);
+}
+
 function rateHzToIntervalMs(rateHz) {
   return Math.max(1, Math.round(1000 / clampSampleRateHz(rateHz)));
+}
+
+function adc3RateHzToIntervalMs(rateHz) {
+  return Math.max(1, Math.round(1000 / clampAdc3RateHz(rateHz)));
 }
 
 function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
@@ -1673,6 +1700,24 @@ function setPpgRateUi(rateHz = null, frameMs = null, ledOnMs = null) {
   }
 }
 
+function setAdc3RateUi(rateHz = null, intervalMs = null, options = {}) {
+  const parsedRate = Number.parseInt(rateHz, 10);
+  const parsedIntervalMs = Number.parseInt(intervalMs, 10);
+  if (Number.isFinite(parsedRate) && parsedRate > 0) {
+    state.adc3RateHz = parsedRate;
+    state.adc3SampleIntervalMs = Number.isFinite(parsedIntervalMs) && parsedIntervalMs > 0
+      ? Math.max(1, parsedIntervalMs)
+      : adc3RateHzToIntervalMs(parsedRate);
+  } else if (Number.isFinite(parsedIntervalMs) && parsedIntervalMs > 0) {
+    state.adc3SampleIntervalMs = Math.max(1, parsedIntervalMs);
+    state.adc3RateHz = Math.max(1, Math.round(1000 / state.adc3SampleIntervalMs));
+  }
+
+  if (options.normalizeInput !== false && els.adc3Rate) {
+    els.adc3Rate.value = String(state.adc3RateHz);
+  }
+}
+
 function applySampleRateInput(normalize = false) {
   const rawValue = String(els.sampleRate?.value ?? "").trim();
   if (!rawValue) return;
@@ -1680,9 +1725,21 @@ function applySampleRateInput(normalize = false) {
   setSampleRateUi(nextRate, null, { normalizeInput: normalize });
 }
 
+function applyAdc3RateInput(normalize = false) {
+  const rawValue = String(els.adc3Rate?.value ?? "").trim();
+  if (!rawValue) return;
+  const nextRate = clampAdc3RateHz(rawValue);
+  setAdc3RateUi(nextRate, null, { normalizeInput: normalize });
+}
+
 async function sendSampleRateCommand() {
   applySampleRateInput(true);
-  await sendCommand(`RATE${state.sampleRateHz}`);
+  await sendCommand(`ADC2RATE${state.sampleRateHz}`);
+}
+
+async function sendAdc3RateCommand() {
+  applyAdc3RateInput(true);
+  await sendCommand(`ADC3RATE${state.adc3RateHz}`);
 }
 
 function clampPositive(value, fallback) {
@@ -1720,7 +1777,7 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `PPG ${state.ppgRateHz} Hz | ADC3 ${state.adc3RateHz} Hz batch | LED ${state.ppgLedOnMs} ms | SAADC OS ${state.saadcOversample}`;
+  return `ADC2 PPG ${state.ppgRateHz} Hz | ADC3 noise ${state.adc3RateHz} Hz | LED ${state.ppgLedOnMs} ms | SAADC base ${state.saadcBaseHz} Hz | OS ${state.saadcOversample}`;
 }
 
 function getSelectedAdcPlotSources() {
@@ -3204,6 +3261,11 @@ function bindEvents() {
   els.sendRateButton.addEventListener("click", () => {
     sendSampleRateCommand().catch((error) => addLog("ERR", error.message || error, true));
   });
+  els.adc3Rate?.addEventListener("input", () => applyAdc3RateInput(false));
+  els.adc3Rate?.addEventListener("change", () => applyAdc3RateInput(true));
+  els.sendAdc3RateButton?.addEventListener("click", () => {
+    sendAdc3RateCommand().catch((error) => addLog("ERR", error.message || error, true));
+  });
   els.bitMethod?.addEventListener("change", () => {
     setBitGenerationMethod(els.bitMethod.value, { enable: true });
   });
@@ -3314,6 +3376,7 @@ function init() {
   applyWindowSizeInput();
   setSampleRateUi(DEFAULT_SAMPLE_RATE_HZ, rateHzToIntervalMs(DEFAULT_SAMPLE_RATE_HZ));
   setPpgRateUi(DEFAULT_PPG_RATE_HZ, 10, DEFAULT_PPG_LED_ON_MS);
+  setAdc3RateUi(DEFAULT_ADC3_RATE_HZ, 1);
   setDacValue(2056, "init");
   applyLiveMaSettings();
   setBitGenerationMethod(getSelectedBitMethod());
