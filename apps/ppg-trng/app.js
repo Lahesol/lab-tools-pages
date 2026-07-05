@@ -125,6 +125,7 @@ const DEFAULT_ADC3_BATCH_MAX = 64;
 const DEFAULT_CIPHER_WIDTH_BITS = 14;
 const CIPHER_WIDTH_OPTIONS = new Set([8, 10, 12, 14]);
 const MAX_KEY_BITS = 8192;
+const MAX_RATE_HISTORY = 10000;
 const MAX_PENDING_PPG = 512;
 const MAX_ENCRYPTED_PPG = 4096;
 
@@ -165,6 +166,8 @@ const state = {
   bitPlaneCycles: 0,
   bitLanes: {},
   bitSource: "idle",
+  bitInputEvents: [],
+  totalBitInputSamples: 0,
   bitGenerationMethod: "residual-vn",
   cipherWidthBits: DEFAULT_CIPHER_WIDTH_BITS,
   keyBits: [],
@@ -173,6 +176,8 @@ const state = {
   encryptedCount: 0,
   droppedPpg: 0,
   lastEncrypted: null,
+  totalAdc3Batches: 0,
+  lastAdc3BatchAt: 0,
   lastAdc3BatchCount: 0,
   totalAdc3BatchSamples: 0,
   liveMaWindow: 33,
@@ -984,6 +989,8 @@ function parseAdcBatchSegment(segment) {
     addSample(value, "ADC", { adcSource, valueKind: "raw" });
   });
 
+  state.totalAdc3Batches += 1;
+  state.lastAdc3BatchAt = performance.now();
   state.lastAdc3BatchCount = limitedValues.length;
   state.totalAdc3BatchSamples = (state.totalAdc3BatchSamples || 0) + limitedValues.length;
   if (expectedCount !== limitedValues.length) {
@@ -1258,6 +1265,10 @@ function resetLiveEncryption() {
   state.liveBitExtractors = {};
   state.lastAdc3BatchCount = 0;
   state.totalAdc3BatchSamples = 0;
+  state.totalAdc3Batches = 0;
+  state.lastAdc3BatchAt = 0;
+  state.bitInputEvents = [];
+  state.totalBitInputSamples = 0;
   state.needsCipherDraw = true;
 }
 
@@ -1298,6 +1309,12 @@ function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
   const source = normalizeAdcSource(adcSource) || state.bitAdcSource;
   if (source !== state.bitAdcSource || !Number.isFinite(value)) return;
   if (!state.bitMode) return;
+
+  state.bitInputEvents.push({ t: performance.now(), adcSource: source });
+  state.totalBitInputSamples += 1;
+  if (state.bitInputEvents.length > MAX_RATE_HISTORY) {
+    state.bitInputEvents.splice(0, state.bitInputEvents.length - MAX_RATE_HISTORY);
+  }
 
   const method = state.bitGenerationMethod;
 
@@ -1417,6 +1434,17 @@ function getRecentKeyBitRate() {
   return estimateRecentRate(state.bits);
 }
 
+function getRecentBitInputRate() {
+  return estimateRecentRate(state.bitInputEvents);
+}
+
+function getAdc3BatchStatusText() {
+  if (!state.totalAdc3Batches) return "ADC3B none";
+  const ageMs = performance.now() - state.lastAdc3BatchAt;
+  const staleText = ageMs > 3000 ? " stale" : "";
+  return `ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}${staleText}`;
+}
+
 function enqueuePpgEncryption(sample) {
   if (!state.encryptionEnabled) return;
   if (!Number.isFinite(sample.value)) return;
@@ -1482,19 +1510,19 @@ function updateEncryptionUi() {
     const signalRate = getRecentSignalRateHz();
     const requiredKeyRate = signalRate * state.cipherWidthBits;
     const keyRate = getRecentKeyBitRate();
+    const bitInputRate = getRecentBitInputRate();
     const rateText = state.encryptionEnabled
       ? ` | key ${keyRate.toFixed(0)}/${requiredKeyRate.toFixed(0)} bps`
       : "";
+    const inputText = state.bitMode ? ` | input ${bitInputRate.toFixed(0)} sps` : "";
     const pendingReason = state.encryptionEnabled && state.pendingPpg.length && requiredKeyRate > 0 && keyRate < requiredKeyRate
       ? " | key slow"
       : "";
     const methodParams = isMovingAverageBitMethod()
       ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
       : "";
-    const batchText = state.totalAdc3BatchSamples
-      ? ` | ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}`
-      : "";
-    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${rateText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
+    const batchText = state.bitMode ? ` | ${getAdc3BatchStatusText()}` : "";
+    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
