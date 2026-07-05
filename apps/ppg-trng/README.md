@@ -42,7 +42,7 @@ Open `http://localhost:4173` in a Chromium-based browser, choose `USB Serial` or
 - ADC3 noise receive format in PPG mode: one batch per emitted PPG sample, for example `ADC3B,40,7568,7562,...\n;`. With ADC3 set to 1 kHz, the count is normally 40 at ADC2/PPG 25 Hz, 20 at 50 Hz, and 10 at 100 Hz.
 - Browser-side bit extraction uses the streamed ADC3 batch samples.
 
-In PPG measurement modes, the firmware samples SAADC every 1 ms. It starts each frame with LEDs off, turns the selected LED on near the end of the frame, samples the selected LED-on ADC2 value, then turns LEDs off again. Normal PPG modes stream the selected LED-on raw ADC code with a channel tag; bias is not added, subtracted, or otherwise applied in the firmware payload. Raw diagnostic mode streams both the ambient and LED-on raw phase values.
+In PPG measurement modes, the firmware samples SAADC every 1 ms. It starts each ADC2 frame with an LEDs-off ambient sample, immediately turns the selected LED on, samples ADC2 again at the end of the configured LED-on pulse, then turns LEDs off for the rest of the frame. Normal PPG modes stream the selected LED-on raw ADC code with a channel tag; bias is not added, subtracted, or otherwise applied in the firmware payload. Raw diagnostic mode streams both the ambient and LED-on raw phase values.
 
 PPG timing displayed in the GUI follows `RATE?`: 25 Hz uses a 40 ms frame with about 10 ms LED-on time, 50 Hz uses a 20 ms frame with about 5 ms LED-on time, and 100 Hz uses a 10 ms frame with about 2 ms LED-on time. Alternating Green/IR/Red mode divides the selected PPG rate across the three optical channels. ADC3 noise sampling is independent of the ADC2 PPG frame and is decimated from the 1 ms SAADC base tick.
 
