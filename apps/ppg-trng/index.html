@@ -343,6 +343,17 @@
                     <option value="residual-vn" selected>ADC3 residual VN</option>
                     <option value="delta-vn">ADC3 delta VN</option>
                     <option value="lsb">ADC3 LSB</option>
+                    <option value="lsb2">ADC3 LSB x2 fast</option>
+                    <option value="lsb4">ADC3 LSB x4 fast</option>
+                  </select>
+                </label>
+                <label class="compact-field" for="cipherWidth">
+                  <span>Cipher width</span>
+                  <select id="cipherWidth">
+                    <option value="8">8 bit</option>
+                    <option value="10">10 bit</option>
+                    <option value="12">12 bit</option>
+                    <option value="14" selected>14 bit</option>
                   </select>
                 </label>
                 <label id="liveMaWindowField" class="compact-field" for="liveMaWindow" title="Previous ADC3 samples used for the moving-average baseline.">
@@ -670,7 +681,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=d4c761bb46e6" defer></script>
+    <script src="./app.js?v=29b6e074b4c7" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

@@ -31,6 +31,7 @@ const els = {
   sendAdc3RateButton: document.querySelector("#sendAdc3RateButton"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
   bitMethod: document.querySelector("#bitMethod"),
+  cipherWidth: document.querySelector("#cipherWidth"),
   liveMaWindow: document.querySelector("#liveMaWindow"),
   liveMaOffset: document.querySelector("#liveMaOffset"),
   liveMaWindowField: document.querySelector("#liveMaWindowField"),
@@ -121,7 +122,8 @@ const DEFAULT_ADC3_RATE_HZ = 1000;
 const MIN_ADC3_RATE_HZ = 25;
 const MAX_ADC3_RATE_HZ = 1000;
 const DEFAULT_ADC3_BATCH_MAX = 64;
-const ENCRYPTION_BITS_PER_SAMPLE = 14;
+const DEFAULT_CIPHER_WIDTH_BITS = 14;
+const CIPHER_WIDTH_OPTIONS = new Set([8, 10, 12, 14]);
 const MAX_KEY_BITS = 8192;
 const MAX_PENDING_PPG = 512;
 const MAX_ENCRYPTED_PPG = 4096;
@@ -164,6 +166,7 @@ const state = {
   bitLanes: {},
   bitSource: "idle",
   bitGenerationMethod: "residual-vn",
+  cipherWidthBits: DEFAULT_CIPHER_WIDTH_BITS,
   keyBits: [],
   pendingPpg: [],
   encryptedPpg: [],
@@ -620,7 +623,11 @@ function setEncryptionEnabled(enabled, options = {}) {
 
   state.encryptionEnabled = nextEnabled;
   if (nextEnabled) {
-    resetLiveEncryption();
+    if (!state.bitMode) {
+      setBitMode(true);
+    } else {
+      resetLiveEncryption();
+    }
   } else {
     state.pendingPpg = [];
   }
@@ -1184,6 +1191,8 @@ function getBitMethodLabel(method = state.bitGenerationMethod) {
   if (method === "residual-vn") return "ADC3 residual VN";
   if (method === "delta-vn") return "ADC3 delta VN";
   if (method === "lsb") return "ADC3 LSB";
+  if (method === "lsb2") return "ADC3 LSB x2";
+  if (method === "lsb4") return "ADC3 LSB x4";
   return method || "--";
 }
 
@@ -1296,6 +1305,16 @@ function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
     handleGeneratedBits([Math.round(value) & 1], source, "ADC3 LSB", method);
     return;
   }
+  if (method === "lsb2" || method === "lsb4") {
+    const bitCount = method === "lsb4" ? 4 : 2;
+    const rounded = Math.round(value);
+    const bits = [];
+    for (let bitIndex = bitCount - 1; bitIndex >= 0; bitIndex -= 1) {
+      bits.push((rounded >> bitIndex) & 1);
+    }
+    handleGeneratedBits(bits, source, `ADC3 LSB x${bitCount}`, method);
+    return;
+  }
 
   const extractor = getLiveBitExtractor(method, source);
 
@@ -1354,6 +1373,50 @@ function formatHex(value, width = 4) {
   return `0x${Math.max(0, value).toString(16).toUpperCase().padStart(width, "0")}`;
 }
 
+function normalizeCipherWidth(value) {
+  const width = Number.parseInt(value, 10);
+  return CIPHER_WIDTH_OPTIONS.has(width) ? width : DEFAULT_CIPHER_WIDTH_BITS;
+}
+
+function getCipherWidthBits() {
+  return normalizeCipherWidth(els.cipherWidth?.value ?? state.cipherWidthBits);
+}
+
+function getCipherMask(width = state.cipherWidthBits) {
+  return (1 << normalizeCipherWidth(width)) - 1;
+}
+
+function setCipherWidthBits(width = getCipherWidthBits(), options = {}) {
+  const nextWidth = normalizeCipherWidth(width);
+  const changed = state.cipherWidthBits !== nextWidth;
+  state.cipherWidthBits = nextWidth;
+  if (els.cipherWidth && els.cipherWidth.value !== String(nextWidth)) {
+    els.cipherWidth.value = String(nextWidth);
+  }
+  if (changed && options.reset !== false) {
+    resetLiveEncryption();
+  }
+  updateEncryptionUi();
+}
+
+function estimateRecentRate(records, windowMs = 5000) {
+  const now = performance.now();
+  const recent = records.filter((record) => Number.isFinite(record.t) && now - record.t <= windowMs);
+  if (recent.length < 2) return 0;
+  const elapsed = Math.max(0.001, (recent.at(-1).t - recent[0].t) / 1000);
+  return (recent.length - 1) / elapsed;
+}
+
+function getRecentSignalRateHz() {
+  return estimateRecentRate(
+    state.samples.filter((sample) => (normalizeAdcSource(sample.adcSource) || state.adcSource) === state.adcSource),
+  );
+}
+
+function getRecentKeyBitRate() {
+  return estimateRecentRate(state.bits);
+}
+
 function enqueuePpgEncryption(sample) {
   if (!state.encryptionEnabled) return;
   if (!Number.isFinite(sample.value)) return;
@@ -1374,15 +1437,22 @@ function enqueuePpgEncryption(sample) {
 }
 
 function processEncryptionQueue() {
-  while (state.pendingPpg.length && state.keyBits.length >= ENCRYPTION_BITS_PER_SAMPLE) {
+  const width = normalizeCipherWidth(state.cipherWidthBits);
+  const mask = getCipherMask(width);
+  while (state.pendingPpg.length && state.keyBits.length >= width) {
     const sample = state.pendingPpg.shift();
-    const keyBits = state.keyBits.splice(0, ENCRYPTION_BITS_PER_SAMPLE);
+    const keyBits = state.keyBits.splice(0, width);
     const key = bitsToNumber(keyBits);
-    const cipher = sample.adcCode ^ key;
+    const plainMasked = sample.adcCode & mask;
+    const cipherMasked = plainMasked ^ key;
+    const cipher = (sample.adcCode & ~mask) | cipherMasked;
     const record = {
       ...sample,
+      cipherWidthBits: width,
+      plainMasked,
       key,
       keyBits: keyBits.join(""),
+      cipherMasked,
       cipher,
       method: state.bitGenerationMethod,
       bitSource: state.bitAdcSource,
@@ -1409,18 +1479,30 @@ function updateEncryptionUi() {
     const dropped = state.droppedPpg ? ` | dropped ${state.droppedPpg}` : "";
     const encryptionText = state.encryptionEnabled ? "encryption on" : "encryption off";
     const modeText = state.bitMode ? "extracting" : "extraction off";
+    const signalRate = getRecentSignalRateHz();
+    const requiredKeyRate = signalRate * state.cipherWidthBits;
+    const keyRate = getRecentKeyBitRate();
+    const rateText = state.encryptionEnabled
+      ? ` | key ${keyRate.toFixed(0)}/${requiredKeyRate.toFixed(0)} bps`
+      : "";
+    const pendingReason = state.encryptionEnabled && state.pendingPpg.length && requiredKeyRate > 0 && keyRate < requiredKeyRate
+      ? " | key slow"
+      : "";
     const methodParams = isMovingAverageBitMethod()
       ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
       : "";
     const batchText = state.totalAdc3BatchSamples
       ? ` | ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}`
       : "";
-    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${encryptionText} | ${modeText}${batchText} | key ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${dropped}`;
+    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${rateText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
   if (els.encryptionPlain) els.encryptionPlain.textContent = latest ? String(latest.adcCode) : "--";
-  if (els.encryptionKey) els.encryptionKey.textContent = latest ? formatHex(latest.key) : "--";
+  if (els.encryptionKey) {
+    const keyHexWidth = latest ? Math.ceil((latest.cipherWidthBits || state.cipherWidthBits) / 4) : 4;
+    els.encryptionKey.textContent = latest ? formatHex(latest.key, keyHexWidth) : "--";
+  }
   if (els.encryptionCipher) els.encryptionCipher.textContent = latest ? formatHex(latest.cipher) : "--";
   if (els.encryptionChannel) {
     els.encryptionChannel.textContent = latest
@@ -2102,18 +2184,22 @@ function exportCipherCsv() {
 
   const start = state.encryptedPpg[0]?.t || performance.now();
   const rows = [
-    "index,time_ms,channel,adc_input,plain_adc,key_bits,key_dec,key_hex,cipher_dec,cipher_hex,method,bit_source",
+    "index,time_ms,channel,adc_input,cipher_width_bits,plain_adc,plain_masked,key_bits,key_dec,key_hex,cipher_masked,cipher_dec,cipher_hex,method,bit_source",
   ];
   state.encryptedPpg.forEach((entry, index) => {
+    const keyHexWidth = Math.ceil((entry.cipherWidthBits || state.cipherWidthBits) / 4);
     rows.push([
       index,
       (entry.t - start).toFixed(3),
       csvCell(entry.channel),
       csvCell(entry.adcSource),
+      entry.cipherWidthBits || state.cipherWidthBits,
       entry.adcCode,
+      entry.plainMasked,
       csvCell(entry.keyBits || ""),
       entry.key,
-      csvCell(formatHex(entry.key)),
+      csvCell(formatHex(entry.key, keyHexWidth)),
+      entry.cipherMasked,
       entry.cipher,
       csvCell(formatHex(entry.cipher)),
       csvCell(entry.method),
@@ -3310,6 +3396,9 @@ function bindEvents() {
   els.encryptionToggle?.addEventListener("change", () => {
     setEncryptionEnabled(els.encryptionToggle.checked);
   });
+  els.cipherWidth?.addEventListener("change", () => {
+    setCipherWidthBits(els.cipherWidth.value);
+  });
   [els.liveMaWindow, els.liveMaOffset].forEach((control) => {
     control?.addEventListener("input", () => applyLiveMaSettings({ normalize: false }));
     control?.addEventListener("change", () => applyLiveMaSettings());
@@ -3421,6 +3510,7 @@ function init() {
   setDacValue(2056, "init");
   applyLiveMaSettings();
   setBitGenerationMethod(getSelectedBitMethod());
+  setCipherWidthBits(DEFAULT_CIPHER_WIDTH_BITS, { reset: false });
   applyBitMapSettings();
   updateTransportControls();
   setConnectedUi(false);
