@@ -124,6 +124,15 @@ const MAX_ADC3_RATE_HZ = 1000;
 const DEFAULT_ADC3_BATCH_MAX = 64;
 const DEFAULT_CIPHER_WIDTH_BITS = 14;
 const CIPHER_WIDTH_OPTIONS = new Set([8, 10, 12, 14]);
+const PULSE_MODE_SETTLE_MS = 80;
+const PULSE_MODE_FORCE_SEQUENCES = {
+  7761: ["7764", "7761"],
+  7762: ["7764", "7762"],
+  7763: ["7764", "7763"],
+  7764: ["7761", "7764"],
+  7769: ["7761", "7769"],
+  7777: ["7761", "7777"],
+};
 const MAX_KEY_BITS = 8192;
 const MAX_RATE_HISTORY = 10000;
 const MAX_PENDING_PPG = 512;
@@ -203,6 +212,7 @@ const state = {
   adc3BatchMax: DEFAULT_ADC3_BATCH_MAX,
   saadcBaseHz: 1000,
   saadcOversample: 0,
+  activePulseCommand: null,
   lastStatsAt: 0,
   needsDraw: true,
   lastDrawAt: 0,
@@ -1439,7 +1449,7 @@ function getRecentBitInputRate() {
 }
 
 function getAdc3BatchStatusText() {
-  if (!state.totalAdc3Batches) return "ADC3B none";
+  if (!state.totalAdc3Batches) return "ADC3B none - click 776x pulse";
   const ageMs = performance.now() - state.lastAdc3BatchAt;
   const staleText = ageMs > 3000 ? " stale" : "";
   return `ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}${staleText}`;
@@ -2100,6 +2110,46 @@ async function sendCommand(value) {
   } else {
     addLog("TX", `${command} (not connected)`);
   }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function getPulseModeSequence(command) {
+  const normalized = String(command).trim();
+  return PULSE_MODE_FORCE_SEQUENCES[normalized] || null;
+}
+
+function setActivePulseCommand(command) {
+  const normalized = command ? String(command).trim() : null;
+  state.activePulseCommand = normalized;
+  document.querySelectorAll("[data-command]").forEach((button) => {
+    const buttonCommand = String(button.dataset.command || "").trim();
+    if (!getPulseModeSequence(buttonCommand)) return;
+    button.classList.toggle("is-active", buttonCommand === normalized);
+  });
+}
+
+async function sendPulseModeCommand(command) {
+  const normalized = String(command).trim();
+  const sequence = getPulseModeSequence(normalized);
+  if (!sequence) {
+    await sendCommand(normalized);
+    return;
+  }
+
+  addLog("SYS", `Pulse mode ${normalized}: ${sequence.join(" -> ")}`);
+  for (let index = 0; index < sequence.length; index += 1) {
+    await sendCommand(sequence[index]);
+    if (index < sequence.length - 1) {
+      await delay(PULSE_MODE_SETTLE_MS);
+    }
+  }
+  if (isConnected()) {
+    setActivePulseCommand(normalized);
+  }
+  await sendCommand("RATE?");
 }
 
 async function writeBluetoothPayload(payload) {
@@ -3393,12 +3443,20 @@ function bindEvents() {
   });
 
   document.querySelectorAll("[data-command]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
+      const command = button.dataset.command;
       if (button.dataset.adcSource && isConnected()) {
         setAdcSource(button.dataset.adcSource, { pending: true });
       }
-      applyPpgCommandPreset(button.dataset.command);
-      sendCommand(button.dataset.command);
+      applyPpgCommandPreset(command);
+      if (getPulseModeSequence(command)) {
+        await sendPulseModeCommand(command);
+      } else {
+        if (/^(0000|888\d)$/.test(String(command).trim())) {
+          setActivePulseCommand(null);
+        }
+        await sendCommand(command);
+      }
     });
   });
 

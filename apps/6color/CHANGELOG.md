@@ -26,3 +26,4 @@
 - Changed the default OOK pulse example to 50% duty cycle to avoid showing period and pulse width as identical.
 - Changed Timeline protocol insertion so a saved protocol is added as one timeline protocol instance instead of expanding into individual manual brightness rows.
 - Updated Timeline plotting, running, CSV import, and CSV export to preserve protocol instances while expanding their internal pulses only for execution/preview calculations.
+- Updated the protocol terminology diagram to show all bits for 4/8/16-bit data, with compact labeling at narrow cell widths and truncation notice for longer streams.

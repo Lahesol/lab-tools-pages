@@ -1581,15 +1581,21 @@ function renderProtocolTermDiagram(config = null, preview = null) {
     return;
   }
 
-  const visibleBits = preview.bits.slice(0, 4);
-  const bits = visibleBits || "0";
-  const periodPx = 128;
   const periodMs = protocolPeriodMs(config);
-  const pulseWidthMs = protocolPulseWidthMs(config);
-  const pulsePx = Math.max(6, Math.min(periodPx, (pulseWidthMs / periodMs) * periodPx));
   const startX = left + 42;
   const firstPulseX = startX + 42;
   const startDelayX = left + 10;
+  const maxVisibleCells = config.encoding === "levels" ? 12 : 16;
+  const sourceCellCount = config.encoding === "levels"
+    ? preview.symbols.length
+    : preview.bits.length;
+  const visibleCellCount = Math.max(1, Math.min(sourceCellCount || 1, maxVisibleCells));
+  const availablePeriodPx = Math.max(160, right - firstPulseX - 16);
+  const periodPx = Math.max(28, Math.min(128, availablePeriodPx / visibleCellCount));
+  const visibleBits = preview.bits.slice(0, visibleCellCount);
+  const bits = visibleBits || "0";
+  const pulseWidthMs = protocolPulseWidthMs(config);
+  const pulsePx = Math.max(6, Math.min(periodPx, (pulseWidthMs / periodMs) * periodPx));
   const color = channelById(config.channelId).color;
 
   svg.appendChild(createSvgElement("line", {
@@ -1617,7 +1623,7 @@ function renderProtocolTermDiagram(config = null, preview = null) {
   svg.appendChild(label);
 
   if (config.encoding === "levels") {
-    const symbols = (preview.symbols.length > 0 ? preview.symbols : [0]).slice(0, 5);
+    const symbols = (preview.symbols.length > 0 ? preview.symbols : [0]).slice(0, visibleCellCount);
     for (let index = 0; index < symbols.length; index += 1) {
       const symbol = symbols[index];
       const x0 = firstPulseX + index * periodPx;
@@ -1651,7 +1657,7 @@ function renderProtocolTermDiagram(config = null, preview = null) {
         class: "term-muted",
         "text-anchor": "middle",
       });
-      levelText.textContent = `L${symbol}`;
+      levelText.textContent = periodPx < 44 ? String(symbol) : `L${symbol}`;
       svg.appendChild(levelText);
     }
 
@@ -1693,7 +1699,10 @@ function renderProtocolTermDiagram(config = null, preview = null) {
       class: "term-muted",
       "text-anchor": "end",
     });
-    footer.textContent = `Amplitude = level / ${config.levels - 1} x max`;
+    const suffix = preview.symbols.length > symbols.length
+      ? ` | showing first ${symbols.length}/${preview.symbols.length} symbols`
+      : "";
+    footer.textContent = `Amplitude = level / ${config.levels - 1} x max${suffix}`;
     svg.appendChild(footer);
     return;
   }
@@ -1754,7 +1763,7 @@ function renderProtocolTermDiagram(config = null, preview = null) {
       class: "term-muted",
       "text-anchor": "middle",
     });
-    bitText.textContent = `bit ${bit}`;
+    bitText.textContent = periodPx < 48 ? bit : `bit ${bit}`;
     svg.appendChild(bitText);
   }
 
@@ -1814,12 +1823,15 @@ function renderProtocolTermDiagram(config = null, preview = null) {
     class: "term-muted",
     "text-anchor": "end",
   });
+  const suffix = preview.bits.length > bits.length
+    ? ` | showing first ${bits.length}/${preview.bits.length} bits`
+    : "";
   if (config.encoding === "manchester") {
-    footer.textContent = "Manchester: bit 0 = first half high, bit 1 = second half high";
+    footer.textContent = `Manchester: bit 0 = first half high, bit 1 = second half high${suffix}`;
   } else if (config.encoding === "pulse-width") {
-    footer.textContent = "PWM width: bit 0 = 25% T high, bit 1 = 75% T high";
+    footer.textContent = `PWM width: bit 0 = 25% T high, bit 1 = 75% T high${suffix}`;
   } else {
-    footer.textContent = `Duty cycle = PW / T = ${Math.round((pulseWidthMs / periodMs) * 100)}%`;
+    footer.textContent = `Duty cycle = PW / T = ${Math.round((pulseWidthMs / periodMs) * 100)}%${suffix}`;
   }
   svg.appendChild(footer);
 }
