@@ -136,7 +136,7 @@ const PULSE_MODE_FORCE_SEQUENCES = {
 const MAX_KEY_BITS = 8192;
 const MAX_RATE_HISTORY = 10000;
 const MAX_PENDING_PPG = 512;
-const MAX_ENCRYPTED_PPG = 4096;
+const MAX_ENCRYPTED_PPG = MAX_MAX_SAMPLES;
 
 const state = {
   transport: "none",
@@ -1484,6 +1484,22 @@ function getAdc3BatchStatusText() {
   return `ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}${staleText}`;
 }
 
+function getCipherWindowSize() {
+  return clampInteger(state.maxSamples, MIN_MAX_SAMPLES, MAX_ENCRYPTED_PPG, DEFAULT_MAX_SAMPLES);
+}
+
+function trimEncryptedHistory() {
+  const maxRecords = getCipherWindowSize();
+  if (state.encryptedPpg.length > maxRecords) {
+    state.encryptedPpg.splice(0, state.encryptedPpg.length - maxRecords);
+  }
+}
+
+function getCipherDisplayRecords() {
+  trimEncryptedHistory();
+  return state.encryptedPpg;
+}
+
 function enqueuePpgEncryption(sample) {
   if (!state.encryptionEnabled) return;
   if (!Number.isFinite(sample.value)) return;
@@ -1527,9 +1543,7 @@ function processEncryptionQueue() {
     state.encryptedPpg.push(record);
     state.encryptedCount += 1;
     state.lastEncrypted = record;
-    if (state.encryptedPpg.length > MAX_ENCRYPTED_PPG) {
-      state.encryptedPpg.splice(0, state.encryptedPpg.length - MAX_ENCRYPTED_PPG);
-    }
+    trimEncryptedHistory();
     state.needsCipherDraw = true;
   }
   updateEncryptionUi();
@@ -1561,7 +1575,8 @@ function updateEncryptionUi() {
       ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
       : "";
     const batchText = state.bitMode ? ` | ${getAdc3BatchStatusText()}` : "";
-    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
+    const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
+    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
@@ -1836,8 +1851,11 @@ function applyWindowSizeInput(normalize = true) {
   if (state.samples.length > state.maxSamples) {
     state.samples.splice(0, state.samples.length - state.maxSamples);
   }
+  trimEncryptedHistory();
   updateStats();
+  updateEncryptionUi();
   state.needsDraw = true;
+  state.needsCipherDraw = true;
 }
 
 function clampSampleRateHz(value) {
@@ -2284,16 +2302,17 @@ function exportCsv() {
 }
 
 function exportCipherCsv() {
-  if (!state.encryptedPpg.length) {
+  const cipherRecords = getCipherDisplayRecords();
+  if (!cipherRecords.length) {
     addLog("SYS", "No cipher samples to export");
     return;
   }
 
-  const start = state.encryptedPpg[0]?.t || performance.now();
+  const start = cipherRecords[0]?.t || performance.now();
   const rows = [
     "index,time_ms,channel,adc_input,cipher_width_bits,plain_adc,plain_masked,key_bits,key_dec,key_hex,cipher_masked,cipher_dec,cipher_hex,method,bit_source",
   ];
-  state.encryptedPpg.forEach((entry, index) => {
+  cipherRecords.forEach((entry, index) => {
     const keyHexWidth = Math.ceil((entry.cipherWidthBits || state.cipherWidthBits) / 4);
     rows.push([
       index,
@@ -2321,7 +2340,7 @@ function exportCipherCsv() {
   link.download = `adc_cipher_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  addLog("SYS", `Exported ${state.encryptedPpg.length} cipher samples`);
+  addLog("SYS", `Exported ${cipherRecords.length} cipher samples`);
 }
 
 function clearBits() {
@@ -3297,7 +3316,7 @@ function drawCipherPlot() {
   const max = 16383;
   drawGrid(ctx, margin, chartW, chartH, min, max);
 
-  const records = state.encryptedPpg;
+  const records = getCipherDisplayRecords();
   if (!records.length) {
     ctx.fillStyle = "#66746f";
     ctx.font = "700 13px Segoe UI, sans-serif";
@@ -3305,8 +3324,7 @@ function drawCipherPlot() {
     return;
   }
 
-  const start = Math.max(0, records.length - 600);
-  const visible = records.slice(start);
+  const visible = records;
   const span = Math.max(1, visible.length - 1);
   const yFor = (value) => margin.top + (1 - (value - min) / (max - min)) * chartH;
 
@@ -3332,7 +3350,7 @@ function drawCipherPlot() {
 
   ctx.font = "800 12px Segoe UI, sans-serif";
   ctx.fillStyle = "#30423d";
-  ctx.fillText(`Cipher | latest ${formatHex(latest.cipher)} | plotted ${visible.length}/${records.length}`, margin.left, margin.top - 7);
+  ctx.fillText(`Cipher | latest ${formatHex(latest.cipher)} | window ${visible.length}/${getCipherWindowSize()}`, margin.left, margin.top - 7);
   ctx.restore();
 }
 
