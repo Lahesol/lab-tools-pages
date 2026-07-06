@@ -328,7 +328,7 @@
             <div class="plot-toolbar">
               <div>
                 <h2>ADC Encryption</h2>
-                <p id="encryptionStatus">ADC3 residual VN | encryption off | extraction off | key 0 bits | pending 0</p>
+                <p id="encryptionStatus">ADC3 throughput mix | encryption off | extraction off | key 0 bits | pending 0</p>
               </div>
               <div class="toolbar-actions">
                 <label class="switch" title="Encrypt incoming signal samples with ADC3-derived key bits">
@@ -338,9 +338,10 @@
                 <label class="compact-field" for="bitMethod">
                   <span>Bit method</span>
                   <select id="bitMethod">
+                    <option value="throughput-all" selected>ADC3 throughput mix</option>
                     <option value="ma-threshold">ADC3 MA threshold</option>
                     <option value="ma-threshold-vn">ADC3 MA threshold VN</option>
-                    <option value="residual-vn" selected>ADC3 residual VN</option>
+                    <option value="residual-vn">ADC3 residual VN</option>
                     <option value="delta-vn">ADC3 delta VN</option>
                     <option value="lsb">ADC3 LSB</option>
                     <option value="lsb2">ADC3 LSB x2 fast</option>
@@ -681,7 +682,7 @@
       </main>
     </div>
 
-    <script src="./app.js?v=913b966f0f9e" defer></script>
+    <script src="./app.js?v=54b069b5a3b6" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

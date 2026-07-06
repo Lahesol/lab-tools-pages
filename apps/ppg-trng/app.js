@@ -177,7 +177,7 @@ const state = {
   bitSource: "idle",
   bitInputEvents: [],
   totalBitInputSamples: 0,
-  bitGenerationMethod: "residual-vn",
+  bitGenerationMethod: "throughput-all",
   cipherWidthBits: DEFAULT_CIPHER_WIDTH_BITS,
   keyBits: [],
   pendingPpg: [],
@@ -1203,6 +1203,7 @@ function getSelectedBitMethod() {
 }
 
 function getBitMethodLabel(method = state.bitGenerationMethod) {
+  if (method === "throughput-all") return "ADC3 throughput mix";
   if (method === "ma-threshold") return "ADC3 MA threshold";
   if (method === "ma-threshold-vn") return "ADC3 MA threshold VN";
   if (method === "residual-vn") return "ADC3 residual VN";
@@ -1214,7 +1215,7 @@ function getBitMethodLabel(method = state.bitGenerationMethod) {
 }
 
 function isMovingAverageBitMethod(method = state.bitGenerationMethod) {
-  return method === "ma-threshold" || method === "ma-threshold-vn";
+  return method === "ma-threshold" || method === "ma-threshold-vn" || method === "throughput-all";
 }
 
 function readLiveMaSettings() {
@@ -1315,6 +1316,88 @@ function pushVonNeumannBit(rawBit, extractor, adcSource, source, method) {
   handleGeneratedBits([previousBit === 0 && rawBit === 1 ? 0 : 1], adcSource, source, method);
 }
 
+function collectVonNeumannBit(rawBit, extractor) {
+  if (extractor.pairBit === null) {
+    extractor.pairBit = rawBit;
+    return [];
+  }
+
+  const previousBit = extractor.pairBit;
+  extractor.pairBit = null;
+  if (previousBit === rawBit) return [];
+  return [previousBit === 0 && rawBit === 1 ? 0 : 1];
+}
+
+function getThroughputBitMethods() {
+  return ["ma-threshold", "ma-threshold-vn", "residual", "residual-vn", "delta", "delta-vn", "lsb4"];
+}
+
+function collectLiveBitsForMethod(value, adcSource, method) {
+  const source = normalizeAdcSource(adcSource) || state.bitAdcSource;
+  const rounded = Math.round(value);
+
+  if (method === "lsb") return [rounded & 1];
+  if (method === "lsb2" || method === "lsb4") {
+    const bitCount = method === "lsb4" ? 4 : 2;
+    const bits = [];
+    for (let bitIndex = bitCount - 1; bitIndex >= 0; bitIndex -= 1) {
+      bits.push((rounded >> bitIndex) & 1);
+    }
+    return bits;
+  }
+
+  const extractor = getLiveBitExtractor(method, source);
+
+  if (method === "ma-threshold" || method === "ma-threshold-vn") {
+    const windowSize = state.liveMaWindow;
+    const offset = state.liveMaOffset;
+    let bits = [];
+    if (extractor.window.length >= windowSize) {
+      const threshold = (extractor.sum / extractor.window.length) + offset;
+      const rawBit = value > threshold ? 1 : 0;
+      bits = method === "ma-threshold-vn"
+        ? collectVonNeumannBit(rawBit, extractor)
+        : [rawBit];
+    }
+    extractor.window.push(value);
+    extractor.sum += value;
+    if (extractor.window.length > windowSize) {
+      extractor.sum -= extractor.window.shift();
+    }
+    return bits;
+  }
+
+  if (method === "delta" || method === "delta-vn") {
+    if (extractor.previous === null) {
+      extractor.previous = value;
+      return [];
+    }
+    const delta = value - extractor.previous;
+    extractor.previous = value;
+    if (delta === 0) return [];
+    const rawBit = delta > 0 ? 1 : 0;
+    return method === "delta-vn" ? collectVonNeumannBit(rawBit, extractor) : [rawBit];
+  }
+
+  if (method === "residual" || method === "residual-vn") {
+    if (extractor.baseline === null) {
+      extractor.baseline = value;
+      extractor.warmup = 1;
+      return [];
+    }
+
+    const residual = value - extractor.baseline;
+    extractor.baseline += NOISE_BASELINE_ALPHA * residual;
+    extractor.warmup += 1;
+
+    if (extractor.warmup < NOISE_WARMUP_SAMPLES || residual === 0) return [];
+    const rawBit = residual > 0 ? 1 : 0;
+    return method === "residual-vn" ? collectVonNeumannBit(rawBit, extractor) : [rawBit];
+  }
+
+  return [];
+}
+
 function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
   const source = normalizeAdcSource(adcSource) || state.bitAdcSource;
   if (source !== state.bitAdcSource || !Number.isFinite(value)) return;
@@ -1327,68 +1410,14 @@ function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
   }
 
   const method = state.bitGenerationMethod;
-
-  if (method === "lsb") {
-    handleGeneratedBits([Math.round(value) & 1], source, "ADC3 LSB", method);
-    return;
-  }
-  if (method === "lsb2" || method === "lsb4") {
-    const bitCount = method === "lsb4" ? 4 : 2;
-    const rounded = Math.round(value);
-    const bits = [];
-    for (let bitIndex = bitCount - 1; bitIndex >= 0; bitIndex -= 1) {
-      bits.push((rounded >> bitIndex) & 1);
-    }
-    handleGeneratedBits(bits, source, `ADC3 LSB x${bitCount}`, method);
+  if (method === "throughput-all") {
+    const bits = getThroughputBitMethods()
+      .flatMap((candidate) => collectLiveBitsForMethod(value, source, candidate));
+    addBits(bits, source, "ADC3 throughput mix");
     return;
   }
 
-  const extractor = getLiveBitExtractor(method, source);
-
-  if (isMovingAverageBitMethod(method)) {
-    const windowSize = state.liveMaWindow;
-    const offset = state.liveMaOffset;
-    if (extractor.window.length >= windowSize) {
-      const threshold = (extractor.sum / extractor.window.length) + offset;
-      const rawBit = value > threshold ? 1 : 0;
-      if (method === "ma-threshold-vn") {
-        pushVonNeumannBit(rawBit, extractor, source, "ADC3 MA threshold VN", method);
-      } else {
-        handleGeneratedBits([rawBit], source, "ADC3 MA threshold", method);
-      }
-    }
-    extractor.window.push(value);
-    extractor.sum += value;
-    if (extractor.window.length > windowSize) {
-      extractor.sum -= extractor.window.shift();
-    }
-    return;
-  }
-
-  if (method === "delta-vn") {
-    if (extractor.previous === null) {
-      extractor.previous = value;
-      return;
-    }
-    const delta = value - extractor.previous;
-    extractor.previous = value;
-    if (delta === 0) return;
-    pushVonNeumannBit(delta > 0 ? 1 : 0, extractor, source, "ADC3 delta VN", method);
-    return;
-  }
-
-  if (extractor.baseline === null) {
-    extractor.baseline = value;
-    extractor.warmup = 1;
-    return;
-  }
-
-  const residual = value - extractor.baseline;
-  extractor.baseline += NOISE_BASELINE_ALPHA * residual;
-  extractor.warmup += 1;
-
-  if (extractor.warmup < NOISE_WARMUP_SAMPLES || residual === 0) return;
-  pushVonNeumannBit(residual > 0 ? 1 : 0, extractor, source, "ADC3 residual VN", method);
+  addBits(collectLiveBitsForMethod(value, source, method), source, getBitMethodLabel(method));
 }
 
 function bitsToNumber(bits) {
