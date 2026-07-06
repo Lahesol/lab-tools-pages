@@ -24,6 +24,14 @@
         "accent":  "#087f72"
     },
     {
+        "name":  "KETI Lab Console",
+        "description":  "Web Serial ADC acquisition, filtering, plotting, recording, and helper-based flashing console for Arduino Nano 33 BLE Rev2.",
+        "url":  "apps/keti-platform/",
+        "group":  "Firmware",
+        "status":  "Ready",
+        "accent":  "#345995"
+    },
+    {
         "name":  "시수배정 최적화",
         "description":  "주간시수 배정과 강의 시간표 검증/최적화를 위한 웹 도구.",
         "url":  "apps/sisu-baejeong/",

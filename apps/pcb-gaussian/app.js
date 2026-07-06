@@ -24,7 +24,7 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-07-06-adc4-zero-bias";
+const WEB_VERSION = "2026-07-06-adc014-zero-bias";
 const EXPECTED_FIRMWARE_VERSION = "2026-06-15-dacramp-noise";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1";
 const APP_VERSION = WEB_VERSION;
@@ -71,10 +71,10 @@ const DEFAULT_DAC_CAL = {
 };
 const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.inverted.v2";
 const DEVICE_PARAM_CAL_STORAGE_KEY = "pcbGaussian.deviceParameterCalibration.d15d16.v1";
-const ADC_BASELINE_STORAGE_KEY = "pcbGaussian.adcBaseline.adc4zero.v1";
+const ADC_BASELINE_STORAGE_KEY = "pcbGaussian.adcBaseline.adc014zero.v1";
 const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
 const DEFAULT_ADC_ZERO_CURRENT_V = 1.03;
-const ADC_ZERO_CURRENT_DEFAULTS = [1.03, 1.03, 1.03, 1.03, 0.0, 1.03, 1.03, 1.03];
+const ADC_ZERO_CURRENT_DEFAULTS = [0.0, 0.0, 1.03, 1.03, 0.0, 1.03, 1.03, 1.03];
 const PROGRAM_REPLY_TIMEOUT_MS = 1500;
 const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653"];
 const ADC_LABELS = Array.from({ length: ADC_TIA_COUNT }, (_, idx) => `ADC${idx}`);
@@ -82,7 +82,7 @@ const DEVICE_CAL_DAC_BY_ADC = ["D2", "D2", "D2", "D2", "D1", "D1", "D1", "D1"];
 const DEVICE_CAL_LUT_STORAGE_KEY = "pcbGaussian.deviceCalLut.v1";
 const DEVICE_CAL_LUT_ROW_LIMIT = 20000;
 const SPECIAL_PARAM_CAL_DEVICES = new Set([15, 16]);
-const ADC_CURRENT_NON_INVERTED = new Set([4, 7]);
+const ADC_CURRENT_NON_INVERTED = new Set([0, 1, 4, 7]);
 // Current jumper map from bench wiring. Each active ADC/TIA sums four devices.
 const ADC_DEVICE_MAP = [[5, 6, 7, 8], [1, 2, 3, 4], [], [], [9, 10, 11, 12], [13, 14], [], [15, 16]];
 const PLOT_CONFIGS = {
@@ -2347,7 +2347,7 @@ function renderAdcBaselineControls() {
     input.addEventListener("change", saveAdcBaselineFromInputs);
     input.addEventListener("input", saveAdcBaselineFromInputs);
   });
-  setAdcBaselineStatus(`Zero-current baseline ready. ADC4 defaults to 0.000 V non-inverted; ADC7 is also non-inverted. Other ADCs use ${DEFAULT_ADC_ZERO_CURRENT_V.toFixed(3)} V unless edited.`, "ok");
+  setAdcBaselineStatus(`Zero-current baseline ready. ADC0/ADC1/ADC4 default to 0.000 V non-inverted; ADC7 is also non-inverted. Other ADCs use ${DEFAULT_ADC_ZERO_CURRENT_V.toFixed(3)} V unless edited.`, "ok");
 }
 
 function readAdcBaselineInputs() {
@@ -2375,7 +2375,7 @@ function refreshCurrentDependentViews() {
 function saveAdcBaselineFromInputs() {
   state.adcBaseline = readAdcBaselineInputs();
   const saved = persistAdcBaselineConfig();
-  if (saved) setAdcBaselineStatus("ADC baseline saved. ADC4 and ADC7 remain non-inverted unless global invert is off.", "ok");
+  if (saved) setAdcBaselineStatus("ADC baseline saved. ADC0/ADC1/ADC4 and ADC7 remain non-inverted unless global invert is off.", "ok");
   refreshCurrentDependentViews();
 }
 
@@ -2398,7 +2398,7 @@ function resetAdcBaseline() {
   try { localStorage.removeItem(ADC_BASELINE_STORAGE_KEY); } catch {}
   renderAdcBaselineControls();
   refreshCurrentDependentViews();
-  setAdcBaselineStatus("ADC baseline reset to per-ADC defaults: ADC4 0.000 V non-inverted, other ADCs 1.030 V unless edited.", "ok");
+  setAdcBaselineStatus("ADC baseline reset to per-ADC defaults: ADC0/ADC1/ADC4 0.000 V non-inverted, other ADCs 1.030 V unless edited.", "ok");
 }
 
 async function captureAdcBaselineFromCurrentRead() {

@@ -1,0 +1,224 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KETI Nano 33 BLE Rev2 Lab Console</title>
+    <link rel="stylesheet" href="styles.css?v=bba70e70563d" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">K</div>
+          <div>
+            <h1>KETI Lab Console</h1>
+            <p>Arduino Nano 33 BLE Rev2 - ADC and filtering</p>
+          </div>
+        </div>
+        <div class="status-strip" aria-live="polite">
+          <span id="browserStatus" class="status-pill">Web Serial check</span>
+          <span id="helperStatus" class="status-pill muted">Helper offline</span>
+          <span id="portStatus" class="status-pill muted">Disconnected</span>
+          <span id="streamStatus" class="status-pill muted">Idle</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="panel controls-panel">
+          <div class="panel-header">
+            <h2>Device</h2>
+            <span id="sampleCount">0 samples</span>
+          </div>
+
+          <div class="button-row">
+            <button id="connectButton" class="primary-button" type="button">Connect</button>
+            <button id="disconnectButton" type="button" disabled>Disconnect</button>
+          </div>
+
+          <div class="button-row">
+            <button id="startButton" type="button" disabled>Start</button>
+            <button id="stopButton" type="button" disabled>Stop</button>
+          </div>
+
+          <label class="field">
+            <span>ADC Channel</span>
+            <select id="channelSelect">
+              <option value="0">A0</option>
+              <option value="1">A1</option>
+              <option value="2">A2</option>
+              <option value="3">A3</option>
+              <option value="4">A4</option>
+              <option value="5">A5</option>
+              <option value="6">A6</option>
+              <option value="7">A7</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Sample Rate</span>
+            <div class="inline-input">
+              <input id="rateInput" type="number" min="1" max="1000" step="1" value="100" />
+              <span>Hz</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>ADC Resolution</span>
+            <select id="resolutionSelect">
+              <option value="12">12 bit</option>
+              <option value="10">10 bit</option>
+            </select>
+          </label>
+
+          <button id="applyAcquisitionButton" type="button" disabled>Apply Acquisition</button>
+
+          <div class="divider"></div>
+
+          <div class="panel-header compact">
+            <h2>Flash</h2>
+            <span id="flashState">Ready</span>
+          </div>
+
+          <label class="field">
+            <span>Helper URL</span>
+            <input id="helperUrlInput" type="url" value="http://127.0.0.1:8765" />
+          </label>
+
+          <div class="button-row">
+            <button id="helperCheckButton" type="button">Check Helper</button>
+            <button id="refreshPortsButton" type="button" disabled>Refresh Ports</button>
+          </div>
+
+          <label class="field">
+            <span>Upload Port</span>
+            <select id="flashPortSelect">
+              <option value="COM12">COM12</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Firmware</span>
+            <select id="firmwareSelect">
+              <option value="stage1_lab_console">Stage 1 ADC/filter v0.1.0</option>
+            </select>
+          </label>
+
+          <button id="flashButton" type="button" disabled>Flash Firmware</button>
+
+          <div class="divider"></div>
+
+          <div class="panel-header compact">
+            <h2>Recording</h2>
+            <span id="recordCount">0 rows</span>
+          </div>
+          <label class="field">
+            <span>Label</span>
+            <input id="labelInput" type="text" value="adc_lab" />
+          </label>
+          <div class="button-row">
+            <button id="recordButton" type="button" disabled>Record</button>
+            <button id="clearButton" type="button">Clear</button>
+          </div>
+          <button id="exportButton" type="button" disabled>Export CSV</button>
+        </aside>
+
+        <section class="plot-panel">
+          <div class="plot-toolbar">
+            <div>
+              <h2>Live Signal</h2>
+              <p id="plotMeta">Waiting for device data</p>
+            </div>
+            <div class="toggle-group" role="group" aria-label="Trace visibility">
+              <label><input id="showRawToggle" type="checkbox" checked /> Raw</label>
+              <label><input id="showFilteredToggle" type="checkbox" checked /> Filtered</label>
+              <label><input id="autoScaleToggle" type="checkbox" checked /> Auto scale</label>
+            </div>
+          </div>
+          <canvas id="signalCanvas" width="1200" height="520" aria-label="ADC signal plot"></canvas>
+          <div class="metric-grid">
+            <div>
+              <span>Raw</span>
+              <strong id="rawMetric">--</strong>
+            </div>
+            <div>
+              <span>Filtered</span>
+              <strong id="filteredMetric">--</strong>
+            </div>
+            <div>
+              <span>Voltage</span>
+              <strong id="voltageMetric">--</strong>
+            </div>
+            <div>
+              <span>Rate</span>
+              <strong id="rateMetric">--</strong>
+            </div>
+          </div>
+        </section>
+
+        <aside class="panel settings-panel">
+          <div class="panel-header">
+            <h2>Filter</h2>
+            <span id="filterState">RAW</span>
+          </div>
+
+          <label class="field">
+            <span>Mode</span>
+            <select id="filterSelect">
+              <option value="RAW">Raw passthrough</option>
+              <option value="MA">Moving average</option>
+              <option value="EMA">Exponential average</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>EMA Alpha</span>
+            <div class="inline-input">
+              <input id="alphaInput" type="range" min="0.001" max="1" step="0.001" value="0.2" />
+              <output id="alphaOutput">0.200</output>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>MA Window</span>
+            <input id="windowInput" type="number" min="1" max="32" step="1" value="8" />
+          </label>
+
+          <button id="applyFilterButton" type="button" disabled>Apply Filter</button>
+
+          <div class="divider"></div>
+
+          <div class="panel-header compact">
+            <h2>Device Log</h2>
+            <button id="pingButton" type="button" disabled>Ping</button>
+          </div>
+          <pre id="logOutput" class="log-output" aria-live="polite"></pre>
+        </aside>
+
+        <section class="data-panel">
+          <div class="panel-header">
+            <h2>Recent Samples</h2>
+            <span id="lastTimestamp">No data</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Seq</th>
+                  <th>Time us</th>
+                  <th>Channel</th>
+                  <th>Raw</th>
+                  <th>mV</th>
+                  <th>Filtered</th>
+                </tr>
+              </thead>
+              <tbody id="sampleTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js?v=8ac259508195"></script>
+  </body>
+</html>
