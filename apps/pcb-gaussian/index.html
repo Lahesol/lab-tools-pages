@@ -52,7 +52,7 @@
         </div>
         <div class="metric">
           <span>Zero ref</span>
-          <strong>1.030 V</strong>
+          <strong>ADC4 0 V</strong>
         </div>
       </section>
 
@@ -1051,16 +1051,16 @@
               <p class="eyebrow">ADC baseline</p>
               <h2>Zero-current reference</h2>
             </div>
-            <p class="hint" id="adcBaselineStatus">Default zero-current baseline is 1.030 V; SAADC full-scale is 1.2 V.</p>
+            <p class="hint" id="adcBaselineStatus">Per-ADC zero-current defaults: ADC4 is 0.000 V; other ADCs are 1.030 V unless edited.</p>
           </div>
           <div class="button-row tune-row">
             <label class="inline-field">Default zero V <input id="adcBaselineDefault" type="number" value="1.030" min="0" max="1.2" step="0.001" /></label>
             <label class="checkbox inline-check"><input id="adcBaselineInvert" type="checkbox" checked /> Invert around baseline</label>
             <button id="adcBaselineApplyButton">Apply default to all</button>
             <button id="adcBaselineCaptureButton" class="primary">Capture ADC as zero</button>
-            <button id="adcBaselineResetButton">Reset 1.030 V</button>
+            <button id="adcBaselineResetButton">Reset defaults</button>
           </div>
-          <p class="hint">Use this after setting zero-current/TIA bias. Current mode uses I_uA = (zero V - V_AIN) / Rf by default. Values above 1.2 V clip with the current SAADC gain.</p>
+          <p class="hint">Use this after setting zero-current/TIA bias. ADC4 and ADC7 use I_uA = (V_AIN - zero V) / Rf by default; the other ADCs use I_uA = (zero V - V_AIN) / Rf unless edited. Values above 1.2 V clip with the current SAADC gain.</p>
           <div class="table-wrap">
             <table>
               <thead><tr><th>ADC</th><th>Zero-current V_AIN</th><th>Current formula</th></tr></thead>
@@ -1169,7 +1169,7 @@
 
     </main>
 
-  <script src="./app.js?v=f9ab0e699f7e"></script>
+  <script src="./app.js?v=c9b64f5190a1"></script>
     <script src="./application_model_target_data.js?v=20260625-measured-bimodal-target"></script>
     <script src="./application_models.js?v=20260625-measured-bimodal-target"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>

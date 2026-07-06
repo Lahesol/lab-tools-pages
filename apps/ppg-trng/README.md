@@ -120,6 +120,8 @@ The encryption status line also reports recent ADC3 bit-input sample rate and AD
 
 The bitmap is a fixed plane whose columns and rows can be entered directly in the live panel. After all cells in the plane are filled, the next bit clears only the visible plane and writing restarts from the first cell. CSV export uses the separate buffered bit history, not the current visible plane. The `History` field controls that export buffer size; when the buffer exceeds the limit, the oldest bits are dropped.
 
+The ADC plot `Clear` button is synchronized with the encryption panel: it clears ADC samples, cipher history, pending samples, queued key bits, and the live bit bitmap together. The bit-panel `Clear` button clears only the cipher/key/bitmap side and leaves the ADC signal plot intact.
+
 ## Noise Extractor
 
 The `Noise extractor` tab accepts CSV files exported from the live PPG/ADC view or other tools. After loading a file, choose the delimiter and data column; the first parsed rows are shown in `CSV preview` so the selected column can be checked before extraction. Then run one or more extractors:

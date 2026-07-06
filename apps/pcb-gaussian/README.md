@@ -47,9 +47,11 @@ powershell -ExecutionPolicy Bypass -File .\trust_https_cert_current_user.ps1
   `firmware/pcb_gaussian_latest_dfu.zip`.
 - Current firmware/GUI ADC scaling is SAADC 14-bit with internal 0.6 V reference
   and gain 1/2, so raw ADC values are converted over a 0-1.2 V input range.
-- The default zero-current baseline is 1.030 V and current mode uses
-  `I_uA = (zero V - V_AIN) / Rf * 1e6`. With the current gain, V_AIN above
-  1.2 V clips.
+- The ADC baseline table uses per-channel defaults. ADC4 defaults to 0.000 V
+  and non-inverted current for the D9-D12 zero-bias TIA/inverter path
+  (`I_uA = (V_AIN - zero V) / Rf * 1e6`). Other ADCs default to the previous
+  1.030 V inverted-current convention unless edited in the ADC baseline panel.
+  With the current gain, V_AIN above 1.2 V clips.
 - Commands match the firmware UART protocol: `D1,<code>`, `D2,<code>`, `A<device>,<code>`, `M<device>,<code>`, `INIT`, `ADC`, `PING`.
 - `ADC` is expected to return 8 values: `ADC,v0,v1,v2,v3,v4,v5,v6,v7`.
 - Calibrated DAC output model:

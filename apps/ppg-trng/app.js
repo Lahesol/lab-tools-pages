@@ -2251,9 +2251,17 @@ function clearSamples() {
   state.totalSamples = 0;
   state.latest = null;
   resetNoiseExtractor();
+  resetBitAndEncryptionBuffers();
   updateStats();
+  updateBitStats();
+  updateEncryptionUi();
   state.needsDraw = true;
+  state.needsBitDraw = true;
+  state.needsCipherDraw = true;
   drawPlot();
+  drawBitMap();
+  drawCipherPlot();
+  addLog("SYS", "Cleared ADC, cipher, and bit views");
 }
 
 function exportCsv() {
@@ -2343,7 +2351,7 @@ function exportCipherCsv() {
   addLog("SYS", `Exported ${cipherRecords.length} cipher samples`);
 }
 
-function clearBits() {
+function resetBitAndEncryptionBuffers() {
   state.bits = [];
   state.totalBits = 0;
   state.bitLanes = {};
@@ -2356,12 +2364,17 @@ function clearBits() {
   state.droppedPpg = 0;
   state.lastEncrypted = null;
   ensureBitPlaneCapacity();
+}
+
+function clearBits() {
+  resetBitAndEncryptionBuffers();
   updateBitStats();
   updateEncryptionUi();
   state.needsBitDraw = true;
   state.needsCipherDraw = true;
   drawBitMap();
   drawCipherPlot();
+  addLog("SYS", "Cleared cipher and bit views");
 }
 
 function exportBitsCsv() {
