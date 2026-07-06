@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=bba70e70563d" />
+    <link rel="stylesheet" href="styles.css?v=b7e9ba58759d" />
   </head>
   <body>
     <div class="app-shell">
@@ -105,6 +105,25 @@
           </label>
 
           <button id="flashButton" type="button" disabled>Flash Firmware</button>
+
+          <div class="divider"></div>
+
+          <div class="panel-header compact">
+            <h2>Browser Flash</h2>
+            <span id="directFlashState">Ready</span>
+          </div>
+
+          <label class="field">
+            <span>Local BIN</span>
+            <input id="directBinInput" type="file" accept=".bin,application/octet-stream" />
+          </label>
+
+          <div class="button-row">
+            <button id="bootloaderButton" type="button">Bootloader</button>
+            <button id="directFlashButton" type="button">Direct Flash</button>
+          </div>
+
+          <progress id="directFlashProgress" class="flash-progress" max="100" value="0"></progress>
 
           <div class="divider"></div>
 
@@ -219,6 +238,7 @@
       </main>
     </div>
 
-    <script src="app.js?v=8ac259508195"></script>
+    <script src="direct-flasher.js"></script>
+    <script src="app.js?v=6960030b900a"></script>
   </body>
 </html>

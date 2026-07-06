@@ -1,0 +1,17 @@
+{
+  "firmware": [
+    {
+      "id": "stage1_lab_console",
+      "version": "0.1.0",
+      "board": "Arduino Nano 33 BLE Rev2",
+      "fqbn": "arduino:mbed_nano:nano33ble",
+      "baud": 115200,
+      "file": "stage1_lab_console_v0.1.0.bin",
+      "size_bytes": 98320,
+      "sha256": "BC47685554FBA841EB633315B465FF1FE98A0829A5E429E2BCB76269E534741C",
+      "source": "../stage1_lab_console/stage1_lab_console.ino",
+      "notes": "Prebuilt application image for direct upload with arduino-cli --input-file. Does not include bootloader."
+    }
+  ]
+}
+
