@@ -650,7 +650,8 @@ function consumeText(text) {
 }
 
 function handleLine(line) {
-  if (!line.startsWith("DATA,")) {
+  const isStreamData = line.startsWith("DATA,") || line.startsWith("IMU,");
+  if (!isStreamData) {
     logLine(line);
   }
 
@@ -927,14 +928,14 @@ function flushUiRender(now) {
   state.renderPending = false;
   state.lastRenderTime = now;
 
-  if (!state.latestSample) {
+  if (!state.latestSample && !state.latestImu && !state.classification.updatedAt) {
     return;
   }
 
   updateCurrentMetrics();
   updateRateMetric(now);
 
-  if (now - state.lastTableRenderTime >= TABLE_RENDER_INTERVAL_MS) {
+  if (state.latestSample && now - state.lastTableRenderTime >= TABLE_RENDER_INTERVAL_MS) {
     updateTable();
     state.lastTableRenderTime = now;
   }
