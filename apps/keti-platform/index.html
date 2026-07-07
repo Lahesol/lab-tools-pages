@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=b56343dcdf2a" />
+    <link rel="stylesheet" href="styles.css?v=1def9752e9fa" />
   </head>
   <body>
     <div class="app-shell">
@@ -148,28 +148,37 @@
               <h2>Live Signal</h2>
               <p id="plotMeta">Waiting for device data</p>
             </div>
-            <div class="toggle-group" role="group" aria-label="Trace visibility">
-              <label><input id="showRawToggle" type="checkbox" checked /> Raw</label>
-              <label><input id="showFilteredToggle" type="checkbox" checked /> Filtered</label>
-              <label><input id="autoScaleToggle" type="checkbox" checked /> Auto scale</label>
+            <div class="plot-actions">
+              <div class="view-tabs" role="tablist" aria-label="Plot view">
+                <button class="view-tab active" type="button" data-view="adc">ADC</button>
+                <button class="view-tab" type="button" data-view="imu1d">IMU 1D</button>
+                <button class="view-tab" type="button" data-view="imu2d">IMU 2D</button>
+                <button class="view-tab" type="button" data-view="imu3d">IMU 3D</button>
+                <button class="view-tab" type="button" data-view="classification">Class</button>
+              </div>
+              <div class="toggle-group" role="group" aria-label="Trace visibility">
+                <label><input id="showRawToggle" type="checkbox" checked /> Raw</label>
+                <label><input id="showFilteredToggle" type="checkbox" checked /> Filtered</label>
+                <label><input id="autoScaleToggle" type="checkbox" checked /> Auto scale</label>
+              </div>
             </div>
           </div>
           <canvas id="signalCanvas" width="1200" height="520" aria-label="ADC signal plot"></canvas>
           <div class="metric-grid">
             <div>
-              <span>Raw</span>
+              <span id="metric1Label">Raw</span>
               <strong id="rawMetric">--</strong>
             </div>
             <div>
-              <span>Filtered</span>
+              <span id="metric2Label">Filtered</span>
               <strong id="filteredMetric">--</strong>
             </div>
             <div>
-              <span>Voltage</span>
+              <span id="metric3Label">Voltage</span>
               <strong id="voltageMetric">--</strong>
             </div>
             <div>
-              <span>Rate</span>
+              <span id="metric4Label">Rate</span>
               <strong id="rateMetric">--</strong>
             </div>
           </div>
@@ -208,6 +217,24 @@
           <div class="divider"></div>
 
           <div class="panel-header compact">
+            <h2>Classification</h2>
+            <span id="classificationState">Idle</span>
+          </div>
+
+          <div class="button-row">
+            <button id="classStartButton" type="button" disabled>Start Class</button>
+            <button id="classStopButton" type="button" disabled>Stop Class</button>
+          </div>
+
+          <div class="classification-summary">
+            <span id="classificationTopLabel">--</span>
+            <strong id="classificationTopScore">--</strong>
+          </div>
+          <div id="classificationList" class="classification-list"></div>
+
+          <div class="divider"></div>
+
+          <div class="panel-header compact">
             <h2>Device Log</h2>
             <button id="pingButton" type="button" disabled>Ping</button>
           </div>
@@ -239,6 +266,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=c231b9547fd2"></script>
+    <script src="app.js?v=3269c551130f"></script>
   </body>
 </html>

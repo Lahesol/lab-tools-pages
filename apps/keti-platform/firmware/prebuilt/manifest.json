@@ -11,7 +11,18 @@
       "sha256": "BC47685554FBA841EB633315B465FF1FE98A0829A5E429E2BCB76269E534741C",
       "source": "../stage1_lab_console/stage1_lab_console.ino",
       "notes": "Prebuilt application image for direct upload with arduino-cli --input-file. Does not include bootloader."
+    },
+    {
+      "id": "stage2_imu_console",
+      "version": "0.2.0",
+      "board": "Arduino Nano 33 BLE Rev2",
+      "fqbn": "arduino:mbed_nano:nano33ble",
+      "baud": 115200,
+      "file": "stage2_imu_console_v0.2.0.bin",
+      "size_bytes": 118336,
+      "sha256": "FA30571E888C86132D9049384BC2C6B793D880B2158355C5F4E9FDDEAE5B40B8",
+      "source": "../stage2_imu_console/stage2_imu_console.ino",
+      "notes": "Stage 2 IMU raw streaming firmware. Edge Impulse classification hook is present but disabled until the motion-recognition accelerometer Arduino library is installed."
     }
   ]
 }
-

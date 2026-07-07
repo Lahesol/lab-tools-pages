@@ -1,4 +1,5 @@
 const MAX_POINTS = 900;
+const MAX_IMU_POINTS = 900;
 const MAX_TABLE_ROWS = 80;
 const RENDER_INTERVAL_MS = 33;
 const TABLE_RENDER_INTERVAL_MS = 150;
@@ -26,16 +27,32 @@ const state = {
   connected: false,
   streaming: false,
   recording: false,
+  activeView: "adc",
   samples: [],
+  imuSamples: [],
   records: [],
   tableRows: [],
   latestSample: null,
+  latestImu: null,
+  classification: {
+    active: false,
+    seq: null,
+    topLabel: "--",
+    topScore: null,
+    scores: [],
+    timing: {},
+    anomaly: null,
+    updatedAt: null
+  },
   renderPending: false,
   lastRenderTime: 0,
   lastTableRenderTime: 0,
   lastRateCheckTime: performance.now(),
   lastRateCheckCount: 0,
   receivedSamples: 0,
+  receivedImuSamples: 0,
+  lastImuRateCheckTime: performance.now(),
+  lastImuRateCheckCount: 0,
   lineBuffer: "",
   settings: {
     rateHz: 100,
@@ -99,11 +116,22 @@ const el = {
   autoScaleToggle: document.getElementById("autoScaleToggle"),
   signalCanvas: document.getElementById("signalCanvas"),
   plotMeta: document.getElementById("plotMeta"),
+  metric1Label: document.getElementById("metric1Label"),
+  metric2Label: document.getElementById("metric2Label"),
+  metric3Label: document.getElementById("metric3Label"),
+  metric4Label: document.getElementById("metric4Label"),
   rawMetric: document.getElementById("rawMetric"),
   filteredMetric: document.getElementById("filteredMetric"),
   voltageMetric: document.getElementById("voltageMetric"),
   rateMetric: document.getElementById("rateMetric"),
   filterState: document.getElementById("filterState"),
+  viewTabs: [...document.querySelectorAll(".view-tab")],
+  classStartButton: document.getElementById("classStartButton"),
+  classStopButton: document.getElementById("classStopButton"),
+  classificationState: document.getElementById("classificationState"),
+  classificationTopLabel: document.getElementById("classificationTopLabel"),
+  classificationTopScore: document.getElementById("classificationTopScore"),
+  classificationList: document.getElementById("classificationList"),
   logOutput: document.getElementById("logOutput"),
   sampleTableBody: document.getElementById("sampleTableBody"),
   lastTimestamp: document.getElementById("lastTimestamp")
@@ -151,6 +179,8 @@ function setUiEnabled() {
   el.applyFilterButton.disabled = !connected;
   el.pingButton.disabled = !connected;
   el.recordButton.disabled = !connected;
+  el.classStartButton.disabled = !connected || state.classification.active;
+  el.classStopButton.disabled = !connected || !state.classification.active;
   el.exportButton.disabled = state.records.length === 0;
   el.refreshPortsButton.disabled = !state.flash.helperOnline || state.flash.helperBusy;
   el.flashButton.disabled = !state.flash.helperOnline || state.flash.helperBusy;
@@ -624,10 +654,33 @@ function handleLine(line) {
     logLine(line);
   }
 
+  if (line.startsWith("ERR,EI_ACCEL_MODEL_REQUIRED")) {
+    state.classification.active = false;
+    el.classificationState.textContent = "Model missing";
+    setUiEnabled();
+    return;
+  }
+
   if (line.startsWith("DATA,")) {
     const sample = parseDataLine(line);
     if (sample) {
       addSample(sample);
+    }
+    return;
+  }
+
+  if (line.startsWith("IMU,")) {
+    const sample = parseImuLine(line);
+    if (sample) {
+      addImuSample(sample);
+    }
+    return;
+  }
+
+  if (line.startsWith("CLS,")) {
+    const result = parseClassificationLine(line);
+    if (result) {
+      updateClassification(result);
     }
     return;
   }
@@ -645,6 +698,20 @@ function handleLine(line) {
 
   if (line.startsWith("ACK,STOP")) {
     state.streaming = false;
+    setUiEnabled();
+    return;
+  }
+
+  if (line.startsWith("ACK,CLS_ON")) {
+    state.classification.active = true;
+    el.classificationState.textContent = "Running";
+    setUiEnabled();
+    return;
+  }
+
+  if (line.startsWith("ACK,CLS_OFF")) {
+    state.classification.active = false;
+    el.classificationState.textContent = "Idle";
     setUiEnabled();
   }
 }
@@ -665,12 +732,73 @@ function parseDataLine(line) {
   };
 }
 
+function parseImuLine(line) {
+  const parts = line.split(",");
+  if (parts.length < 12) {
+    return null;
+  }
+  return {
+    seq: Number(parts[1]),
+    micros: Number(parts[2]),
+    ax: Number(parts[3]),
+    ay: Number(parts[4]),
+    az: Number(parts[5]),
+    gx: Number(parts[6]),
+    gy: Number(parts[7]),
+    gz: Number(parts[8]),
+    mx: Number(parts[9]),
+    my: Number(parts[10]),
+    mz: Number(parts[11]),
+    receivedAt: Date.now()
+  };
+}
+
+function parseClassificationLine(line) {
+  const parts = line.split(",");
+  if (parts.length < 5) {
+    return null;
+  }
+
+  const result = {
+    seq: Number(parts[1]),
+    millis: Number(parts[2]),
+    topLabel: parts[3],
+    topScore: Number(parts[4]),
+    scores: [],
+    timing: {},
+    anomaly: null,
+    updatedAt: Date.now()
+  };
+
+  for (const token of parts.slice(5)) {
+    const [key, value] = token.split("=");
+    if (key === "scores") {
+      result.scores = value.split("|").map((item) => {
+        const separator = item.lastIndexOf(":");
+        return {
+          label: separator >= 0 ? item.slice(0, separator) : item,
+          value: separator >= 0 ? Number(item.slice(separator + 1)) : 0
+        };
+      }).filter((item) => item.label);
+    } else if (key === "anomaly") {
+      result.anomaly = Number(value);
+    } else if (key && key.endsWith("_ms")) {
+      result.timing[key] = Number(value);
+    }
+  }
+
+  return result;
+}
+
 function parseStatus(line) {
   const tokens = line.split(",").slice(1);
   for (const token of tokens) {
     const [key, value] = token.split("=");
     if (key === "streaming") {
       state.streaming = value === "1";
+    } else if (key === "classification") {
+      state.classification.active = value === "1";
+      el.classificationState.textContent = state.classification.active ? "Running" : "Idle";
     } else if (key === "rate_hz") {
       state.settings.rateHz = Number(value);
       el.rateInput.value = value;
@@ -716,6 +844,71 @@ function addSample(sample) {
   scheduleUiRender();
 }
 
+function addImuSample(sample) {
+  state.imuSamples.push(sample);
+  if (state.imuSamples.length > MAX_IMU_POINTS) {
+    state.imuSamples.shift();
+  }
+  state.receivedImuSamples++;
+  state.latestImu = sample;
+  scheduleUiRender();
+}
+
+function updateClassification(result) {
+  state.classification = {
+    ...state.classification,
+    ...result,
+    active: state.classification.active
+  };
+  renderClassification();
+  if (state.activeView === "classification") {
+    drawPlot();
+  }
+}
+
+function renderClassification() {
+  const result = state.classification;
+  el.classificationState.textContent = result.active ? "Running" : "Idle";
+  el.classificationTopLabel.textContent = result.topLabel || "--";
+  el.classificationTopScore.textContent = Number.isFinite(result.topScore)
+    ? `${(result.topScore * 100).toFixed(1)}%`
+    : "--";
+
+  const sortedScores = [...(result.scores || [])]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  el.classificationList.replaceChildren(
+    ...sortedScores.map((score) => {
+      const row = document.createElement("div");
+      row.className = "classification-row";
+      const percent = Math.max(0, Math.min(100, score.value * 100));
+      const name = document.createElement("span");
+      name.className = "classification-name";
+      name.textContent = score.label;
+      const value = document.createElement("span");
+      value.className = "classification-score";
+      value.textContent = `${percent.toFixed(1)}%`;
+      const bar = document.createElement("span");
+      bar.className = "classification-bar";
+      const fill = document.createElement("span");
+      fill.className = "classification-fill";
+      fill.style.width = `${percent.toFixed(1)}%`;
+      bar.append(fill);
+      row.append(name, value, bar);
+      return row;
+    })
+  );
+}
+
+function setActiveView(view) {
+  state.activeView = view;
+  for (const tab of el.viewTabs) {
+    tab.classList.toggle("active", tab.dataset.view === view);
+  }
+  drawPlot();
+}
+
 function scheduleUiRender() {
   if (state.renderPending) {
     return;
@@ -738,7 +931,7 @@ function flushUiRender(now) {
     return;
   }
 
-  updateMetrics(state.latestSample);
+  updateCurrentMetrics();
   updateRateMetric(now);
 
   if (now - state.lastTableRenderTime >= TABLE_RENDER_INTERVAL_MS) {
@@ -751,6 +944,10 @@ function flushUiRender(now) {
 }
 
 function updateMetrics(sample) {
+  el.metric1Label.textContent = "Raw";
+  el.metric2Label.textContent = "Filtered";
+  el.metric3Label.textContent = "Voltage";
+  el.metric4Label.textContent = "Rate";
   el.sampleCount.textContent = `${state.receivedSamples} samples`;
   el.recordCount.textContent = `${state.records.length} rows`;
   el.rawMetric.textContent = sample.raw.toFixed(0);
@@ -760,7 +957,67 @@ function updateMetrics(sample) {
   el.lastTimestamp.textContent = `${sample.micros} us`;
 }
 
+function updateCurrentMetrics() {
+  if (state.activeView === "adc" && state.latestSample) {
+    updateMetrics(state.latestSample);
+    return;
+  }
+
+  if (state.activeView.startsWith("imu") && state.latestImu) {
+    updateImuMetrics(state.latestImu);
+    return;
+  }
+
+  if (state.activeView === "classification") {
+    updateClassificationMetrics();
+  }
+}
+
+function updateImuMetrics(sample) {
+  el.metric1Label.textContent = "Accel X";
+  el.metric2Label.textContent = "Accel Y";
+  el.metric3Label.textContent = "Accel Z";
+  el.metric4Label.textContent = "IMU Rate";
+  el.sampleCount.textContent = `${state.receivedImuSamples} IMU`;
+  el.rawMetric.textContent = `${sample.ax.toFixed(3)} g`;
+  el.filteredMetric.textContent = `${sample.ay.toFixed(3)} g`;
+  el.voltageMetric.textContent = `${sample.az.toFixed(3)} g`;
+  el.plotMeta.textContent = `IMU accel/gyro/mag - seq ${sample.seq}`;
+  el.lastTimestamp.textContent = `${sample.micros} us`;
+}
+
+function updateClassificationMetrics() {
+  const result = state.classification;
+  el.metric1Label.textContent = "Top Label";
+  el.metric2Label.textContent = "Confidence";
+  el.metric3Label.textContent = "DSP";
+  el.metric4Label.textContent = "Classify";
+  el.sampleCount.textContent = result.seq == null ? "0 class" : `${result.seq + 1} class`;
+  el.rawMetric.textContent = result.topLabel || "--";
+  el.filteredMetric.textContent = Number.isFinite(result.topScore) ? `${(result.topScore * 100).toFixed(1)}%` : "--";
+  el.voltageMetric.textContent = Number.isFinite(result.timing?.dsp_ms) ? `${result.timing.dsp_ms} ms` : "--";
+  el.rateMetric.textContent = Number.isFinite(result.timing?.classification_ms) ? `${result.timing.classification_ms} ms` : "--";
+  el.plotMeta.textContent = result.updatedAt ? `Classification result - seq ${result.seq}` : "Waiting for classification";
+}
+
 function updateRateMetric(now = performance.now()) {
+  if (state.activeView === "classification") {
+    return;
+  }
+
+  if (state.activeView.startsWith("imu")) {
+    const elapsed = now - state.lastImuRateCheckTime;
+    if (elapsed < 1000) {
+      return;
+    }
+    const countDelta = state.receivedImuSamples - state.lastImuRateCheckCount;
+    const rate = (countDelta * 1000) / elapsed;
+    el.rateMetric.textContent = `${rate.toFixed(1)} Hz`;
+    state.lastImuRateCheckCount = state.receivedImuSamples;
+    state.lastImuRateCheckTime = now;
+    return;
+  }
+
   const elapsed = now - state.lastRateCheckTime;
   if (elapsed < 1000) {
     return;
@@ -790,6 +1047,23 @@ function updateTable() {
 }
 
 function drawPlot() {
+  if (state.activeView === "imu1d") {
+    drawImuSeriesPlot();
+    return;
+  }
+  if (state.activeView === "imu2d") {
+    drawImuPlanarPlot();
+    return;
+  }
+  if (state.activeView === "imu3d") {
+    drawImu3dPlot();
+    return;
+  }
+  if (state.activeView === "classification") {
+    drawClassificationPlot();
+    return;
+  }
+
   const { width, height } = resizeCanvasToDisplaySize();
   const compactPlot = width < 560;
   const pad = compactPlot
@@ -888,6 +1162,231 @@ function drawTrace(key, color, minY, maxY, pad, plotWidth, plotHeight) {
   ctx.stroke();
 }
 
+function drawEmptyPlot(message) {
+  const { width, height } = resizeCanvasToDisplaySize();
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfd";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#637083";
+  ctx.font = "16px Segoe UI, Arial, sans-serif";
+  ctx.fillText(message, 24, 44);
+}
+
+function drawImuSeriesPlot() {
+  const samples = state.imuSamples;
+  if (samples.length < 2) {
+    drawEmptyPlot("Waiting for IMU data");
+    return;
+  }
+
+  const { width, height } = resizeCanvasToDisplaySize();
+  const pad = width < 560
+    ? { left: 38, right: 14, top: 18, bottom: 30 }
+    : { left: 58, right: 18, top: 18, bottom: 36 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const axes = [
+    { key: "ax", color: "#008c8c", label: "ax" },
+    { key: "ay", color: "#d28a00", label: "ay" },
+    { key: "az", color: "#2767c9", label: "az" }
+  ];
+  const values = samples.flatMap((sample) => axes.map((axis) => sample[axis.key]));
+  const maxAbs = Math.max(0.25, ...values.map((value) => Math.abs(value)));
+  const minY = -maxAbs;
+  const maxY = maxAbs;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfd";
+  ctx.fillRect(0, 0, width, height);
+  drawGrid(width, height, pad, plotWidth, plotHeight);
+
+  for (const axis of axes) {
+    ctx.strokeStyle = axis.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    samples.forEach((sample, index) => {
+      const x = pad.left + (plotWidth * index) / Math.max(1, samples.length - 1);
+      const normalized = (sample[axis.key] - minY) / (maxY - minY);
+      const y = pad.top + plotHeight - normalized * plotHeight;
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.stroke();
+  }
+
+  drawLegend(axes, pad.left + 8, pad.top + 18);
+}
+
+function drawImuPlanarPlot() {
+  const samples = state.imuSamples;
+  if (samples.length < 2) {
+    drawEmptyPlot("Waiting for IMU data");
+    return;
+  }
+
+  const { width, height } = resizeCanvasToDisplaySize();
+  const pad = { left: 32, right: 32, top: 24, bottom: 32 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const centerX = pad.left + plotWidth / 2;
+  const centerY = pad.top + plotHeight / 2;
+  const scale = Math.min(plotWidth, plotHeight) / 2;
+  const maxAbs = Math.max(0.25, ...samples.flatMap((sample) => [Math.abs(sample.ax), Math.abs(sample.ay)]));
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfd";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#d7dee8";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, centerY);
+  ctx.lineTo(width - pad.right, centerY);
+  ctx.moveTo(centerX, pad.top);
+  ctx.lineTo(centerX, height - pad.bottom);
+  ctx.stroke();
+  ctx.strokeStyle = "#bdc8d5";
+  ctx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
+
+  ctx.strokeStyle = "#008c8c";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  samples.forEach((sample, index) => {
+    const x = centerX + (sample.ax / maxAbs) * scale * 0.92;
+    const y = centerY - (sample.ay / maxAbs) * scale * 0.92;
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+
+  const latest = samples[samples.length - 1];
+  const latestX = centerX + (latest.ax / maxAbs) * scale * 0.92;
+  const latestY = centerY - (latest.ay / maxAbs) * scale * 0.92;
+  ctx.fillStyle = "#d28a00";
+  ctx.beginPath();
+  ctx.arc(latestX, latestY, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#637083";
+  ctx.font = "12px Segoe UI, Arial, sans-serif";
+  ctx.fillText("ax", width - pad.right - 18, centerY - 8);
+  ctx.fillText("ay", centerX + 8, pad.top + 14);
+}
+
+function drawImu3dPlot() {
+  const samples = state.imuSamples;
+  if (samples.length < 2) {
+    drawEmptyPlot("Waiting for IMU data");
+    return;
+  }
+
+  const { width, height } = resizeCanvasToDisplaySize();
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const scale = Math.min(width, height) * 0.34;
+  const maxAbs = Math.max(0.25, ...samples.flatMap((sample) => [Math.abs(sample.ax), Math.abs(sample.ay), Math.abs(sample.az)]));
+
+  function project(x, y, z) {
+    const nx = x / maxAbs;
+    const ny = y / maxAbs;
+    const nz = z / maxAbs;
+    return {
+      x: centerX + (nx - ny) * scale * 0.72,
+      y: centerY + (nx + ny) * scale * 0.36 - nz * scale * 0.82
+    };
+  }
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfd";
+  ctx.fillRect(0, 0, width, height);
+
+  const axes = [
+    { end: project(maxAbs, 0, 0), color: "#008c8c", label: "x" },
+    { end: project(0, maxAbs, 0), color: "#d28a00", label: "y" },
+    { end: project(0, 0, maxAbs), color: "#2767c9", label: "z" }
+  ];
+  for (const axis of axes) {
+    ctx.strokeStyle = axis.color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(axis.end.x, axis.end.y);
+    ctx.stroke();
+    ctx.fillStyle = axis.color;
+    ctx.font = "12px Segoe UI, Arial, sans-serif";
+    ctx.fillText(axis.label, axis.end.x + 5, axis.end.y);
+  }
+
+  ctx.strokeStyle = "#14242b";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  samples.forEach((sample, index) => {
+    const point = project(sample.ax, sample.ay, sample.az);
+    if (index === 0) {
+      ctx.moveTo(point.x, point.y);
+    } else {
+      ctx.lineTo(point.x, point.y);
+    }
+  });
+  ctx.stroke();
+
+  const latest = samples[samples.length - 1];
+  const point = project(latest.ax, latest.ay, latest.az);
+  ctx.fillStyle = "#d28a00";
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawClassificationPlot() {
+  const scores = [...(state.classification.scores || [])]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10);
+  if (scores.length === 0) {
+    drawEmptyPlot("Waiting for classification results");
+    return;
+  }
+
+  const { width, height } = resizeCanvasToDisplaySize();
+  const pad = { left: width < 680 ? 112 : 180, right: 28, top: 22, bottom: 24 };
+  const rowHeight = Math.min(34, (height - pad.top - pad.bottom) / scores.length);
+  const barWidth = width - pad.left - pad.right;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfd";
+  ctx.fillRect(0, 0, width, height);
+  ctx.font = "12px Segoe UI, Arial, sans-serif";
+
+  scores.forEach((score, index) => {
+    const y = pad.top + index * rowHeight;
+    const percent = Math.max(0, Math.min(1, score.value));
+    ctx.fillStyle = "#637083";
+    const label = score.label.length > 22 ? `${score.label.slice(0, 21)}...` : score.label;
+    ctx.fillText(label, 12, y + rowHeight * 0.62);
+    ctx.fillStyle = "#eef3f7";
+    ctx.fillRect(pad.left, y + 7, barWidth, Math.max(8, rowHeight - 14));
+    ctx.fillStyle = index === 0 ? "#008c8c" : "#2767c9";
+    ctx.fillRect(pad.left, y + 7, barWidth * percent, Math.max(8, rowHeight - 14));
+    ctx.fillStyle = "#17202a";
+    ctx.fillText(`${(percent * 100).toFixed(1)}%`, pad.left + 8, y + rowHeight * 0.62);
+  });
+}
+
+function drawLegend(items, x, y) {
+  items.forEach((item, index) => {
+    const offsetX = x + index * 58;
+    ctx.fillStyle = item.color;
+    ctx.fillRect(offsetX, y - 9, 16, 3);
+    ctx.fillStyle = "#637083";
+    ctx.font = "12px Segoe UI, Arial, sans-serif";
+    ctx.fillText(item.label, offsetX + 20, y - 4);
+  });
+}
+
 async function applyAcquisition() {
   state.settings.channel = normalizeNumber(el.channelSelect.value, 0, 0, 7);
   state.settings.rateHz = normalizeNumber(el.rateInput.value, 100, 1, 1000);
@@ -910,17 +1409,35 @@ async function applyFilter() {
   el.filterState.textContent = state.settings.filter;
 }
 
+async function startStreaming() {
+  if (state.activeView !== "adc") {
+    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
+    await sendCommand(`RATE ${state.settings.rateHz}`);
+    await sendCommand("START");
+    return;
+  }
+
+  await applyAcquisition();
+  await applyFilter();
+  await sendCommand("START");
+}
+
 function clearData() {
   state.samples = [];
+  state.imuSamples = [];
   state.records = [];
   state.tableRows = [];
   state.latestSample = null;
+  state.latestImu = null;
   state.renderPending = false;
   state.lastRenderTime = performance.now();
   state.lastTableRenderTime = 0;
   state.receivedSamples = 0;
+  state.receivedImuSamples = 0;
   state.lastRateCheckCount = 0;
   state.lastRateCheckTime = performance.now();
+  state.lastImuRateCheckCount = 0;
+  state.lastImuRateCheckTime = performance.now();
   el.sampleCount.textContent = "0 samples";
   el.recordCount.textContent = "0 rows";
   el.rawMetric.textContent = "--";
@@ -937,6 +1454,14 @@ function clearData() {
 function toggleRecording() {
   state.recording = !state.recording;
   setUiEnabled();
+}
+
+async function startClassification() {
+  await sendCommand("CLS ON");
+}
+
+async function stopClassification() {
+  await sendCommand("CLS OFF");
 }
 
 function exportCsv() {
@@ -976,15 +1501,13 @@ function sleep(ms) {
 function bindEvents() {
   el.connectButton.addEventListener("click", connectDevice);
   el.disconnectButton.addEventListener("click", disconnectDevice);
-  el.startButton.addEventListener("click", async () => {
-    await applyAcquisition();
-    await applyFilter();
-    await sendCommand("START");
-  });
+  el.startButton.addEventListener("click", startStreaming);
   el.stopButton.addEventListener("click", () => sendCommand("STOP"));
   el.applyAcquisitionButton.addEventListener("click", applyAcquisition);
   el.applyFilterButton.addEventListener("click", applyFilter);
   el.pingButton.addEventListener("click", () => sendCommand("PING"));
+  el.classStartButton.addEventListener("click", startClassification);
+  el.classStopButton.addEventListener("click", stopClassification);
   el.recordButton.addEventListener("click", toggleRecording);
   el.clearButton.addEventListener("click", clearData);
   el.exportButton.addEventListener("click", exportCsv);
@@ -1005,6 +1528,9 @@ function bindEvents() {
   el.showRawToggle.addEventListener("change", drawPlot);
   el.showFilteredToggle.addEventListener("change", drawPlot);
   el.autoScaleToggle.addEventListener("change", drawPlot);
+  for (const tab of el.viewTabs) {
+    tab.addEventListener("click", () => setActiveView(tab.dataset.view));
+  }
   window.addEventListener("resize", drawPlot);
   el.alphaInput.addEventListener("input", () => {
     el.alphaOutput.textContent = Number(el.alphaInput.value).toFixed(3);
@@ -1020,6 +1546,7 @@ function init() {
   populateFirmwareSelect(DEFAULT_PREBUILT_FIRMWARES);
   bindEvents();
   setUiEnabled();
+  renderClassification();
   drawPlot();
   loadDirectFirmwareManifest();
   checkFlashHelper();
