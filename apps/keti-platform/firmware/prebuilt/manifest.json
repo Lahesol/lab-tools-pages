@@ -23,6 +23,18 @@
       "sha256": "FA30571E888C86132D9049384BC2C6B793D880B2158355C5F4E9FDDEAE5B40B8",
       "source": "../stage2_imu_console/stage2_imu_console.ino",
       "notes": "Stage 2 IMU raw streaming firmware. Edge Impulse classification hook is present but disabled until the motion-recognition accelerometer Arduino library is installed."
+    },
+    {
+      "id": "stage2_imu_ei_motion",
+      "version": "0.3.0",
+      "board": "Arduino Nano 33 BLE Rev2",
+      "fqbn": "arduino:mbed_nano:nano33ble",
+      "baud": 115200,
+      "file": "stage2_imu_ei_motion_v0.3.0.bin",
+      "size_bytes": 195984,
+      "sha256": "8481314E5B89B1A23C39F551AF75A1FADDF22EF0B35E98FBD9E07B14AE5EF3E8",
+      "source": "../stage2_imu_ei_motion/stage2_imu_ei_motion.ino",
+      "notes": "Stage 2 IMU firmware with the Edge Impulse Tutorial: Continuous motion recognition accelerometer model enabled. Labels: idle, snake, updown, wave."
     }
   ]
 }
