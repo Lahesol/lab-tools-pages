@@ -1229,53 +1229,102 @@ function drawImuPlanarPlot() {
   }
 
   const { width, height } = resizeCanvasToDisplaySize();
-  const pad = { left: 32, right: 32, top: 24, bottom: 32 };
-  const plotWidth = width - pad.left - pad.right;
-  const plotHeight = height - pad.top - pad.bottom;
-  const centerX = pad.left + plotWidth / 2;
-  const centerY = pad.top + plotHeight / 2;
-  const scale = Math.min(plotWidth, plotHeight) / 2;
-  const maxAbs = Math.max(0.25, ...samples.flatMap((sample) => [Math.abs(sample.ax), Math.abs(sample.ay)]));
-
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#fbfcfd";
   ctx.fillRect(0, 0, width, height);
-  ctx.strokeStyle = "#d7dee8";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(pad.left, centerY);
-  ctx.lineTo(width - pad.right, centerY);
-  ctx.moveTo(centerX, pad.top);
-  ctx.lineTo(centerX, height - pad.bottom);
-  ctx.stroke();
-  ctx.strokeStyle = "#bdc8d5";
-  ctx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
 
-  ctx.strokeStyle = "#008c8c";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  samples.forEach((sample, index) => {
-    const x = centerX + (sample.ax / maxAbs) * scale * 0.92;
-    const y = centerY - (sample.ay / maxAbs) * scale * 0.92;
-    if (index === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
-  });
-  ctx.stroke();
+  const planes = [
+    { label: "XY", xKey: "ax", yKey: "ay", xLabel: "x", yLabel: "y", color: "#008c8c" },
+    { label: "YZ", xKey: "ay", yKey: "az", xLabel: "y", yLabel: "z", color: "#d28a00" },
+    { label: "ZA", xKey: "az", yKey: "ax", xLabel: "z", yLabel: "x", color: "#2767c9" }
+  ];
+  const columns = width < 760 ? 1 : 3;
+  const rows = Math.ceil(planes.length / columns);
+  const outerPad = width < 760
+    ? { left: 18, right: 18, top: 18, bottom: 18 }
+    : { left: 26, right: 26, top: 24, bottom: 24 };
+  const gap = width < 760 ? 12 : 16;
+  const panelWidth = (width - outerPad.left - outerPad.right - gap * (columns - 1)) / columns;
+  const panelHeight = (height - outerPad.top - outerPad.bottom - gap * (rows - 1)) / rows;
+  const autoScale = el.autoScaleToggle.checked;
 
-  const latest = samples[samples.length - 1];
-  const latestX = centerX + (latest.ax / maxAbs) * scale * 0.92;
-  const latestY = centerY - (latest.ay / maxAbs) * scale * 0.92;
-  ctx.fillStyle = "#d28a00";
-  ctx.beginPath();
-  ctx.arc(latestX, latestY, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#637083";
-  ctx.font = "12px Segoe UI, Arial, sans-serif";
-  ctx.fillText("ax", width - pad.right - 18, centerY - 8);
-  ctx.fillText("ay", centerX + 8, pad.top + 14);
+  function average(key) {
+    return samples.reduce((sum, sample) => sum + sample[key], 0) / samples.length;
+  }
+
+  for (const [planeIndex, plane] of planes.entries()) {
+    const column = planeIndex % columns;
+    const row = Math.floor(planeIndex / columns);
+    const left = outerPad.left + column * (panelWidth + gap);
+    const top = outerPad.top + row * (panelHeight + gap);
+    const innerPad = { left: 34, right: 18, top: 34, bottom: 28 };
+    const plotLeft = left + innerPad.left;
+    const plotTop = top + innerPad.top;
+    const plotWidth = panelWidth - innerPad.left - innerPad.right;
+    const plotHeight = panelHeight - innerPad.top - innerPad.bottom;
+    const centerX = plotLeft + plotWidth / 2;
+    const centerY = plotTop + plotHeight / 2;
+    const xCenter = autoScale ? average(plane.xKey) : 0;
+    const yCenter = autoScale ? average(plane.yKey) : 0;
+    const range = Math.max(
+      autoScale ? 0.08 : 1,
+      ...samples.flatMap((sample) => [
+        Math.abs(sample[plane.xKey] - xCenter),
+        Math.abs(sample[plane.yKey] - yCenter)
+      ])
+    );
+    const scale = Math.min(plotWidth, plotHeight) * 0.44;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#d7dee8";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(left, top, panelWidth, panelHeight, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = "#d7dee8";
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, centerY);
+    ctx.lineTo(plotLeft + plotWidth, centerY);
+    ctx.moveTo(centerX, plotTop);
+    ctx.lineTo(centerX, plotTop + plotHeight);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#bdc8d5";
+    ctx.strokeRect(plotLeft, plotTop, plotWidth, plotHeight);
+
+    ctx.strokeStyle = plane.color;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    samples.forEach((sample, index) => {
+      const x = centerX + ((sample[plane.xKey] - xCenter) / range) * scale;
+      const y = centerY - ((sample[plane.yKey] - yCenter) / range) * scale;
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.stroke();
+
+    const latest = samples[samples.length - 1];
+    const latestX = centerX + ((latest[plane.xKey] - xCenter) / range) * scale;
+    const latestY = centerY - ((latest[plane.yKey] - yCenter) / range) * scale;
+    ctx.fillStyle = "#14242b";
+    ctx.beginPath();
+    ctx.arc(latestX, latestY, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#17202a";
+    ctx.font = "700 13px Segoe UI, Arial, sans-serif";
+    ctx.fillText(plane.label, left + 12, top + 20);
+    ctx.fillStyle = "#637083";
+    ctx.font = "12px Segoe UI, Arial, sans-serif";
+    ctx.fillText(plane.xLabel, plotLeft + plotWidth - 16, centerY - 8);
+    ctx.fillText(plane.yLabel, centerX + 8, plotTop + 14);
+    ctx.fillText(autoScale ? `+/-${range.toFixed(2)} g from mean` : `+/-${range.toFixed(2)} g`, left + 42, top + 20);
+  }
 }
 
 function drawImu3dPlot() {
@@ -1286,47 +1335,97 @@ function drawImu3dPlot() {
   }
 
   const { width, height } = resizeCanvasToDisplaySize();
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const scale = Math.min(width, height) * 0.34;
-  const maxAbs = Math.max(0.25, ...samples.flatMap((sample) => [Math.abs(sample.ax), Math.abs(sample.ay), Math.abs(sample.az)]));
+  const autoScale = el.autoScaleToggle.checked;
+  const center = autoScale
+    ? {
+        ax: samples.reduce((sum, sample) => sum + sample.ax, 0) / samples.length,
+        ay: samples.reduce((sum, sample) => sum + sample.ay, 0) / samples.length,
+        az: samples.reduce((sum, sample) => sum + sample.az, 0) / samples.length
+      }
+    : { ax: 0, ay: 0, az: 0 };
+  const range = Math.max(
+    autoScale ? 0.08 : 1,
+    ...samples.flatMap((sample) => [
+      Math.abs(sample.ax - center.ax),
+      Math.abs(sample.ay - center.ay),
+      Math.abs(sample.az - center.az)
+    ])
+  );
 
-  function project(x, y, z) {
-    const nx = x / maxAbs;
-    const ny = y / maxAbs;
-    const nz = z / maxAbs;
+  function projectVector(x, y, z) {
+    const nx = x / range;
+    const ny = y / range;
+    const nz = z / range;
     return {
-      x: centerX + (nx - ny) * scale * 0.72,
-      y: centerY + (nx + ny) * scale * 0.36 - nz * scale * 0.82
+      x: (nx - ny) * 0.82,
+      y: (nx + ny) * 0.40 - nz * 0.92
+    };
+  }
+
+  const tracePoints = samples.map((sample) => projectVector(
+    sample.ax - center.ax,
+    sample.ay - center.ay,
+    sample.az - center.az
+  ));
+  const origin = projectVector(0, 0, 0);
+  const axes = [
+    { end: projectVector(range, 0, 0), color: "#008c8c", label: "x" },
+    { end: projectVector(0, range, 0), color: "#d28a00", label: "y" },
+    { end: projectVector(0, 0, range), color: "#2767c9", label: "z" }
+  ];
+  const fitPoints = [origin, ...axes.map((axis) => axis.end), ...tracePoints];
+  const minX = Math.min(...fitPoints.map((point) => point.x));
+  const maxX = Math.max(...fitPoints.map((point) => point.x));
+  const minY = Math.min(...fitPoints.map((point) => point.y));
+  const maxY = Math.max(...fitPoints.map((point) => point.y));
+  const pad = width < 760
+    ? { left: 26, right: 26, top: 28, bottom: 34 }
+    : { left: 48, right: 48, top: 38, bottom: 44 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const fitScale = Math.min(
+    plotWidth / Math.max(0.1, maxX - minX),
+    plotHeight / Math.max(0.1, maxY - minY)
+  ) * 0.84;
+  const fitCenterX = (minX + maxX) / 2;
+  const fitCenterY = (minY + maxY) / 2;
+  const screenCenterX = pad.left + plotWidth / 2;
+  const screenCenterY = pad.top + plotHeight / 2;
+
+  function toScreen(point) {
+    return {
+      x: screenCenterX + (point.x - fitCenterX) * fitScale,
+      y: screenCenterY + (point.y - fitCenterY) * fitScale
     };
   }
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#fbfcfd";
   ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#d7dee8";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
 
-  const axes = [
-    { end: project(maxAbs, 0, 0), color: "#008c8c", label: "x" },
-    { end: project(0, maxAbs, 0), color: "#d28a00", label: "y" },
-    { end: project(0, 0, maxAbs), color: "#2767c9", label: "z" }
-  ];
+  const originPoint = toScreen(origin);
   for (const axis of axes) {
+    const end = toScreen(axis.end);
     ctx.strokeStyle = axis.color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.lineTo(axis.end.x, axis.end.y);
+    ctx.moveTo(originPoint.x, originPoint.y);
+    ctx.lineTo(end.x, end.y);
     ctx.stroke();
     ctx.fillStyle = axis.color;
-    ctx.font = "12px Segoe UI, Arial, sans-serif";
-    ctx.fillText(axis.label, axis.end.x + 5, axis.end.y);
+    ctx.font = "700 13px Segoe UI, Arial, sans-serif";
+    ctx.fillText(axis.label, end.x + 6, end.y);
   }
 
   ctx.strokeStyle = "#14242b";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3;
+  ctx.lineJoin = "round";
   ctx.beginPath();
-  samples.forEach((sample, index) => {
-    const point = project(sample.ax, sample.ay, sample.az);
+  tracePoints.forEach((tracePoint, index) => {
+    const point = toScreen(tracePoint);
     if (index === 0) {
       ctx.moveTo(point.x, point.y);
     } else {
@@ -1336,11 +1435,19 @@ function drawImu3dPlot() {
   ctx.stroke();
 
   const latest = samples[samples.length - 1];
-  const point = project(latest.ax, latest.ay, latest.az);
+  const latestPoint = toScreen(projectVector(
+    latest.ax - center.ax,
+    latest.ay - center.ay,
+    latest.az - center.az
+  ));
   ctx.fillStyle = "#d28a00";
   ctx.beginPath();
-  ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+  ctx.arc(latestPoint.x, latestPoint.y, 7, 0, Math.PI * 2);
   ctx.fill();
+
+  ctx.fillStyle = "#637083";
+  ctx.font = "12px Segoe UI, Arial, sans-serif";
+  ctx.fillText(autoScale ? `3D auto zoom: +/-${range.toFixed(2)} g from mean` : `3D scale: +/-${range.toFixed(2)} g`, pad.left + 12, pad.top + 20);
 }
 
 function drawClassificationPlot() {
