@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=f2bc73d92767" />
+    <link rel="stylesheet" href="styles.css?v=eb68acfb48d6" />
   </head>
   <body>
     <div class="app-shell">
@@ -100,7 +100,7 @@
           <label class="field">
             <span>Firmware</span>
             <select id="firmwareSelect">
-              <option value="stage1_lab_console">Stage 1 ADC/filter v0.1.0</option>
+              <option value="stage1_lab_console">Stage 1 ADC/filter v0.1.1</option>
             </select>
           </label>
 
@@ -155,6 +155,8 @@
                 <button class="view-tab" type="button" data-view="imu2d">IMU 2D</button>
                 <button class="view-tab" type="button" data-view="imu3d">IMU 3D</button>
                 <button class="view-tab" type="button" data-view="classification">Class</button>
+                <button class="view-tab" type="button" data-view="dataset">Dataset</button>
+                <button class="view-tab" type="button" data-view="model">Model</button>
               </div>
               <div class="toggle-group" role="group" aria-label="Trace visibility">
                 <label><input id="showRawToggle" type="checkbox" checked /> Raw</label>
@@ -164,7 +166,182 @@
             </div>
           </div>
           <canvas id="signalCanvas" width="1200" height="520" aria-label="ADC signal plot"></canvas>
-          <div class="metric-grid">
+          <section id="datasetView" class="lab-view is-hidden" aria-label="Dataset collection">
+            <div class="lab-view-header">
+              <div>
+                <h2>Dataset Collection</h2>
+                <p>Windowed IMU samples for browser-side TinyML training</p>
+              </div>
+              <strong id="datasetSummary">0 windows</strong>
+            </div>
+
+            <div class="lab-grid">
+              <section class="lab-section">
+                <div class="section-title">
+                  <h3>Capture</h3>
+                  <span id="datasetCaptureState">Idle</span>
+                </div>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>Label</span>
+                    <input id="datasetLabelInput" type="text" value="motion_a" />
+                  </label>
+
+                  <label class="field">
+                    <span>Window</span>
+                    <input id="datasetWindowInput" type="number" min="16" max="900" step="1" value="125" />
+                  </label>
+                </div>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>Stride</span>
+                    <input id="datasetStrideInput" type="number" min="1" max="900" step="1" value="31" />
+                  </label>
+
+                  <label class="field">
+                    <span>Feature</span>
+                    <select id="datasetFeatureSelect">
+                      <option value="STATS">Stats 15</option>
+                      <option value="FLATTEN">Flatten window</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>Source</span>
+                  <select id="datasetSourceSelect">
+                    <option value="PROCESSED">Processed IMU</option>
+                    <option value="RAW">Raw IMU</option>
+                  </select>
+                </label>
+
+                <div class="button-row">
+                  <button id="datasetCaptureButton" type="button">Start Capture</button>
+                  <button id="datasetCaptureOneButton" type="button">Capture One</button>
+                </div>
+
+                <div class="button-row">
+                  <button id="datasetExportJsonButton" type="button">Export JSON</button>
+                  <button id="datasetExportCsvButton" type="button">Export CSV</button>
+                </div>
+
+                <div class="button-row">
+                  <button id="datasetClearButton" type="button">Clear Dataset</button>
+                  <label class="file-button">
+                    <input id="datasetImportInput" type="file" accept=".json,application/json" />
+                    Import JSON
+                  </label>
+                </div>
+              </section>
+
+              <section class="lab-section">
+                <div class="section-title">
+                  <h3>Windows</h3>
+                  <span id="datasetFeatureState">No data</span>
+                </div>
+                <div id="datasetLabelList" class="dataset-label-list"></div>
+                <div class="dataset-window-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Label</th>
+                        <th>Window</th>
+                        <th>Feature</th>
+                        <th>Source</th>
+                      </tr>
+                    </thead>
+                    <tbody id="datasetTableBody"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section id="modelView" class="lab-view is-hidden" aria-label="Model lab">
+            <div class="lab-view-header">
+              <div>
+                <h2>Model Lab</h2>
+                <p>Browser-trained ANN from collected windows</p>
+              </div>
+              <strong id="modelStatus">Idle</strong>
+            </div>
+
+            <div class="lab-grid">
+              <section class="lab-section">
+                <div class="section-title">
+                  <h3>Architecture</h3>
+                  <span id="modelShapeState">No model</span>
+                </div>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>Hidden Layers</span>
+                    <input id="hiddenLayerInput" type="number" min="0" max="4" step="1" value="1" />
+                  </label>
+
+                  <label class="field">
+                    <span>Neurons / Layer</span>
+                    <input id="neuronInput" type="number" min="2" max="128" step="1" value="16" />
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>Activation</span>
+                  <select id="activationSelect">
+                    <option value="relu">ReLU</option>
+                    <option value="tanh">Tanh</option>
+                    <option value="sigmoid">Sigmoid</option>
+                  </select>
+                </label>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>Learning Rate</span>
+                    <input id="learningRateInput" type="number" min="0.0001" max="1" step="0.001" value="0.02" />
+                  </label>
+
+                  <label class="field">
+                    <span>Epochs</span>
+                    <input id="epochInput" type="number" min="1" max="2000" step="1" value="120" />
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>Pruning Sparsity</span>
+                  <div class="inline-input">
+                    <input id="pruningInput" type="range" min="0" max="0.95" step="0.01" value="0" />
+                    <output id="pruningOutput">0%</output>
+                  </div>
+                </label>
+
+                <label class="check-field">
+                  <input id="quantizeToggle" type="checkbox" checked />
+                  <span>Quantized export</span>
+                </label>
+
+                <button id="trainModelButton" type="button">Train Model</button>
+
+                <div class="button-row">
+                  <button id="exportModelJsonButton" type="button">Export JSON</button>
+                  <button id="exportCArrayButton" type="button">Export C Array</button>
+                </div>
+              </section>
+
+              <section class="lab-section">
+                <div class="section-title">
+                  <h3>Result</h3>
+                  <span id="modelMetricState">Waiting</span>
+                </div>
+                <div id="modelMetrics" class="model-metrics"></div>
+                <pre id="modelLog" class="model-log"></pre>
+              </section>
+            </div>
+          </section>
+
+          <div id="metricGrid" class="metric-grid">
             <div>
               <span id="metric1Label">Raw</span>
               <strong id="rawMetric">--</strong>
@@ -196,6 +373,9 @@
               <option value="RAW">Raw passthrough</option>
               <option value="MA">Moving average</option>
               <option value="EMA">Exponential average</option>
+              <option value="IIR_LPF">IIR low-pass</option>
+              <option value="IIR_HPF">IIR high-pass</option>
+              <option value="IIR_BPF">IIR band-pass</option>
             </select>
           </label>
 
@@ -212,7 +392,100 @@
             <input id="windowInput" type="number" min="1" max="32" step="1" value="8" />
           </label>
 
+          <label class="field">
+            <span>IIR Order</span>
+            <input id="iirOrderInput" type="number" min="1" max="4" step="1" value="2" />
+          </label>
+
+          <label class="field">
+            <span>IIR Low Cutoff</span>
+            <div class="inline-input">
+              <input id="iirLowInput" type="number" min="0.01" max="450" step="0.1" value="1.0" />
+              <span>Hz</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>IIR High Cutoff</span>
+            <div class="inline-input">
+              <input id="iirHighInput" type="number" min="0.02" max="450" step="0.1" value="10.0" />
+              <span>Hz</span>
+            </div>
+          </label>
+
           <button id="applyFilterButton" type="button" disabled>Apply Filter</button>
+
+          <div class="divider"></div>
+
+          <div class="panel-header compact">
+            <h2>Input</h2>
+            <span id="inputState">125 win</span>
+          </div>
+
+          <label class="field">
+            <span>Window Samples</span>
+            <input id="inputWindowInput" type="number" min="16" max="900" step="1" value="125" />
+          </label>
+
+          <label class="field">
+            <span>Pre-filter</span>
+            <select id="inputFilterSelect">
+              <option value="NONE">None</option>
+              <option value="MA">Moving average</option>
+              <option value="EMA">Exponential average</option>
+              <option value="IIR_LPF">IIR low-pass</option>
+              <option value="IIR_HPF">IIR high-pass</option>
+              <option value="IIR_BPF">IIR band-pass</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Normalize</span>
+            <select id="normalizeSelect">
+              <option value="NONE">None</option>
+              <option value="CENTER">Center mean</option>
+              <option value="ZSCORE">Z-score</option>
+              <option value="MINMAX">Min-max -1..1</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>EMA Alpha</span>
+            <div class="inline-input">
+              <input id="inputAlphaInput" type="range" min="0.001" max="1" step="0.001" value="0.2" />
+              <output id="inputAlphaOutput">0.200</output>
+            </div>
+          </label>
+
+          <div class="field-row">
+            <label class="field">
+              <span>MA Window</span>
+              <input id="inputMaWindowInput" type="number" min="1" max="128" step="1" value="5" />
+            </label>
+
+            <label class="field">
+              <span>IIR Order</span>
+              <input id="inputIirOrderInput" type="number" min="1" max="4" step="1" value="2" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>IIR Low Cutoff</span>
+            <div class="inline-input">
+              <input id="inputIirLowInput" type="number" min="0.01" max="95" step="0.1" value="0.5" />
+              <span>Hz</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>IIR High Cutoff</span>
+            <div class="inline-input">
+              <input id="inputIirHighInput" type="number" min="0.02" max="95" step="0.1" value="8.0" />
+              <span>Hz</span>
+            </div>
+          </label>
+
+          <button id="applyInputButton" type="button">Apply Input</button>
 
           <div class="divider"></div>
 
@@ -266,6 +539,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=0bb0e93c04f6"></script>
+    <script src="app.js?v=ed9d5b0b19ef"></script>
   </body>
 </html>

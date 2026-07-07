@@ -266,6 +266,12 @@ h2 {
   font-weight: 700;
 }
 
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 input,
 select {
   min-width: 0;
@@ -286,6 +292,10 @@ input[type="range"] {
 
 input[type="file"] {
   padding: 7px 8px;
+}
+
+.is-hidden {
+  display: none !important;
 }
 
 .flash-progress {
@@ -345,6 +355,22 @@ input[type="file"] {
   padding: 0;
 }
 
+.check-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.check-field input {
+  width: 15px;
+  min-height: 15px;
+  padding: 0;
+}
+
 #signalCanvas {
   width: 100%;
   height: clamp(360px, 34vw, 700px);
@@ -353,6 +379,124 @@ input[type="file"] {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: #fbfcfd;
+}
+
+.lab-view {
+  min-height: clamp(360px, 34vw, 700px);
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 16px;
+  background: #fbfcfd;
+}
+
+.lab-view-header,
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lab-view-header p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lab-view-header strong,
+.section-title span {
+  color: var(--teal-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lab-grid {
+  display: grid;
+  grid-template-columns: minmax(270px, 0.85fr) minmax(320px, 1.15fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.lab-section {
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.lab-section h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.file-button {
+  display: grid;
+  min-height: 36px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.file-button:hover {
+  border-color: var(--teal);
+  color: var(--teal-dark);
+}
+
+.file-button input {
+  display: none;
+}
+
+.dataset-label-list,
+.model-metrics {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dataset-label-row,
+.metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dataset-window-table {
+  max-height: 280px;
+  overflow: auto;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.model-log {
+  height: 260px;
+  overflow: auto;
+  margin: 12px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px;
+  background: #111b20;
+  color: #d7f0ef;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .metric-grid {
@@ -526,6 +670,10 @@ th:first-child {
     grid-column: auto;
   }
 
+  .lab-grid {
+    grid-template-columns: 1fr;
+  }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;
@@ -550,6 +698,10 @@ th:first-child {
   }
 
   .button-row {
+    grid-template-columns: 1fr;
+  }
+
+  .field-row {
     grid-template-columns: 1fr;
   }
 
