@@ -192,6 +192,8 @@ function setUiEnabled() {
   el.recordButton.textContent = state.recording ? "Stop Rec" : "Record";
   el.flashButton.textContent = state.flash.helperBusy ? "Flashing..." : "Flash Firmware";
   el.directFlashButton.textContent = state.flash.directBusy ? "Flashing..." : "Direct Flash";
+  el.startButton.textContent = state.activeView === "classification" ? "Start + Class" : "Start";
+  el.stopButton.textContent = state.activeView === "classification" ? "Stop + Class" : "Stop";
   setStatus(el.portStatus, connected ? "Connected" : "Disconnected", connected ? "" : "muted");
   setStatus(el.streamStatus, streaming ? "Streaming" : "Idle", streaming ? "warning" : "muted");
   setStatus(el.helperStatus, state.flash.helperOnline ? "Helper online" : "Helper offline", state.flash.helperOnline ? "" : "muted");
@@ -658,6 +660,12 @@ function handleLine(line) {
   if (line.startsWith("ERR,EI_ACCEL_MODEL_REQUIRED")) {
     state.classification.active = false;
     el.classificationState.textContent = "Model missing";
+    setUiEnabled();
+    return;
+  }
+
+  if (line.startsWith("ERR,EI_RUN_CLASSIFIER") || line.startsWith("ERR,EI_SIGNAL_FROM_BUFFER")) {
+    el.classificationState.textContent = "Inference error";
     setUiEnabled();
     return;
   }
@@ -1455,7 +1463,9 @@ function drawClassificationPlot() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 10);
   if (scores.length === 0) {
-    drawEmptyPlot("Waiting for classification results");
+    drawEmptyPlot(state.classification.active
+      ? "Collecting inference window - first result takes about 2 s"
+      : "Press Start + Class or Start Class to run inference");
     return;
   }
 
@@ -1518,6 +1528,14 @@ async function applyFilter() {
 }
 
 async function startStreaming() {
+  if (state.activeView === "classification") {
+    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
+    await sendCommand(`RATE ${state.settings.rateHz}`);
+    await sendCommand("CLS ON");
+    await sendCommand("START");
+    return;
+  }
+
   if (state.activeView !== "adc") {
     state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
     await sendCommand(`RATE ${state.settings.rateHz}`);
@@ -1528,6 +1546,13 @@ async function startStreaming() {
   await applyAcquisition();
   await applyFilter();
   await sendCommand("START");
+}
+
+async function stopStreaming() {
+  if (state.activeView === "classification") {
+    await sendCommand("CLS OFF");
+  }
+  await sendCommand("STOP");
 }
 
 function clearData() {
@@ -1610,7 +1635,7 @@ function bindEvents() {
   el.connectButton.addEventListener("click", connectDevice);
   el.disconnectButton.addEventListener("click", disconnectDevice);
   el.startButton.addEventListener("click", startStreaming);
-  el.stopButton.addEventListener("click", () => sendCommand("STOP"));
+  el.stopButton.addEventListener("click", stopStreaming);
   el.applyAcquisitionButton.addEventListener("click", applyAcquisition);
   el.applyFilterButton.addEventListener("click", applyFilter);
   el.pingButton.addEventListener("click", () => sendCommand("PING"));
