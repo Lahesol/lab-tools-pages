@@ -1,5 +1,7 @@
 const MAX_POINTS = 900;
 const MAX_TABLE_ROWS = 80;
+const RENDER_INTERVAL_MS = 33;
+const TABLE_RENDER_INTERVAL_MS = 150;
 const DEFAULT_PREBUILT_FIRMWARES = [
   {
     id: "stage1_lab_console",
@@ -27,6 +29,10 @@ const state = {
   samples: [],
   records: [],
   tableRows: [],
+  latestSample: null,
+  renderPending: false,
+  lastRenderTime: 0,
+  lastTableRenderTime: 0,
   lastRateCheckTime: performance.now(),
   lastRateCheckCount: 0,
   receivedSamples: 0,
@@ -706,9 +712,40 @@ function addSample(sample) {
     state.tableRows.pop();
   }
 
-  updateMetrics(sample);
-  updateTable();
-  updateRateMetric();
+  state.latestSample = sample;
+  scheduleUiRender();
+}
+
+function scheduleUiRender() {
+  if (state.renderPending) {
+    return;
+  }
+
+  const elapsed = performance.now() - state.lastRenderTime;
+  const delay = Math.max(0, RENDER_INTERVAL_MS - elapsed);
+  state.renderPending = true;
+
+  setTimeout(() => {
+    requestAnimationFrame(flushUiRender);
+  }, delay);
+}
+
+function flushUiRender(now) {
+  state.renderPending = false;
+  state.lastRenderTime = now;
+
+  if (!state.latestSample) {
+    return;
+  }
+
+  updateMetrics(state.latestSample);
+  updateRateMetric(now);
+
+  if (now - state.lastTableRenderTime >= TABLE_RENDER_INTERVAL_MS) {
+    updateTable();
+    state.lastTableRenderTime = now;
+  }
+
   drawPlot();
   setUiEnabled();
 }
@@ -723,8 +760,7 @@ function updateMetrics(sample) {
   el.lastTimestamp.textContent = `${sample.micros} us`;
 }
 
-function updateRateMetric() {
-  const now = performance.now();
+function updateRateMetric(now = performance.now()) {
   const elapsed = now - state.lastRateCheckTime;
   if (elapsed < 1000) {
     return;
@@ -878,6 +914,10 @@ function clearData() {
   state.samples = [];
   state.records = [];
   state.tableRows = [];
+  state.latestSample = null;
+  state.renderPending = false;
+  state.lastRenderTime = performance.now();
+  state.lastTableRenderTime = 0;
   state.receivedSamples = 0;
   state.lastRateCheckCount = 0;
   state.lastRateCheckTime = performance.now();
