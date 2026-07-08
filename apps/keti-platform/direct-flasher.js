@@ -197,6 +197,39 @@
       });
     }
 
+    async openBootloaderTransport(port, message = "Opening bootloader") {
+      this.transport = new SerialTransport(port, this.baudRate);
+      this.progress(1, message);
+      await this.transport.open();
+    }
+
+    async verifyBootloaderTarget() {
+      await this.initBootloader();
+      const version = await this.readVersion();
+      this.log(`version=${version}`);
+      this.ensureArduinoExtensions(version);
+
+      const chip = await this.identifyChip();
+      this.log(`chip=${chip}`);
+      if (!/nRF52840/i.test(chip)) {
+        throw new Error(`Unexpected bootloader target: ${chip || "unknown"}`);
+      }
+      return { version, chip };
+    }
+
+    async probe(port) {
+      await this.openBootloaderTransport(port, "Checking bootloader");
+
+      try {
+        const result = await this.verifyBootloaderTarget();
+        this.progress(100, "Bootloader OK");
+        return result;
+      } finally {
+        await this.transport.close();
+        this.transport = null;
+      }
+    }
+
     async flash({ port, firmwareBytes, maxSketchSize = MAX_SKETCH_SIZE }) {
       if (!(firmwareBytes instanceof Uint8Array)) {
         throw new Error("Firmware must be provided as a Uint8Array");
@@ -208,22 +241,10 @@
         throw new Error(`Firmware is larger than the ${maxSketchSize} byte sketch limit`);
       }
 
-      this.transport = new SerialTransport(port, this.baudRate);
-      this.progress(1, "Opening bootloader");
-      await this.transport.open();
+      await this.openBootloaderTransport(port, "Opening bootloader");
 
       try {
-        await this.initBootloader();
-        const version = await this.readVersion();
-        this.log(`version=${version}`);
-        this.ensureArduinoExtensions(version);
-
-        const chip = await this.identifyChip();
-        this.log(`chip=${chip}`);
-        if (!/nRF52840/i.test(chip)) {
-          throw new Error(`Unexpected bootloader target: ${chip || "unknown"}`);
-        }
-
+        await this.verifyBootloaderTarget();
         this.progress(8, "Preparing flash");
         await this.prepareVectorTable(firmwareBytes);
         await this.chipErase(0);
@@ -337,11 +358,17 @@
     await port.close();
   }
 
+  async function probeBootloaderPort(port, options = {}) {
+    const flasher = new DirectSamBaFlasher(options);
+    return flasher.probe(port);
+  }
+
   const api = {
     ARDUINO_USB_FILTERS,
     BOOTLOADER_BAUD,
     MAX_SKETCH_SIZE,
     DirectSamBaFlasher,
+    probeBootloaderPort,
     touch1200BpsReset
   };
 

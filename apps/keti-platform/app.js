@@ -1804,6 +1804,23 @@ async function enterBootloaderAndResolvePort() {
   return requestArduinoSerialPort();
 }
 
+async function verifyDirectBootloaderPort(port) {
+  setDirectFlashProgress(8, "Checking bootloader");
+  try {
+    const result = await window.KetiDirectFlash.probeBootloaderPort(port, {
+      onLog: (message) => logLine(`DIRECT_FLASH_PROBE,${message}`),
+      onProgress: ({ percent, message }) => setDirectFlashProgress(Math.min(9, percent), message)
+    });
+    logLine(`DIRECT_FLASH_PROBE_OK,chip=${result.chip}`);
+    setDirectFlashProgress(10, "Bootloader OK");
+    return result;
+  } catch (error) {
+    state.flash.directBootloaderTouched = false;
+    setDirectFlashProgress(0, "Not bootloader");
+    throw new Error(`Bootloader check failed: ${error.message}`);
+  }
+}
+
 async function enterBootloaderDirect() {
   if (!("serial" in navigator) || !window.KetiDirectFlash) {
     setDirectFlashProgress(0, "Unavailable");
@@ -1857,7 +1874,9 @@ async function directFlashFirmware() {
       ? await requestArduinoSerialPort()
       : await enterBootloaderAndResolvePort();
 
-    setDirectFlashProgress(0, "Loading BIN");
+    await verifyDirectBootloaderPort(port);
+
+    setDirectFlashProgress(10, "Loading BIN");
     const loaded = await loadDirectFirmwareBytes(firmware);
     logLine(`DIRECT_FLASH,firmware=${firmware.id},bytes=${loaded.bytes.length},source=${loaded.source}`);
 
