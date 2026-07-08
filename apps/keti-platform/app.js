@@ -115,10 +115,6 @@ const state = {
   },
   preprocess: createPreprocessState(),
   flash: {
-    helperOnline: false,
-    helperBusy: false,
-    helperUrl: "http://127.0.0.1:8765",
-    firmwares: [],
     directFirmwares: DEFAULT_PREBUILT_FIRMWARES,
     directBasePath: "firmware/prebuilt/",
     directBusy: false,
@@ -128,7 +124,6 @@ const state = {
 
 const el = {
   browserStatus: document.getElementById("browserStatus"),
-  helperStatus: document.getElementById("helperStatus"),
   portStatus: document.getElementById("portStatus"),
   streamStatus: document.getElementById("streamStatus"),
   sampleCount: document.getElementById("sampleCount"),
@@ -144,18 +139,11 @@ const el = {
   recordButton: document.getElementById("recordButton"),
   clearButton: document.getElementById("clearButton"),
   exportButton: document.getElementById("exportButton"),
-  helperUrlInput: document.getElementById("helperUrlInput"),
-  helperCheckButton: document.getElementById("helperCheckButton"),
-  refreshPortsButton: document.getElementById("refreshPortsButton"),
-  flashPortSelect: document.getElementById("flashPortSelect"),
   firmwareSelect: document.getElementById("firmwareSelect"),
   flashButton: document.getElementById("flashButton"),
   flashState: document.getElementById("flashState"),
-  directFlashState: document.getElementById("directFlashState"),
-  directBinInput: document.getElementById("directBinInput"),
   bootloaderButton: document.getElementById("bootloaderButton"),
-  directFlashButton: document.getElementById("directFlashButton"),
-  directFlashProgress: document.getElementById("directFlashProgress"),
+  flashProgress: document.getElementById("flashProgress"),
   channelSelect: document.getElementById("channelSelect"),
   rateInput: document.getElementById("rateInput"),
   resolutionSelect: document.getElementById("resolutionSelect"),
@@ -332,22 +320,16 @@ function setUiEnabled() {
   el.ppgAnalyzeButton.disabled = state.ppg.loading || state.ppg.samples.length === 0;
   el.ppgLoadSampleButton.disabled = state.ppg.loading;
   el.ppgFileInput.disabled = state.ppg.loading;
-  el.refreshPortsButton.disabled = !state.flash.helperOnline || state.flash.helperBusy;
-  el.flashButton.disabled = !state.flash.helperOnline || state.flash.helperBusy;
-  el.helperCheckButton.disabled = state.flash.helperBusy;
   el.bootloaderButton.disabled = !("serial" in navigator) || state.flash.directBusy;
-  el.directFlashButton.disabled = !("serial" in navigator) || state.flash.directBusy;
-  el.directBinInput.disabled = state.flash.directBusy;
+  el.flashButton.disabled = !("serial" in navigator) || state.flash.directBusy;
 
   el.recordButton.textContent = state.recording ? "Stop Rec" : "Record";
   el.datasetCaptureButton.textContent = state.dataset.captureActive ? "Stop Capture" : "Start Capture";
-  el.flashButton.textContent = state.flash.helperBusy ? "Flashing..." : "Flash Firmware";
-  el.directFlashButton.textContent = state.flash.directBusy ? "Flashing..." : "Direct Flash";
+  el.flashButton.textContent = state.flash.directBusy ? "Flashing..." : "Flash Firmware";
   el.startButton.textContent = state.activeView === "classification" ? "Start + Class" : "Start";
   el.stopButton.textContent = state.activeView === "classification" ? "Stop + Class" : "Stop";
   setStatus(el.portStatus, connected ? "Connected" : "Disconnected", connected ? "" : "muted");
   setStatus(el.streamStatus, streaming ? "Streaming" : "Idle", streaming ? "warning" : "muted");
-  setStatus(el.helperStatus, state.flash.helperOnline ? "Helper online" : "Helper offline", state.flash.helperOnline ? "" : "muted");
 }
 
 function normalizeNumber(value, fallback, min, max) {
@@ -1514,33 +1496,6 @@ function downloadText(stem, extension, text, type) {
   URL.revokeObjectURL(url);
 }
 
-function getHelperUrl() {
-  const raw = (el.helperUrlInput.value || state.flash.helperUrl).trim();
-  return raw.replace(/\/+$/, "");
-}
-
-async function helperRequest(path, options = {}, timeoutMs = 15000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`${getHelperUrl()}${path}`, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      }
-    });
-    const payload = await response.json();
-    if (!response.ok || payload.ok === false) {
-      throw new Error(payload.error || `Helper returned HTTP ${response.status}`);
-    }
-    return payload;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function populateFirmwareSelect(firmwares) {
   const previous = el.firmwareSelect.value || "stage1_lab_console";
   const list = firmwares.length > 0 ? firmwares : DEFAULT_PREBUILT_FIRMWARES;
@@ -1560,102 +1515,6 @@ function populateFirmwareSelect(firmwares) {
   }
 }
 
-async function checkFlashHelper() {
-  try {
-    el.flashState.textContent = "Checking";
-    const payload = await helperRequest("/api/health", { method: "GET" }, 4000);
-    state.flash.helperOnline = true;
-    state.flash.helperUrl = getHelperUrl();
-    el.flashState.textContent = payload.arduinoCli?.ok ? "Helper online" : "CLI warning";
-    logLine(`FLASH_HELPER,online,${payload.helper},${payload.version}`);
-    await loadFirmwares();
-    await refreshFlashPorts();
-  } catch (error) {
-    state.flash.helperOnline = false;
-    el.flashState.textContent = "Helper offline";
-    logLine(`ERR,flash_helper,${error.message}`);
-  } finally {
-    setUiEnabled();
-  }
-}
-
-async function loadFirmwares() {
-  const payload = await helperRequest("/api/firmwares", { method: "GET" }, 5000);
-  state.flash.firmwares = payload.firmware || [];
-  populateFirmwareSelect(state.flash.firmwares);
-}
-
-async function refreshFlashPorts() {
-  const payload = await helperRequest("/api/ports", { method: "GET" }, 12000);
-  const ports = payload.ports || [];
-  const previous = el.flashPortSelect.value || "COM12";
-  const options = ports.length > 0 ? ports : [{ address: previous, boards: [] }];
-
-  el.flashPortSelect.replaceChildren(
-    ...options.map((port) => {
-      const option = document.createElement("option");
-      option.value = port.address;
-      const boardName = port.boards?.[0]?.name ? ` - ${port.boards[0].name}` : "";
-      option.textContent = `${port.address}${boardName}`;
-      return option;
-    })
-  );
-
-  if ([...el.flashPortSelect.options].some((option) => option.value === previous)) {
-    el.flashPortSelect.value = previous;
-  }
-  logLine(`FLASH_PORTS,${options.map((port) => port.address).join("|")}`);
-}
-
-async function flashFirmware() {
-  if (!state.flash.helperOnline) {
-    await checkFlashHelper();
-    if (!state.flash.helperOnline) {
-      return;
-    }
-  }
-
-  const port = el.flashPortSelect.value;
-  const firmwareId = el.firmwareSelect.value;
-  state.flash.helperBusy = true;
-  el.flashState.textContent = "Flashing";
-  setUiEnabled();
-
-  try {
-    if (state.connected) {
-      await disconnectDevice();
-      await sleep(500);
-    }
-
-    logLine(`FLASH_START,port=${port},firmware=${firmwareId}`);
-    const payload = await helperRequest("/api/flash", {
-      method: "POST",
-      body: JSON.stringify({ port, firmwareId })
-    }, 120000);
-
-    appendHelperOutput(payload.stdout);
-    appendHelperOutput(payload.stderr);
-    el.flashState.textContent = "Flash OK";
-    logLine(`FLASH_OK,port=${payload.port},elapsed_ms=${payload.elapsedMs}`);
-  } catch (error) {
-    el.flashState.textContent = "Flash failed";
-    logLine(`ERR,flash,${error.message}`);
-  } finally {
-    state.flash.helperBusy = false;
-    setUiEnabled();
-  }
-}
-
-function appendHelperOutput(output) {
-  if (!output) {
-    return;
-  }
-  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  for (const line of lines.slice(-16)) {
-    logLine(`FLASH_LOG,${line}`);
-  }
-}
-
 async function loadDirectFirmwareManifest() {
   for (const manifestPath of DIRECT_MANIFEST_PATHS) {
     try {
@@ -1669,20 +1528,16 @@ async function loadDirectFirmwareManifest() {
       }
       state.flash.directFirmwares = payload.firmware;
       state.flash.directBasePath = manifestPath.replace(/manifest\.json$/i, "");
-      if (!state.flash.helperOnline) {
-        populateFirmwareSelect(state.flash.directFirmwares);
-      }
+      populateFirmwareSelect(state.flash.directFirmwares);
       logLine(`DIRECT_MANIFEST,${manifestPath},items=${payload.firmware.length}`);
       return;
     } catch (error) {
-      // Local file access may block fetch; the Local BIN field remains available.
+      // Try the next static firmware manifest path.
     }
   }
 
   state.flash.directFirmwares = DEFAULT_PREBUILT_FIRMWARES;
-  if (!state.flash.helperOnline) {
-    populateFirmwareSelect(state.flash.directFirmwares);
-  }
+  populateFirmwareSelect(state.flash.directFirmwares);
   logLine("DIRECT_MANIFEST,default");
 }
 
@@ -1690,15 +1545,9 @@ function getSelectedFirmware() {
   const firmwareId = el.firmwareSelect.value || "stage1_lab_console";
   const candidates = [
     ...state.flash.directFirmwares,
-    ...state.flash.firmwares,
     ...DEFAULT_PREBUILT_FIRMWARES
   ];
   return candidates.find((firmware) => firmware.id === firmwareId) || DEFAULT_PREBUILT_FIRMWARES[0];
-}
-
-async function readLocalFirmwareFile(file) {
-  const buffer = await file.arrayBuffer();
-  return new Uint8Array(buffer);
 }
 
 async function fetchFirmwareBytes(firmware) {
@@ -1727,7 +1576,7 @@ async function fetchFirmwareBytes(firmware) {
     }
   }
 
-  throw new Error("Could not load static firmware; choose a Local BIN file instead");
+  throw new Error("Could not load static firmware from the prebuilt assets");
 }
 
 async function sha256Hex(bytes) {
@@ -1756,27 +1605,18 @@ async function verifyFirmwareBytes(bytes, firmware) {
 }
 
 async function loadDirectFirmwareBytes(firmware) {
-  const localFile = el.directBinInput.files?.[0] || null;
-  let bytes;
-  let source;
-
-  if (localFile) {
-    bytes = await readLocalFirmwareFile(localFile);
-    source = localFile.name;
-  } else {
-    const loaded = await fetchFirmwareBytes(firmware);
-    bytes = loaded.bytes;
-    source = loaded.source;
-  }
+  const loaded = await fetchFirmwareBytes(firmware);
+  const bytes = loaded.bytes;
+  const source = loaded.source;
 
   await verifyFirmwareBytes(bytes, firmware);
   return { bytes, source };
 }
 
 function setDirectFlashProgress(percent, message) {
-  el.directFlashProgress.value = Math.max(0, Math.min(100, percent));
+  el.flashProgress.value = Math.max(0, Math.min(100, percent));
   if (message) {
-    el.directFlashState.textContent = message;
+    el.flashState.textContent = message;
   }
 }
 
@@ -1892,7 +1732,7 @@ async function enterBootloaderDirect() {
   }
 }
 
-async function directFlashFirmware() {
+async function flashFirmware() {
   if (!("serial" in navigator) || !window.KetiDirectFlash) {
     setDirectFlashProgress(0, "Unavailable");
     logLine("ERR,direct_flash,web_serial_unavailable");
@@ -3891,20 +3731,8 @@ function bindEvents() {
   el.recordButton.addEventListener("click", toggleRecording);
   el.clearButton.addEventListener("click", clearData);
   el.exportButton.addEventListener("click", exportCsv);
-  el.helperCheckButton.addEventListener("click", checkFlashHelper);
-  el.refreshPortsButton.addEventListener("click", refreshFlashPorts);
   el.flashButton.addEventListener("click", flashFirmware);
   el.bootloaderButton.addEventListener("click", enterBootloaderDirect);
-  el.directFlashButton.addEventListener("click", directFlashFirmware);
-  el.directBinInput.addEventListener("change", () => {
-    const file = el.directBinInput.files?.[0];
-    setDirectFlashProgress(0, file ? "Local BIN" : "Ready");
-  });
-  el.helperUrlInput.addEventListener("change", () => {
-    state.flash.helperOnline = false;
-    el.flashState.textContent = "Helper unchecked";
-    setUiEnabled();
-  });
   el.showRawToggle.addEventListener("change", drawPlot);
   el.showFilteredToggle.addEventListener("change", drawPlot);
   el.autoScaleToggle.addEventListener("change", drawPlot);
@@ -3939,7 +3767,6 @@ function init() {
   renderClassification();
   drawPlot();
   loadDirectFirmwareManifest();
-  checkFlashHelper();
 }
 
 init();
