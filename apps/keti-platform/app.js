@@ -13,7 +13,12 @@ const AXIS_COLORS = {
 };
 const BOOTLOADER_REENUMERATE_WAIT_MS = 6500;
 const BOOTLOADER_POLL_INTERVAL_MS = 250;
-const NON_CANVAS_VIEWS = new Set(["dataset", "model"]);
+const PPG_SAMPLE_PATHS = [
+  "../ppg_dalia_subject1_acc_ppg_activity_temp.csv",
+  "ppg_dalia_subject1_acc_ppg_activity_temp.csv"
+];
+const PPG_MAX_PARSE_ROWS = 240000;
+const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
 const DEFAULT_PREBUILT_FIRMWARES = [
   {
     id: "stage1_lab_console",
@@ -69,6 +74,15 @@ const state = {
     timing: {},
     anomaly: null,
     updatedAt: null
+  },
+  ppg: {
+    samples: [],
+    sampleRateHz: 32,
+    source: "",
+    columns: [],
+    analysis: null,
+    loading: false,
+    error: ""
   },
   renderPending: false,
   lastRenderTime: 0,
@@ -168,6 +182,24 @@ const el = {
   autoScaleToggle: document.getElementById("autoScaleToggle"),
   signalCanvas: document.getElementById("signalCanvas"),
   metricGrid: document.getElementById("metricGrid"),
+  ppgView: document.getElementById("ppgView"),
+  ppgStatus: document.getElementById("ppgStatus"),
+  ppgSourceState: document.getElementById("ppgSourceState"),
+  ppgMetricState: document.getElementById("ppgMetricState"),
+  ppgWindowState: document.getElementById("ppgWindowState"),
+  ppgCnnState: document.getElementById("ppgCnnState"),
+  ppgFileInput: document.getElementById("ppgFileInput"),
+  ppgLoadSampleButton: document.getElementById("ppgLoadSampleButton"),
+  ppgAnalyzeButton: document.getElementById("ppgAnalyzeButton"),
+  ppgSampleRateInput: document.getElementById("ppgSampleRateInput"),
+  ppgStartInput: document.getElementById("ppgStartInput"),
+  ppgDurationInput: document.getElementById("ppgDurationInput"),
+  ppgRefractoryInput: document.getElementById("ppgRefractoryInput"),
+  ppgThresholdInput: document.getElementById("ppgThresholdInput"),
+  ppgThresholdOutput: document.getElementById("ppgThresholdOutput"),
+  ppgMetrics: document.getElementById("ppgMetrics"),
+  ppgCanvas: document.getElementById("ppgCanvas"),
+  ppgCnnCanvas: document.getElementById("ppgCnnCanvas"),
   datasetView: document.getElementById("datasetView"),
   modelView: document.getElementById("modelView"),
   plotMeta: document.getElementById("plotMeta"),
@@ -297,6 +329,9 @@ function setUiEnabled() {
   el.trainModelButton.disabled = state.dataset.examples.length < 2 || labelCounts().length < 2;
   el.exportModelJsonButton.disabled = !state.model.trained;
   el.exportCArrayButton.disabled = !state.model.trained;
+  el.ppgAnalyzeButton.disabled = state.ppg.loading || state.ppg.samples.length === 0;
+  el.ppgLoadSampleButton.disabled = state.ppg.loading;
+  el.ppgFileInput.disabled = state.ppg.loading;
   el.refreshPortsButton.disabled = !state.flash.helperOnline || state.flash.helperBusy;
   el.flashButton.disabled = !state.flash.helperOnline || state.flash.helperBusy;
   el.helperCheckButton.disabled = state.flash.helperBusy;
@@ -1821,6 +1856,11 @@ async function verifyDirectBootloaderPort(port) {
   }
 }
 
+function isDirectBootloaderError(error) {
+  const message = String(error?.message || "");
+  return /bootloader|SAM-BA|N# ack|Unexpected bootloader target|Arduino extension|Timed out waiting/i.test(message);
+}
+
 async function enterBootloaderDirect() {
   if (!("serial" in navigator) || !window.KetiDirectFlash) {
     setDirectFlashProgress(0, "Unavailable");
@@ -1861,24 +1901,22 @@ async function directFlashFirmware() {
 
   const firmware = getSelectedFirmware();
   state.flash.directBusy = true;
-  setDirectFlashProgress(0, "Select bootloader");
+  setDirectFlashProgress(0, "Loading BIN");
   setUiEnabled();
 
   try {
+    const loaded = await loadDirectFirmwareBytes(firmware);
+    logLine(`DIRECT_FLASH,firmware=${firmware.id},bytes=${loaded.bytes.length},source=${loaded.source}`);
+
     if (state.connected) {
       await disconnectDevice();
       await sleep(300);
     }
 
+    setDirectFlashProgress(0, state.flash.directBootloaderTouched ? "Select bootloader" : "Select app port");
     const port = state.flash.directBootloaderTouched
       ? await requestArduinoSerialPort()
       : await enterBootloaderAndResolvePort();
-
-    await verifyDirectBootloaderPort(port);
-
-    setDirectFlashProgress(10, "Loading BIN");
-    const loaded = await loadDirectFirmwareBytes(firmware);
-    logLine(`DIRECT_FLASH,firmware=${firmware.id},bytes=${loaded.bytes.length},source=${loaded.source}`);
 
     const flasher = new window.KetiDirectFlash.DirectSamBaFlasher({
       onLog: (message) => logLine(`DIRECT_FLASH,${message}`),
@@ -1895,7 +1933,8 @@ async function directFlashFirmware() {
     setDirectFlashProgress(100, "Flash OK");
     logLine(`DIRECT_FLASH_OK,firmware=${firmware.id}`);
   } catch (error) {
-    setDirectFlashProgress(0, "Flash failed");
+    state.flash.directBootloaderTouched = false;
+    setDirectFlashProgress(0, isDirectBootloaderError(error) ? "Not bootloader" : "Flash failed");
     logLine(`ERR,direct_flash,${error.message}`);
   } finally {
     state.flash.directBusy = false;
@@ -2283,6 +2322,527 @@ function renderClassification() {
   );
 }
 
+function parseCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index];
+    if (char === "\"") {
+      if (quoted && line[index + 1] === "\"") {
+        current += "\"";
+        index++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells;
+}
+
+function inferPpgSampleRate(samples) {
+  if (samples.length < 2) {
+    return 32;
+  }
+  const deltas = [];
+  for (let index = 1; index < Math.min(samples.length, 80); index++) {
+    const delta = samples[index].tSec - samples[index - 1].tSec;
+    if (Number.isFinite(delta) && delta > 0) {
+      deltas.push(delta);
+    }
+  }
+  if (deltas.length === 0) {
+    return 32;
+  }
+  deltas.sort((a, b) => a - b);
+  return Math.max(1, Math.min(200, 1 / deltas[Math.floor(deltas.length / 2)]));
+}
+
+function parseTimestampSeconds(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/
+  );
+  if (match) {
+    const [, year, month, day, hour, minute, second, fraction = ""] = match;
+    const wholeSeconds = Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    ) / 1000;
+    const fractionalSeconds = fraction ? Number(`0.${fraction}`) : 0;
+    return wholeSeconds + fractionalSeconds;
+  }
+  const parsedMs = Date.parse(text);
+  return Number.isFinite(parsedMs) ? parsedMs / 1000 : NaN;
+}
+
+function parsePpgCsv(text, source = "CSV") {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length < 2) {
+    throw new Error("PPG CSV has no data rows");
+  }
+  const headers = parseCsvLine(lines[0]).map((header) => header.trim());
+  const indexOf = (name) => headers.findIndex((header) => header.toLowerCase() === name);
+  const timeIndex = indexOf("time");
+  const ppgIndex = indexOf("ppg");
+  const hrIndex = indexOf("hr");
+  const activityIndex = indexOf("activity_label") >= 0 ? indexOf("activity_label") : indexOf("activity");
+  if (ppgIndex < 0) {
+    throw new Error("PPG CSV must include a ppg column");
+  }
+
+  const samples = [];
+  let firstTimeSec = null;
+  for (let lineIndex = 1; lineIndex < lines.length && samples.length < PPG_MAX_PARSE_ROWS; lineIndex++) {
+    const cells = parseCsvLine(lines[lineIndex]);
+    const ppg = Number(cells[ppgIndex]);
+    if (!Number.isFinite(ppg)) {
+      continue;
+    }
+    let tSec = samples.length / 32;
+    if (timeIndex >= 0) {
+      const timeSec = parseTimestampSeconds(cells[timeIndex]);
+      if (Number.isFinite(timeSec)) {
+        if (firstTimeSec == null) {
+          firstTimeSec = timeSec;
+        }
+        tSec = timeSec - firstTimeSec;
+      }
+    }
+    samples.push({
+      tSec,
+      ppg,
+      hr: hrIndex >= 0 ? Number(cells[hrIndex]) : NaN,
+      activity: activityIndex >= 0 ? cells[activityIndex] : ""
+    });
+  }
+  if (samples.length < 2) {
+    throw new Error("No numeric PPG samples found");
+  }
+
+  const sampleRateHz = inferPpgSampleRate(samples);
+  state.ppg.samples = samples;
+  state.ppg.sampleRateHz = sampleRateHz;
+  state.ppg.source = source;
+  state.ppg.columns = headers;
+  state.ppg.analysis = null;
+  state.ppg.error = "";
+  el.ppgSampleRateInput.value = sampleRateHz.toFixed(Math.abs(sampleRateHz - Math.round(sampleRateHz)) < 0.01 ? 0 : 2);
+  logLine(`PPG_LOAD,rows=${samples.length},fs=${sampleRateHz.toFixed(2)},source=${source}`);
+  renderPpgView();
+  setUiEnabled();
+}
+
+function getPpgOptions() {
+  return {
+    sampleRateHz: normalizeNumber(el.ppgSampleRateInput.value, state.ppg.sampleRateHz || 32, 10, 200),
+    startMin: normalizeNumber(el.ppgStartInput.value, 0, 0, 10000),
+    durationSec: normalizeNumber(el.ppgDurationInput.value, 60, 10, 300),
+    refractoryMs: normalizeNumber(el.ppgRefractoryInput.value, 420, 250, 1200),
+    threshold: normalizeNumber(el.ppgThresholdInput.value, 0.42, 0.1, 0.9)
+  };
+}
+
+function getPpgWindow(options = getPpgOptions()) {
+  const startSec = options.startMin * 60;
+  const durationSec = options.durationSec;
+  return state.ppg.samples.filter((sample) => sample.tSec >= startSec && sample.tSec < startSec + durationSec);
+}
+
+function movingAverage(values, radius) {
+  const out = Array(values.length).fill(0);
+  let sum = 0;
+  for (let index = 0; index < values.length; index++) {
+    sum += values[index];
+    const removeIndex = index - radius * 2 - 1;
+    if (removeIndex >= 0) {
+      sum -= values[removeIndex];
+    }
+    const count = Math.min(index + 1, radius * 2 + 1);
+    out[index] = sum / count;
+  }
+  return out;
+}
+
+function preprocessPpgWindow(window, sampleRateHz) {
+  const raw = window.map((sample) => sample.ppg);
+  const baselineRadius = Math.max(3, Math.round(sampleRateHz * 1.2));
+  const smoothRadius = Math.max(1, Math.round(sampleRateHz * 0.08));
+  const baseline = movingAverage(raw, baselineRadius);
+  const detrended = raw.map((value, index) => value - baseline[index]);
+  const smoothed = movingAverage(detrended, smoothRadius);
+  const mean = smoothed.reduce((sum, value) => sum + value, 0) / Math.max(1, smoothed.length);
+  const variance = smoothed.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, smoothed.length);
+  const std = Math.max(1e-6, Math.sqrt(variance));
+  return smoothed.map((value) => (value - mean) / std);
+}
+
+function convolveSame(values, kernel) {
+  const radius = Math.floor(kernel.length / 2);
+  return values.map((_, index) => {
+    let sum = 0;
+    for (let k = 0; k < kernel.length; k++) {
+      const sourceIndex = Math.max(0, Math.min(values.length - 1, index + k - radius));
+      sum += values[sourceIndex] * kernel[k];
+    }
+    return sum;
+  });
+}
+
+function normalizeUnit(values) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1e-6, max - min);
+  return values.map((value) => (value - min) / span);
+}
+
+function runPpgCnnDetector(processed, sampleRateHz) {
+  const kernels = [
+    [-0.20, -0.35, -0.15, 0.25, 0.75, 1.00, 0.75, 0.25, -0.15, -0.35, -0.20],
+    [-0.40, -0.25, 0.00, 0.35, 0.80, 0.35, 0.00, -0.25, -0.40],
+    [-0.50, -0.20, 0.35, 0.80, 0.35, -0.20, -0.50]
+  ];
+  const featureMaps = kernels.map((kernel) => convolveSame(processed, kernel).map((value) => Math.max(0, value)));
+  const fused = processed.map((_, index) => (
+    featureMaps.reduce((sum, map) => sum + map[index], 0) / featureMaps.length
+  ));
+  const pooled = movingAverage(fused, Math.max(1, Math.round(sampleRateHz * 0.06)));
+  return {
+    kernels: kernels.map((kernel) => kernel.length),
+    score: normalizeUnit(pooled)
+  };
+}
+
+function detectPeaksFromScore(score, threshold, refractorySamples) {
+  const peaks = [];
+  let lastPeak = -Infinity;
+  for (let index = 1; index < score.length - 1; index++) {
+    if (score[index] < threshold || score[index] < score[index - 1] || score[index] < score[index + 1]) {
+      continue;
+    }
+    if (index - lastPeak < refractorySamples) {
+      if (peaks.length > 0 && score[index] > score[peaks[peaks.length - 1]]) {
+        peaks[peaks.length - 1] = index;
+        lastPeak = index;
+      }
+      continue;
+    }
+    peaks.push(index);
+    lastPeak = index;
+  }
+  return peaks;
+}
+
+function computeHrvFromPeaks(peaks, sampleRateHz) {
+  const ibiMs = [];
+  for (let index = 1; index < peaks.length; index++) {
+    const ibi = ((peaks[index] - peaks[index - 1]) / sampleRateHz) * 1000;
+    if (ibi >= 300 && ibi <= 2000) {
+      ibiMs.push(ibi);
+    }
+  }
+  if (ibiMs.length < 2) {
+    return {
+      peaks: peaks.length,
+      ibiMs,
+      hrBpm: NaN,
+      meanIbiMs: NaN,
+      rmssdMs: NaN,
+      sdnnMs: NaN,
+      pnn50: NaN
+    };
+  }
+  const meanIbiMs = ibiMs.reduce((sum, value) => sum + value, 0) / ibiMs.length;
+  const diffs = [];
+  for (let index = 1; index < ibiMs.length; index++) {
+    diffs.push(ibiMs[index] - ibiMs[index - 1]);
+  }
+  const rmssdMs = Math.sqrt(diffs.reduce((sum, value) => sum + value * value, 0) / Math.max(1, diffs.length));
+  const sdnnMs = Math.sqrt(ibiMs.reduce((sum, value) => sum + (value - meanIbiMs) ** 2, 0) / Math.max(1, ibiMs.length - 1));
+  const pnn50 = diffs.filter((value) => Math.abs(value) > 50).length / Math.max(1, diffs.length);
+  return {
+    peaks: peaks.length,
+    ibiMs,
+    hrBpm: 60000 / meanIbiMs,
+    meanIbiMs,
+    rmssdMs,
+    sdnnMs,
+    pnn50
+  };
+}
+
+function runPpgAnalysis() {
+  const options = getPpgOptions();
+  const window = getPpgWindow(options);
+  if (window.length < Math.max(10, options.sampleRateHz * 8)) {
+    throw new Error("Selected PPG window is too short");
+  }
+  const processed = preprocessPpgWindow(window, options.sampleRateHz);
+  const cnn = runPpgCnnDetector(processed, options.sampleRateHz);
+  const refractorySamples = Math.max(1, Math.round((options.refractoryMs / 1000) * options.sampleRateHz));
+  const peaks = detectPeaksFromScore(cnn.score, options.threshold, refractorySamples);
+  const hrv = computeHrvFromPeaks(peaks, options.sampleRateHz);
+  const referenceHrValues = window.map((sample) => sample.hr).filter(Number.isFinite);
+  const referenceHr = referenceHrValues.length > 0
+    ? referenceHrValues.reduce((sum, value) => sum + value, 0) / referenceHrValues.length
+    : NaN;
+  state.ppg.analysis = {
+    options,
+    window,
+    processed,
+    cnn,
+    peaks,
+    hrv,
+    referenceHr
+  };
+  state.ppg.error = "";
+  logLine(`PPG_ANALYZE,window=${window.length},peaks=${peaks.length},hr=${Number.isFinite(hrv.hrBpm) ? hrv.hrBpm.toFixed(1) : "nan"}`);
+  renderPpgView();
+}
+
+async function loadBundledPpgCsv() {
+  state.ppg.loading = true;
+  state.ppg.error = "";
+  el.ppgStatus.textContent = "Loading";
+  setUiEnabled();
+  try {
+    let lastError = null;
+    for (const path of PPG_SAMPLE_PATHS) {
+      try {
+        const response = await fetch(path, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        parsePpgCsv(await response.text(), path);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("No bundled PPG CSV path worked");
+  } catch (error) {
+    state.ppg.error = error.message;
+    el.ppgStatus.textContent = "Load failed";
+    logLine(`ERR,ppg_load,${error.message}`);
+  } finally {
+    state.ppg.loading = false;
+    renderPpgView();
+    setUiEnabled();
+  }
+}
+
+async function importPpgCsv(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+  state.ppg.loading = true;
+  state.ppg.error = "";
+  el.ppgStatus.textContent = "Loading";
+  setUiEnabled();
+  try {
+    parsePpgCsv(await file.text(), file.name);
+  } catch (error) {
+    state.ppg.error = error.message;
+    el.ppgStatus.textContent = "Load failed";
+    logLine(`ERR,ppg_import,${error.message}`);
+  } finally {
+    state.ppg.loading = false;
+    renderPpgView();
+    setUiEnabled();
+  }
+}
+
+function safeMetric(value, digits = 1, suffix = "") {
+  return Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : "--";
+}
+
+function renderPpgView() {
+  const sampleCount = state.ppg.samples.length;
+  const analysis = state.ppg.analysis;
+  el.ppgStatus.textContent = state.ppg.loading
+    ? "Loading"
+    : state.ppg.error ? state.ppg.error
+    : analysis ? "Analyzed" : sampleCount > 0 ? "Ready" : "No data";
+  el.ppgSourceState.textContent = sampleCount > 0
+    ? `${state.ppg.source || "CSV"} - ${sampleCount} samples`
+    : "Load CSV";
+  el.ppgMetricState.textContent = analysis ? `${analysis.peaks.length} peaks` : `${sampleCount} samples`;
+  el.ppgThresholdOutput.textContent = Number(el.ppgThresholdInput.value).toFixed(2);
+
+  if (!analysis) {
+    el.ppgWindowState.textContent = sampleCount > 0 ? "Ready to analyze" : "No window";
+    el.ppgCnnState.textContent = "Idle";
+    el.ppgMetrics.replaceChildren(
+      metricRow("Sample Rate", `${Number(el.ppgSampleRateInput.value || state.ppg.sampleRateHz).toFixed(1)} Hz`),
+      metricRow("Rows", `${sampleCount}`),
+      metricRow("Columns", state.ppg.columns.length ? state.ppg.columns.join(", ") : "--")
+    );
+    drawEmptyAuxPlot(el.ppgCanvas, "Load PPG CSV and analyze");
+    drawPpgCnnArchitecture();
+    return;
+  }
+
+  const hrv = analysis.hrv;
+  el.ppgWindowState.textContent = `${analysis.window.length} samples - ${analysis.options.durationSec.toFixed(0)} s`;
+  el.ppgCnnState.textContent = `Conv kernels ${analysis.cnn.kernels.join("/")}`;
+  el.ppgMetrics.replaceChildren(
+    metricRow("CNN HR", safeMetric(hrv.hrBpm, 1, " bpm")),
+    metricRow("Reference HR", safeMetric(analysis.referenceHr, 1, " bpm")),
+    metricRow("RMSSD", safeMetric(hrv.rmssdMs, 1, " ms")),
+    metricRow("SDNN", safeMetric(hrv.sdnnMs, 1, " ms")),
+    metricRow("pNN50", Number.isFinite(hrv.pnn50) ? `${(hrv.pnn50 * 100).toFixed(1)}%` : "--"),
+    metricRow("Mean IBI", safeMetric(hrv.meanIbiMs, 1, " ms"))
+  );
+  drawPpgSignalPlot();
+  drawPpgCnnScorePlot();
+}
+
+function drawEmptyAuxPlot(canvas, message) {
+  const { ctx: auxCtx, width, height } = resizeAuxCanvasToDisplaySize(canvas, 190);
+  auxCtx.clearRect(0, 0, width, height);
+  auxCtx.fillStyle = "#ffffff";
+  auxCtx.fillRect(0, 0, width, height);
+  auxCtx.fillStyle = "#637083";
+  auxCtx.font = "14px Segoe UI, Arial, sans-serif";
+  auxCtx.fillText(message, 18, 34);
+}
+
+function drawPpgSignalPlot() {
+  const analysis = state.ppg.analysis;
+  if (!analysis) {
+    drawEmptyAuxPlot(el.ppgCanvas, "No PPG analysis");
+    return;
+  }
+  const { ctx: ppgCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgCanvas, 220);
+  const pad = { left: 48, right: 18, top: 18, bottom: 34 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  ppgCtx.clearRect(0, 0, width, height);
+  ppgCtx.fillStyle = "#ffffff";
+  ppgCtx.fillRect(0, 0, width, height);
+  drawGridOn(ppgCtx, width, height, pad, plotWidth, plotHeight);
+  const values = analysis.processed;
+  const minY = Math.min(-0.5, ...values);
+  const maxY = Math.max(0.5, ...values);
+  ppgCtx.strokeStyle = "#008c8c";
+  ppgCtx.lineWidth = 1.6;
+  ppgCtx.beginPath();
+  values.forEach((value, index) => {
+    const x = pad.left + (plotWidth * index) / Math.max(1, values.length - 1);
+    const y = pad.top + plotHeight - ((value - minY) / (maxY - minY)) * plotHeight;
+    if (index === 0) {
+      ppgCtx.moveTo(x, y);
+    } else {
+      ppgCtx.lineTo(x, y);
+    }
+  });
+  ppgCtx.stroke();
+
+  ppgCtx.fillStyle = "#d28a00";
+  for (const peak of analysis.peaks) {
+    const x = pad.left + (plotWidth * peak) / Math.max(1, values.length - 1);
+    const value = values[peak];
+    const y = pad.top + plotHeight - ((value - minY) / (maxY - minY)) * plotHeight;
+    ppgCtx.beginPath();
+    ppgCtx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ppgCtx.fill();
+  }
+  drawLegendOn(ppgCtx, [
+    { color: "#008c8c", label: "PPG" },
+    { color: "#d28a00", label: "peaks" }
+  ], pad.left + 8, pad.top + 18);
+}
+
+function drawPpgCnnArchitecture() {
+  const { ctx: cnnCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgCnnCanvas, 180);
+  cnnCtx.clearRect(0, 0, width, height);
+  cnnCtx.fillStyle = "#ffffff";
+  cnnCtx.fillRect(0, 0, width, height);
+  const layers = [
+    { label: "Input", value: "PPG window", color: "#008c8c" },
+    { label: "Conv1D", value: "3 kernels", color: "#d28a00" },
+    { label: "ReLU + Pool", value: "score map", color: "#7b5fb2" },
+    { label: "Peak Gate", value: "IBI", color: "#2767c9" },
+    { label: "HRV", value: "RMSSD/SDNN", color: "#008c8c" }
+  ];
+  const gap = (width - 80) / Math.max(1, layers.length - 1);
+  const y = height / 2;
+  cnnCtx.strokeStyle = "#d7dee8";
+  cnnCtx.lineWidth = 2;
+  cnnCtx.beginPath();
+  cnnCtx.moveTo(40, y);
+  cnnCtx.lineTo(width - 40, y);
+  cnnCtx.stroke();
+  layers.forEach((layer, index) => {
+    const x = 40 + gap * index;
+    cnnCtx.fillStyle = layer.color;
+    cnnCtx.beginPath();
+    cnnCtx.arc(x, y, 10, 0, Math.PI * 2);
+    cnnCtx.fill();
+    cnnCtx.fillStyle = "#17202a";
+    cnnCtx.font = "700 12px Segoe UI, Arial, sans-serif";
+    cnnCtx.textAlign = "center";
+    cnnCtx.fillText(layer.label, x, y - 24);
+    cnnCtx.fillStyle = "#637083";
+    cnnCtx.font = "11px Segoe UI, Arial, sans-serif";
+    cnnCtx.fillText(layer.value, x, y + 34);
+  });
+  cnnCtx.textAlign = "start";
+}
+
+function drawPpgCnnScorePlot() {
+  const analysis = state.ppg.analysis;
+  if (!analysis) {
+    drawPpgCnnArchitecture();
+    return;
+  }
+  const { ctx: cnnCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgCnnCanvas, 180);
+  const pad = { left: 44, right: 16, top: 18, bottom: 30 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  cnnCtx.clearRect(0, 0, width, height);
+  cnnCtx.fillStyle = "#ffffff";
+  cnnCtx.fillRect(0, 0, width, height);
+  drawGridOn(cnnCtx, width, height, pad, plotWidth, plotHeight);
+  const score = analysis.cnn.score;
+  cnnCtx.strokeStyle = "#2767c9";
+  cnnCtx.lineWidth = 1.8;
+  cnnCtx.beginPath();
+  score.forEach((value, index) => {
+    const x = pad.left + (plotWidth * index) / Math.max(1, score.length - 1);
+    const y = pad.top + plotHeight - value * plotHeight;
+    if (index === 0) {
+      cnnCtx.moveTo(x, y);
+    } else {
+      cnnCtx.lineTo(x, y);
+    }
+  });
+  cnnCtx.stroke();
+  const thresholdY = pad.top + plotHeight - analysis.options.threshold * plotHeight;
+  cnnCtx.strokeStyle = "#d28a00";
+  cnnCtx.setLineDash([6, 5]);
+  cnnCtx.beginPath();
+  cnnCtx.moveTo(pad.left, thresholdY);
+  cnnCtx.lineTo(width - pad.right, thresholdY);
+  cnnCtx.stroke();
+  cnnCtx.setLineDash([]);
+  drawLegendOn(cnnCtx, [
+    { color: "#2767c9", label: "score" },
+    { color: "#d28a00", label: "gate" }
+  ], pad.left + 8, pad.top + 18);
+}
+
 function setActiveView(view) {
   state.activeView = view;
   for (const tab of el.viewTabs) {
@@ -2293,13 +2853,18 @@ function setActiveView(view) {
 }
 
 function updateViewVisibility() {
+  const isPpg = state.activeView === "ppg";
   const isDataset = state.activeView === "dataset";
   const isModel = state.activeView === "model";
   const isCanvas = !NON_CANVAS_VIEWS.has(state.activeView);
   el.signalCanvas.classList.toggle("is-hidden", !isCanvas);
   el.metricGrid.classList.toggle("is-hidden", !isCanvas);
+  el.ppgView.classList.toggle("is-hidden", !isPpg);
   el.datasetView.classList.toggle("is-hidden", !isDataset);
   el.modelView.classList.toggle("is-hidden", !isModel);
+  if (isPpg) {
+    renderPpgView();
+  }
   if (isDataset) {
     renderDatasetView();
   }
@@ -2357,6 +2922,11 @@ function updateMetrics(sample) {
 }
 
 function updateCurrentMetrics() {
+  if (state.activeView === "ppg") {
+    renderPpgView();
+    return;
+  }
+
   if (state.activeView === "dataset") {
     renderDatasetView();
     return;
@@ -2465,6 +3035,11 @@ function updateTable() {
 }
 
 function drawPlot() {
+  if (state.activeView === "ppg") {
+    renderPpgView();
+    return;
+  }
+
   if (state.activeView === "dataset") {
     renderDatasetView();
     return;
@@ -3242,6 +3817,55 @@ function bindEvents() {
   el.datasetExportCsvButton.addEventListener("click", exportDatasetCsv);
   el.datasetClearButton.addEventListener("click", clearDataset);
   el.datasetImportInput.addEventListener("change", importDatasetJson);
+  el.ppgLoadSampleButton.addEventListener("click", loadBundledPpgCsv);
+  el.ppgAnalyzeButton.addEventListener("click", () => {
+    try {
+      runPpgAnalysis();
+    } catch (error) {
+      state.ppg.error = error.message;
+      el.ppgStatus.textContent = "Analyze failed";
+      logLine(`ERR,ppg_analyze,${error.message}`);
+      renderPpgView();
+    } finally {
+      setUiEnabled();
+    }
+  });
+  el.ppgFileInput.addEventListener("change", importPpgCsv);
+  [el.ppgSampleRateInput, el.ppgStartInput, el.ppgDurationInput, el.ppgRefractoryInput].forEach((node) => {
+    node.addEventListener("change", () => {
+      if (state.ppg.samples.length > 0) {
+        try {
+          runPpgAnalysis();
+        } catch (error) {
+          state.ppg.analysis = null;
+          state.ppg.error = error.message;
+          el.ppgStatus.textContent = "Analyze failed";
+          logLine(`ERR,ppg_analyze,${error.message}`);
+          renderPpgView();
+        }
+      } else {
+        renderPpgView();
+      }
+      setUiEnabled();
+    });
+  });
+  el.ppgThresholdInput.addEventListener("input", () => {
+    el.ppgThresholdOutput.textContent = Number(el.ppgThresholdInput.value).toFixed(2);
+  });
+  el.ppgThresholdInput.addEventListener("change", () => {
+    if (state.ppg.samples.length > 0) {
+      try {
+        runPpgAnalysis();
+      } catch (error) {
+        state.ppg.analysis = null;
+        state.ppg.error = error.message;
+        el.ppgStatus.textContent = "Analyze failed";
+        logLine(`ERR,ppg_analyze,${error.message}`);
+        renderPpgView();
+      }
+    }
+    setUiEnabled();
+  });
   [el.datasetWindowInput, el.datasetStrideInput, el.datasetFeatureSelect, el.datasetSourceSelect].forEach((node) => {
     node.addEventListener("input", () => {
       renderDatasetView();

@@ -6,6 +6,7 @@
   const HEADER_SIZE = 0x34;
   const MAX_SKETCH_SIZE = 983040;
   const BOOTLOADER_BAUD = 921600;
+  const WRITE_TIMEOUT_MS = 5000;
   const ARDUINO_USB_FILTERS = [
     { usbVendorId: 0x2341 },
     { usbVendorId: 0x2a03 }
@@ -26,6 +27,22 @@
     return decoder.decode(bytes).replace(/\0/g, "").trim();
   }
 
+  function bytesToHex(bytes) {
+    return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function withTimeout(promise, timeoutMs, description) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`${description} timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      clearTimeout(timer);
+    });
+  }
+
   class SerialTransport {
     constructor(port, baudRate) {
       this.port = port;
@@ -36,6 +53,7 @@
       this.waiters = [];
       this.closed = false;
       this.readPumpTask = null;
+      this.writeTimeoutMs = WRITE_TIMEOUT_MS;
     }
 
     async open() {
@@ -133,11 +151,19 @@
     }
 
     async writeAscii(command) {
-      await this.writer.write(encoder.encode(command));
+      await withTimeout(
+        this.writer.write(encoder.encode(command)),
+        this.writeTimeoutMs,
+        `Writing bootloader command ${command.slice(0, 1) || "?"}`
+      );
     }
 
     async writeBytes(bytes) {
-      await this.writer.write(bytes);
+      await withTimeout(
+        this.writer.write(bytes),
+        this.writeTimeoutMs,
+        `Writing ${bytes.length} bootloader bytes`
+      );
     }
 
     async close() {
@@ -184,6 +210,8 @@
       this.baudRate = options.baudRate || BOOTLOADER_BAUD;
       this.onLog = options.onLog || (() => {});
       this.onProgress = options.onProgress || (() => {});
+      this.bootloaderVerified = false;
+      this.bootloaderTarget = null;
     }
 
     log(message) {
@@ -198,6 +226,8 @@
     }
 
     async openBootloaderTransport(port, message = "Opening bootloader") {
+      this.bootloaderVerified = false;
+      this.bootloaderTarget = null;
       this.transport = new SerialTransport(port, this.baudRate);
       this.progress(1, message);
       await this.transport.open();
@@ -214,7 +244,15 @@
       if (!/nRF52840/i.test(chip)) {
         throw new Error(`Unexpected bootloader target: ${chip || "unknown"}`);
       }
-      return { version, chip };
+      this.bootloaderVerified = true;
+      this.bootloaderTarget = { version, chip };
+      return this.bootloaderTarget;
+    }
+
+    ensureVerifiedBootloader() {
+      if (!this.bootloaderVerified || !this.bootloaderTarget) {
+        throw new Error("Refusing to write before Arduino nRF52840 bootloader verification");
+      }
     }
 
     async probe(port) {
@@ -244,7 +282,8 @@
       await this.openBootloaderTransport(port, "Opening bootloader");
 
       try {
-        await this.verifyBootloaderTarget();
+        const target = await this.verifyBootloaderTarget();
+        this.log(`verified=${target.chip}`);
         this.progress(8, "Preparing flash");
         await this.prepareVectorTable(firmwareBytes);
         await this.chipErase(0);
@@ -262,7 +301,10 @@
       this.transport.discardRx();
       await this.transport.writeAscii("N#");
       const ack = await this.transport.readBytes(2, 2500);
-      this.log(`binary_ack=${Array.from(ack).map((byte) => byte.toString(16).padStart(2, "0")).join("")}`);
+      this.log(`binary_ack=${bytesToHex(ack)}`);
+      if (ack[0] !== 0x0a || ack[1] !== 0x0d) {
+        throw new Error(`Not in Arduino SAM-BA bootloader: unexpected N# ack ${bytesToHex(ack)}`);
+      }
     }
 
     async readVersion() {
@@ -289,18 +331,21 @@
     }
 
     async prepareVectorTable(firmwareBytes) {
+      this.ensureVerifiedBootloader();
       await this.writeMemory(0, firmwareBytes.slice(0, HEADER_SIZE));
       await this.writeWord(0x30, 0x400);
       await this.writeWord(0x20, 0);
     }
 
     async chipErase(startAddress) {
+      this.ensureVerifiedBootloader();
       this.progress(10, "Erasing flash");
       await this.transport.writeAscii(`X${hex8(startAddress)}#`);
       await this.expectAck("X", 30000);
     }
 
     async writeApplication(firmwareBytes) {
+      this.ensureVerifiedBootloader();
       const pageCount = Math.ceil(firmwareBytes.length / PAGE_SIZE);
 
       for (let page = 0; page < pageCount; page++) {

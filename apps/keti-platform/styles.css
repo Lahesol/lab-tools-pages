@@ -453,7 +453,9 @@ input[type="file"] {
 }
 
 #datasetPreviewCanvas,
-#modelArchitectureCanvas {
+#modelArchitectureCanvas,
+#ppgCanvas,
+#ppgCnnCanvas {
   width: 100%;
   min-height: 190px;
   margin-top: 8px;
@@ -469,6 +471,18 @@ input[type="file"] {
 #modelArchitectureCanvas {
   height: 260px;
   margin-bottom: 14px;
+}
+
+#ppgCanvas {
+  height: 300px;
+}
+
+#ppgCnnCanvas {
+  height: 220px;
+}
+
+.ppg-cnn-title {
+  margin-top: 14px;
 }
 
 .file-button {
