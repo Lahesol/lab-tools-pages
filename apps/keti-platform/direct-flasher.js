@@ -263,9 +263,17 @@
         this.progress(100, "Bootloader OK");
         return result;
       } finally {
-        await this.transport.close();
-        this.transport = null;
+        await this.close();
       }
+    }
+
+    async close() {
+      if (!this.transport) {
+        return;
+      }
+      const transport = this.transport;
+      this.transport = null;
+      await transport.close();
     }
 
     async flash({ port, firmwareBytes, maxSketchSize = MAX_SKETCH_SIZE }) {
@@ -292,8 +300,7 @@
         await this.reset();
         this.progress(100, "Flash complete");
       } finally {
-        await this.transport.close();
-        this.transport = null;
+        await this.close();
       }
     }
 

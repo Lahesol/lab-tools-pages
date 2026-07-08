@@ -35,6 +35,18 @@
       "sha256": "8481314E5B89B1A23C39F551AF75A1FADDF22EF0B35E98FBD9E07B14AE5EF3E8",
       "source": "../stage2_imu_ei_motion/stage2_imu_ei_motion.ino",
       "notes": "Stage 2 IMU firmware with the Edge Impulse Tutorial: Continuous motion recognition accelerometer model enabled. Labels: idle, snake, updown, wave."
+    },
+    {
+      "id": "stage3_ppg_hr_adc",
+      "version": "0.4.0",
+      "board": "Arduino Nano 33 BLE Rev2",
+      "fqbn": "arduino:mbed_nano:nano33ble",
+      "baud": 115200,
+      "file": "stage3_ppg_hr_adc_v0.4.0.bin",
+      "size_bytes": 98680,
+      "sha256": "F3D4B018A5F3E4E9B5C321DB4009371DD80F387D7582CBD2B455183DBAC04086",
+      "source": "../stage3_ppg_hr_adc/stage3_ppg_hr_adc.ino",
+      "notes": "Stage 3 ADC PPG heart-rate firmware. Reads A0-A7 at 32 Hz, runs a 10 s trained HR regression model from PPG-DaLiA features, and streams PPG/HR serial lines."
     }
   ]
 }

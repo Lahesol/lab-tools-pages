@@ -13,6 +13,8 @@ const AXIS_COLORS = {
 };
 const BOOTLOADER_REENUMERATE_WAIT_MS = 6500;
 const BOOTLOADER_POLL_INTERVAL_MS = 250;
+const DIRECT_FLASH_STALL_TIMEOUT_MS = 45000;
+const DIRECT_FLASH_TOTAL_TIMEOUT_MS = 180000;
 const PPG_SAMPLE_PATHS = [
   "../ppg_dalia_subject1_acc_ppg_activity_temp.csv",
   "ppg_dalia_subject1_acc_ppg_activity_temp.csv"
@@ -82,6 +84,7 @@ const state = {
     source: "",
     columns: [],
     analysis: null,
+    liveHr: null,
     loading: false,
     error: ""
   },
@@ -1742,6 +1745,187 @@ function isDirectBootloaderError(error) {
   return /bootloader|SAM-BA|N# ack|Unexpected bootloader target|Arduino extension|Timed out waiting/i.test(message);
 }
 
+function createDirectFlashTimeoutError(kind, attemptLabel, timeoutMs) {
+  const error = new Error(`Direct flash ${attemptLabel} ${kind} timeout after ${timeoutMs} ms`);
+  error.name = "DirectFlashTimeoutError";
+  error.directFlashTimeout = true;
+  error.timeoutKind = kind;
+  error.attemptLabel = attemptLabel;
+  error.timeoutMs = timeoutMs;
+  return error;
+}
+
+function isDirectFlashTimeoutError(error) {
+  const message = String(error?.message || "");
+  return Boolean(error?.directFlashTimeout) || /Direct flash .* timeout after/i.test(message);
+}
+
+function createDirectFlasher(attemptLabel, onProgress = null) {
+  return new window.KetiDirectFlash.DirectSamBaFlasher({
+    onLog: (message) => logLine(`DIRECT_FLASH,${attemptLabel},${message}`),
+    onProgress: (item) => {
+      setDirectFlashProgress(item.percent, item.message);
+      if (onProgress) {
+        onProgress(item);
+      }
+    }
+  });
+}
+
+async function closeDirectFlasher(flasher, reason) {
+  if (!flasher || typeof flasher.close !== "function") {
+    return;
+  }
+  try {
+    await flasher.close();
+    logLine(`DIRECT_FLASH,closed,reason=${reason}`);
+  } catch (error) {
+    logLine(`ERR,direct_flash_close,${error.message}`);
+  }
+}
+
+async function runTimedDirectFlash({ port, firmwareBytes, attemptLabel }) {
+  let stallTimer = null;
+  let totalTimer = null;
+  let rejectForTimeout = null;
+  let timeoutError = null;
+
+  const clearTimers = () => {
+    clearTimeout(stallTimer);
+    clearTimeout(totalTimer);
+    stallTimer = null;
+    totalTimer = null;
+  };
+
+  const signalTimeout = (error) => {
+    if (timeoutError) {
+      return;
+    }
+    timeoutError = error;
+    logLine(`DIRECT_FLASH_TIMEOUT,attempt=${attemptLabel},kind=${error.timeoutKind},ms=${error.timeoutMs}`);
+    if (rejectForTimeout) {
+      rejectForTimeout(error);
+    }
+  };
+
+  const resetStallTimer = () => {
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      signalTimeout(createDirectFlashTimeoutError("stall", attemptLabel, DIRECT_FLASH_STALL_TIMEOUT_MS));
+    }, DIRECT_FLASH_STALL_TIMEOUT_MS);
+  };
+
+  const timeoutPromise = new Promise((_, reject) => {
+    rejectForTimeout = reject;
+  });
+
+  const flasher = createDirectFlasher(attemptLabel, resetStallTimer);
+  resetStallTimer();
+  totalTimer = setTimeout(() => {
+    signalTimeout(createDirectFlashTimeoutError("total", attemptLabel, DIRECT_FLASH_TOTAL_TIMEOUT_MS));
+  }, DIRECT_FLASH_TOTAL_TIMEOUT_MS);
+
+  const flashPromise = flasher.flash({
+    port,
+    firmwareBytes,
+    maxSketchSize: window.KetiDirectFlash.MAX_SKETCH_SIZE
+  });
+
+  try {
+    await Promise.race([flashPromise, timeoutPromise]);
+  } catch (error) {
+    if (isDirectFlashTimeoutError(error)) {
+      setDirectFlashProgress(0, attemptLabel === "recovery" ? "Recovery timeout" : "Flash timeout");
+      await closeDirectFlasher(flasher, `timeout_${attemptLabel}`);
+      await flashPromise.catch(() => {});
+    }
+    throw error;
+  } finally {
+    clearTimers();
+  }
+}
+
+async function probeRecoveryBootloaderPort(port, source) {
+  try {
+    await window.KetiDirectFlash.probeBootloaderPort(port, {
+      onLog: (message) => logLine(`DIRECT_FLASH,recovery_probe_${source},${message}`),
+      onProgress: ({ percent, message }) => setDirectFlashProgress(Math.min(8, percent), message)
+    });
+    logLine(`DIRECT_FLASH_RECOVERY,bootloader_port=${source}`);
+    return true;
+  } catch (error) {
+    logLine(`ERR,direct_recovery_probe_${source},${error.message}`);
+    return false;
+  }
+}
+
+async function findGrantedRecoveryBootloaderPort() {
+  const ports = await getGrantedArduinoSerialPorts();
+  for (let index = 0; index < ports.length; index++) {
+    setDirectFlashProgress(1, `Recovery probe ${index + 1}/${ports.length}`);
+    if (await probeRecoveryBootloaderPort(ports[index], `granted_${index + 1}`)) {
+      return ports[index];
+    }
+  }
+  return null;
+}
+
+async function touchRecoveryPortIntoBootloader(port) {
+  setDirectFlashProgress(2, "Recovery reset");
+  try {
+    await window.KetiDirectFlash.forceSerialReset(port);
+    logLine("DIRECT_FLASH_RECOVERY,force_reset");
+  } catch (error) {
+    logLine(`ERR,direct_recovery_force_reset,${error.message}`);
+  }
+
+  setDirectFlashProgress(4, "Recovery touch");
+  await window.KetiDirectFlash.touch1200BpsReset(port);
+  state.flash.directBootloaderTouched = true;
+  logLine("DIRECT_FLASH_RECOVERY,bootloader_touch_1200bps");
+
+  setDirectFlashProgress(6, "Recovery finding bootloader");
+  const grantedBootloaderPort = await waitForGrantedBootloaderPort(port);
+  if (grantedBootloaderPort) {
+    logLine("DIRECT_FLASH_RECOVERY,bootloader_auto_port");
+    return grantedBootloaderPort;
+  }
+
+  setDirectFlashProgress(6, "Recovery select bootloader");
+  logLine("DIRECT_FLASH_RECOVERY,manual_bootloader_select_required");
+  return requestArduinoSerialPort();
+}
+
+async function selectRecoveryBootloaderPort() {
+  const grantedBootloaderPort = await findGrantedRecoveryBootloaderPort();
+  if (grantedBootloaderPort) {
+    return grantedBootloaderPort;
+  }
+
+  setDirectFlashProgress(0, "Recovery select port");
+  const selectedPort = await requestArduinoSerialPort();
+  if (await probeRecoveryBootloaderPort(selectedPort, "selected")) {
+    return selectedPort;
+  }
+
+  return touchRecoveryPortIntoBootloader(selectedPort);
+}
+
+async function runRecoveryFlashAfterTimeout({ loaded, firmware, reason }) {
+  logLine(`DIRECT_FLASH_RECOVERY,start,firmware=${firmware.id},reason=${reason.message}`);
+  state.flash.directBootloaderTouched = false;
+  setDirectFlashProgress(0, "Recovery flash");
+  const recoveryPort = await selectRecoveryBootloaderPort();
+  await runTimedDirectFlash({
+    port: recoveryPort,
+    firmwareBytes: loaded.bytes,
+    attemptLabel: "recovery"
+  });
+  state.flash.directBootloaderTouched = false;
+  setDirectFlashProgress(100, "Recovery OK");
+  logLine(`DIRECT_FLASH_RECOVERY_OK,firmware=${firmware.id}`);
+}
+
 async function enterBootloaderDirect() {
   if (!("serial" in navigator) || !window.KetiDirectFlash) {
     setDirectFlashProgress(0, "Unavailable");
@@ -1782,28 +1966,44 @@ async function flashFirmware() {
     const loaded = await loadDirectFirmwareBytes(firmware);
     logLine(`DIRECT_FLASH,firmware=${firmware.id},bytes=${loaded.bytes.length},source=${loaded.source}`);
 
-    setDirectFlashProgress(0, state.flash.directBootloaderTouched ? "Select bootloader" : "Select app port");
-    const port = state.flash.directBootloaderTouched
-      ? await requestArduinoSerialPort()
-      : await enterBootloaderAndResolvePort();
+    try {
+      setDirectFlashProgress(0, state.flash.directBootloaderTouched ? "Select bootloader" : "Select app port");
+      const port = state.flash.directBootloaderTouched
+        ? await requestArduinoSerialPort()
+        : await enterBootloaderAndResolvePort();
 
-    const flasher = new window.KetiDirectFlash.DirectSamBaFlasher({
-      onLog: (message) => logLine(`DIRECT_FLASH,${message}`),
-      onProgress: ({ percent, message }) => setDirectFlashProgress(percent, message)
-    });
+      await runTimedDirectFlash({
+        port,
+        firmwareBytes: loaded.bytes,
+        attemptLabel: "normal"
+      });
+    } catch (error) {
+      if (!isDirectFlashTimeoutError(error)) {
+        throw error;
+      }
 
-    await flasher.flash({
-      port,
-      firmwareBytes: loaded.bytes,
-      maxSketchSize: window.KetiDirectFlash.MAX_SKETCH_SIZE
-    });
+      try {
+        await runRecoveryFlashAfterTimeout({ loaded, firmware, reason: error });
+      } catch (recoveryError) {
+        const wrapped = new Error(`Recovery flash failed after timeout: ${recoveryError.message}`);
+        wrapped.recoveryFailed = true;
+        wrapped.cause = recoveryError;
+        throw wrapped;
+      }
+    }
 
     state.flash.directBootloaderTouched = false;
-    setDirectFlashProgress(100, "Flash OK");
+    if (el.flashState.textContent !== "Recovery OK") {
+      setDirectFlashProgress(100, "Flash OK");
+    }
     logLine(`DIRECT_FLASH_OK,firmware=${firmware.id}`);
   } catch (error) {
     state.flash.directBootloaderTouched = false;
-    setDirectFlashProgress(0, isDirectBootloaderError(error) ? "Not bootloader" : "Flash failed");
+    const status = error.recoveryFailed
+      ? "Recovery failed"
+      : isDirectFlashTimeoutError(error) ? "Flash timeout"
+      : isDirectBootloaderError(error) ? "Not bootloader" : "Flash failed";
+    setDirectFlashProgress(0, status);
     logLine(`ERR,direct_flash,${error.message}`);
   } finally {
     state.flash.directBusy = false;
@@ -1908,7 +2108,7 @@ function consumeText(text) {
 }
 
 function handleLine(line) {
-  const isStreamData = line.startsWith("DATA,") || line.startsWith("IMU,");
+  const isStreamData = line.startsWith("DATA,") || line.startsWith("IMU,") || line.startsWith("PPG,");
   if (!isStreamData) {
     logLine(line);
   }
@@ -1948,6 +2148,22 @@ function handleLine(line) {
     const result = parseClassificationLine(line);
     if (result) {
       updateClassification(result);
+    }
+    return;
+  }
+
+  if (line.startsWith("PPG,")) {
+    const sample = parseLivePpgLine(line);
+    if (sample) {
+      addLivePpgSample(sample);
+    }
+    return;
+  }
+
+  if (line.startsWith("HR,")) {
+    const result = parseLiveHrLine(line);
+    if (result) {
+      updateLiveHr(result);
     }
     return;
   }
@@ -2059,6 +2275,66 @@ function parseClassificationLine(line) {
   return result;
 }
 
+function parseKeyValueTokens(tokens) {
+  const values = {};
+  for (const token of tokens) {
+    const separator = token.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = token.slice(0, separator);
+    const value = token.slice(separator + 1);
+    const numeric = Number(value);
+    values[key] = Number.isFinite(numeric) ? numeric : value;
+  }
+  return values;
+}
+
+function parseLivePpgLine(line) {
+  const parts = line.split(",");
+  if (parts.length < 4) {
+    return null;
+  }
+  const seq = Number(parts[1]);
+  const micros = Number(parts[2]);
+  const raw = Number(parts[3]);
+  const filled = Number(parts[4]);
+  if (!Number.isFinite(seq) || !Number.isFinite(raw)) {
+    return null;
+  }
+  return {
+    seq,
+    micros: Number.isFinite(micros) ? micros : seq * (1000000 / 32),
+    tSec: seq / (state.ppg.sampleRateHz || 32),
+    ppg: raw,
+    filled: Number.isFinite(filled) ? filled : null,
+    receivedAt: Date.now()
+  };
+}
+
+function parseLiveHrLine(line) {
+  const parts = line.split(",");
+  if (parts.length < 4) {
+    return null;
+  }
+  const hr = Number(parts[3]);
+  const kv = parseKeyValueTokens(parts.slice(4));
+  return {
+    seq: Number(parts[1]),
+    millis: Number(parts[2]),
+    hrBpm: Number.isFinite(hr) ? hr : null,
+    quality: Number(kv.quality),
+    std: Number(kv.std),
+    acfBpm: Number(kv.acf_bpm),
+    acfScore: Number(kv.acf_score),
+    specBpm: Number(kv.spec_bpm),
+    specScore: Number(kv.spec_score),
+    window: Number(kv.window),
+    model: kv.model || "",
+    updatedAt: Date.now()
+  };
+}
+
 function parseStatus(line) {
   const tokens = line.split(",").slice(1);
   for (const token of tokens) {
@@ -2146,6 +2422,33 @@ function addImuSample(sample) {
     });
   }
   maybeCaptureDatasetWindow(sample);
+  scheduleUiRender();
+}
+
+function resetPpgForLiveIfNeeded() {
+  if (state.ppg.source !== "Live ADC") {
+    state.ppg.samples = [];
+    state.ppg.analysis = null;
+    state.ppg.error = "";
+    state.ppg.source = "Live ADC";
+    state.ppg.columns = ["seq", "micros", "ppg", "filled"];
+    state.ppg.sampleRateHz = 32;
+    el.ppgSampleRateInput.value = "32";
+  }
+}
+
+function addLivePpgSample(sample) {
+  resetPpgForLiveIfNeeded();
+  state.ppg.samples.push(sample);
+  if (state.ppg.samples.length > MAX_POINTS) {
+    state.ppg.samples.shift();
+  }
+  scheduleUiRender();
+}
+
+function updateLiveHr(result) {
+  resetPpgForLiveIfNeeded();
+  state.ppg.liveHr = result;
   scheduleUiRender();
 }
 
@@ -2331,6 +2634,7 @@ function parsePpgCsv(text, source = "CSV") {
   state.ppg.source = source;
   state.ppg.columns = headers;
   state.ppg.analysis = null;
+  state.ppg.liveHr = null;
   state.ppg.error = "";
   el.ppgSampleRateInput.value = sampleRateHz.toFixed(Math.abs(sampleRateHz - Math.round(sampleRateHz)) < 0.01 ? 0 : 2);
   logLine(`PPG_LOAD,rows=${samples.length},fs=${sampleRateHz.toFixed(2)},source=${source}`);
@@ -2565,25 +2869,41 @@ function safeMetric(value, digits = 1, suffix = "") {
 function renderPpgView() {
   const sampleCount = state.ppg.samples.length;
   const analysis = state.ppg.analysis;
+  const liveHr = state.ppg.liveHr;
+  const isLive = state.ppg.source === "Live ADC";
   el.ppgStatus.textContent = state.ppg.loading
     ? "Loading"
     : state.ppg.error ? state.ppg.error
-    : analysis ? "Analyzed" : sampleCount > 0 ? "Ready" : "No data";
+    : analysis ? "Analyzed" : isLive && sampleCount > 0 ? "Live ADC" : sampleCount > 0 ? "Ready" : "No data";
   el.ppgSourceState.textContent = sampleCount > 0
     ? `${state.ppg.source || "CSV"} - ${sampleCount} samples`
     : "Load CSV";
-  el.ppgMetricState.textContent = analysis ? `${analysis.peaks.length} peaks` : `${sampleCount} samples`;
+  el.ppgMetricState.textContent = analysis
+    ? `${analysis.peaks.length} peaks`
+    : liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm`
+    : `${sampleCount} samples`;
   el.ppgThresholdOutput.textContent = Number(el.ppgThresholdInput.value).toFixed(2);
 
   if (!analysis) {
-    el.ppgWindowState.textContent = sampleCount > 0 ? "Ready to analyze" : "No window";
-    el.ppgCnnState.textContent = "Idle";
+    el.ppgWindowState.textContent = isLive
+      ? `${sampleCount} live samples - model window ${liveHr?.window || 320}`
+      : sampleCount > 0 ? "Ready to analyze" : "No window";
+    el.ppgCnnState.textContent = isLive
+      ? liveHr?.model ? `ADC HR model ${liveHr.model}` : "Waiting for HR model"
+      : "Idle";
     el.ppgMetrics.replaceChildren(
       metricRow("Sample Rate", `${Number(el.ppgSampleRateInput.value || state.ppg.sampleRateHz).toFixed(1)} Hz`),
       metricRow("Rows", `${sampleCount}`),
+      metricRow("Last HR", liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm` : "--"),
+      metricRow("Quality", liveHr && Number.isFinite(liveHr.quality) ? liveHr.quality.toFixed(3) : "--"),
+      metricRow("Window STD", liveHr && Number.isFinite(liveHr.std) ? liveHr.std.toFixed(2) : "--"),
       metricRow("Columns", state.ppg.columns.length ? state.ppg.columns.join(", ") : "--")
     );
-    drawEmptyAuxPlot(el.ppgCanvas, "Load PPG CSV and analyze");
+    if (sampleCount > 0) {
+      drawLivePpgPlot();
+    } else {
+      drawEmptyAuxPlot(el.ppgCanvas, "Load PPG CSV and analyze");
+    }
     drawPpgCnnArchitecture();
     return;
   }
@@ -2601,6 +2921,46 @@ function renderPpgView() {
   );
   drawPpgSignalPlot();
   drawPpgCnnScorePlot();
+}
+
+function drawLivePpgPlot() {
+  const samples = state.ppg.samples;
+  if (!samples.length) {
+    drawEmptyAuxPlot(el.ppgCanvas, "No live PPG samples");
+    return;
+  }
+  const { ctx: ppgCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgCanvas, 220);
+  const pad = { left: 48, right: 18, top: 18, bottom: 34 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const values = samples.map((sample) => sample.ppg);
+  const minY = Math.min(...values);
+  const maxY = Math.max(...values);
+  const span = Math.max(1, maxY - minY);
+
+  ppgCtx.clearRect(0, 0, width, height);
+  ppgCtx.fillStyle = "#ffffff";
+  ppgCtx.fillRect(0, 0, width, height);
+  drawGridOn(ppgCtx, width, height, pad, plotWidth, plotHeight);
+  ppgCtx.strokeStyle = "#008c8c";
+  ppgCtx.lineWidth = 1.6;
+  ppgCtx.beginPath();
+  values.forEach((value, index) => {
+    const x = pad.left + (plotWidth * index) / Math.max(1, values.length - 1);
+    const y = pad.top + plotHeight - ((value - minY) / span) * plotHeight;
+    if (index === 0) {
+      ppgCtx.moveTo(x, y);
+    } else {
+      ppgCtx.lineTo(x, y);
+    }
+  });
+  ppgCtx.stroke();
+
+  const liveHr = state.ppg.liveHr;
+  drawLegendOn(ppgCtx, [
+    { color: "#008c8c", label: "Live ADC PPG" },
+    { color: "#2767c9", label: liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm` : "waiting HR" }
+  ], pad.left + 8, pad.top + 18);
 }
 
 function drawEmptyAuxPlot(canvas, message) {
