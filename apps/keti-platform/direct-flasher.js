@@ -403,6 +403,25 @@
     await port.close();
   }
 
+  async function forceSerialReset(port, options = {}) {
+    const holdMs = options.holdMs ?? 180;
+    const settleMs = options.settleMs ?? 700;
+    await port.open({ baudRate: options.baudRate || 115200 });
+    try {
+      if (typeof port.setSignals === "function") {
+        await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+        await sleep(holdMs);
+        await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+        await sleep(holdMs);
+        await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+      }
+      await sleep(holdMs);
+    } finally {
+      await port.close();
+    }
+    await sleep(settleMs);
+  }
+
   async function probeBootloaderPort(port, options = {}) {
     const flasher = new DirectSamBaFlasher(options);
     return flasher.probe(port);
@@ -413,6 +432,7 @@
     BOOTLOADER_BAUD,
     MAX_SKETCH_SIZE,
     DirectSamBaFlasher,
+    forceSerialReset,
     probeBootloaderPort,
     touch1200BpsReset
   };

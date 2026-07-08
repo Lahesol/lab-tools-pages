@@ -114,6 +114,15 @@ h1 {
   letter-spacing: 0;
 }
 
+.browser-recommendation {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
 h2 {
   font-size: 14px;
   line-height: 1.2;
@@ -304,6 +313,36 @@ input[type="file"] {
   height: 10px;
   margin-top: 10px;
   accent-color: var(--teal);
+}
+
+.flash-main-action {
+  margin-top: 12px;
+}
+
+.flash-main-action button {
+  width: 100%;
+}
+
+.flash-recovery-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 7px;
+}
+
+.recovery-button {
+  min-height: 26px;
+  border-color: transparent;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.recovery-button:hover:not(:disabled) {
+  border-color: var(--border);
+  color: var(--teal-dark);
+  background: var(--surface-alt);
 }
 
 .inline-input {
@@ -607,6 +646,14 @@ input[type="file"] {
 .classification-summary strong {
   color: var(--teal-dark);
   font-size: 18px;
+}
+
+.classification-window-state {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
 }
 
 .classification-list {

@@ -67,6 +67,7 @@ const state = {
   },
   classification: {
     active: false,
+    startPending: false,
     seq: null,
     topLabel: "--",
     topScore: null,
@@ -206,6 +207,7 @@ const el = {
   classificationState: document.getElementById("classificationState"),
   classificationTopLabel: document.getElementById("classificationTopLabel"),
   classificationTopScore: document.getElementById("classificationTopScore"),
+  classificationWindowState: document.getElementById("classificationWindowState"),
   classificationList: document.getElementById("classificationList"),
   logOutput: document.getElementById("logOutput"),
   sampleTableBody: document.getElementById("sampleTableBody"),
@@ -1658,14 +1660,70 @@ async function requestArduinoSerialPort() {
   });
 }
 
-async function enterBootloaderAndResolvePort() {
-  setDirectFlashProgress(0, "Select app port");
-  const appPort = await requestArduinoSerialPort();
+async function stopActiveSessionBeforeBootloader() {
+  const existingPort = state.port;
+  if (!state.connected) {
+    return null;
+  }
 
-  setDirectFlashProgress(3, "Resetting board");
-  await window.KetiDirectFlash.touch1200BpsReset(appPort);
+  setDirectFlashProgress(1, "Stopping stream");
+  if (state.writer) {
+    try {
+      await sendCommand("CLS OFF");
+      await sleep(80);
+    } catch (error) {
+      logLine(`ERR,bootloader_cls_off,${error.message}`);
+    }
+    try {
+      await sendCommand("STOP");
+      await sleep(150);
+    } catch (error) {
+      logLine(`ERR,bootloader_stop,${error.message}`);
+    }
+  }
+
+  state.streaming = false;
+  state.recording = false;
+  state.classification.active = false;
+  await disconnectDevice();
+  await sleep(350);
+  return existingPort;
+}
+
+async function touchApplicationPortIntoBootloader() {
+  let appPort = await stopActiveSessionBeforeBootloader();
+  if (!appPort) {
+    setDirectFlashProgress(0, "Select app port");
+    appPort = await requestArduinoSerialPort();
+  }
+
+  setDirectFlashProgress(2, "Force reset");
+  try {
+    await window.KetiDirectFlash.forceSerialReset(appPort);
+    logLine("DIRECT_FLASH,force_reset");
+  } catch (error) {
+    logLine(`ERR,direct_force_reset,${error.message}`);
+    setDirectFlashProgress(2, "Select app port");
+    appPort = await requestArduinoSerialPort();
+  }
+
+  setDirectFlashProgress(4, "Bootloader touch");
+  try {
+    await window.KetiDirectFlash.touch1200BpsReset(appPort);
+  } catch (error) {
+    logLine(`ERR,direct_touch_after_reset,${error.message}`);
+    setDirectFlashProgress(4, "Select app port");
+    appPort = await requestArduinoSerialPort();
+    await window.KetiDirectFlash.touch1200BpsReset(appPort);
+  }
+
   state.flash.directBootloaderTouched = true;
   logLine("DIRECT_FLASH,bootloader_touch_1200bps");
+  return appPort;
+}
+
+async function enterBootloaderAndResolvePort() {
+  const appPort = await touchApplicationPortIntoBootloader();
 
   setDirectFlashProgress(6, "Finding bootloader");
   const grantedBootloaderPort = await waitForGrantedBootloaderPort(appPort);
@@ -1677,23 +1735,6 @@ async function enterBootloaderAndResolvePort() {
   setDirectFlashProgress(6, "Select bootloader");
   logLine("DIRECT_FLASH,bootloader_manual_select_required");
   return requestArduinoSerialPort();
-}
-
-async function verifyDirectBootloaderPort(port) {
-  setDirectFlashProgress(8, "Checking bootloader");
-  try {
-    const result = await window.KetiDirectFlash.probeBootloaderPort(port, {
-      onLog: (message) => logLine(`DIRECT_FLASH_PROBE,${message}`),
-      onProgress: ({ percent, message }) => setDirectFlashProgress(Math.min(9, percent), message)
-    });
-    logLine(`DIRECT_FLASH_PROBE_OK,chip=${result.chip}`);
-    setDirectFlashProgress(10, "Bootloader OK");
-    return result;
-  } catch (error) {
-    state.flash.directBootloaderTouched = false;
-    setDirectFlashProgress(0, "Not bootloader");
-    throw new Error(`Bootloader check failed: ${error.message}`);
-  }
 }
 
 function isDirectBootloaderError(error) {
@@ -1713,17 +1754,10 @@ async function enterBootloaderDirect() {
   setUiEnabled();
 
   try {
-    if (state.connected) {
-      await disconnectDevice();
-      await sleep(300);
-    }
-
-    const port = await requestArduinoSerialPort();
-    await window.KetiDirectFlash.touch1200BpsReset(port);
-    state.flash.directBootloaderTouched = true;
+    await touchApplicationPortIntoBootloader();
     setDirectFlashProgress(5, "Select bootloader");
-    logLine("DIRECT_FLASH,bootloader_touch_1200bps");
   } catch (error) {
+    state.flash.directBootloaderTouched = false;
     setDirectFlashProgress(0, "Bootloader failed");
     logLine(`ERR,direct_bootloader,${error.message}`);
   } finally {
@@ -1747,11 +1781,6 @@ async function flashFirmware() {
   try {
     const loaded = await loadDirectFirmwareBytes(firmware);
     logLine(`DIRECT_FLASH,firmware=${firmware.id},bytes=${loaded.bytes.length},source=${loaded.source}`);
-
-    if (state.connected) {
-      await disconnectDevice();
-      await sleep(300);
-    }
 
     setDirectFlashProgress(0, state.flash.directBootloaderTouched ? "Select bootloader" : "Select app port");
     const port = state.flash.directBootloaderTouched
@@ -1886,12 +1915,14 @@ function handleLine(line) {
 
   if (line.startsWith("ERR,EI_ACCEL_MODEL_REQUIRED")) {
     state.classification.active = false;
+    state.classification.startPending = false;
     el.classificationState.textContent = "Model missing";
     setUiEnabled();
     return;
   }
 
   if (line.startsWith("ERR,EI_RUN_CLASSIFIER") || line.startsWith("ERR,EI_SIGNAL_FROM_BUFFER")) {
+    state.classification.startPending = false;
     el.classificationState.textContent = "Inference error";
     setUiEnabled();
     return;
@@ -1940,6 +1971,7 @@ function handleLine(line) {
 
   if (line.startsWith("ACK,CLS_ON")) {
     state.classification.active = true;
+    state.classification.startPending = false;
     el.classificationState.textContent = "Running";
     setUiEnabled();
     return;
@@ -1947,6 +1979,7 @@ function handleLine(line) {
 
   if (line.startsWith("ACK,CLS_OFF")) {
     state.classification.active = false;
+    state.classification.startPending = false;
     el.classificationState.textContent = "Idle";
     setUiEnabled();
   }
@@ -2034,7 +2067,8 @@ function parseStatus(line) {
       state.streaming = value === "1";
     } else if (key === "classification") {
       state.classification.active = value === "1";
-      el.classificationState.textContent = state.classification.active ? "Running" : "Idle";
+      state.classification.startPending = false;
+      renderClassification();
     } else if (key === "rate_hz") {
       state.settings.rateHz = Number(value);
       el.rateInput.value = value;
@@ -2127,13 +2161,34 @@ function updateClassification(result) {
   }
 }
 
+function getClassificationInputWindowText() {
+  const windowSize = getInputWindowSize();
+  const useProcessed = isInputPreprocessActive();
+  const sourceName = useProcessed ? "processed" : "raw";
+  const frames = useProcessed ? state.imuProcessedSamples : state.imuSamples;
+  const available = Math.min(frames.length, windowSize);
+  const latest = frames[frames.length - 1] || null;
+  const first = frames[Math.max(0, frames.length - available)] || null;
+  const seqText = latest && first
+    ? `seq ${first.seq}-${latest.seq}`
+    : "no IMU window";
+  const result = state.classification;
+  const resultSeq = result.seq == null ? "no class result" : `class seq ${result.seq}`;
+  return `Input window: ${available}/${windowSize} ${sourceName} samples - ${state.settings.inputFilter} - ${state.settings.normalizeMode} - ${seqText} - ${resultSeq}`;
+}
+
+function updateClassificationInputState() {
+  el.classificationWindowState.textContent = getClassificationInputWindowText();
+}
+
 function renderClassification() {
   const result = state.classification;
-  el.classificationState.textContent = result.active ? "Running" : "Idle";
+  el.classificationState.textContent = result.startPending ? "Starting" : result.active ? "Running" : "Idle";
   el.classificationTopLabel.textContent = result.topLabel || "--";
   el.classificationTopScore.textContent = Number.isFinite(result.topScore)
     ? `${(result.topScore * 100).toFixed(1)}%`
     : "--";
+  updateClassificationInputState();
 
   const sortedScores = [...(result.scores || [])]
     .sort((a, b) => b.value - a.value)
@@ -2690,6 +2745,42 @@ function setActiveView(view) {
   }
   updateViewVisibility();
   drawPlot();
+  if (view === "classification") {
+    void ensureClassificationRunningFromStream("tab");
+  }
+}
+
+async function ensureClassificationRunningFromStream(reason = "view") {
+  if (state.activeView !== "classification") {
+    return;
+  }
+  if (!state.connected || !state.streaming || !state.writer) {
+    renderClassification();
+    return;
+  }
+  if (state.classification.active || state.classification.startPending) {
+    renderClassification();
+    return;
+  }
+
+  state.classification.startPending = true;
+  renderClassification();
+  setUiEnabled();
+
+  try {
+    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
+    applyInputPreprocess();
+    await sendCommand(`RATE ${state.settings.rateHz}`);
+    await sendCommand("CLS ON");
+    logLine(`CLASS_AUTO_START,${reason},rate=${state.settings.rateHz},window=${getInputWindowSize()}`);
+  } catch (error) {
+    state.classification.startPending = false;
+    el.classificationState.textContent = "Start failed";
+    logLine(`ERR,class_auto_start,${error.message}`);
+  } finally {
+    setUiEnabled();
+    renderClassification();
+  }
 }
 
 function updateViewVisibility() {
@@ -2816,6 +2907,7 @@ function updateImuMetrics(sample) {
 
 function updateClassificationMetrics() {
   const result = state.classification;
+  updateClassificationInputState();
   el.metric1Label.textContent = "Top Label";
   el.metric2Label.textContent = "Confidence";
   el.metric3Label.textContent = "DSP";
@@ -2825,7 +2917,9 @@ function updateClassificationMetrics() {
   el.filteredMetric.textContent = Number.isFinite(result.topScore) ? `${(result.topScore * 100).toFixed(1)}%` : "--";
   el.voltageMetric.textContent = Number.isFinite(result.timing?.dsp_ms) ? `${result.timing.dsp_ms} ms` : "--";
   el.rateMetric.textContent = Number.isFinite(result.timing?.classification_ms) ? `${result.timing.classification_ms} ms` : "--";
-  el.plotMeta.textContent = result.updatedAt ? `Classification result - seq ${result.seq}` : "Waiting for classification";
+  el.plotMeta.textContent = result.updatedAt
+    ? `Classification result - seq ${result.seq} - ${getInputWindowSize()} sample window`
+    : `Waiting for classification - ${getInputWindowSize()} sample window`;
 }
 
 function updateRateMetric(now = performance.now()) {
@@ -3497,6 +3591,8 @@ async function startStreaming() {
   if (state.activeView === "classification") {
     state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
     applyInputPreprocess();
+    state.classification.startPending = true;
+    renderClassification();
     await sendCommand(`RATE ${state.settings.rateHz}`);
     await sendCommand("CLS ON");
     await sendCommand("START");
@@ -3561,10 +3657,16 @@ function toggleRecording() {
 }
 
 async function startClassification() {
+  state.classification.startPending = true;
+  renderClassification();
+  setUiEnabled();
   await sendCommand("CLS ON");
 }
 
 async function stopClassification() {
+  state.classification.startPending = false;
+  state.classification.active = false;
+  renderClassification();
   await sendCommand("CLS OFF");
 }
 
