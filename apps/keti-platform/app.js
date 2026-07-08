@@ -11,6 +11,8 @@ const AXIS_COLORS = {
   ay: "#d28a00",
   az: "#2767c9"
 };
+const BOOTLOADER_REENUMERATE_WAIT_MS = 6500;
+const BOOTLOADER_POLL_INTERVAL_MS = 250;
 const NON_CANVAS_VIEWS = new Set(["dataset", "model"]);
 const DEFAULT_PREBUILT_FIRMWARES = [
   {
@@ -292,7 +294,7 @@ function setUiEnabled() {
   el.datasetCaptureOneButton.disabled = state.imuSamples.length < getDatasetWindowSize();
   el.datasetExportJsonButton.disabled = state.dataset.examples.length === 0;
   el.datasetExportCsvButton.disabled = state.dataset.examples.length === 0;
-  el.trainModelButton.disabled = state.dataset.examples.length < 2;
+  el.trainModelButton.disabled = state.dataset.examples.length < 2 || labelCounts().length < 2;
   el.exportModelJsonButton.disabled = !state.model.trained;
   el.exportCArrayButton.disabled = !state.model.trained;
   el.refreshPortsButton.disabled = !state.flash.helperOnline || state.flash.helperBusy;
@@ -1147,14 +1149,23 @@ function getModelOptions() {
 }
 
 function getPlannedModelSizes() {
+  return getPlannedModelArchitecture().sizes;
+}
+
+function getPlannedModelArchitecture() {
   const shape = getDatasetShape();
   const options = getModelOptions();
-  const outputSize = Math.max(1, shape.labels);
-  return [
+  const outputReady = shape.labels >= 2;
+  const sizes = [
     shape.featureSize,
     ...Array(options.hiddenLayers).fill(options.neurons),
-    outputSize
+    outputReady ? shape.labels : 0
   ];
+  return {
+    sizes,
+    outputReady,
+    labelCount: shape.labels
+  };
 }
 
 function layerName(index, layerCount) {
@@ -1167,12 +1178,56 @@ function layerName(index, layerCount) {
   return `Hidden ${index}`;
 }
 
+function formatNeuronCount(size, pending = false) {
+  if (pending) {
+    return "set labels first";
+  }
+  return `${size} neuron${size === 1 ? "" : "s"}`;
+}
+
+function formatArchitectureShape(sizes, outputPending = false) {
+  return sizes.map((size, index) => (
+    outputPending && index === sizes.length - 1 ? "labels" : String(size)
+  )).join(" -> ");
+}
+
+function drawArchitectureConnections(archCtx, fromNodes, toNodes, radius) {
+  const pairs = [];
+  const addPair = (fromIndex, toIndex) => {
+    const from = fromNodes[Math.max(0, Math.min(fromNodes.length - 1, fromIndex))];
+    const to = toNodes[Math.max(0, Math.min(toNodes.length - 1, toIndex))];
+    const key = `${from.x},${from.y},${to.x},${to.y}`;
+    if (!pairs.some((pair) => pair.key === key)) {
+      pairs.push({ from, to, key });
+    }
+  };
+
+  for (let index = 0; index < fromNodes.length; index++) {
+    const targetIndex = Math.round((index * Math.max(0, toNodes.length - 1)) / Math.max(1, fromNodes.length - 1));
+    addPair(index, targetIndex);
+  }
+  for (let index = 0; index < toNodes.length; index++) {
+    const sourceIndex = Math.round((index * Math.max(0, fromNodes.length - 1)) / Math.max(1, toNodes.length - 1));
+    addPair(sourceIndex, index);
+  }
+
+  for (const { from, to } of pairs) {
+    archCtx.beginPath();
+    archCtx.moveTo(from.x + radius, from.y);
+    archCtx.lineTo(to.x - radius, to.y);
+    archCtx.stroke();
+  }
+}
+
 function renderModelArchitecture() {
   if (!el.modelArchitectureCanvas) {
     return;
   }
 
-  const sizes = state.model.trained?.sizes || getPlannedModelSizes();
+  const planned = getPlannedModelArchitecture();
+  const trained = state.model.trained;
+  const sizes = trained?.sizes || planned.sizes;
+  const outputPending = !trained && !planned.outputReady;
   const { ctx: archCtx, width, height } = resizeAuxCanvasToDisplaySize(el.modelArchitectureCanvas, 210);
   archCtx.clearRect(0, 0, width, height);
   archCtx.fillStyle = "#ffffff";
@@ -1205,20 +1260,11 @@ function renderModelArchitecture() {
   });
 
   archCtx.save();
-  archCtx.globalAlpha = 0.18;
+  archCtx.globalAlpha = 0.24;
   archCtx.strokeStyle = "#637083";
   archCtx.lineWidth = 1;
   for (let layerIndex = 0; layerIndex < layerNodes.length - 1; layerIndex++) {
-    const leftNodes = layerNodes[layerIndex].slice(0, 8);
-    const rightNodes = layerNodes[layerIndex + 1].slice(0, 8);
-    for (const from of leftNodes) {
-      for (const to of rightNodes) {
-        archCtx.beginPath();
-        archCtx.moveTo(from.x + radius, from.y);
-        archCtx.lineTo(to.x - radius, to.y);
-        archCtx.stroke();
-      }
-    }
+    drawArchitectureConnections(archCtx, layerNodes[layerIndex], layerNodes[layerIndex + 1], radius);
   }
   archCtx.restore();
 
@@ -1226,21 +1272,22 @@ function renderModelArchitecture() {
     const nodes = layerNodes[layerIndex];
     const isOutput = layerIndex === sizes.length - 1;
     const isInput = layerIndex === 0;
+    const pendingOutput = outputPending && isOutput;
     const fill = isInput ? "#008c8c" : isOutput ? "#2767c9" : "#d28a00";
     for (const node of nodes) {
-      archCtx.fillStyle = fill;
+      archCtx.fillStyle = pendingOutput ? "#f2f5f8" : fill;
       archCtx.beginPath();
       archCtx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       archCtx.fill();
-      archCtx.strokeStyle = "#ffffff";
-      archCtx.lineWidth = 1.5;
+      archCtx.strokeStyle = pendingOutput ? "#9aa8b7" : "#ffffff";
+      archCtx.lineWidth = pendingOutput ? 1.8 : 1.5;
       archCtx.stroke();
     }
     if (size > nodes.length) {
       archCtx.fillStyle = "#637083";
       archCtx.font = "12px Segoe UI, Arial, sans-serif";
       archCtx.textAlign = "center";
-      archCtx.fillText("...", nodes[0].x, height - pad.bottom + 2);
+      archCtx.fillText(`+${size - nodes.length}`, nodes[0].x, height - pad.bottom + 2);
     }
     archCtx.fillStyle = "#17202a";
     archCtx.font = "700 12px Segoe UI, Arial, sans-serif";
@@ -1248,7 +1295,7 @@ function renderModelArchitecture() {
     archCtx.fillText(layerName(layerIndex, sizes.length), nodes[0].x, 18);
     archCtx.fillStyle = "#637083";
     archCtx.font = "12px Segoe UI, Arial, sans-serif";
-    archCtx.fillText(`${size} neurons`, nodes[0].x, height - 18);
+    archCtx.fillText(formatNeuronCount(size, pendingOutput), nodes[0].x, height - 18);
   });
   archCtx.textAlign = "start";
 }
@@ -1309,14 +1356,16 @@ function renderModelView() {
   const shape = getDatasetShape();
   renderModelArchitecture();
   if (!state.model.trained) {
-    const plannedSizes = getPlannedModelSizes();
-    el.modelStatus.textContent = examples > 1 ? "Ready" : "Need data";
-    el.modelShapeState.textContent = `${plannedSizes.join(" -> ")} planned`;
+    const planned = getPlannedModelArchitecture();
+    el.modelStatus.textContent = examples > 1 && shape.labels >= 2
+      ? "Ready"
+      : shape.labels < 2 ? "Need labels" : "Need data";
+    el.modelShapeState.textContent = `${formatArchitectureShape(planned.sizes, !planned.outputReady)} planned`;
     el.modelMetricState.textContent = formatDatasetSize(shape);
     el.modelMetrics.replaceChildren(
       metricRow("Input Dataset", formatDatasetSize(shape)),
       metricRow("Windows", `${examples}`),
-      metricRow("Labels", `${shape.labels}`),
+      metricRow("Labels", shape.labels >= 2 ? `${shape.labels}` : `${shape.labels}/2 needed`),
       metricRow("Window Samples", `${shape.windowSamples}`),
       metricRow("Feature Mode", shape.featureMode)
     );
@@ -1696,6 +1745,65 @@ function setDirectFlashProgress(percent, message) {
   }
 }
 
+function isArduinoSerialPort(port) {
+  if (!port || typeof port.getInfo !== "function") {
+    return true;
+  }
+  const info = port.getInfo();
+  return info.usbVendorId === 0x2341 || info.usbVendorId === 0x2a03;
+}
+
+async function getGrantedArduinoSerialPorts(excludedPort = null) {
+  if (!navigator.serial.getPorts) {
+    return [];
+  }
+  const ports = await navigator.serial.getPorts();
+  return ports.filter((port) => port !== excludedPort && isArduinoSerialPort(port));
+}
+
+async function waitForGrantedBootloaderPort(appPort) {
+  const start = performance.now();
+  while (performance.now() - start < BOOTLOADER_REENUMERATE_WAIT_MS) {
+    const ports = await getGrantedArduinoSerialPorts(appPort);
+    if (ports.length === 1) {
+      return ports[0];
+    }
+    if (ports.length > 1) {
+      logLine(`DIRECT_FLASH,bootloader_auto_ambiguous,count=${ports.length}`);
+      return null;
+    }
+    await sleep(BOOTLOADER_POLL_INTERVAL_MS);
+  }
+  return null;
+}
+
+async function requestArduinoSerialPort() {
+  return navigator.serial.requestPort({
+    filters: window.KetiDirectFlash.ARDUINO_USB_FILTERS
+  });
+}
+
+async function enterBootloaderAndResolvePort() {
+  setDirectFlashProgress(0, "Select app port");
+  const appPort = await requestArduinoSerialPort();
+
+  setDirectFlashProgress(3, "Resetting board");
+  await window.KetiDirectFlash.touch1200BpsReset(appPort);
+  state.flash.directBootloaderTouched = true;
+  logLine("DIRECT_FLASH,bootloader_touch_1200bps");
+
+  setDirectFlashProgress(6, "Finding bootloader");
+  const grantedBootloaderPort = await waitForGrantedBootloaderPort(appPort);
+  if (grantedBootloaderPort) {
+    logLine("DIRECT_FLASH,bootloader_auto_port");
+    return grantedBootloaderPort;
+  }
+
+  setDirectFlashProgress(6, "Select bootloader");
+  logLine("DIRECT_FLASH,bootloader_manual_select_required");
+  return requestArduinoSerialPort();
+}
+
 async function enterBootloaderDirect() {
   if (!("serial" in navigator) || !window.KetiDirectFlash) {
     setDirectFlashProgress(0, "Unavailable");
@@ -1713,9 +1821,7 @@ async function enterBootloaderDirect() {
       await sleep(300);
     }
 
-    const port = await navigator.serial.requestPort({
-      filters: window.KetiDirectFlash.ARDUINO_USB_FILTERS
-    });
+    const port = await requestArduinoSerialPort();
     await window.KetiDirectFlash.touch1200BpsReset(port);
     state.flash.directBootloaderTouched = true;
     setDirectFlashProgress(5, "Select bootloader");
@@ -1747,9 +1853,9 @@ async function directFlashFirmware() {
       await sleep(300);
     }
 
-    const port = await navigator.serial.requestPort({
-      filters: window.KetiDirectFlash.ARDUINO_USB_FILTERS
-    });
+    const port = state.flash.directBootloaderTouched
+      ? await requestArduinoSerialPort()
+      : await enterBootloaderAndResolvePort();
 
     setDirectFlashProgress(0, "Loading BIN");
     const loaded = await loadDirectFirmwareBytes(firmware);
