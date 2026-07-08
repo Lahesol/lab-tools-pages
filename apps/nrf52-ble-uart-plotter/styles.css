@@ -335,6 +335,14 @@ textarea:focus {
   grid-template-columns: 1fr;
 }
 
+.mode-settings {
+  display: grid;
+}
+
+.hidden {
+  display: none !important;
+}
+
 .check-row {
   display: flex;
   align-items: center;

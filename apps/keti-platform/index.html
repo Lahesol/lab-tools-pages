@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=eb68acfb48d6" />
+    <link rel="stylesheet" href="styles.css?v=8c929f6d993b" />
   </head>
   <body>
     <div class="app-shell">
@@ -172,7 +172,10 @@
                 <h2>Dataset Collection</h2>
                 <p>Windowed IMU samples for browser-side TinyML training</p>
               </div>
-              <strong id="datasetSummary">0 windows</strong>
+              <div class="summary-stack">
+                <strong id="datasetSummary">0 windows</strong>
+                <span id="datasetSizeState">0 x 0 features</span>
+              </div>
             </div>
 
             <div class="lab-grid">
@@ -241,6 +244,13 @@
                   <h3>Windows</h3>
                   <span id="datasetFeatureState">No data</span>
                 </div>
+                <div class="dataset-preview">
+                  <div class="section-title compact-title">
+                    <h3>Live 1D Window</h3>
+                    <span id="datasetPreviewState">0 / 125 samples</span>
+                  </div>
+                  <canvas id="datasetPreviewCanvas" width="900" height="240" aria-label="Dataset live 1D window plot"></canvas>
+                </div>
                 <div id="datasetLabelList" class="dataset-label-list"></div>
                 <div class="dataset-window-table">
                   <table>
@@ -275,6 +285,7 @@
                   <h3>Architecture</h3>
                   <span id="modelShapeState">No model</span>
                 </div>
+                <canvas id="modelArchitectureCanvas" width="900" height="260" aria-label="ANN architecture diagram"></canvas>
 
                 <div class="field-row">
                   <label class="field">
@@ -539,6 +550,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=ed9d5b0b19ef"></script>
+    <script src="app.js?v=bf39551bc37f"></script>
   </body>
 </html>

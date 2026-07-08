@@ -20,15 +20,24 @@ const MAX_LOG_ROWS = 260;
 const els = {
   secureBadge: document.querySelector("#secureBadge"),
   apiBadge: document.querySelector("#apiBadge"),
+  serialBadge: document.querySelector("#serialBadge"),
   deviceLabel: document.querySelector("#deviceLabel"),
   connectionState: document.querySelector("#connectionState"),
   connectButton: document.querySelector("#connectButton"),
   disconnectButton: document.querySelector("#disconnectButton"),
+  connectionModeSelect: document.querySelector("#connectionModeSelect"),
+  bleSettings: document.querySelector("#bleSettings"),
+  serialSettings: document.querySelector("#serialSettings"),
+  serialDataBitsSelect: document.querySelector("#serialDataBitsSelect"),
+  serialStopBitsSelect: document.querySelector("#serialStopBitsSelect"),
+  serialParitySelect: document.querySelector("#serialParitySelect"),
+  serialFlowControlSelect: document.querySelector("#serialFlowControlSelect"),
   namePrefixInput: document.querySelector("#namePrefixInput"),
   serviceUuidInput: document.querySelector("#serviceUuidInput"),
   rxUuidInput: document.querySelector("#rxUuidInput"),
   txUuidInput: document.querySelector("#txUuidInput"),
   baudrateSelect: document.querySelector("#baudrateSelect"),
+  baudCommandField: document.querySelector("#baudCommandField"),
   baudrateCommandInput: document.querySelector("#baudrateCommandInput"),
   baudrateState: document.querySelector("#baudrateState"),
   applyBaudrateButton: document.querySelector("#applyBaudrateButton"),
@@ -79,6 +88,11 @@ const encoder = new TextEncoder();
 let bluetoothDevice = null;
 let rxCharacteristic = null;
 let txCharacteristic = null;
+let serialPort = null;
+let serialReader = null;
+let serialWriter = null;
+let serialReadAbort = false;
+let activeConnectionMode = null;
 let frameBuffer = "";
 let escapeArmed = false;
 let samples = [];
@@ -99,6 +113,52 @@ function setBadge(el, text, state) {
     .filter((name) => !["ok", "warn", "error", "idle", "connected", "neutral"].includes(name))
     .concat(state)
     .join(" ");
+}
+
+function getSelectedConnectionMode() {
+  return els.connectionModeSelect.value === "serial" ? "serial" : "ble";
+}
+
+function getBaudrate() {
+  return Number.parseInt(els.baudrateSelect.value, 10) || 115200;
+}
+
+function getSerialOptions() {
+  return {
+    baudRate: getBaudrate(),
+    dataBits: Number.parseInt(els.serialDataBitsSelect.value, 10) || 8,
+    stopBits: Number.parseInt(els.serialStopBitsSelect.value, 10) || 1,
+    parity: els.serialParitySelect.value,
+    flowControl: els.serialFlowControlSelect.value,
+  };
+}
+
+function isSelectedModeSupported() {
+  const mode = getSelectedConnectionMode();
+  if (mode === "serial") return Boolean(navigator.serial);
+  return Boolean(navigator.bluetooth);
+}
+
+function updateConnectionModeUi() {
+  const mode = getSelectedConnectionMode();
+  const isSerial = mode === "serial";
+
+  els.bleSettings.classList.toggle("hidden", isSerial);
+  els.serialSettings.classList.toggle("hidden", !isSerial);
+  els.baudCommandField.classList.toggle("hidden", isSerial);
+  els.connectionModeSelect.disabled = connected;
+
+  if (!connected) {
+    els.connectButton.disabled = !isSelectedModeSupported();
+    els.applyBaudrateButton.disabled = true;
+    els.sendCommandButton.disabled = true;
+    setBadge(els.baudrateState, isSerial ? "Open setting" : "Local", "idle");
+    if (!isSelectedModeSupported()) {
+      setBadge(els.connectionState, isSerial ? "No Web Serial" : "No Web Bluetooth", "error");
+    } else {
+      setBadge(els.connectionState, "Idle", "idle");
+    }
+  }
 }
 
 function nowLabel() {
@@ -430,11 +490,15 @@ function appendIncomingText(text) {
   }
 }
 
-function handleIncomingValue(dataView) {
-  totalBytes += dataView.byteLength;
-  const text = decoder.decode(dataView, { stream: true });
+function handleIncomingBytes(bytes) {
+  totalBytes += bytes.byteLength;
+  const text = decoder.decode(bytes, { stream: true });
   appendIncomingText(text);
   updateStats();
+}
+
+function handleIncomingValue(dataView) {
+  handleIncomingBytes(dataView);
 }
 
 function onCharacteristicValueChanged(event) {
@@ -447,16 +511,20 @@ function updateConnectionUi(nextConnected, message = "") {
   els.disconnectButton.disabled = !connected;
   els.applyBaudrateButton.disabled = !connected;
   els.sendCommandButton.disabled = !connected;
+  els.connectionModeSelect.disabled = connected;
 
   if (connected) {
     setBadge(els.connectionState, "Connected", "connected");
     setBadge(els.txState, "Ready", "ok");
     els.deviceLabel.textContent = message || bluetoothDevice?.name || bluetoothDevice?.id || "Connected device";
+    setBadge(els.baudrateState, activeConnectionMode === "serial" ? `${getBaudrate()} baud` : "Connected", "ok");
   } else {
+    activeConnectionMode = null;
     setBadge(els.connectionState, "Idle", "idle");
     setBadge(els.txState, "Standby", "idle");
     setBadge(els.baudrateState, "Local", "idle");
     els.deviceLabel.textContent = message || "No device selected";
+    updateConnectionModeUi();
   }
 }
 
@@ -467,6 +535,112 @@ function validateUuidInput(input, fallback) {
     return fallback;
   }
   return value;
+}
+
+async function connectSelectedTransport() {
+  if (getSelectedConnectionMode() === "serial") {
+    await connectSerial();
+  } else {
+    await connectBluetooth();
+  }
+}
+
+async function disconnectActiveTransport() {
+  if (activeConnectionMode === "serial") {
+    await disconnectSerial();
+  } else {
+    await disconnectBluetooth();
+  }
+}
+
+async function openSerialPort(port) {
+  const options = getSerialOptions();
+  serialReadAbort = false;
+  await port.open(options);
+  serialPort = port;
+  serialWriter = port.writable?.getWriter() ?? null;
+  activeConnectionMode = "serial";
+  updateConnectionUi(true, `USB Serial @ ${options.baudRate}`);
+  const parityLabel = options.parity === "none" ? "N" : options.parity.charAt(0).toUpperCase();
+  logRow("rx", `Serial connected: ${options.baudRate} baud, ${options.dataBits}${parityLabel}${options.stopBits}`);
+  readSerialLoop();
+}
+
+async function connectSerial() {
+  if (!navigator.serial) {
+    setBadge(els.connectionState, "Unsupported", "error");
+    logRow("err", "Web Serial is not available in this browser.");
+    return;
+  }
+
+  try {
+    setBadge(els.connectionState, "Selecting", "warn");
+    const port = await navigator.serial.requestPort();
+    setBadge(els.connectionState, "Opening", "warn");
+    await openSerialPort(port);
+  } catch (error) {
+    await closeSerialPort({ updateUi: false }).catch(() => {});
+    updateConnectionUi(false);
+    setBadge(els.connectionState, "Failed", "error");
+    logRow("err", `Serial connect failed: ${error.message}`);
+  }
+}
+
+async function readSerialLoop() {
+  while (serialPort?.readable && !serialReadAbort) {
+    serialReader = serialPort.readable.getReader();
+    try {
+      while (!serialReadAbort) {
+        const { value, done } = await serialReader.read();
+        if (done) break;
+        if (value?.byteLength) {
+          handleIncomingBytes(value);
+        }
+      }
+    } catch (error) {
+      if (!serialReadAbort) {
+        logRow("err", `Serial RX failed: ${error.message}`);
+      }
+    } finally {
+      if (serialReader) {
+        serialReader.releaseLock();
+        serialReader = null;
+      }
+    }
+  }
+}
+
+async function closeSerialPort({ updateUi = true } = {}) {
+  serialReadAbort = true;
+
+  if (serialReader) {
+    const reader = serialReader;
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+    serialReader = null;
+  }
+
+  if (serialWriter) {
+    serialWriter.releaseLock();
+    serialWriter = null;
+  }
+
+  if (serialPort) {
+    const port = serialPort;
+    serialPort = null;
+    if (port.readable || port.writable) {
+      await port.close().catch(() => {});
+    }
+  }
+
+  if (updateUi) {
+    updateConnectionUi(false, "Serial disconnected");
+    logRow("err", "Serial disconnected.");
+  }
+}
+
+async function disconnectSerial() {
+  await closeSerialPort();
 }
 
 async function connectBluetooth() {
@@ -499,6 +673,7 @@ async function connectBluetooth() {
     txCharacteristic.addEventListener("characteristicvaluechanged", onCharacteristicValueChanged);
     await txCharacteristic.startNotifications();
 
+    activeConnectionMode = "ble";
     updateConnectionUi(true, bluetoothDevice.name || bluetoothDevice.id);
     logRow("rx", `Connected: ${bluetoothDevice.name || bluetoothDevice.id}`);
   } catch (error) {
@@ -509,6 +684,7 @@ async function connectBluetooth() {
 }
 
 function onDisconnected() {
+  if (activeConnectionMode && activeConnectionMode !== "ble") return;
   updateConnectionUi(false, "Disconnected");
   rxCharacteristic = null;
   txCharacteristic = null;
@@ -537,11 +713,20 @@ function normalizeCommandText(value) {
 }
 
 async function writeText(text) {
+  const data = encoder.encode(text);
+
+  if (activeConnectionMode === "serial") {
+    if (!serialWriter) {
+      throw new Error("Serial writer is not ready.");
+    }
+    await serialWriter.write(data);
+    return;
+  }
+
   if (!rxCharacteristic) {
     throw new Error("RX characteristic is not ready.");
   }
 
-  const data = encoder.encode(text);
   if (typeof rxCharacteristic.writeValueWithoutResponse === "function") {
     await rxCharacteristic.writeValueWithoutResponse(data);
   } else {
@@ -551,6 +736,27 @@ async function writeText(text) {
 
 async function applyBaudrate() {
   const baudrate = els.baudrateSelect.value;
+
+  if (activeConnectionMode === "serial") {
+    if (!serialPort) {
+      setBadge(els.baudrateState, "Open setting", "idle");
+      return;
+    }
+
+    const port = serialPort;
+    try {
+      await closeSerialPort({ updateUi: false });
+      await openSerialPort(port);
+      setBadge(els.baudrateState, `${baudrate} baud`, "ok");
+      logRow("tx", `Serial reopened @ ${baudrate} baud`);
+    } catch (error) {
+      updateConnectionUi(false);
+      setBadge(els.baudrateState, "Failed", "error");
+      logRow("err", `Serial baudrate apply failed: ${error.message}`);
+    }
+    return;
+  }
+
   const template = els.baudrateCommandInput.value || "BAUD {baud}\\n";
   const command = normalizeCommandText(template.replaceAll("{baud}", baudrate));
 
@@ -580,7 +786,9 @@ function startRecording() {
   recording = true;
   els.startButton.classList.add("active");
   els.stopButton.classList.remove("active");
-  els.plotSubtitle.textContent = connected ? "Recording BLE frames" : "Recording parser input";
+  els.plotSubtitle.textContent = connected
+    ? `Recording ${activeConnectionMode === "serial" ? "Serial" : "BLE"} frames`
+    : "Recording parser input";
 }
 
 function stopRecording() {
@@ -823,8 +1031,20 @@ function initCapabilities() {
     setBadge(els.apiBadge, "Web Bluetooth", "ok");
   } else {
     setBadge(els.apiBadge, "No Web Bluetooth", "error");
-    els.connectButton.disabled = true;
   }
+
+  if (navigator.serial) {
+    setBadge(els.serialBadge, "Web Serial", "ok");
+    navigator.serial.addEventListener("disconnect", (event) => {
+      if (event.target === serialPort) {
+        closeSerialPort().catch((error) => logRow("err", `Serial disconnect cleanup failed: ${error.message}`));
+      }
+    });
+  } else {
+    setBadge(els.serialBadge, "No Web Serial", "error");
+  }
+
+  updateConnectionModeUi();
 }
 
 function restartDemoStreamIfActive() {
@@ -849,8 +1069,9 @@ function handleRollingSettingsChange() {
 }
 
 function bindEvents() {
-  els.connectButton.addEventListener("click", connectBluetooth);
-  els.disconnectButton.addEventListener("click", disconnectBluetooth);
+  els.connectButton.addEventListener("click", connectSelectedTransport);
+  els.disconnectButton.addEventListener("click", disconnectActiveTransport);
+  els.connectionModeSelect.addEventListener("change", updateConnectionModeUi);
   els.applyBaudrateButton.addEventListener("click", applyBaudrate);
   els.sendCommandButton.addEventListener("click", sendCommand);
   els.startButton.addEventListener("click", startRecording);

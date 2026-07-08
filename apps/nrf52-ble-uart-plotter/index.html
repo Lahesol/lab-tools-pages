@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>nRF52 BLE Plotter</title>
-    <link rel="stylesheet" href="./styles.css?v=c2c7d20ee72d" />
+    <title>nRF52 Data Plotter</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css?v=a3b1e0d79b85" />
   </head>
   <body>
     <div class="app-shell">
@@ -19,7 +20,7 @@
             </svg>
           </div>
           <div>
-            <h1>nRF52 BLE Plotter</h1>
+            <h1>nRF52 Data Plotter</h1>
             <p id="deviceLabel">No device selected</p>
           </div>
         </div>
@@ -27,6 +28,7 @@
         <div class="top-actions" aria-label="connection controls">
           <span id="secureBadge" class="status-badge neutral">Secure context</span>
           <span id="apiBadge" class="status-badge neutral">Web Bluetooth</span>
+          <span id="serialBadge" class="status-badge neutral">Web Serial</span>
           <button id="connectButton" class="primary-button" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M7 7.2 12.4 12 7 16.8V7.2Z" />
@@ -51,10 +53,19 @@
         <aside class="control-panel" aria-label="device and parser settings">
           <section class="panel-section">
             <div class="section-title">
-              <h2>Bluetooth</h2>
+              <h2>Connection</h2>
               <span id="connectionState" class="dot-label idle">Idle</span>
             </div>
 
+            <label class="field">
+              <span>Connection mode</span>
+              <select id="connectionModeSelect">
+                <option value="ble" selected>BLE UART</option>
+                <option value="serial">USB Serial</option>
+              </select>
+            </label>
+
+            <div id="bleSettings" class="mode-settings">
             <label class="field">
               <span>Device name prefix</span>
               <input id="namePrefixInput" type="text" value="nRF" autocomplete="off" />
@@ -74,6 +85,44 @@
                 <span>TX notify UUID</span>
                 <input id="txUuidInput" type="text" value="6e400003-b5a3-f393-e0a9-e50e24dcca9e" spellcheck="false" />
               </label>
+            </div>
+            </div>
+
+            <div id="serialSettings" class="mode-settings hidden">
+              <div class="two-col">
+                <label class="field">
+                  <span>Data bits</span>
+                  <select id="serialDataBitsSelect">
+                    <option value="8" selected>8</option>
+                    <option value="7">7</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Stop bits</span>
+                  <select id="serialStopBitsSelect">
+                    <option value="1" selected>1</option>
+                    <option value="2">2</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="two-col">
+                <label class="field">
+                  <span>Parity</span>
+                  <select id="serialParitySelect">
+                    <option value="none" selected>None</option>
+                    <option value="even">Even</option>
+                    <option value="odd">Odd</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Flow control</span>
+                  <select id="serialFlowControlSelect">
+                    <option value="none" selected>None</option>
+                    <option value="hardware">Hardware</option>
+                  </select>
+                </label>
+              </div>
             </div>
           </section>
 
@@ -98,7 +147,7 @@
               </select>
             </label>
 
-            <label class="field">
+            <label id="baudCommandField" class="field">
               <span>Apply command</span>
               <input id="baudrateCommandInput" type="text" value="BAUD {baud}\n" spellcheck="false" />
             </label>
@@ -344,6 +393,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=6acbbf05cdc6"></script>
+    <script src="./app.js?v=fbfd3cf69226"></script>
   </body>
 </html>

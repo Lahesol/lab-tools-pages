@@ -6,6 +6,11 @@ const TABLE_RENDER_INTERVAL_MS = 150;
 const IMU_ACCEL_AXES = ["ax", "ay", "az"];
 const IMU_PROCESSED_AXES = ["pax", "pay", "paz"];
 const IMU_FILTERED_AXES = ["fax", "fay", "faz"];
+const AXIS_COLORS = {
+  ax: "#008c8c",
+  ay: "#d28a00",
+  az: "#2767c9"
+};
 const NON_CANVAS_VIEWS = new Set(["dataset", "model"]);
 const DEFAULT_PREBUILT_FIRMWARES = [
   {
@@ -197,10 +202,14 @@ const el = {
   datasetClearButton: document.getElementById("datasetClearButton"),
   datasetImportInput: document.getElementById("datasetImportInput"),
   datasetFeatureState: document.getElementById("datasetFeatureState"),
+  datasetSizeState: document.getElementById("datasetSizeState"),
+  datasetPreviewState: document.getElementById("datasetPreviewState"),
+  datasetPreviewCanvas: document.getElementById("datasetPreviewCanvas"),
   datasetLabelList: document.getElementById("datasetLabelList"),
   datasetTableBody: document.getElementById("datasetTableBody"),
   modelStatus: document.getElementById("modelStatus"),
   modelShapeState: document.getElementById("modelShapeState"),
+  modelArchitectureCanvas: document.getElementById("modelArchitectureCanvas"),
   hiddenLayerInput: document.getElementById("hiddenLayerInput"),
   neuronInput: document.getElementById("neuronInput"),
   activationSelect: document.getElementById("activationSelect"),
@@ -234,6 +243,24 @@ function resizeCanvasToDisplaySize() {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { width: displayWidth, height: displayHeight };
+}
+
+function resizeAuxCanvasToDisplaySize(canvas, minHeight = 180) {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const displayWidth = Math.max(280, Math.round(rect.width));
+  const displayHeight = Math.max(minHeight, Math.round(rect.height));
+  const backingWidth = Math.round(displayWidth * dpr);
+  const backingHeight = Math.round(displayHeight * dpr);
+
+  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+    canvas.width = backingWidth;
+    canvas.height = backingHeight;
+  }
+
+  const canvasCtx = canvas.getContext("2d");
+  canvasCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx: canvasCtx, width: displayWidth, height: displayHeight };
 }
 
 function setStatus(node, text, mode = "muted") {
@@ -567,6 +594,32 @@ function extractWindowFeatures(window, mode) {
   });
 }
 
+function getPlannedFeatureSize() {
+  const featureMode = el.datasetFeatureSelect?.value || "STATS";
+  const windowSize = getDatasetWindowSize();
+  return featureMode === "FLATTEN" ? windowSize * IMU_ACCEL_AXES.length : 15;
+}
+
+function getDatasetShape() {
+  const examples = state.dataset.examples;
+  const first = examples.find((example) => Array.isArray(example.features));
+  const featureSize = first?.features?.length || getPlannedFeatureSize();
+  const windowSamples = first?.windowSamples || getDatasetWindowSize();
+  const labels = labelCounts().length;
+  return {
+    examples: examples.length,
+    featureSize,
+    windowSamples,
+    labels,
+    featureMode: first?.featureMode || el.datasetFeatureSelect?.value || "STATS",
+    source: first?.source || el.datasetSourceSelect?.value || "PROCESSED"
+  };
+}
+
+function formatDatasetSize(shape = getDatasetShape()) {
+  return `${shape.examples} x ${shape.featureSize} features`;
+}
+
 function captureDatasetWindow(reason = "manual") {
   const label = (el.datasetLabelInput.value || "unlabeled").trim() || "unlabeled";
   const source = el.datasetSourceSelect.value;
@@ -635,10 +688,14 @@ function labelCounts() {
 function renderDatasetView() {
   const examples = state.dataset.examples;
   const counts = labelCounts();
-  const featureSize = examples[0]?.features?.length || 0;
+  const shape = getDatasetShape();
   el.datasetSummary.textContent = `${examples.length} windows`;
-  el.datasetFeatureState.textContent = featureSize > 0 ? `${featureSize} features` : "No data";
+  el.datasetSizeState.textContent = `${formatDatasetSize(shape)} - ${shape.labels} labels`;
+  el.datasetFeatureState.textContent = examples.length > 0
+    ? `${shape.featureSize} features`
+    : `${shape.featureSize} planned`;
   el.datasetCaptureState.textContent = state.dataset.captureActive ? "Capturing" : "Idle";
+  drawDatasetPreview();
 
   el.datasetLabelList.replaceChildren(
     ...(counts.length > 0 ? counts : [["No labels", 0]]).map(([label, count]) => {
@@ -664,6 +721,78 @@ function renderDatasetView() {
       return row;
     })
   );
+}
+
+function drawDatasetPreview() {
+  if (!el.datasetPreviewCanvas) {
+    return;
+  }
+
+  const { ctx: previewCtx, width, height } = resizeAuxCanvasToDisplaySize(el.datasetPreviewCanvas, 180);
+  const windowSize = getDatasetWindowSize();
+  const source = el.datasetSourceSelect?.value || "PROCESSED";
+  const samples = getDatasetWindow(source);
+  el.datasetPreviewState.textContent = `${samples.length} / ${windowSize} samples`;
+
+  previewCtx.clearRect(0, 0, width, height);
+  previewCtx.fillStyle = "#ffffff";
+  previewCtx.fillRect(0, 0, width, height);
+
+  const pad = width < 560
+    ? { left: 40, right: 14, top: 18, bottom: 30 }
+    : { left: 54, right: 18, top: 18, bottom: 34 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  drawGridOn(previewCtx, width, height, pad, plotWidth, plotHeight);
+
+  if (samples.length < 2) {
+    previewCtx.fillStyle = "#637083";
+    previewCtx.font = "14px Segoe UI, Arial, sans-serif";
+    previewCtx.fillText("Waiting for IMU window data", pad.left + 12, pad.top + 32);
+    return;
+  }
+
+  const values = samples.flatMap((sample) => IMU_ACCEL_AXES.map((axis) => sample[axis]));
+  let minY = Math.min(...values);
+  let maxY = Math.max(...values);
+  const padding = Math.max(0.02, (maxY - minY) * 0.12);
+  minY -= padding;
+  maxY += padding;
+  if (Math.abs(maxY - minY) < 1e-6) {
+    minY -= 0.5;
+    maxY += 0.5;
+  }
+
+  for (const axis of IMU_ACCEL_AXES) {
+    drawDatasetPreviewLine(previewCtx, samples, axis, AXIS_COLORS[axis], minY, maxY, pad, plotWidth, plotHeight);
+  }
+
+  previewCtx.fillStyle = "#637083";
+  previewCtx.font = "11px Segoe UI, Arial, sans-serif";
+  previewCtx.fillText(`${maxY.toFixed(2)} ${getInputUnits()}`, 8, pad.top + 4);
+  previewCtx.fillText(`${minY.toFixed(2)} ${getInputUnits()}`, 8, height - pad.bottom);
+  drawLegendOn(previewCtx, [
+    { color: AXIS_COLORS.ax, label: "x" },
+    { color: AXIS_COLORS.ay, label: "y" },
+    { color: AXIS_COLORS.az, label: "z" }
+  ], pad.left + 8, pad.top + 18);
+}
+
+function drawDatasetPreviewLine(previewCtx, samples, axis, color, minY, maxY, pad, plotWidth, plotHeight) {
+  previewCtx.strokeStyle = color;
+  previewCtx.lineWidth = 2;
+  previewCtx.beginPath();
+  samples.forEach((sample, index) => {
+    const x = pad.left + (plotWidth * index) / Math.max(1, samples.length - 1);
+    const normalized = (sample[axis] - minY) / (maxY - minY);
+    const y = pad.top + plotHeight - normalized * plotHeight;
+    if (index === 0) {
+      previewCtx.moveTo(x, y);
+    } else {
+      previewCtx.lineTo(x, y);
+    }
+  });
+  previewCtx.stroke();
 }
 
 function toggleDatasetCapture() {
@@ -1017,6 +1146,113 @@ function getModelOptions() {
   };
 }
 
+function getPlannedModelSizes() {
+  const shape = getDatasetShape();
+  const options = getModelOptions();
+  const outputSize = Math.max(1, shape.labels);
+  return [
+    shape.featureSize,
+    ...Array(options.hiddenLayers).fill(options.neurons),
+    outputSize
+  ];
+}
+
+function layerName(index, layerCount) {
+  if (index === 0) {
+    return "Input";
+  }
+  if (index === layerCount - 1) {
+    return "Output";
+  }
+  return `Hidden ${index}`;
+}
+
+function renderModelArchitecture() {
+  if (!el.modelArchitectureCanvas) {
+    return;
+  }
+
+  const sizes = state.model.trained?.sizes || getPlannedModelSizes();
+  const { ctx: archCtx, width, height } = resizeAuxCanvasToDisplaySize(el.modelArchitectureCanvas, 210);
+  archCtx.clearRect(0, 0, width, height);
+  archCtx.fillStyle = "#ffffff";
+  archCtx.fillRect(0, 0, width, height);
+
+  if (sizes.length < 2) {
+    archCtx.fillStyle = "#637083";
+    archCtx.font = "14px Segoe UI, Arial, sans-serif";
+    archCtx.fillText("Capture data to define model input/output", 18, 36);
+    return;
+  }
+
+  const pad = width < 620
+    ? { left: 46, right: 46, top: 38, bottom: 48 }
+    : { left: 62, right: 62, top: 42, bottom: 52 };
+  const layerGap = sizes.length === 1 ? 0 : (width - pad.left - pad.right) / Math.max(1, sizes.length - 1);
+  const maxVisibleNeurons = width < 620 ? 8 : 12;
+  const radius = width < 620 ? 5 : 6;
+  const layerNodes = sizes.map((size, layerIndex) => {
+    const visible = Math.max(1, Math.min(size, maxVisibleNeurons));
+    const usableHeight = height - pad.top - pad.bottom;
+    const spacing = visible <= 1 ? 0 : Math.min(20, usableHeight / Math.max(1, visible - 1));
+    const totalHeight = spacing * Math.max(0, visible - 1);
+    const startY = pad.top + usableHeight / 2 - totalHeight / 2;
+    const x = pad.left + layerGap * layerIndex;
+    return Array.from({ length: visible }, (_, nodeIndex) => ({
+      x,
+      y: startY + spacing * nodeIndex
+    }));
+  });
+
+  archCtx.save();
+  archCtx.globalAlpha = 0.18;
+  archCtx.strokeStyle = "#637083";
+  archCtx.lineWidth = 1;
+  for (let layerIndex = 0; layerIndex < layerNodes.length - 1; layerIndex++) {
+    const leftNodes = layerNodes[layerIndex].slice(0, 8);
+    const rightNodes = layerNodes[layerIndex + 1].slice(0, 8);
+    for (const from of leftNodes) {
+      for (const to of rightNodes) {
+        archCtx.beginPath();
+        archCtx.moveTo(from.x + radius, from.y);
+        archCtx.lineTo(to.x - radius, to.y);
+        archCtx.stroke();
+      }
+    }
+  }
+  archCtx.restore();
+
+  sizes.forEach((size, layerIndex) => {
+    const nodes = layerNodes[layerIndex];
+    const isOutput = layerIndex === sizes.length - 1;
+    const isInput = layerIndex === 0;
+    const fill = isInput ? "#008c8c" : isOutput ? "#2767c9" : "#d28a00";
+    for (const node of nodes) {
+      archCtx.fillStyle = fill;
+      archCtx.beginPath();
+      archCtx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      archCtx.fill();
+      archCtx.strokeStyle = "#ffffff";
+      archCtx.lineWidth = 1.5;
+      archCtx.stroke();
+    }
+    if (size > nodes.length) {
+      archCtx.fillStyle = "#637083";
+      archCtx.font = "12px Segoe UI, Arial, sans-serif";
+      archCtx.textAlign = "center";
+      archCtx.fillText("...", nodes[0].x, height - pad.bottom + 2);
+    }
+    archCtx.fillStyle = "#17202a";
+    archCtx.font = "700 12px Segoe UI, Arial, sans-serif";
+    archCtx.textAlign = "center";
+    archCtx.fillText(layerName(layerIndex, sizes.length), nodes[0].x, 18);
+    archCtx.fillStyle = "#637083";
+    archCtx.font = "12px Segoe UI, Arial, sans-serif";
+    archCtx.fillText(`${size} neurons`, nodes[0].x, height - 18);
+  });
+  archCtx.textAlign = "start";
+}
+
 function trainBrowserModel() {
   try {
     const dataset = getTrainingDataset();
@@ -1070,13 +1306,19 @@ function trainBrowserModel() {
 
 function renderModelView() {
   const examples = state.dataset.examples.length;
+  const shape = getDatasetShape();
+  renderModelArchitecture();
   if (!state.model.trained) {
+    const plannedSizes = getPlannedModelSizes();
     el.modelStatus.textContent = examples > 1 ? "Ready" : "Need data";
-    el.modelShapeState.textContent = "No model";
-    el.modelMetricState.textContent = `${examples} windows`;
+    el.modelShapeState.textContent = `${plannedSizes.join(" -> ")} planned`;
+    el.modelMetricState.textContent = formatDatasetSize(shape);
     el.modelMetrics.replaceChildren(
-      metricRow("Dataset", `${examples} windows`),
-      metricRow("Labels", `${labelCounts().length}`)
+      metricRow("Input Dataset", formatDatasetSize(shape)),
+      metricRow("Windows", `${examples}`),
+      metricRow("Labels", `${shape.labels}`),
+      metricRow("Window Samples", `${shape.windowSamples}`),
+      metricRow("Feature Mode", shape.featureMode)
     );
     renderModelLog(state.model.trainingLog.length ? state.model.trainingLog : ["Capture at least two labels, then train."]);
     return;
@@ -1089,7 +1331,8 @@ function renderModelView() {
   el.modelMetricState.textContent = `${(metrics.accuracy * 100).toFixed(1)}%`;
   el.modelMetrics.replaceChildren(
     metricRow("Accuracy", `${(metrics.accuracy * 100).toFixed(1)}%`),
-    metricRow("Input", `${trained.inputSize}`),
+    metricRow("Input Dataset", `${metrics.examples} x ${trained.inputSize} features`),
+    metricRow("Window Samples", `${trained.windowSamples}`),
     metricRow("Labels", trained.labels.join(", ")),
     metricRow("Weights", `${metrics.nonzeroWeights}/${metrics.totalWeights}`),
     metricRow("Sparsity", `${(metrics.actualSparsity * 100).toFixed(1)}%`),
@@ -2184,23 +2427,27 @@ function drawPlot() {
 }
 
 function drawGrid(width, height, pad, plotWidth, plotHeight) {
-  ctx.strokeStyle = "#d7dee8";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
+  drawGridOn(ctx, width, height, pad, plotWidth, plotHeight);
+}
+
+function drawGridOn(targetCtx, width, height, pad, plotWidth, plotHeight) {
+  targetCtx.strokeStyle = "#d7dee8";
+  targetCtx.lineWidth = 1;
+  targetCtx.beginPath();
   for (let i = 0; i <= 5; i++) {
     const y = pad.top + (plotHeight * i) / 5;
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(width - pad.right, y);
+    targetCtx.moveTo(pad.left, y);
+    targetCtx.lineTo(width - pad.right, y);
   }
   for (let i = 0; i <= 8; i++) {
     const x = pad.left + (plotWidth * i) / 8;
-    ctx.moveTo(x, pad.top);
-    ctx.lineTo(x, height - pad.bottom);
+    targetCtx.moveTo(x, pad.top);
+    targetCtx.lineTo(x, height - pad.bottom);
   }
-  ctx.stroke();
+  targetCtx.stroke();
 
-  ctx.strokeStyle = "#bdc8d5";
-  ctx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
+  targetCtx.strokeStyle = "#bdc8d5";
+  targetCtx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
 }
 
 function drawTrace(key, color, minY, maxY, pad, plotWidth, plotHeight) {
@@ -2633,13 +2880,17 @@ function drawClassificationPlot() {
 }
 
 function drawLegend(items, x, y) {
+  drawLegendOn(ctx, items, x, y);
+}
+
+function drawLegendOn(targetCtx, items, x, y) {
   items.forEach((item, index) => {
     const offsetX = x + index * 58;
-    ctx.fillStyle = item.color;
-    ctx.fillRect(offsetX, y - 9, 16, 3);
-    ctx.fillStyle = "#637083";
-    ctx.font = "12px Segoe UI, Arial, sans-serif";
-    ctx.fillText(item.label, offsetX + 20, y - 4);
+    targetCtx.fillStyle = item.color;
+    targetCtx.fillRect(offsetX, y - 9, 16, 3);
+    targetCtx.fillStyle = "#637083";
+    targetCtx.font = "12px Segoe UI, Arial, sans-serif";
+    targetCtx.fillText(item.label, offsetX + 20, y - 4);
   });
 }
 
@@ -2866,6 +3117,22 @@ function bindEvents() {
   el.datasetExportCsvButton.addEventListener("click", exportDatasetCsv);
   el.datasetClearButton.addEventListener("click", clearDataset);
   el.datasetImportInput.addEventListener("change", importDatasetJson);
+  [el.datasetWindowInput, el.datasetStrideInput, el.datasetFeatureSelect, el.datasetSourceSelect].forEach((node) => {
+    node.addEventListener("input", () => {
+      renderDatasetView();
+      renderModelView();
+      setUiEnabled();
+    });
+    node.addEventListener("change", () => {
+      renderDatasetView();
+      renderModelView();
+      setUiEnabled();
+    });
+  });
+  [el.hiddenLayerInput, el.neuronInput].forEach((node) => {
+    node.addEventListener("input", renderModelView);
+    node.addEventListener("change", renderModelView);
+  });
   el.trainModelButton.addEventListener("click", trainBrowserModel);
   el.exportModelJsonButton.addEventListener("click", exportModelJson);
   el.exportCArrayButton.addEventListener("click", exportCArray);
