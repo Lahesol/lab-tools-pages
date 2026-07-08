@@ -30,6 +30,33 @@ const DEFAULT_PREBUILT_FIRMWARES = [
     file: "stage1_lab_console_v0.1.1.bin",
     size_bytes: 99552,
     sha256: "43756B93E6A3BC2433C7C82BCB03E500ABC7BFEF0ED6415066342FFBD8EBED20"
+  },
+  {
+    id: "stage2_imu_console",
+    version: "0.2.0",
+    board: "Arduino Nano 33 BLE Rev2",
+    fqbn: "arduino:mbed_nano:nano33ble",
+    file: "stage2_imu_console_v0.2.0.bin",
+    size_bytes: 118336,
+    sha256: "FA30571E888C86132D9049384BC2C6B793D880B2158355C5F4E9FDDEAE5B40B8"
+  },
+  {
+    id: "stage2_imu_ei_motion",
+    version: "0.3.0",
+    board: "Arduino Nano 33 BLE Rev2",
+    fqbn: "arduino:mbed_nano:nano33ble",
+    file: "stage2_imu_ei_motion_v0.3.0.bin",
+    size_bytes: 195984,
+    sha256: "8481314E5B89B1A23C39F551AF75A1FADDF22EF0B35E98FBD9E07B14AE5EF3E8"
+  },
+  {
+    id: "stage3_ppg_hr_adc",
+    version: "0.4.1",
+    board: "Arduino Nano 33 BLE Rev2",
+    fqbn: "arduino:mbed_nano:nano33ble",
+    file: "stage3_ppg_hr_adc_v0.4.1.bin",
+    size_bytes: 98680,
+    sha256: "7E7E8449748D2EDAE19F050916648603028BBBE028AD2AC51A21B17E7E8A8014"
   }
 ];
 const DIRECT_MANIFEST_PATHS = [
@@ -105,6 +132,7 @@ const state = {
     filter: "RAW",
     alpha: 0.2,
     window: 8,
+    windowSec: 0.08,
     iirOrder: 2,
     iirLowHz: 1.0,
     iirHighHz: 10.0,
@@ -158,6 +186,10 @@ const el = {
   iirOrderInput: document.getElementById("iirOrderInput"),
   iirLowInput: document.getElementById("iirLowInput"),
   iirHighInput: document.getElementById("iirHighInput"),
+  adcSettingsSection: document.getElementById("adcSettingsSection"),
+  inputSettingsSection: document.getElementById("inputSettingsSection"),
+  classificationSettingsSection: document.getElementById("classificationSettingsSection"),
+  deviceLogSection: document.getElementById("deviceLogSection"),
   inputState: document.getElementById("inputState"),
   inputWindowInput: document.getElementById("inputWindowInput"),
   inputFilterSelect: document.getElementById("inputFilterSelect"),
@@ -343,6 +375,32 @@ function normalizeNumber(value, fallback, min, max) {
     return fallback;
   }
   return Math.min(max, Math.max(min, parsed));
+}
+
+function formatSeconds(value) {
+  return value >= 1 ? value.toFixed(2) : value.toFixed(3);
+}
+
+function adcWindowSamplesFromSeconds(seconds) {
+  const rateHz = Math.max(1, normalizeNumber(state.settings.rateHz, 100, 1, 1000));
+  return Math.max(1, Math.min(32, Math.round(normalizeNumber(seconds, state.settings.windowSec, 0.001, 32) * rateHz)));
+}
+
+function adcWindowSecondsFromSamples(samples) {
+  const rateHz = Math.max(1, normalizeNumber(state.settings.rateHz, 100, 1, 1000));
+  return normalizeNumber(samples, 8, 1, 32) / rateHz;
+}
+
+function updateAdcWindowInputFromSamples(samples) {
+  const sampleCount = Math.round(normalizeNumber(samples, 8, 1, 32));
+  state.settings.window = sampleCount;
+  state.settings.windowSec = adcWindowSecondsFromSamples(sampleCount);
+  el.windowInput.value = formatSeconds(state.settings.windowSec);
+  updateFilterStateText();
+}
+
+function updateFilterStateText() {
+  el.filterState.textContent = `${state.settings.filter} ${formatSeconds(state.settings.windowSec)}s`;
 }
 
 function createPreprocessState() {
@@ -2348,6 +2406,7 @@ function parseStatus(line) {
     } else if (key === "rate_hz") {
       state.settings.rateHz = Number(value);
       el.rateInput.value = value;
+      updateAdcWindowInputFromSamples(state.settings.window);
     } else if (key === "channel") {
       state.settings.channel = Number(value);
       el.channelSelect.value = value;
@@ -2357,14 +2416,13 @@ function parseStatus(line) {
     } else if (key === "filter") {
       state.settings.filter = value;
       el.filterSelect.value = value;
-      el.filterState.textContent = value;
+      updateFilterStateText();
     } else if (key === "alpha") {
       state.settings.alpha = Number(value);
       el.alphaInput.value = String(state.settings.alpha);
       el.alphaOutput.textContent = state.settings.alpha.toFixed(3);
     } else if (key === "window") {
-      state.settings.window = Number(value);
-      el.windowInput.value = value;
+      updateAdcWindowInputFromSamples(Number(value));
     } else if (key === "iir_order") {
       state.settings.iirOrder = Number(value);
       el.iirOrderInput.value = value;
@@ -2464,20 +2522,38 @@ function updateClassification(result) {
   }
 }
 
-function getClassificationInputWindowText() {
+function getClassificationInputWindow() {
   const windowSize = getInputWindowSize();
   const useProcessed = isInputPreprocessActive();
   const sourceName = useProcessed ? "processed" : "raw";
   const frames = useProcessed ? state.imuProcessedSamples : state.imuSamples;
   const available = Math.min(frames.length, windowSize);
-  const latest = frames[frames.length - 1] || null;
-  const first = frames[Math.max(0, frames.length - available)] || null;
-  const seqText = latest && first
-    ? `seq ${first.seq}-${latest.seq}`
+  const startIndex = Math.max(0, frames.length - available);
+  const windowFrames = frames.slice(startIndex);
+  const latest = windowFrames[windowFrames.length - 1] || null;
+  const first = windowFrames[0] || null;
+  const keys = useProcessed
+    ? { ax: "pax", ay: "pay", az: "paz" }
+    : { ax: "ax", ay: "ay", az: "az" };
+  return {
+    windowSize,
+    sourceName,
+    frames: windowFrames,
+    available,
+    first,
+    latest,
+    keys
+  };
+}
+
+function getClassificationInputWindowText() {
+  const inputWindow = getClassificationInputWindow();
+  const seqText = inputWindow.latest && inputWindow.first
+    ? `seq ${inputWindow.first.seq}-${inputWindow.latest.seq}`
     : "no IMU window";
   const result = state.classification;
   const resultSeq = result.seq == null ? "no class result" : `class seq ${result.seq}`;
-  return `Input window: ${available}/${windowSize} ${sourceName} samples - ${state.settings.inputFilter} - ${state.settings.normalizeMode} - ${seqText} - ${resultSeq}`;
+  return `Input data window: ${inputWindow.available}/${inputWindow.windowSize} ${inputWindow.sourceName} samples - ${state.settings.inputFilter} - ${state.settings.normalizeMode} - ${seqText} - ${resultSeq}`;
 }
 
 function updateClassificationInputState() {
@@ -3143,6 +3219,16 @@ async function ensureClassificationRunningFromStream(reason = "view") {
   }
 }
 
+function syncSettingsPanelVisibility() {
+  const showAdcSettings = state.activeView === "adc";
+  const showInputSettings = ["imu1d", "imu2d", "classification", "dataset", "model"].includes(state.activeView);
+  const showClassificationSettings = state.activeView === "classification";
+
+  el.adcSettingsSection.classList.toggle("is-hidden", !showAdcSettings);
+  el.inputSettingsSection.classList.toggle("is-hidden", !showInputSettings);
+  el.classificationSettingsSection.classList.toggle("is-hidden", !showClassificationSettings);
+}
+
 function updateViewVisibility() {
   const isPpg = state.activeView === "ppg";
   const isDataset = state.activeView === "dataset";
@@ -3153,6 +3239,7 @@ function updateViewVisibility() {
   el.ppgView.classList.toggle("is-hidden", !isPpg);
   el.datasetView.classList.toggle("is-hidden", !isDataset);
   el.modelView.classList.toggle("is-hidden", !isModel);
+  syncSettingsPanelVisibility();
   if (isPpg) {
     renderPpgView();
   }
@@ -3348,10 +3435,6 @@ function drawPlot() {
   }
   if (state.activeView === "imu2d") {
     drawImuPlanarPlot();
-    return;
-  }
-  if (state.activeView === "imu3d") {
-    drawImu3dPlot();
     return;
   }
   if (state.activeView === "classification") {
@@ -3837,39 +3920,151 @@ function drawImu3dPlot() {
   ctx.fillText(autoScale ? `3D auto zoom: +/-${range.toFixed(2)} ${getInputUnits()} from mean` : `3D scale: +/-${range.toFixed(2)} ${getInputUnits()}`, pad.left + 12, pad.top + 20);
 }
 
-function drawClassificationPlot() {
-  const scores = [...(state.classification.scores || [])]
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 10);
-  if (scores.length === 0) {
-    drawEmptyPlot(state.classification.active
-      ? "Collecting inference window - first result takes about 2 s"
-      : "Press Start + Class or Start Class to run inference");
+function drawClassificationInputWindowPlot(inputWindow, area) {
+  const samples = inputWindow.frames;
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#d7dee8";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(area.x, area.y, area.width, area.height, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#17202a";
+  ctx.font = "700 13px Segoe UI, Arial, sans-serif";
+  ctx.fillText("Input data window", area.x + 12, area.y + 20);
+  ctx.fillStyle = "#637083";
+  ctx.font = "12px Segoe UI, Arial, sans-serif";
+  const seqText = inputWindow.first && inputWindow.latest
+    ? `seq ${inputWindow.first.seq}-${inputWindow.latest.seq}`
+    : "no IMU window";
+  ctx.fillText(`${inputWindow.available}/${inputWindow.windowSize} ${inputWindow.sourceName} samples - ${seqText}`, area.x + 142, area.y + 20);
+
+  const plotLeft = area.x + 42;
+  const plotTop = area.y + 34;
+  const plotWidth = Math.max(80, area.width - 58);
+  const plotHeight = Math.max(60, area.height - 58);
+  ctx.strokeStyle = "#eef3f7";
+  ctx.beginPath();
+  for (let i = 0; i <= 4; i++) {
+    const y = plotTop + (plotHeight * i) / 4;
+    ctx.moveTo(plotLeft, y);
+    ctx.lineTo(plotLeft + plotWidth, y);
+  }
+  for (let i = 0; i <= 8; i++) {
+    const x = plotLeft + (plotWidth * i) / 8;
+    ctx.moveTo(x, plotTop);
+    ctx.lineTo(x, plotTop + plotHeight);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = "#bdc8d5";
+  ctx.strokeRect(plotLeft, plotTop, plotWidth, plotHeight);
+
+  if (samples.length < 2) {
+    ctx.fillStyle = "#637083";
+    ctx.font = "13px Segoe UI, Arial, sans-serif";
+    ctx.fillText("Waiting for enough IMU samples", plotLeft + 12, plotTop + 30);
     return;
   }
 
-  const { width, height } = resizeCanvasToDisplaySize();
-  const pad = { left: width < 680 ? 112 : 180, right: 28, top: 22, bottom: 24 };
-  const rowHeight = Math.min(34, (height - pad.top - pad.bottom) / scores.length);
-  const barWidth = width - pad.left - pad.right;
+  const axes = [
+    { key: inputWindow.keys.ax, label: "x", color: "#008c8c" },
+    { key: inputWindow.keys.ay, label: "y", color: "#d28a00" },
+    { key: inputWindow.keys.az, label: "z", color: "#2767c9" }
+  ];
+  const values = samples.flatMap((sample) => axes.map((axis) => sample[axis.key])).filter(Number.isFinite);
+  const maxAbs = Math.max(0.25, ...values.map((value) => Math.abs(value)));
+  const minY = -maxAbs;
+  const maxY = maxAbs;
 
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#fbfcfd";
-  ctx.fillRect(0, 0, width, height);
+  for (const axis of axes) {
+    ctx.strokeStyle = axis.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    samples.forEach((sample, index) => {
+      const x = plotLeft + (plotWidth * index) / Math.max(1, samples.length - 1);
+      const y = plotTop + plotHeight - ((sample[axis.key] - minY) / (maxY - minY)) * plotHeight;
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#637083";
+  ctx.font = "11px Segoe UI, Arial, sans-serif";
+  ctx.fillText(`+/-${maxAbs.toFixed(2)} ${getInputUnits()}`, plotLeft + 8, plotTop + 16);
+  drawLegendOn(ctx, axes, plotLeft + 8, plotTop + plotHeight - 8);
+}
+
+function drawClassificationScoreBars(scores, area) {
+  ctx.fillStyle = "#17202a";
+  ctx.font = "700 13px Segoe UI, Arial, sans-serif";
+  ctx.fillText("Inference scores", area.x + 12, area.y + 20);
+
+  if (scores.length === 0) {
+    ctx.fillStyle = "#637083";
+    ctx.font = "14px Segoe UI, Arial, sans-serif";
+    ctx.fillText(state.classification.active
+      ? "Collecting inference window - first result takes about 2 s"
+      : "Press Start + Class or Start Class to run inference", area.x + 12, area.y + 52);
+    return;
+  }
+
+  const pad = {
+    left: area.x + (area.width < 680 ? 112 : 170),
+    right: area.x + area.width - 20,
+    top: area.y + 32,
+    bottom: area.y + area.height - 10
+  };
+  const rowHeight = Math.min(30, (pad.bottom - pad.top) / scores.length);
+  const barWidth = Math.max(80, pad.right - pad.left);
+
   ctx.font = "12px Segoe UI, Arial, sans-serif";
-
   scores.forEach((score, index) => {
     const y = pad.top + index * rowHeight;
     const percent = Math.max(0, Math.min(1, score.value));
     ctx.fillStyle = "#637083";
     const label = score.label.length > 22 ? `${score.label.slice(0, 21)}...` : score.label;
-    ctx.fillText(label, 12, y + rowHeight * 0.62);
+    ctx.fillText(label, area.x + 12, y + rowHeight * 0.62);
     ctx.fillStyle = "#eef3f7";
     ctx.fillRect(pad.left, y + 7, barWidth, Math.max(8, rowHeight - 14));
     ctx.fillStyle = index === 0 ? "#008c8c" : "#2767c9";
     ctx.fillRect(pad.left, y + 7, barWidth * percent, Math.max(8, rowHeight - 14));
     ctx.fillStyle = "#17202a";
     ctx.fillText(`${(percent * 100).toFixed(1)}%`, pad.left + 8, y + rowHeight * 0.62);
+  });
+}
+
+function drawClassificationPlot() {
+  const scores = [...(state.classification.scores || [])]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10);
+  const inputWindow = getClassificationInputWindow();
+  const { width, height } = resizeCanvasToDisplaySize();
+  const gap = 14;
+  const inputHeight = Math.max(168, Math.round(height * 0.52));
+  const scoreHeight = Math.max(112, height - inputHeight - gap - 24);
+  const areaX = 16;
+  const areaWidth = width - 32;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfd";
+  ctx.fillRect(0, 0, width, height);
+
+  drawClassificationInputWindowPlot(inputWindow, {
+    x: areaX,
+    y: 16,
+    width: areaWidth,
+    height: inputHeight
+  });
+  drawClassificationScoreBars(scores, {
+    x: areaX,
+    y: 16 + inputHeight + gap,
+    width: areaWidth,
+    height: scoreHeight
   });
 }
 
@@ -3892,6 +4087,7 @@ async function applyAcquisition() {
   state.settings.channel = normalizeNumber(el.channelSelect.value, 0, 0, 7);
   state.settings.rateHz = normalizeNumber(el.rateInput.value, 100, 1, 1000);
   state.settings.resolution = normalizeNumber(el.resolutionSelect.value, 12, 10, 12);
+  updateAdcWindowInputFromSamples(state.settings.window);
 
   await sendCommand(`STOP`);
   await sendCommand(`RES ${state.settings.resolution}`);
@@ -3902,20 +4098,23 @@ async function applyAcquisition() {
 async function applyFilter() {
   state.settings.filter = el.filterSelect.value;
   state.settings.alpha = normalizeNumber(el.alphaInput.value, 0.2, 0.001, 1);
-  state.settings.window = normalizeNumber(el.windowInput.value, 8, 1, 32);
+  state.settings.windowSec = normalizeNumber(el.windowInput.value, state.settings.windowSec, 0.001, 32);
+  state.settings.window = adcWindowSamplesFromSeconds(state.settings.windowSec);
+  state.settings.windowSec = adcWindowSecondsFromSamples(state.settings.window);
+  el.windowInput.value = formatSeconds(state.settings.windowSec);
   state.settings.iirOrder = Math.round(normalizeNumber(el.iirOrderInput.value, 2, 1, 4));
   state.settings.iirLowHz = normalizeNumber(el.iirLowInput.value, 1.0, 0.01, 450);
   state.settings.iirHighHz = normalizeNumber(el.iirHighInput.value, 10.0, 0.02, 450);
 
   await sendCommand(`FILTER ${state.settings.filter}`);
   await sendCommand(`ALPHA ${state.settings.alpha.toFixed(3)}`);
-  await sendCommand(`WINDOW ${Math.round(state.settings.window)}`);
+  await sendCommand(`WINDOW ${state.settings.window}`);
   if (state.settings.filter.startsWith("IIR_")) {
     await sendCommand(`IIRORDER ${state.settings.iirOrder}`);
     await sendCommand(`IIRHIGH ${state.settings.iirHighHz.toFixed(3)}`);
     await sendCommand(`IIRLOW ${state.settings.iirLowHz.toFixed(3)}`);
   }
-  el.filterState.textContent = state.settings.filter;
+  updateFilterStateText();
 }
 
 function applyInputPreprocess() {
@@ -4221,6 +4420,7 @@ function init() {
   }
   populateFirmwareSelect(DEFAULT_PREBUILT_FIRMWARES);
   bindEvents();
+  updateAdcWindowInputFromSamples(state.settings.window);
   applyInputPreprocess();
   updateViewVisibility();
   renderDatasetView();

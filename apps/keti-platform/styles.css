@@ -367,6 +367,17 @@ input[type="file"] {
   margin-top: 12px;
 }
 
+.settings-section + .settings-section {
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.settings-section > button {
+  width: 100%;
+  margin-top: 12px;
+}
+
 .divider {
   height: 1px;
   margin: 18px 0;
