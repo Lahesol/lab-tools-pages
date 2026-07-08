@@ -7,6 +7,9 @@
   const MAX_SKETCH_SIZE = 983040;
   const BOOTLOADER_BAUD = 921600;
   const WRITE_TIMEOUT_MS = 5000;
+  const WRITE_CHUNK_SIZE = 512;
+  const WRITE_CHUNK_DELAY_MS = 1;
+  const PAGE_WRITE_ATTEMPTS = 2;
   const ARDUINO_USB_FILTERS = [
     { usbVendorId: 0x2341 },
     { usbVendorId: 0x2a03 }
@@ -159,11 +162,17 @@
     }
 
     async writeBytes(bytes) {
-      await withTimeout(
-        this.writer.write(bytes),
-        this.writeTimeoutMs,
-        `Writing ${bytes.length} bootloader bytes`
-      );
+      for (let offset = 0; offset < bytes.length; offset += WRITE_CHUNK_SIZE) {
+        const chunk = bytes.slice(offset, Math.min(offset + WRITE_CHUNK_SIZE, bytes.length));
+        await withTimeout(
+          this.writer.write(chunk),
+          this.writeTimeoutMs,
+          `Writing bootloader bytes ${offset}-${offset + chunk.length} of ${bytes.length}`
+        );
+        if (WRITE_CHUNK_DELAY_MS > 0 && offset + chunk.length < bytes.length) {
+          await sleep(WRITE_CHUNK_DELAY_MS);
+        }
+      }
     }
 
     async close() {
@@ -171,6 +180,16 @@
       this.rejectWaiters(new Error("Transport closed"));
 
       if (this.writer) {
+        try {
+          if (typeof this.writer.abort === "function") {
+            await Promise.race([
+              this.writer.abort(new Error("Transport closed")),
+              sleep(500)
+            ]);
+          }
+        } catch (error) {
+          // Ignore abort errors during teardown.
+        }
         try {
           this.writer.releaseLock();
         } catch (error) {
@@ -361,11 +380,34 @@
         const pageBuffer = new Uint8Array(PAGE_SIZE);
         pageBuffer.set(source);
 
-        await this.writeMemory(PAGE_BUFFER_ADDR, pageBuffer);
-        await this.copyBufferToFlash(PAGE_BUFFER_ADDR, offset, PAGE_SIZE);
-        const percent = 12 + Math.round(((page + 1) / pageCount) * 84);
-        this.progress(percent, `Writing page ${page + 1}/${pageCount}`);
+        await this.writeApplicationPage(page, pageCount, offset, pageBuffer);
       }
+    }
+
+    async writeApplicationPage(page, pageCount, offset, pageBuffer) {
+      const startPercent = 12 + Math.round((page / pageCount) * 84);
+      const donePercent = 12 + Math.round(((page + 1) / pageCount) * 84);
+      let lastError = null;
+
+      for (let attempt = 1; attempt <= PAGE_WRITE_ATTEMPTS; attempt++) {
+        try {
+          const retryText = attempt > 1 ? ` retry ${attempt}/${PAGE_WRITE_ATTEMPTS}` : "";
+          this.progress(startPercent, `Writing page ${page + 1}/${pageCount}${retryText}`);
+          await this.writeMemory(PAGE_BUFFER_ADDR, pageBuffer);
+          await this.copyBufferToFlash(PAGE_BUFFER_ADDR, offset, PAGE_SIZE);
+          this.progress(donePercent, `Wrote page ${page + 1}/${pageCount}`);
+          return;
+        } catch (error) {
+          lastError = error;
+          this.log(`page=${page + 1},attempt=${attempt},error=${error.message}`);
+          this.transport.discardRx();
+          if (attempt < PAGE_WRITE_ATTEMPTS) {
+            await sleep(120);
+          }
+        }
+      }
+
+      throw new Error(`Writing page ${page + 1}/${pageCount} failed: ${lastError?.message || "unknown error"}`);
     }
 
     async writeMemory(address, bytes) {

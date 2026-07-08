@@ -144,7 +144,7 @@
               </div>
               <div class="summary-stack">
                 <strong id="ppgStatus">No data</strong>
-                <span id="ppgSourceState">Load CSV</span>
+                <span id="ppgSourceState">Waiting for ADC</span>
               </div>
             </div>
 
@@ -155,37 +155,19 @@
                   <span id="ppgMetricState">Waiting</span>
                 </div>
 
-                <label class="field">
-                  <span>PPG CSV</span>
-                  <label class="file-button">
-                    <input id="ppgFileInput" type="file" accept=".csv,text/csv" />
-                    Select CSV
-                  </label>
-                </label>
-
-                <div class="button-row">
-                  <button id="ppgLoadSampleButton" type="button">Load Bundled CSV</button>
-                  <button id="ppgAnalyzeButton" type="button">Analyze HRV</button>
-                </div>
-
                 <div class="field-row">
                   <label class="field">
                     <span>Sample Rate</span>
-                    <input id="ppgSampleRateInput" type="number" min="10" max="200" step="1" value="32" />
+                    <input id="ppgSampleRateInput" type="number" min="1" max="1000" step="1" value="100" />
                   </label>
 
                   <label class="field">
-                    <span>Start Min</span>
-                    <input id="ppgStartInput" type="number" min="0" max="10000" step="0.5" value="0" />
+                    <span>Window Sec</span>
+                    <input id="ppgDurationInput" type="number" min="8" max="180" step="1" value="30" />
                   </label>
                 </div>
 
                 <div class="field-row">
-                  <label class="field">
-                    <span>Window Sec</span>
-                    <input id="ppgDurationInput" type="number" min="10" max="300" step="5" value="60" />
-                  </label>
-
                   <label class="field">
                     <span>Refractory ms</span>
                     <input id="ppgRefractoryInput" type="number" min="250" max="1200" step="25" value="420" />
@@ -607,6 +589,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=4f5214b2e46c"></script>
+    <script src="app.js?v=19bff98be8f0"></script>
   </body>
 </html>

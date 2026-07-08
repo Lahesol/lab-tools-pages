@@ -13,13 +13,16 @@ const AXIS_COLORS = {
 };
 const BOOTLOADER_REENUMERATE_WAIT_MS = 6500;
 const BOOTLOADER_POLL_INTERVAL_MS = 250;
-const DIRECT_FLASH_STALL_TIMEOUT_MS = 45000;
+const DIRECT_FLASH_STALL_TIMEOUT_MS = 15000;
 const DIRECT_FLASH_TOTAL_TIMEOUT_MS = 180000;
+const DIRECT_FLASH_CLOSE_TIMEOUT_MS = 2500;
 const PPG_SAMPLE_PATHS = [
   "../ppg_dalia_subject1_acc_ppg_activity_temp.csv",
   "ppg_dalia_subject1_acc_ppg_activity_temp.csv"
 ];
 const PPG_MAX_PARSE_ROWS = 240000;
+const PPG_MAX_LIVE_POINTS = 30000;
+const PPG_LIVE_ANALYSIS_INTERVAL_MS = 1000;
 const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
 const DEFAULT_PREBUILT_FIRMWARES = [
   {
@@ -107,11 +110,15 @@ const state = {
   },
   ppg: {
     samples: [],
-    sampleRateHz: 32,
+    sampleRateHz: 100,
     source: "",
+    signalSource: "",
     columns: [],
     analysis: null,
     liveHr: null,
+    liveStartMicros: null,
+    lastAutoAnalysisAt: 0,
+    lastAutoAnalysisSeq: null,
     loading: false,
     error: ""
   },
@@ -354,9 +361,15 @@ function setUiEnabled() {
   el.trainModelButton.disabled = state.dataset.examples.length < 2 || labelCounts().length < 2;
   el.exportModelJsonButton.disabled = !state.model.trained;
   el.exportCArrayButton.disabled = !state.model.trained;
-  el.ppgAnalyzeButton.disabled = state.ppg.loading || state.ppg.samples.length === 0;
-  el.ppgLoadSampleButton.disabled = state.ppg.loading;
-  el.ppgFileInput.disabled = state.ppg.loading;
+  if (el.ppgAnalyzeButton) {
+    el.ppgAnalyzeButton.disabled = state.ppg.loading || state.ppg.samples.length === 0;
+  }
+  if (el.ppgLoadSampleButton) {
+    el.ppgLoadSampleButton.disabled = state.ppg.loading;
+  }
+  if (el.ppgFileInput) {
+    el.ppgFileInput.disabled = state.ppg.loading;
+  }
   el.bootloaderButton.disabled = !("serial" in navigator) || state.flash.directBusy;
   el.flashButton.disabled = !("serial" in navigator) || state.flash.directBusy;
 
@@ -1815,7 +1828,27 @@ function createDirectFlashTimeoutError(kind, attemptLabel, timeoutMs) {
 
 function isDirectFlashTimeoutError(error) {
   const message = String(error?.message || "");
-  return Boolean(error?.directFlashTimeout) || /Direct flash .* timeout after/i.test(message);
+  return Boolean(error?.directFlashTimeout) || /Direct flash .* timeout after|Writing page .* failed: .*timed out|Writing bootloader .*timed out/i.test(message);
+}
+
+function isMidFlashTimeoutLikeError(error, lastProgressMessage) {
+  const message = String(error?.message || "");
+  const progress = String(lastProgressMessage || "");
+  return /timed out|timeout|Transport closed/i.test(message) &&
+    /Preparing flash|Erasing flash|Writing page|Wrote page|Resetting board/i.test(progress);
+}
+
+function asDirectFlashTimeoutError(error, attemptLabel, lastProgressMessage) {
+  if (isDirectFlashTimeoutError(error)) {
+    return error;
+  }
+  if (!isMidFlashTimeoutLikeError(error, lastProgressMessage)) {
+    return error;
+  }
+  const wrapped = createDirectFlashTimeoutError("operation", attemptLabel, DIRECT_FLASH_STALL_TIMEOUT_MS);
+  wrapped.message = `${wrapped.message}: ${error.message}`;
+  wrapped.cause = error;
+  return wrapped;
 }
 
 function createDirectFlasher(attemptLabel, onProgress = null) {
@@ -1835,7 +1868,12 @@ async function closeDirectFlasher(flasher, reason) {
     return;
   }
   try {
-    await flasher.close();
+    await Promise.race([
+      flasher.close(),
+      sleep(DIRECT_FLASH_CLOSE_TIMEOUT_MS).then(() => {
+        throw new Error(`close timeout after ${DIRECT_FLASH_CLOSE_TIMEOUT_MS} ms`);
+      })
+    ]);
     logLine(`DIRECT_FLASH,closed,reason=${reason}`);
   } catch (error) {
     logLine(`ERR,direct_flash_close,${error.message}`);
@@ -1847,6 +1885,7 @@ async function runTimedDirectFlash({ port, firmwareBytes, attemptLabel }) {
   let totalTimer = null;
   let rejectForTimeout = null;
   let timeoutError = null;
+  let lastProgressMessage = "";
 
   const clearTimers = () => {
     clearTimeout(stallTimer);
@@ -1877,7 +1916,10 @@ async function runTimedDirectFlash({ port, firmwareBytes, attemptLabel }) {
     rejectForTimeout = reject;
   });
 
-  const flasher = createDirectFlasher(attemptLabel, resetStallTimer);
+  const flasher = createDirectFlasher(attemptLabel, (item) => {
+    lastProgressMessage = item.message || "";
+    resetStallTimer();
+  });
   resetStallTimer();
   totalTimer = setTimeout(() => {
     signalTimeout(createDirectFlashTimeoutError("total", attemptLabel, DIRECT_FLASH_TOTAL_TIMEOUT_MS));
@@ -1892,12 +1934,15 @@ async function runTimedDirectFlash({ port, firmwareBytes, attemptLabel }) {
   try {
     await Promise.race([flashPromise, timeoutPromise]);
   } catch (error) {
-    if (isDirectFlashTimeoutError(error)) {
+    const normalizedError = asDirectFlashTimeoutError(error, attemptLabel, lastProgressMessage);
+    if (isDirectFlashTimeoutError(normalizedError)) {
       setDirectFlashProgress(0, attemptLabel === "recovery" ? "Recovery timeout" : "Flash timeout");
       await closeDirectFlasher(flasher, `timeout_${attemptLabel}`);
-      await flashPromise.catch(() => {});
+      flashPromise.catch((flashError) => {
+        logLine(`ERR,direct_flash_late_reject,${flashError.message}`);
+      });
     }
-    throw error;
+    throw normalizedError;
   } finally {
     clearTimers();
   }
@@ -2363,8 +2408,11 @@ function parseLivePpgLine(line) {
   return {
     seq,
     micros: Number.isFinite(micros) ? micros : seq * (1000000 / 32),
-    tSec: seq / (state.ppg.sampleRateHz || 32),
+    tSec: Number.isFinite(micros) ? micros / 1000000 : seq / 32,
     ppg: raw,
+    raw,
+    filtered: raw,
+    source: "raw",
     filled: Number.isFinite(filled) ? filled : null,
     receivedAt: Date.now()
   };
@@ -2407,6 +2455,10 @@ function parseStatus(line) {
       state.settings.rateHz = Number(value);
       el.rateInput.value = value;
       updateAdcWindowInputFromSamples(state.settings.window);
+      if (state.ppg.source === "Live ADC" && state.ppg.samples.length === 0 && el.ppgSampleRateInput) {
+        state.ppg.sampleRateHz = state.settings.rateHz;
+        el.ppgSampleRateInput.value = value;
+      }
     } else if (key === "channel") {
       state.settings.channel = Number(value);
       el.channelSelect.value = value;
@@ -2454,6 +2506,7 @@ function addSample(sample) {
   }
 
   state.latestSample = sample;
+  addAdcSampleToLivePpg(sample);
   scheduleUiRender();
 }
 
@@ -2483,29 +2536,135 @@ function addImuSample(sample) {
   scheduleUiRender();
 }
 
-function resetPpgForLiveIfNeeded() {
-  if (state.ppg.source !== "Live ADC") {
-    state.ppg.samples = [];
-    state.ppg.analysis = null;
-    state.ppg.error = "";
-    state.ppg.source = "Live ADC";
-    state.ppg.columns = ["seq", "micros", "ppg", "filled"];
-    state.ppg.sampleRateHz = 32;
-    el.ppgSampleRateInput.value = "32";
+function clearLivePpgWindow(signalSource = state.ppg.signalSource || "raw") {
+  state.ppg.samples = [];
+  state.ppg.analysis = null;
+  state.ppg.liveHr = null;
+  state.ppg.error = "";
+  state.ppg.source = "Live ADC";
+  state.ppg.signalSource = signalSource;
+  state.ppg.columns = ["seq", "micros", "raw", "filtered", "ppg", "source"];
+  state.ppg.liveStartMicros = null;
+  state.ppg.lastAutoAnalysisAt = 0;
+  state.ppg.lastAutoAnalysisSeq = null;
+}
+
+function resetPpgForLiveIfNeeded(signalSource = "raw") {
+  if (state.ppg.source !== "Live ADC" || state.ppg.signalSource !== signalSource) {
+    clearLivePpgWindow(signalSource);
+  }
+}
+
+function getAdcPpgSignal(sample) {
+  const useFiltered = state.settings.filter !== "RAW" && Number.isFinite(sample.filtered);
+  return {
+    value: useFiltered ? sample.filtered : sample.raw,
+    source: useFiltered ? "filtered" : "raw"
+  };
+}
+
+function updateLivePpgSampleRate(sample = null) {
+  const fallbackRate = normalizeNumber(state.settings.rateHz, state.ppg.sampleRateHz || 100, 1, 1000);
+  let nextRate = fallbackRate;
+  const previous = state.ppg.samples[state.ppg.samples.length - 1];
+  if (sample && previous && Number.isFinite(sample.micros) && Number.isFinite(previous.micros)) {
+    const deltaSec = (sample.micros - previous.micros) / 1000000;
+    if (deltaSec > 0 && deltaSec < 2) {
+      nextRate = normalizeNumber(1 / deltaSec, fallbackRate, 1, 1000);
+    }
+  }
+  state.ppg.sampleRateHz = nextRate;
+  if (el.ppgSampleRateInput && Math.abs(Number(el.ppgSampleRateInput.value || 0) - nextRate) > 0.05) {
+    el.ppgSampleRateInput.value = nextRate.toFixed(Math.abs(nextRate - Math.round(nextRate)) < 0.05 ? 0 : 1);
+  }
+}
+
+function getLivePpgRetentionCount() {
+  const windowSec = normalizeNumber(el.ppgDurationInput?.value, 30, 8, 180);
+  const rateHz = normalizeNumber(state.ppg.sampleRateHz, state.settings.rateHz || 100, 1, 1000);
+  return Math.min(PPG_MAX_LIVE_POINTS, Math.max(1200, Math.ceil(rateHz * Math.max(windowSec * 1.6, 90))));
+}
+
+function trimLivePpgSamples() {
+  const maxSamples = getLivePpgRetentionCount();
+  while (state.ppg.samples.length > maxSamples) {
+    state.ppg.samples.shift();
+  }
+}
+
+function makeLivePpgSampleFromAdc(sample) {
+  const signal = getAdcPpgSignal(sample);
+  resetPpgForLiveIfNeeded(signal.source);
+  updateLivePpgSampleRate(sample);
+  if (state.ppg.liveStartMicros == null || (Number.isFinite(sample.micros) && sample.micros < state.ppg.liveStartMicros)) {
+    state.ppg.liveStartMicros = Number.isFinite(sample.micros) ? sample.micros : 0;
+  }
+  const tSec = Number.isFinite(sample.micros)
+    ? (sample.micros - state.ppg.liveStartMicros) / 1000000
+    : state.ppg.samples.length / Math.max(1, state.ppg.sampleRateHz || 100);
+  return {
+    seq: sample.seq,
+    micros: sample.micros,
+    tSec,
+    ppg: signal.value,
+    raw: sample.raw,
+    filtered: sample.filtered,
+    source: signal.source,
+    channel: sample.channel,
+    receivedAt: sample.receivedAt
+  };
+}
+
+function addAdcSampleToLivePpg(sample) {
+  if (!Number.isFinite(sample.raw) && !Number.isFinite(sample.filtered)) {
+    return;
+  }
+  const liveSample = makeLivePpgSampleFromAdc(sample);
+  state.ppg.samples.push(liveSample);
+  trimLivePpgSamples();
+  maybeRunLivePpgAnalysis(liveSample);
+}
+
+function addPpgSampleToAdcPlot(sample) {
+  const adcSample = {
+    seq: sample.seq,
+    micros: sample.micros,
+    channel: state.settings.channel,
+    raw: sample.ppg,
+    millivolts: Number.isFinite(sample.ppg)
+      ? (sample.ppg / Math.max(1, (1 << state.settings.resolution) - 1)) * 3300
+      : NaN,
+    filtered: sample.ppg,
+    receivedAt: sample.receivedAt,
+    ppgMirror: true
+  };
+  state.samples.push(adcSample);
+  if (state.samples.length > MAX_POINTS) {
+    state.samples.shift();
+  }
+  state.receivedSamples++;
+  state.latestSample = adcSample;
+  if (state.recording) {
+    state.records.push({ ...adcSample, kind: "adc", label: el.labelInput.value.trim() || "unlabeled" });
+  }
+  state.tableRows.unshift(adcSample);
+  if (state.tableRows.length > MAX_TABLE_ROWS) {
+    state.tableRows.pop();
   }
 }
 
 function addLivePpgSample(sample) {
-  resetPpgForLiveIfNeeded();
+  resetPpgForLiveIfNeeded(sample.source || "raw");
+  updateLivePpgSampleRate(sample);
   state.ppg.samples.push(sample);
-  if (state.ppg.samples.length > MAX_POINTS) {
-    state.ppg.samples.shift();
-  }
+  trimLivePpgSamples();
+  addPpgSampleToAdcPlot(sample);
+  maybeRunLivePpgAnalysis(sample);
   scheduleUiRender();
 }
 
 function updateLiveHr(result) {
-  resetPpgForLiveIfNeeded();
+  resetPpgForLiveIfNeeded(state.ppg.signalSource || "raw");
   state.ppg.liveHr = result;
   scheduleUiRender();
 }
@@ -2708,11 +2867,17 @@ function parsePpgCsv(text, source = "CSV") {
   state.ppg.samples = samples;
   state.ppg.sampleRateHz = sampleRateHz;
   state.ppg.source = source;
+  state.ppg.signalSource = "csv";
   state.ppg.columns = headers;
   state.ppg.analysis = null;
   state.ppg.liveHr = null;
+  state.ppg.liveStartMicros = null;
+  state.ppg.lastAutoAnalysisAt = 0;
+  state.ppg.lastAutoAnalysisSeq = null;
   state.ppg.error = "";
-  el.ppgSampleRateInput.value = sampleRateHz.toFixed(Math.abs(sampleRateHz - Math.round(sampleRateHz)) < 0.01 ? 0 : 2);
+  if (el.ppgSampleRateInput) {
+    el.ppgSampleRateInput.value = sampleRateHz.toFixed(Math.abs(sampleRateHz - Math.round(sampleRateHz)) < 0.01 ? 0 : 2);
+  }
   logLine(`PPG_LOAD,rows=${samples.length},fs=${sampleRateHz.toFixed(2)},source=${source}`);
   renderPpgView();
   setUiEnabled();
@@ -2720,15 +2885,23 @@ function parsePpgCsv(text, source = "CSV") {
 
 function getPpgOptions() {
   return {
-    sampleRateHz: normalizeNumber(el.ppgSampleRateInput.value, state.ppg.sampleRateHz || 32, 10, 200),
-    startMin: normalizeNumber(el.ppgStartInput.value, 0, 0, 10000),
-    durationSec: normalizeNumber(el.ppgDurationInput.value, 60, 10, 300),
+    sampleRateHz: normalizeNumber(el.ppgSampleRateInput?.value, state.ppg.sampleRateHz || state.settings.rateHz || 100, 1, 1000),
+    startMin: normalizeNumber(el.ppgStartInput?.value, 0, 0, 10000),
+    durationSec: normalizeNumber(el.ppgDurationInput?.value, 30, 8, 180),
     refractoryMs: normalizeNumber(el.ppgRefractoryInput.value, 420, 250, 1200),
     threshold: normalizeNumber(el.ppgThresholdInput.value, 0.42, 0.1, 0.9)
   };
 }
 
 function getPpgWindow(options = getPpgOptions()) {
+  if (state.ppg.source === "Live ADC") {
+    const latest = state.ppg.samples[state.ppg.samples.length - 1];
+    if (!latest) {
+      return [];
+    }
+    const startSec = latest.tSec - options.durationSec;
+    return state.ppg.samples.filter((sample) => sample.tSec >= startSec && sample.tSec <= latest.tSec);
+  }
   const startSec = options.startMin * 60;
   const durationSec = options.durationSec;
   return state.ppg.samples.filter((sample) => sample.tSec >= startSec && sample.tSec < startSec + durationSec);
@@ -2856,7 +3029,7 @@ function computeHrvFromPeaks(peaks, sampleRateHz) {
   };
 }
 
-function runPpgAnalysis() {
+function runPpgAnalysis(optionsOverride = {}) {
   const options = getPpgOptions();
   const window = getPpgWindow(options);
   if (window.length < Math.max(10, options.sampleRateHz * 8)) {
@@ -2881,8 +3054,42 @@ function runPpgAnalysis() {
     referenceHr
   };
   state.ppg.error = "";
-  logLine(`PPG_ANALYZE,window=${window.length},peaks=${peaks.length},hr=${Number.isFinite(hrv.hrBpm) ? hrv.hrBpm.toFixed(1) : "nan"}`);
+  if (!optionsOverride.silent) {
+    logLine(`PPG_ANALYZE,window=${window.length},peaks=${peaks.length},hr=${Number.isFinite(hrv.hrBpm) ? hrv.hrBpm.toFixed(1) : "nan"}`);
+  }
   renderPpgView();
+}
+
+function maybeRunLivePpgAnalysis(latestSample) {
+  if (state.ppg.source !== "Live ADC" || !latestSample) {
+    return;
+  }
+  const options = getPpgOptions();
+  const requiredSamples = Math.max(10, Math.ceil(options.sampleRateHz * 8));
+  if (state.ppg.samples.length < requiredSamples) {
+    state.ppg.analysis = null;
+    state.ppg.error = "";
+    return;
+  }
+  const now = performance.now();
+  const seqDelta = state.ppg.lastAutoAnalysisSeq == null
+    ? Infinity
+    : Math.abs(latestSample.seq - state.ppg.lastAutoAnalysisSeq);
+  const sampleIntervalReady = seqDelta >= Math.max(1, Math.round(options.sampleRateHz));
+  const timeReady = now - state.ppg.lastAutoAnalysisAt >= PPG_LIVE_ANALYSIS_INTERVAL_MS;
+  if (!sampleIntervalReady && !timeReady) {
+    return;
+  }
+
+  try {
+    runPpgAnalysis({ silent: true });
+    state.ppg.lastAutoAnalysisAt = now;
+    state.ppg.lastAutoAnalysisSeq = latestSample.seq;
+  } catch (error) {
+    if (!/too short/i.test(error.message)) {
+      state.ppg.error = error.message;
+    }
+  }
 }
 
 async function loadBundledPpgCsv() {
@@ -2947,13 +3154,17 @@ function renderPpgView() {
   const analysis = state.ppg.analysis;
   const liveHr = state.ppg.liveHr;
   const isLive = state.ppg.source === "Live ADC";
+  const sourceLabel = isLive
+    ? `Live ADC ${state.ppg.signalSource || "raw"}`
+    : state.ppg.source || "CSV";
   el.ppgStatus.textContent = state.ppg.loading
     ? "Loading"
     : state.ppg.error ? state.ppg.error
-    : analysis ? "Analyzed" : isLive && sampleCount > 0 ? "Live ADC" : sampleCount > 0 ? "Ready" : "No data";
+    : analysis && isLive ? "Live HRV"
+    : analysis ? "Analyzed" : isLive && sampleCount > 0 ? "Estimating" : sampleCount > 0 ? "Ready" : "No data";
   el.ppgSourceState.textContent = sampleCount > 0
-    ? `${state.ppg.source || "CSV"} - ${sampleCount} samples`
-    : "Load CSV";
+    ? `${sourceLabel} - ${sampleCount} samples`
+    : "Waiting for ADC";
   el.ppgMetricState.textContent = analysis
     ? `${analysis.peaks.length} peaks`
     : liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm`
@@ -2961,24 +3172,26 @@ function renderPpgView() {
   el.ppgThresholdOutput.textContent = Number(el.ppgThresholdInput.value).toFixed(2);
 
   if (!analysis) {
+    const options = getPpgOptions();
+    const requiredSamples = Math.max(10, Math.ceil(options.sampleRateHz * 8));
+    const windowSamples = getPpgWindow(options).length;
     el.ppgWindowState.textContent = isLive
-      ? `${sampleCount} live samples - model window ${liveHr?.window || 320}`
+      ? `${Math.min(windowSamples, sampleCount)} / ${Math.max(requiredSamples, Math.ceil(options.sampleRateHz * options.durationSec))} samples`
       : sampleCount > 0 ? "Ready to analyze" : "No window";
     el.ppgCnnState.textContent = isLive
-      ? liveHr?.model ? `ADC HR model ${liveHr.model}` : "Waiting for HR model"
+      ? "Waiting for window"
       : "Idle";
     el.ppgMetrics.replaceChildren(
       metricRow("Sample Rate", `${Number(el.ppgSampleRateInput.value || state.ppg.sampleRateHz).toFixed(1)} Hz`),
-      metricRow("Rows", `${sampleCount}`),
+      metricRow("Window", `${safeMetric(windowSamples, 0)} / ${Math.ceil(options.sampleRateHz * options.durationSec)}`),
+      metricRow("ADC Source", state.ppg.signalSource || "--"),
       metricRow("Last HR", liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm` : "--"),
-      metricRow("Quality", liveHr && Number.isFinite(liveHr.quality) ? liveHr.quality.toFixed(3) : "--"),
-      metricRow("Window STD", liveHr && Number.isFinite(liveHr.std) ? liveHr.std.toFixed(2) : "--"),
-      metricRow("Columns", state.ppg.columns.length ? state.ppg.columns.join(", ") : "--")
+      metricRow("Quality", liveHr && Number.isFinite(liveHr.quality) ? liveHr.quality.toFixed(3) : "--")
     );
     if (sampleCount > 0) {
       drawLivePpgPlot();
     } else {
-      drawEmptyAuxPlot(el.ppgCanvas, "Load PPG CSV and analyze");
+      drawEmptyAuxPlot(el.ppgCanvas, "Start ADC streaming");
     }
     drawPpgCnnArchitecture();
     return;
@@ -2987,14 +3200,18 @@ function renderPpgView() {
   const hrv = analysis.hrv;
   el.ppgWindowState.textContent = `${analysis.window.length} samples - ${analysis.options.durationSec.toFixed(0)} s`;
   el.ppgCnnState.textContent = `Conv kernels ${analysis.cnn.kernels.join("/")}`;
-  el.ppgMetrics.replaceChildren(
+  const rows = [
     metricRow("CNN HR", safeMetric(hrv.hrBpm, 1, " bpm")),
-    metricRow("Reference HR", safeMetric(analysis.referenceHr, 1, " bpm")),
     metricRow("RMSSD", safeMetric(hrv.rmssdMs, 1, " ms")),
     metricRow("SDNN", safeMetric(hrv.sdnnMs, 1, " ms")),
     metricRow("pNN50", Number.isFinite(hrv.pnn50) ? `${(hrv.pnn50 * 100).toFixed(1)}%` : "--"),
-    metricRow("Mean IBI", safeMetric(hrv.meanIbiMs, 1, " ms"))
-  );
+    metricRow("Mean IBI", safeMetric(hrv.meanIbiMs, 1, " ms")),
+    metricRow("ADC Source", isLive ? state.ppg.signalSource || "--" : "CSV")
+  ];
+  if (!isLive) {
+    rows.splice(1, 0, metricRow("Reference HR", safeMetric(analysis.referenceHr, 1, " bpm")));
+  }
+  el.ppgMetrics.replaceChildren(...rows);
   drawPpgSignalPlot();
   drawPpgCnnScorePlot();
 }
@@ -3034,7 +3251,7 @@ function drawLivePpgPlot() {
 
   const liveHr = state.ppg.liveHr;
   drawLegendOn(ppgCtx, [
-    { color: "#008c8c", label: "Live ADC PPG" },
+    { color: "#008c8c", label: state.ppg.signalSource === "filtered" ? "Filtered ADC" : "Raw ADC" },
     { color: "#2767c9", label: liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm` : "waiting HR" }
   ], pad.left + 8, pad.top + 18);
 }
@@ -4114,6 +4331,9 @@ async function applyFilter() {
     await sendCommand(`IIRHIGH ${state.settings.iirHighHz.toFixed(3)}`);
     await sendCommand(`IIRLOW ${state.settings.iirLowHz.toFixed(3)}`);
   }
+  if (state.ppg.source === "Live ADC") {
+    clearLivePpgWindow(state.settings.filter === "RAW" ? "raw" : "filtered");
+  }
   updateFilterStateText();
 }
 
@@ -4158,6 +4378,13 @@ async function startStreaming() {
     return;
   }
 
+  if (state.activeView === "ppg") {
+    await applyAcquisition();
+    await applyFilter();
+    await sendCommand("START");
+    return;
+  }
+
   if (state.activeView !== "adc") {
     state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
     applyInputPreprocess();
@@ -4187,6 +4414,9 @@ function clearData() {
   state.latestSample = null;
   state.latestImu = null;
   state.latestProcessedImu = null;
+  if (state.ppg.source === "Live ADC") {
+    clearLivePpgWindow(state.settings.filter === "RAW" ? "raw" : "filtered");
+  }
   resetPreprocessState();
   state.renderPending = false;
   state.lastRenderTime = performance.now();
@@ -4318,25 +4548,31 @@ function bindEvents() {
   el.datasetExportCsvButton.addEventListener("click", exportDatasetCsv);
   el.datasetClearButton.addEventListener("click", clearDataset);
   el.datasetImportInput.addEventListener("change", importDatasetJson);
-  el.ppgLoadSampleButton.addEventListener("click", loadBundledPpgCsv);
-  el.ppgAnalyzeButton.addEventListener("click", () => {
-    try {
-      runPpgAnalysis();
-    } catch (error) {
-      state.ppg.error = error.message;
-      el.ppgStatus.textContent = "Analyze failed";
-      logLine(`ERR,ppg_analyze,${error.message}`);
-      renderPpgView();
-    } finally {
-      setUiEnabled();
-    }
-  });
-  el.ppgFileInput.addEventListener("change", importPpgCsv);
-  [el.ppgSampleRateInput, el.ppgStartInput, el.ppgDurationInput, el.ppgRefractoryInput].forEach((node) => {
+  if (el.ppgLoadSampleButton) {
+    el.ppgLoadSampleButton.addEventListener("click", loadBundledPpgCsv);
+  }
+  if (el.ppgAnalyzeButton) {
+    el.ppgAnalyzeButton.addEventListener("click", () => {
+      try {
+        runPpgAnalysis();
+      } catch (error) {
+        state.ppg.error = error.message;
+        el.ppgStatus.textContent = "Analyze failed";
+        logLine(`ERR,ppg_analyze,${error.message}`);
+        renderPpgView();
+      } finally {
+        setUiEnabled();
+      }
+    });
+  }
+  if (el.ppgFileInput) {
+    el.ppgFileInput.addEventListener("change", importPpgCsv);
+  }
+  [el.ppgSampleRateInput, el.ppgStartInput, el.ppgDurationInput, el.ppgRefractoryInput].filter(Boolean).forEach((node) => {
     node.addEventListener("change", () => {
       if (state.ppg.samples.length > 0) {
         try {
-          runPpgAnalysis();
+          runPpgAnalysis({ silent: state.ppg.source === "Live ADC" });
         } catch (error) {
           state.ppg.analysis = null;
           state.ppg.error = error.message;
@@ -4356,7 +4592,7 @@ function bindEvents() {
   el.ppgThresholdInput.addEventListener("change", () => {
     if (state.ppg.samples.length > 0) {
       try {
-        runPpgAnalysis();
+        runPpgAnalysis({ silent: state.ppg.source === "Live ADC" });
       } catch (error) {
         state.ppg.analysis = null;
         state.ppg.error = error.message;
