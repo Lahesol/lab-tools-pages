@@ -13,6 +13,8 @@
       writeTimeoutMs: WRITE_TIMEOUT_MS,
       writeChunkSize: 128,
       writeChunkDelayMs: 2,
+      memoryTransferSize: PAGE_SIZE,
+      memorySegmentDelayMs: 0,
       memoryCommandDelayMs: 5,
       memorySettleMs: 10,
       pageWriteAttempts: 2,
@@ -26,6 +28,8 @@
       writeTimeoutMs: 8000,
       writeChunkSize: 64,
       writeChunkDelayMs: 8,
+      memoryTransferSize: 512,
+      memorySegmentDelayMs: 12,
       memoryCommandDelayMs: 12,
       memorySettleMs: 25,
       pageWriteAttempts: 3,
@@ -102,6 +106,7 @@
       this.writeTimeoutMs = profile.writeTimeoutMs;
       this.writeChunkSize = profile.writeChunkSize;
       this.writeChunkDelayMs = profile.writeChunkDelayMs;
+      this.memorySegmentDelayMs = profile.memorySegmentDelayMs || 0;
       this.stalled = false;
     }
 
@@ -387,7 +392,7 @@
       try {
         const target = await this.verifyBootloaderTarget();
         this.log(`verified=${target.chip}`);
-        this.log(`profile=${this.profile.label},chunk=${this.profile.writeChunkSize},delay=${this.profile.writeChunkDelayMs}`);
+        this.log(`profile=${this.profile.label},chunk=${this.profile.writeChunkSize},segment=${this.profile.memoryTransferSize},delay=${this.profile.writeChunkDelayMs}`);
         this.progress(8, "Preparing erase");
         await this.prepareVectorTable(firmwareBytes);
         await this.chipErase(0);
@@ -404,7 +409,7 @@
       try {
         const target = await this.verifyBootloaderTarget();
         this.log(`verified=${target.chip}`);
-        this.log(`profile=${this.profile.label},chunk=${this.profile.writeChunkSize},delay=${this.profile.writeChunkDelayMs}`);
+        this.log(`profile=${this.profile.label},chunk=${this.profile.writeChunkSize},segment=${this.profile.memoryTransferSize},delay=${this.profile.writeChunkDelayMs}`);
         this.progress(8, "Preparing flash");
         await this.prepareVectorTable(firmwareBytes);
         if (skipErase) {
@@ -535,6 +540,17 @@
     }
 
     async writeMemory(address, bytes) {
+      const segmentSize = Math.max(1, Math.min(bytes.length, this.profile.memoryTransferSize || bytes.length));
+      for (let offset = 0; offset < bytes.length; offset += segmentSize) {
+        const segment = bytes.slice(offset, Math.min(offset + segmentSize, bytes.length));
+        await this.writeMemorySegment(address + offset, segment);
+        if (this.profile.memorySegmentDelayMs > 0 && offset + segment.length < bytes.length) {
+          await sleep(this.profile.memorySegmentDelayMs);
+        }
+      }
+    }
+
+    async writeMemorySegment(address, bytes) {
       await this.transport.writeAscii(`S${hex8(address)},${hex8(bytes.length)}#`);
       await sleep(this.profile.memoryCommandDelayMs);
       await this.transport.writeBytes(bytes);

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=bdb0ac11a872" />
+    <link rel="stylesheet" href="styles.css?v=15e71a723cc8" />
   </head>
   <body>
     <div class="app-shell">
@@ -12,14 +12,15 @@
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">K</div>
           <div>
-            <span class="browser-recommendation">Chrome browser recommended for Web Serial / Flash</span>
+            <span class="browser-recommendation">Chrome browser recommended for Web Serial / Web Bluetooth / Flash</span>
             <h1>KETI Lab Console</h1>
             <p>Arduino Nano 33 BLE Rev2 - ADC and filtering</p>
           </div>
         </div>
         <div class="status-strip" aria-live="polite">
-          <span id="browserStatus" class="status-pill">Web Serial check</span>
+          <span id="browserStatus" class="status-pill">Browser API check</span>
           <span id="portStatus" class="status-pill muted">Disconnected</span>
+          <span id="bleStatus" class="status-pill muted">BLE check</span>
           <span id="streamStatus" class="status-pill muted">Idle</span>
         </div>
       </header>
@@ -32,8 +33,13 @@
           </div>
 
           <div class="button-row">
-            <button id="connectButton" class="primary-button" type="button">Connect</button>
-            <button id="disconnectButton" type="button" disabled>Disconnect</button>
+            <button id="connectButton" class="primary-button" type="button">Serial Connect</button>
+            <button id="disconnectButton" type="button" disabled>Serial Disconnect</button>
+          </div>
+
+          <div class="button-row">
+            <button id="bleConnectButton" type="button">BLE Connect</button>
+            <button id="bleDisconnectButton" type="button" disabled>BLE Disconnect</button>
           </div>
 
           <div class="button-row">
@@ -90,10 +96,21 @@
           <label class="field">
             <span>Flash Mode</span>
             <select id="flashProfileSelect">
-              <option value="compatibility" selected>Compatibility - slow/reliable</option>
-              <option value="standard">Standard - faster</option>
+              <option value="compatibility" selected>Segmented - safest Web Serial</option>
+              <option value="standard">Standard - single-page transfer</option>
             </select>
           </label>
+
+          <label class="field">
+            <span>Helper Port</span>
+            <select id="helperPortSelect" disabled>
+              <option value="">Helper not detected</option>
+            </select>
+          </label>
+          <div class="helper-status-row">
+            <span id="helperState">Helper idle</span>
+            <button id="refreshHelperButton" class="recovery-button" type="button">Refresh</button>
+          </div>
 
           <div class="flash-main-action">
             <button id="flashButton" class="primary-button" type="button">Flash Firmware</button>
@@ -102,6 +119,10 @@
           <div class="flash-recovery-row">
             <button id="bootloaderButton" class="recovery-button" type="button">Recovery Bootloader</button>
             <button id="exitBootloaderButton" class="recovery-button" type="button">Exit Bootloader</button>
+          </div>
+          <div class="helper-download-row">
+            <a class="download-button" href="tools/start_flash_helper.ps1" download title="Download PowerShell helper launcher">Helper Script</a>
+            <a class="download-button" href="downloads/keti_flash_helper_bundle.zip" download title="Download runnable helper bundle">Helper Bundle</a>
           </div>
 
           <div class="divider"></div>
@@ -658,6 +679,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=eab0ae0c7d50"></script>
+    <script src="app.js?v=df775d53fa1a"></script>
   </body>
 </html>

@@ -26,6 +26,9 @@ const DIRECT_FLASH_CLOSE_TIMEOUT_MS = 2500;
 const DIRECT_FLASH_SEPARATE_ERASE = true;
 const DIRECT_FLASH_POST_ERASE_SETTLE_MS = 1400;
 const DIRECT_FLASH_COMPAT_POST_ERASE_SETTLE_MS = 2800;
+const BLE_ADC_DEVICE_NAME = "KETI_ADC_REV2";
+const BLE_ADC_SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214";
+const BLE_ADC_CHARACTERISTIC_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
 const PPG_SAMPLE_PATHS = [
   "../ppg_dalia_subject1_acc_ppg_activity_temp.csv",
   "ppg_dalia_subject1_acc_ppg_activity_temp.csv"
@@ -119,6 +122,10 @@ const state = {
   port: null,
   reader: null,
   writer: null,
+  connectionMode: null,
+  bleDevice: null,
+  bleServer: null,
+  bleCharacteristic: null,
   readLoopActive: false,
   connected: false,
   streaming: false,
@@ -225,18 +232,29 @@ const state = {
     directFirmwares: DEFAULT_PREBUILT_FIRMWARES,
     directBasePath: "firmware/prebuilt/",
     directBusy: false,
-    directBootloaderTouched: false
+    directBootloaderTouched: false,
+    helper: {
+      available: false,
+      checking: false,
+      baseUrl: "",
+      ports: [],
+      selectedPort: "",
+      lastError: ""
+    }
   }
 };
 
 const el = {
   browserStatus: document.getElementById("browserStatus"),
   portStatus: document.getElementById("portStatus"),
+  bleStatus: document.getElementById("bleStatus"),
   streamStatus: document.getElementById("streamStatus"),
   sampleCount: document.getElementById("sampleCount"),
   recordCount: document.getElementById("recordCount"),
   connectButton: document.getElementById("connectButton"),
   disconnectButton: document.getElementById("disconnectButton"),
+  bleConnectButton: document.getElementById("bleConnectButton"),
+  bleDisconnectButton: document.getElementById("bleDisconnectButton"),
   startButton: document.getElementById("startButton"),
   stopButton: document.getElementById("stopButton"),
   applyAcquisitionButton: document.getElementById("applyAcquisitionButton"),
@@ -248,6 +266,9 @@ const el = {
   exportButton: document.getElementById("exportButton"),
   firmwareSelect: document.getElementById("firmwareSelect"),
   flashProfileSelect: document.getElementById("flashProfileSelect"),
+  helperPortSelect: document.getElementById("helperPortSelect"),
+  refreshHelperButton: document.getElementById("refreshHelperButton"),
+  helperState: document.getElementById("helperState"),
   flashButton: document.getElementById("flashButton"),
   flashState: document.getElementById("flashState"),
   bootloaderButton: document.getElementById("bootloaderButton"),
@@ -700,17 +721,25 @@ function logLine(line, direction = "rx") {
 function setUiEnabled() {
   const connected = state.connected;
   const streaming = state.streaming;
+  const serialSupported = "serial" in navigator;
+  const bleSupported = "bluetooth" in navigator;
+  const serialMode = state.connectionMode === "serial";
+  const bleMode = state.connectionMode === "ble";
+  const helperReady = state.flash.helper.available && Boolean(state.flash.helper.selectedPort || el.helperPortSelect?.value);
+  const directFlashReady = serialSupported && Boolean(window.KetiDirectFlash);
 
-  el.connectButton.disabled = connected;
-  el.disconnectButton.disabled = !connected;
+  el.connectButton.disabled = connected || !serialSupported;
+  el.disconnectButton.disabled = !serialMode;
+  el.bleConnectButton.disabled = connected || !bleSupported;
+  el.bleDisconnectButton.disabled = !bleMode;
   el.startButton.disabled = !connected || streaming;
   el.stopButton.disabled = !connected || !streaming;
-  el.applyAcquisitionButton.disabled = !connected;
-  el.applyFilterButton.disabled = !connected;
-  el.pingButton.disabled = !connected;
+  el.applyAcquisitionButton.disabled = !serialMode;
+  el.applyFilterButton.disabled = !serialMode;
+  el.pingButton.disabled = !serialMode;
   el.recordButton.disabled = !connected;
-  el.classStartButton.disabled = !connected || state.classification.active;
-  el.classStopButton.disabled = !connected || !state.classification.active;
+  el.classStartButton.disabled = !serialMode || state.classification.active;
+  el.classStopButton.disabled = !serialMode || !state.classification.active;
   el.exportButton.disabled = state.records.length === 0;
   el.datasetCaptureOneButton.disabled = state.imuSamples.length < getDatasetWindowSize();
   el.datasetExportJsonButton.disabled = state.dataset.examples.length === 0;
@@ -729,15 +758,22 @@ function setUiEnabled() {
   }
   el.bootloaderButton.disabled = !("serial" in navigator) || state.flash.directBusy;
   el.exitBootloaderButton.disabled = !("serial" in navigator) || state.flash.directBusy;
-  el.flashButton.disabled = !("serial" in navigator) || state.flash.directBusy;
+  el.flashButton.disabled = state.flash.directBusy || (!helperReady && !directFlashReady);
   el.flashProfileSelect.disabled = state.flash.directBusy;
+  el.helperPortSelect.disabled = state.flash.directBusy || !state.flash.helper.available || state.flash.helper.ports.length === 0;
+  el.refreshHelperButton.disabled = state.flash.directBusy || state.flash.helper.checking;
 
   el.recordButton.textContent = state.recording ? "Stop Rec" : "Record";
   el.datasetCaptureButton.textContent = state.dataset.captureActive ? "Stop Capture" : "Start Capture";
-  el.flashButton.textContent = state.flash.directBusy ? "Flashing..." : "Flash Firmware";
+  el.flashButton.textContent = state.flash.directBusy
+    ? "Flashing..."
+    : helperReady ? "Flash via Helper" : "Flash Firmware";
   el.startButton.textContent = state.activeView === "classification" ? "Start + Class" : "Start";
   el.stopButton.textContent = state.activeView === "classification" ? "Stop + Class" : "Stop";
-  setStatus(el.portStatus, connected ? "Connected" : "Disconnected", connected ? "" : "muted");
+  const connectionLabel = bleMode ? "BLE connected" : serialMode ? "Serial connected" : "Disconnected";
+  setStatus(el.portStatus, connectionLabel, connected ? "" : "muted");
+  const bleLabel = bleMode ? "BLE ADC connected" : bleSupported ? "BLE ready" : "BLE unavailable";
+  setStatus(el.bleStatus, bleLabel, bleMode ? "" : bleSupported ? "muted" : "error");
   setStatus(el.streamStatus, streaming ? "Streaming" : "Idle", streaming ? "warning" : "muted");
 }
 
@@ -2557,6 +2593,173 @@ function setDirectFlashProgress(percent, message) {
   }
 }
 
+function getSameOriginHelperBaseUrl() {
+  try {
+    const location = new URL(window.location.href);
+    const localHost = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+    return location.protocol === "http:" && localHost ? location.origin : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function helperApiUrl(path) {
+  const baseUrl = state.flash.helper.baseUrl || getSameOriginHelperBaseUrl();
+  return baseUrl ? new URL(path, baseUrl).href : "";
+}
+
+function describeHelperPort(port) {
+  const boards = Array.isArray(port.boards) ? port.boards : [];
+  const boardText = boards.map((board) => board.name || board.fqbn).filter(Boolean).join(", ");
+  return [port.address, boardText || port.label || port.protocol].filter(Boolean).join(" - ");
+}
+
+function isPreferredHelperPort(port) {
+  const text = [
+    port.address,
+    port.label,
+    port.protocol,
+    ...(Array.isArray(port.boards) ? port.boards.flatMap((board) => [board.name, board.fqbn]) : [])
+  ].filter(Boolean).join(" ").toLowerCase();
+  return text.includes("nano 33 ble") || text.includes("nano33ble") || text.includes("arduino:mbed_nano:nano33ble");
+}
+
+function updateHelperPortSelect() {
+  const ports = state.flash.helper.ports;
+  const previous = el.helperPortSelect.value || state.flash.helper.selectedPort;
+  el.helperPortSelect.replaceChildren();
+
+  if (!state.flash.helper.available) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Helper not detected";
+    el.helperPortSelect.append(option);
+    state.flash.helper.selectedPort = "";
+    return;
+  }
+
+  if (ports.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No board port";
+    el.helperPortSelect.append(option);
+    state.flash.helper.selectedPort = "";
+    return;
+  }
+
+  for (const port of ports) {
+    const option = document.createElement("option");
+    option.value = String(port.address || "").toUpperCase();
+    option.textContent = describeHelperPort(port);
+    el.helperPortSelect.append(option);
+  }
+
+  const preferred = ports.find((port) => String(port.address).toUpperCase() === previous) ||
+    ports.find(isPreferredHelperPort) ||
+    ports[0];
+  state.flash.helper.selectedPort = String(preferred.address || "").toUpperCase();
+  el.helperPortSelect.value = state.flash.helper.selectedPort;
+}
+
+async function refreshHelperStatus({ silent = false } = {}) {
+  const baseUrl = getSameOriginHelperBaseUrl();
+  state.flash.helper.baseUrl = baseUrl;
+  if (!baseUrl) {
+    state.flash.helper.available = false;
+    state.flash.helper.ports = [];
+    state.flash.helper.lastError = "Open through helper URL to use helper upload";
+    updateHelperPortSelect();
+    el.helperState.textContent = "Helper not detected";
+    setUiEnabled();
+    return false;
+  }
+
+  state.flash.helper.checking = true;
+  if (!silent) {
+    el.helperState.textContent = "Checking helper";
+  }
+  setUiEnabled();
+
+  try {
+    const healthResponse = await fetch(helperApiUrl("/api/health"), { cache: "no-store" });
+    const health = await healthResponse.json();
+    if (!healthResponse.ok || !health.ok) {
+      throw new Error(health.error || "Helper health check failed");
+    }
+    if (health.arduinoCli && health.arduinoCli.ok === false) {
+      throw new Error("Arduino CLI is not usable from the helper.");
+    }
+
+    const portsResponse = await fetch(helperApiUrl("/api/ports"), { cache: "no-store" });
+    const portsPayload = await portsResponse.json();
+    if (!portsResponse.ok || !portsPayload.ok) {
+      throw new Error(portsPayload.error || "Helper port scan failed");
+    }
+
+    state.flash.helper.available = true;
+    state.flash.helper.ports = Array.isArray(portsPayload.ports) ? portsPayload.ports : [];
+    state.flash.helper.lastError = "";
+    updateHelperPortSelect();
+    el.helperState.textContent = state.flash.helper.ports.length > 0
+      ? `Helper ready - ${state.flash.helper.ports.length} port(s)`
+      : "Helper ready - no board";
+    return true;
+  } catch (error) {
+    state.flash.helper.available = false;
+    state.flash.helper.ports = [];
+    state.flash.helper.selectedPort = "";
+    state.flash.helper.lastError = error.message;
+    updateHelperPortSelect();
+    el.helperState.textContent = "Helper unavailable";
+    if (!silent) {
+      logLine(`ERR,helper_status,${error.message}`);
+    }
+    return false;
+  } finally {
+    state.flash.helper.checking = false;
+    setUiEnabled();
+  }
+}
+
+function getSelectedHelperPort() {
+  return String(el.helperPortSelect.value || state.flash.helper.selectedPort || "").trim().toUpperCase();
+}
+
+async function flashFirmwareWithHelper(firmware) {
+  const port = getSelectedHelperPort();
+  if (!port) {
+    throw new Error("Helper port is not selected.");
+  }
+
+  state.flash.directBusy = true;
+  setDirectFlashProgress(5, "Helper upload");
+  setUiEnabled();
+
+  try {
+    const response = await fetch(helperApiUrl("/api/flash"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        port,
+        firmwareId: firmware.id,
+        fqbn: firmware.fqbn || "arduino:mbed_nano:nano33ble"
+      })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || result.stderr || "Helper upload failed");
+    }
+    setDirectFlashProgress(100, "Helper Flash OK");
+    logLine(`HELPER_FLASH_OK,firmware=${firmware.id},port=${port}`);
+  } catch (error) {
+    setDirectFlashProgress(0, "Helper failed");
+    logLine(`ERR,helper_flash,${error.message}`);
+  } finally {
+    state.flash.directBusy = false;
+    setUiEnabled();
+  }
+}
+
 function isArduinoSerialPort(port) {
   if (!port || typeof port.getInfo !== "function") {
     return true;
@@ -3046,13 +3249,22 @@ async function exitBootloaderDirect() {
 }
 
 async function flashFirmware() {
+  const firmware = getSelectedFirmware();
+  const helperReady = state.flash.helper.available || await refreshHelperStatus({ silent: true });
+  if (helperReady && getSelectedHelperPort()) {
+    await flashFirmwareWithHelper(firmware);
+    return;
+  }
+  await flashFirmwareDirect(firmware);
+}
+
+async function flashFirmwareDirect(firmware = getSelectedFirmware()) {
   if (!("serial" in navigator) || !window.KetiDirectFlash) {
     setDirectFlashProgress(0, "Unavailable");
     logLine("ERR,direct_flash,web_serial_unavailable");
     return;
   }
 
-  const firmware = getSelectedFirmware();
   state.flash.directBusy = true;
   setDirectFlashProgress(0, "Loading BIN");
   setUiEnabled();
@@ -3120,12 +3332,17 @@ async function connectDevice() {
     logLine("This browser does not support Web Serial.");
     return;
   }
+  if (state.connected) {
+    logLine("ERR,connect,already_connected");
+    return;
+  }
 
   try {
     state.port = await navigator.serial.requestPort();
     await state.port.open({ baudRate: 115200 });
     state.writer = state.port.writable.getWriter();
     state.reader = state.port.readable.getReader();
+    state.connectionMode = "serial";
     state.connected = true;
     state.readLoopActive = true;
     setUiEnabled();
@@ -3165,9 +3382,146 @@ async function disconnectDevice() {
     state.port = null;
     state.reader = null;
     state.writer = null;
+    state.connectionMode = null;
     state.connected = false;
     setUiEnabled();
   }
+}
+
+function getBleAdcRequestOptions() {
+  return {
+    filters: [
+      { services: [BLE_ADC_SERVICE_UUID] },
+      { name: BLE_ADC_DEVICE_NAME }
+    ],
+    optionalServices: [BLE_ADC_SERVICE_UUID]
+  };
+}
+
+async function connectBleDevice() {
+  if (!("bluetooth" in navigator)) {
+    setStatus(el.bleStatus, "BLE unavailable", "error");
+    logLine("This browser does not support Web Bluetooth.");
+    return;
+  }
+  if (state.connected) {
+    logLine("ERR,ble_connect,already_connected");
+    return;
+  }
+
+  try {
+    setStatus(el.bleStatus, "Selecting BLE ADC", "warning");
+    state.bleDevice = await navigator.bluetooth.requestDevice(getBleAdcRequestOptions());
+    state.bleDevice.addEventListener("gattserverdisconnected", handleBleDisconnected);
+    state.bleServer = await state.bleDevice.gatt.connect();
+    const service = await state.bleServer.getPrimaryService(BLE_ADC_SERVICE_UUID);
+    state.bleCharacteristic = await service.getCharacteristic(BLE_ADC_CHARACTERISTIC_UUID);
+    state.bleCharacteristic.addEventListener("characteristicvaluechanged", handleBleNotification);
+    await state.bleCharacteristic.startNotifications();
+
+    state.connectionMode = "ble";
+    state.connected = true;
+    state.streaming = false;
+    state.recording = false;
+    logLine(`BLE_CONNECTED,device=${state.bleDevice.name || BLE_ADC_DEVICE_NAME}`);
+  } catch (error) {
+    logLine(`ERR,ble_connect,${error.message}`);
+    resetBleState();
+  } finally {
+    setUiEnabled();
+  }
+}
+
+async function disconnectBleDevice() {
+  try {
+    state.streaming = false;
+    state.recording = false;
+    if (state.bleCharacteristic) {
+      try {
+        state.bleCharacteristic.removeEventListener("characteristicvaluechanged", handleBleNotification);
+        await state.bleCharacteristic.stopNotifications();
+      } catch (error) {
+        logLine(`ERR,ble_stop_notify,${error.message}`);
+      }
+    }
+    if (state.bleDevice?.gatt?.connected) {
+      state.bleDevice.gatt.disconnect();
+    }
+  } catch (error) {
+    logLine(`ERR,ble_disconnect,${error.message}`);
+  } finally {
+    resetBleState();
+    logLine("BLE_DISCONNECTED");
+    setUiEnabled();
+  }
+}
+
+function handleBleDisconnected() {
+  resetBleState();
+  logLine("BLE_DISCONNECTED");
+  setUiEnabled();
+}
+
+function resetBleState() {
+  state.bleCharacteristic = null;
+  state.bleServer = null;
+  state.bleDevice = null;
+  if (state.connectionMode === "ble") {
+    state.connectionMode = null;
+    state.connected = false;
+    state.streaming = false;
+    state.recording = false;
+  }
+}
+
+function handleBleNotification(event) {
+  const text = decodeBleNotification(event.target.value);
+  if (!text) {
+    return;
+  }
+  const lines = text.includes("\n") || text.includes("\r")
+    ? text.split(/\r?\n/)
+    : [text];
+  for (const line of lines) {
+    const clean = line.trim();
+    if (clean.length === 0) {
+      continue;
+    }
+    const normalized = normalizeBleAdcPayload(clean);
+    if (!state.streaming) {
+      appendDeviceLogLine(normalized, "rx", true);
+      continue;
+    }
+    handleLine(normalized);
+  }
+}
+
+function decodeBleNotification(value) {
+  if (!value) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  const bytes = value instanceof DataView
+    ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+    : value instanceof ArrayBuffer
+      ? new Uint8Array(value)
+      : ArrayBuffer.isView(value)
+        ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+        : null;
+  return bytes ? new TextDecoder().decode(bytes) : "";
+}
+
+function normalizeBleAdcPayload(payload) {
+  const text = String(payload || "").trim();
+  if (text.startsWith("BLE_DATA,")) {
+    return text;
+  }
+  if (/^\d+\s*,\s*[+-]?\d+(?:\.\d+)?$/.test(text)) {
+    return `BLE_DATA,${text}`;
+  }
+  return text;
 }
 
 async function readLoop() {
@@ -3573,7 +3927,7 @@ function parseBleDataLine(line) {
     millivolts: rawToMillivolts(raw),
     filtered: raw,
     format: "BLE_DATA",
-    formatDetail: "serial mirror",
+    formatDetail: "ble notify",
     valueUnit: "count",
     filteredLabel: "Raw copy"
   });
@@ -5913,6 +6267,14 @@ function applyInputPreprocess() {
 }
 
 async function startStreaming() {
+  if (state.connectionMode === "ble") {
+    state.streaming = true;
+    state.classification.startPending = false;
+    logLine(`BLE_START,device=${BLE_ADC_DEVICE_NAME},sample_rate=32`);
+    setUiEnabled();
+    return;
+  }
+
   if (state.activeView === "classification") {
     state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
     applyInputPreprocess();
@@ -5947,6 +6309,13 @@ async function startStreaming() {
 }
 
 async function stopStreaming() {
+  if (state.connectionMode === "ble") {
+    state.streaming = false;
+    logLine("BLE_STOP");
+    setUiEnabled();
+    return;
+  }
+
   if (state.activeView === "classification") {
     await sendCommand("CLS OFF");
   }
@@ -5998,6 +6367,10 @@ function toggleRecording() {
 }
 
 async function startClassification() {
+  if (state.connectionMode === "ble") {
+    logLine("ERR,class_ble_unsupported");
+    return;
+  }
   state.classification.startPending = true;
   renderClassification();
   setUiEnabled();
@@ -6005,6 +6378,13 @@ async function startClassification() {
 }
 
 async function stopClassification() {
+  if (state.connectionMode === "ble") {
+    state.classification.startPending = false;
+    state.classification.active = false;
+    renderClassification();
+    setUiEnabled();
+    return;
+  }
   state.classification.startPending = false;
   state.classification.active = false;
   renderClassification();
@@ -6093,6 +6473,8 @@ function sleep(ms) {
 function bindEvents() {
   el.connectButton.addEventListener("click", connectDevice);
   el.disconnectButton.addEventListener("click", disconnectDevice);
+  el.bleConnectButton.addEventListener("click", connectBleDevice);
+  el.bleDisconnectButton.addEventListener("click", disconnectBleDevice);
   el.startButton.addEventListener("click", startStreaming);
   el.stopButton.addEventListener("click", stopStreaming);
   el.applyAcquisitionButton.addEventListener("click", applyAcquisition);
@@ -6187,6 +6569,11 @@ function bindEvents() {
   el.flashButton.addEventListener("click", flashFirmware);
   el.bootloaderButton.addEventListener("click", enterBootloaderDirect);
   el.exitBootloaderButton.addEventListener("click", exitBootloaderDirect);
+  el.refreshHelperButton.addEventListener("click", () => refreshHelperStatus());
+  el.helperPortSelect.addEventListener("change", () => {
+    state.flash.helper.selectedPort = getSelectedHelperPort();
+    setUiEnabled();
+  });
   el.showRawToggle.addEventListener("change", drawPlot);
   el.showFilteredToggle.addEventListener("change", drawPlot);
   el.autoScaleToggle.addEventListener("change", drawPlot);
@@ -6223,11 +6610,18 @@ function bindEvents() {
 }
 
 function init() {
-  if ("serial" in navigator) {
+  const serialReady = "serial" in navigator;
+  const bleReady = "bluetooth" in navigator;
+  if (serialReady && bleReady) {
+    setStatus(el.browserStatus, "Serial / BLE ready", "");
+  } else if (serialReady) {
     setStatus(el.browserStatus, "Web Serial ready", "");
+  } else if (bleReady) {
+    setStatus(el.browserStatus, "Web BLE ready", "");
   } else {
-    setStatus(el.browserStatus, "Web Serial unavailable", "error");
+    setStatus(el.browserStatus, "Browser APIs unavailable", "error");
   }
+  setStatus(el.bleStatus, bleReady ? "BLE ready" : "BLE unavailable", bleReady ? "muted" : "error");
   populateFirmwareSelect(DEFAULT_PREBUILT_FIRMWARES);
   bindEvents();
   updateAdcWindowInputFromSamples(state.settings.window);
@@ -6242,6 +6636,7 @@ function init() {
   renderDeviceLog();
   drawPlot();
   loadDirectFirmwareManifest();
+  refreshHelperStatus({ silent: true });
 }
 
 init();
