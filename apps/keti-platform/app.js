@@ -36,6 +36,7 @@ const PPG_LIVE_ANALYSIS_INTERVAL_MS = 1000;
 const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
 const INPUT_SETTINGS_VIEWS = new Set(["imu1d", "imu2d", "classification", "dataset", "model"]);
 const ADC_FORMAT_LABELS = {
+  RAW: "RAW",
   ALL: "All ADC",
   DATA: "DATA",
   BUF: "BUF",
@@ -45,7 +46,7 @@ const ADC_FORMAT_LABELS = {
   PPG: "PPG mirror",
   CUSTOM: "Custom columns"
 };
-const ADC_FORMATS = ["DATA", "BUF", "FILT", "PLOTTER", "BLE_DATA", "PPG", "CUSTOM"];
+const ADC_FORMATS = ["RAW", "DATA", "BUF", "FILT", "PLOTTER", "BLE_DATA", "PPG", "CUSTOM"];
 const ADC_PLOT_SERIES = {
   raw: { label: "Raw", color: "#008c8c", width: 1.8 },
   filtered: { label: "Filtered", color: "#d28a00", width: 2.4 },
@@ -288,16 +289,9 @@ const el = {
   showFilteredToggle: document.getElementById("showFilteredToggle"),
   autoScaleToggle: document.getElementById("autoScaleToggle"),
   adcPlotControls: document.getElementById("adcPlotControls"),
-  adcFormatSelect: document.getElementById("adcFormatSelect"),
   adcPlotModeSelect: document.getElementById("adcPlotModeSelect"),
   adcFormatState: document.getElementById("adcFormatState"),
   adcLineState: document.getElementById("adcLineState"),
-  adcDelimiterSelect: document.getElementById("adcDelimiterSelect"),
-  adcCustomDelimiterInput: document.getElementById("adcCustomDelimiterInput"),
-  adcXAxisSelect: document.getElementById("adcXAxisSelect"),
-  adcYAxisSelect: document.getElementById("adcYAxisSelect"),
-  adcColumnAutoButton: document.getElementById("adcColumnAutoButton"),
-  adcColumnTypeList: document.getElementById("adcColumnTypeList"),
   signalCanvas: document.getElementById("signalCanvas"),
   metricGrid: document.getElementById("metricGrid"),
   ppgView: document.getElementById("ppgView"),
@@ -430,10 +424,10 @@ function escapeHtml(value) {
 }
 
 function syncAdcLineInspectorSettings() {
-  state.lineInspector.delimiter = el.adcDelimiterSelect?.value || "AUTO";
-  state.lineInspector.customDelimiter = el.adcCustomDelimiterInput?.value || ",";
-  state.lineInspector.xAxis = el.adcXAxisSelect?.value || "INDEX";
-  state.lineInspector.yAxis = el.adcYAxisSelect?.value || "DEFAULT";
+  state.lineInspector.delimiter = "COMMA";
+  state.lineInspector.customDelimiter = ",";
+  state.lineInspector.xAxis = "INDEX";
+  state.lineInspector.yAxis = "DEFAULT";
 }
 
 function getDelimiterSpec(line, mode = state.lineInspector.delimiter) {
@@ -575,14 +569,47 @@ function analyzeDeviceLine(line) {
   syncAdcLineInspectorSettings();
   const delimiter = getDelimiterSpec(line);
   const cells = splitLineWithDelimiter(line, delimiter).slice(0, MAX_ADC_COLUMNS);
+  const parsedRaw = extractRawAdcFields(line);
   const inferredTypes = inferAdcColumnTypes(line, cells);
+  const summary = summarizeDeviceLine(line, cells, parsedRaw);
   return {
     line,
     delimiter,
     cells,
     inferredTypes,
-    summary: `${cells.length} col - ${delimiter.label}`
+    summary
   };
+}
+
+function summarizeDeviceLine(line, cells, parsedRaw = null) {
+  if (parsedRaw) {
+    return `RAW sample - ${formatNumber(parsedRaw.raw, 0)}`;
+  }
+  if (line.startsWith("IMU,")) {
+    return "IMU sample";
+  }
+  if (line.startsWith("CLS,")) {
+    return "classification";
+  }
+  if (line.startsWith("PPG,")) {
+    return "PPG sample";
+  }
+  if (line.startsWith("HR,")) {
+    return "HR result";
+  }
+  if (line.startsWith("ACK,")) {
+    return "ack";
+  }
+  if (line.startsWith("ERR,")) {
+    return "error";
+  }
+  if (line.startsWith("STATUS,")) {
+    return "status";
+  }
+  if (isAdcStreamLine(line)) {
+    return "ADC sample";
+  }
+  return `${cells.length} field${cells.length === 1 ? "" : "s"}`;
 }
 
 function ensureAdcColumnTypes(analysis, force = false) {
@@ -634,7 +661,6 @@ function scheduleDeviceLogRender() {
 
 function appendDeviceLogLine(line, direction = "rx", stream = false) {
   const analysis = analyzeDeviceLine(line);
-  ensureAdcColumnTypes(analysis);
   state.lineInspector.latest = analysis;
   state.deviceLog.rows.unshift({
     time: new Date().toLocaleTimeString(),
@@ -649,59 +675,14 @@ function appendDeviceLogLine(line, direction = "rx", stream = false) {
   scheduleDeviceLogRender();
 }
 
-function renderAdcColumnTypeList() {
-  if (!el.adcColumnTypeList) {
-    return;
-  }
-  const analysis = state.lineInspector.latest;
-  if (!analysis || analysis.cells.length === 0) {
-    el.adcColumnTypeList.replaceChildren();
-    return;
-  }
-  const cards = analysis.cells.map((cell, index) => {
-    const card = document.createElement("div");
-    card.className = "adc-column-card";
-    const inferred = analysis.inferredTypes[index] || "IGNORE";
-    const selected = state.lineInspector.columnTypes[index] || inferred;
-    const indexNode = document.createElement("strong");
-    indexNode.textContent = `C${index}`;
-    const valueNode = document.createElement("code");
-    valueNode.textContent = String(cell);
-    valueNode.title = String(cell);
-    const inferredNode = document.createElement("span");
-    inferredNode.textContent = `auto: ${ADC_COLUMN_TYPES.find(([value]) => value === inferred)?.[1] || inferred}`;
-    const numberNode = document.createElement("span");
-    numberNode.textContent = Number.isFinite(parseColumnNumber(cell)) ? "numeric" : "text";
-    const select = document.createElement("select");
-    if (typeof select.setAttribute === "function") {
-      select.setAttribute("aria-label", `Column ${index} type`);
-    }
-    select.innerHTML = ADC_COLUMN_TYPES.map(([value, label]) =>
-      `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`
-    ).join("");
-    select.value = selected;
-    select.addEventListener("change", (event) => {
-      state.lineInspector.columnTypes[index] = event.target.value;
-      drawPlot();
-      renderDeviceLog();
-    });
-    card.append(indexNode, valueNode, inferredNode, numberNode, select);
-    return card;
-  });
-  el.adcColumnTypeList.replaceChildren(...cards);
-}
-
 function renderDeviceLog() {
   if (!el.logOutput) {
     return;
   }
   const latest = state.lineInspector.latest;
   if (el.adcLineState) {
-    const plotMode = state.lineInspector.yAxis === "DEFAULT"
-      ? (el.adcPlotModeSelect?.selectedOptions?.[0]?.textContent || "Plot control")
-      : (el.adcYAxisSelect?.selectedOptions?.[0]?.textContent || state.lineInspector.yAxis);
     el.adcLineState.textContent = latest
-      ? `${latest.summary} - x: ${state.lineInspector.xAxis} - y: ${plotMode}`
+      ? `${latest.summary} - ${state.samples.length} ADC samples`
       : "Waiting for serial lines";
   }
   const text = state.deviceLog.rows.map((row) => {
@@ -710,7 +691,6 @@ function renderDeviceLog() {
     return `${row.time} ${prefix}${stream} [${row.summary}] ${row.line}`;
   }).join("\n");
   el.logOutput.textContent = text;
-  renderAdcColumnTypeList();
 }
 
 function logLine(line, direction = "rx") {
@@ -1166,29 +1146,22 @@ function day2IirModeName(mode) {
 }
 
 function syncAdcPlotSettings() {
-  state.settings.adcFormat = el.adcFormatSelect?.value || "ALL";
+  state.settings.adcFormat = "ALL";
   state.settings.adcPlotMode = el.adcPlotModeSelect?.value || "RAW_FILTERED";
-  syncAdcLineInspectorSettings();
   updateAdcFormatState();
 }
 
 function getVisibleAdcSamples() {
-  const format = state.settings.adcFormat || "ALL";
-  return format === "ALL"
-    ? state.samples
-    : state.samples.filter((sample) => sample.format === format);
+  return state.samples;
 }
 
 function updateAdcFormatState() {
   if (!el.adcFormatState) {
     return;
   }
-  const format = state.settings.adcFormat || "ALL";
-  const visible = getVisibleAdcSamples().length;
   const total = state.samples.length;
-  const countText = format === "ALL" ? `${total}` : `${visible} / ${total}`;
-  const label = ADC_FORMAT_LABELS[format] || format;
-  el.adcFormatState.textContent = `${label} - ${countText}`;
+  const latest = state.latestSample?.format || "RAW";
+  el.adcFormatState.textContent = `${latest} samples - ${total}`;
 }
 
 function getAdcPlotValue(sample, key) {
@@ -1205,13 +1178,6 @@ function getAdcPlotValue(sample, key) {
 
 function getAdcPlotSeries() {
   const mode = state.settings.adcPlotMode || "RAW_FILTERED";
-  const customMode = state.lineInspector.yAxis || "DEFAULT";
-  if (mode === "CUSTOM" || customMode === "CUSTOM_Y" || customMode === "CUSTOM_Y2") {
-    return [
-      { key: "customY", ...ADC_PLOT_SERIES.customY },
-      ...(customMode === "CUSTOM_Y2" ? [{ key: "customY2", ...ADC_PLOT_SERIES.customY2 }] : [])
-    ];
-  }
   if (mode === "RAW") {
     return [{ key: "raw", ...ADC_PLOT_SERIES.raw }];
   }
@@ -1231,16 +1197,6 @@ function getAdcPlotSeries() {
 }
 
 function getAdcPlotXValue(sample, index) {
-  const mode = state.lineInspector.xAxis || "INDEX";
-  if (mode === "MICROS") {
-    return Number(sample.micros);
-  }
-  if (mode === "SEQ") {
-    return Number(sample.seq);
-  }
-  if (mode === "CUSTOM") {
-    return Number(sample.customX);
-  }
   return index;
 }
 
@@ -3247,11 +3203,18 @@ function consumeText(text) {
 }
 
 function isAdcStreamLine(line) {
-  return line.startsWith("DATA,") ||
+  return isRawAdcLine(line) ||
+    line.startsWith("DATA,") ||
     line.startsWith("BUF,") ||
     line.startsWith("FILT,") ||
     line.startsWith("BLE_DATA,") ||
     /^raw\s*:/i.test(line);
+}
+
+function isRawAdcLine(line) {
+  const text = String(line || "").trim();
+  return /^RAW(?:\s*,|\s*:|\s+)/i.test(text) ||
+    /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text);
 }
 
 function handleLine(line) {
@@ -3346,33 +3309,76 @@ function handleLine(line) {
     return;
   }
 
-  const customSample = parseCustomAdcLine(line);
-  if (customSample) {
-    addSample(customSample);
-  }
+  setUiEnabled();
 }
 
 function parseAdcLine(line) {
+  if (/^raw\s*:/i.test(line)) {
+    const sample = parseSerialPlotterLine(line);
+    return sample ? [sample] : [];
+  }
+  if (isRawAdcLine(line)) {
+    const sample = parseRawLine(line);
+    return sample ? [sample] : [];
+  }
   if (line.startsWith("DATA,")) {
     const sample = parseDataLine(line);
-    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
+    return sample ? [sample] : [];
   }
   if (line.startsWith("BUF,")) {
     return parseBufferLine(line);
   }
   if (line.startsWith("FILT,")) {
     const sample = parseFilterLine(line);
-    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
+    return sample ? [sample] : [];
   }
   if (line.startsWith("BLE_DATA,")) {
     const sample = parseBleDataLine(line);
-    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
-  }
-  if (/^raw\s*:/i.test(line)) {
-    const sample = parseSerialPlotterLine(line);
-    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
+    return sample ? [sample] : [];
   }
   return [];
+}
+
+function extractRawAdcFields(line) {
+  const text = String(line || "").trim();
+  if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) {
+    return { raw: Number(text), formatDetail: "numeric raw" };
+  }
+  if (!/^RAW/i.test(text)) {
+    return null;
+  }
+
+  const normalized = text.replace(/^RAW\s*[: ]\s*/i, "RAW,");
+  const values = normalized.split(",").slice(1).map((part) => Number(String(part).trim()));
+  if (values.length === 0 || values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  if (values.length >= 4) {
+    return { seq: values[0], micros: values[1], channel: values[2], raw: values[3], formatDetail: "raw seq/time/channel" };
+  }
+  if (values.length === 3) {
+    return { seq: values[0], micros: values[1], raw: values[2], formatDetail: "raw seq/time" };
+  }
+  if (values.length === 2) {
+    return { seq: values[0], raw: values[1], formatDetail: "raw seq" };
+  }
+  return { raw: values[0], formatDetail: "raw" };
+}
+
+function parseRawLine(line) {
+  const values = extractRawAdcFields(line);
+  if (!values || !Number.isFinite(values.raw)) {
+    return null;
+  }
+  return normalizeAdcSample({
+    ...values,
+    millivolts: rawToMillivolts(values.raw),
+    filtered: values.raw,
+    format: "RAW",
+    valueUnit: "count",
+    filteredLabel: "Raw copy"
+  });
 }
 
 function extractCustomColumnValues(line) {
@@ -3424,8 +3430,7 @@ function extractCustomColumnValues(line) {
 }
 
 function applyCustomColumnsToSample(sample, line) {
-  const values = extractCustomColumnValues(line);
-  return values ? { ...sample, ...values } : sample;
+  return sample;
 }
 
 function parseCustomAdcLine(line) {
@@ -3467,7 +3472,7 @@ function normalizeAdcSample(sample) {
     raw: raw ?? NaN,
     millivolts: millivolts ?? rawToMillivolts(raw),
     filtered: filtered ?? raw ?? NaN,
-    format: sample.format || "DATA",
+    format: sample.format || "RAW",
     formatDetail: sample.formatDetail || "",
     valueUnit: sample.valueUnit || "count",
     rawLabel: sample.rawLabel || "Raw",
@@ -3799,7 +3804,7 @@ function parseStatus(line) {
 }
 
 function addSample(sample) {
-  sample.format = sample.format || "DATA";
+  sample.format = sample.format || "RAW";
   if (state.adcFormatCounts[sample.format] == null) {
     state.adcFormatCounts[sample.format] = 0;
   }
@@ -4972,7 +4977,7 @@ function updateTable() {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${sample.seq}</td>
-        <td>${sample.format || "DATA"}</td>
+        <td>${sample.format || "RAW"}</td>
         <td>${sample.micros}</td>
         <td>${Number.isFinite(sample.channel) ? `A${sample.channel}` : "--"}</td>
         <td>${formatNumber(sample.raw, sample.valueUnit === "count" ? 0 : 3)}</td>
@@ -5112,9 +5117,6 @@ function drawTrace(samples, series, minY, maxY, xRange, pad, plotWidth, plotHeig
       return;
     }
     const rawX = getAdcPlotXValue(sample, index);
-    if (!Number.isFinite(rawX) && state.lineInspector.xAxis !== "INDEX") {
-      return;
-    }
     const xValue = Number.isFinite(rawX) ? rawX : index;
     const x = pad.left + ((xValue - xRange.min) / (xRange.max - xRange.min)) * plotWidth;
     const normalized = (value - minY) / (maxY - minY);
@@ -6188,27 +6190,11 @@ function bindEvents() {
   el.showRawToggle.addEventListener("change", drawPlot);
   el.showFilteredToggle.addEventListener("change", drawPlot);
   el.autoScaleToggle.addEventListener("change", drawPlot);
-  el.adcFormatSelect.addEventListener("change", () => {
-    syncAdcPlotSettings();
-    updateCurrentMetrics();
-    drawPlot();
-  });
-  el.adcPlotModeSelect.addEventListener("change", () => {
-    syncAdcPlotSettings();
-    drawPlot();
-  });
-  [el.adcDelimiterSelect, el.adcCustomDelimiterInput].filter(Boolean).forEach((node) => {
-    node.addEventListener("input", () => refreshAdcLineInspector());
-    node.addEventListener("change", () => refreshAdcLineInspector({ forceColumns: true }));
-  });
-  [el.adcXAxisSelect, el.adcYAxisSelect].filter(Boolean).forEach((node) => {
-    node.addEventListener("change", () => {
-      refreshAdcLineInspector();
-      updateCurrentMetrics();
+  if (el.adcPlotModeSelect) {
+    el.adcPlotModeSelect.addEventListener("change", () => {
+      syncAdcPlotSettings();
+      drawPlot();
     });
-  });
-  if (el.adcColumnAutoButton) {
-    el.adcColumnAutoButton.addEventListener("click", applyAutoAdcColumnTypes);
   }
   [el.filterSelect, el.dspProtocolSelect, el.alphaInput, el.windowInput, el.iirOrderInput, el.iirLowInput, el.iirHighInput, el.rateInput]
     .filter(Boolean)
