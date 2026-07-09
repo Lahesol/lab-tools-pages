@@ -6,16 +6,26 @@ const TABLE_RENDER_INTERVAL_MS = 150;
 const IMU_ACCEL_AXES = ["ax", "ay", "az"];
 const IMU_PROCESSED_AXES = ["pax", "pay", "paz"];
 const IMU_FILTERED_AXES = ["fax", "fay", "faz"];
+const GYRO_AXES = ["gx", "gy", "gz"];
 const AXIS_COLORS = {
   ax: "#008c8c",
   ay: "#d28a00",
   az: "#2767c9"
 };
+const GYRO_AXIS_COLORS = {
+  gx: "#008c8c",
+  gy: "#d28a00",
+  gz: "#2767c9"
+};
+const GYRO_MAX_DT_SEC = 0.25;
 const BOOTLOADER_REENUMERATE_WAIT_MS = 6500;
 const BOOTLOADER_POLL_INTERVAL_MS = 250;
 const DIRECT_FLASH_STALL_TIMEOUT_MS = 15000;
 const DIRECT_FLASH_TOTAL_TIMEOUT_MS = 180000;
 const DIRECT_FLASH_CLOSE_TIMEOUT_MS = 2500;
+const DIRECT_FLASH_SEPARATE_ERASE = true;
+const DIRECT_FLASH_POST_ERASE_SETTLE_MS = 1400;
+const DIRECT_FLASH_COMPAT_POST_ERASE_SETTLE_MS = 2800;
 const PPG_SAMPLE_PATHS = [
   "../ppg_dalia_subject1_acc_ppg_activity_temp.csv",
   "ppg_dalia_subject1_acc_ppg_activity_temp.csv"
@@ -24,6 +34,7 @@ const PPG_MAX_PARSE_ROWS = 240000;
 const PPG_MAX_LIVE_POINTS = 30000;
 const PPG_LIVE_ANALYSIS_INTERVAL_MS = 1000;
 const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
+const INPUT_SETTINGS_VIEWS = new Set(["imu1d", "imu2d", "classification", "dataset", "model"]);
 const ADC_FORMAT_LABELS = {
   ALL: "All ADC",
   DATA: "DATA",
@@ -31,15 +42,35 @@ const ADC_FORMAT_LABELS = {
   FILT: "FILT",
   PLOTTER: "raw:/filtered:",
   BLE_DATA: "BLE_DATA",
-  PPG: "PPG mirror"
+  PPG: "PPG mirror",
+  CUSTOM: "Custom columns"
 };
-const ADC_FORMATS = ["DATA", "BUF", "FILT", "PLOTTER", "BLE_DATA", "PPG"];
+const ADC_FORMATS = ["DATA", "BUF", "FILT", "PLOTTER", "BLE_DATA", "PPG", "CUSTOM"];
 const ADC_PLOT_SERIES = {
   raw: { label: "Raw", color: "#008c8c", width: 1.8 },
   filtered: { label: "Filtered", color: "#d28a00", width: 2.4 },
   millivolts: { label: "mV", color: "#2767c9", width: 2.1 },
-  delta: { label: "Filtered - Raw", color: "#c83232", width: 2.1 }
+  delta: { label: "Filtered - Raw", color: "#c83232", width: 2.1 },
+  customY: { label: "Custom Y", color: "#008c8c", width: 2.2 },
+  customY2: { label: "Custom Y2", color: "#d28a00", width: 1.8 }
 };
+const MAX_DEVICE_LOG_ROWS = 90;
+const MAX_ADC_COLUMNS = 12;
+const DEVICE_LOG_RENDER_INTERVAL_MS = 150;
+const ADC_COLUMN_TYPES = [
+  ["IGNORE", "Ignore"],
+  ["LABEL", "Label / tag"],
+  ["SEQ", "Sequence"],
+  ["MICROS", "Time us"],
+  ["MILLIS", "Time ms"],
+  ["CHANNEL", "ADC channel"],
+  ["RAW", "Raw"],
+  ["MILLIVOLTS", "Voltage mV"],
+  ["FILTERED", "Filtered"],
+  ["CUSTOM_X", "Custom X"],
+  ["CUSTOM_Y", "Custom Y"],
+  ["CUSTOM_Y2", "Custom Y2"]
+];
 const DEFAULT_PREBUILT_FIRMWARES = [
   {
     id: "stage1_lab_console",
@@ -102,6 +133,7 @@ const state = {
   latestSample: null,
   latestImu: null,
   latestProcessedImu: null,
+  gyroOrientation: createGyroOrientationState(),
   dataset: {
     examples: [],
     captureActive: false,
@@ -150,6 +182,19 @@ const state = {
   lastImuRateCheckTime: performance.now(),
   lastImuRateCheckCount: 0,
   lineBuffer: "",
+  deviceLog: {
+    rows: [],
+    renderPending: false,
+    lastRenderTime: 0
+  },
+  lineInspector: {
+    delimiter: "AUTO",
+    customDelimiter: ",",
+    xAxis: "INDEX",
+    yAxis: "DEFAULT",
+    columnTypes: [],
+    latest: null
+  },
   settings: {
     rateHz: 100,
     channel: 0,
@@ -201,9 +246,11 @@ const el = {
   clearButton: document.getElementById("clearButton"),
   exportButton: document.getElementById("exportButton"),
   firmwareSelect: document.getElementById("firmwareSelect"),
+  flashProfileSelect: document.getElementById("flashProfileSelect"),
   flashButton: document.getElementById("flashButton"),
   flashState: document.getElementById("flashState"),
   bootloaderButton: document.getElementById("bootloaderButton"),
+  exitBootloaderButton: document.getElementById("exitBootloaderButton"),
   flashProgress: document.getElementById("flashProgress"),
   channelSelect: document.getElementById("channelSelect"),
   rateInput: document.getElementById("rateInput"),
@@ -244,6 +291,13 @@ const el = {
   adcFormatSelect: document.getElementById("adcFormatSelect"),
   adcPlotModeSelect: document.getElementById("adcPlotModeSelect"),
   adcFormatState: document.getElementById("adcFormatState"),
+  adcLineState: document.getElementById("adcLineState"),
+  adcDelimiterSelect: document.getElementById("adcDelimiterSelect"),
+  adcCustomDelimiterInput: document.getElementById("adcCustomDelimiterInput"),
+  adcXAxisSelect: document.getElementById("adcXAxisSelect"),
+  adcYAxisSelect: document.getElementById("adcYAxisSelect"),
+  adcColumnAutoButton: document.getElementById("adcColumnAutoButton"),
+  adcColumnTypeList: document.getElementById("adcColumnTypeList"),
   signalCanvas: document.getElementById("signalCanvas"),
   metricGrid: document.getElementById("metricGrid"),
   ppgView: document.getElementById("ppgView"),
@@ -367,10 +421,300 @@ function setStatus(node, text, mode = "muted") {
   node.className = `status-pill ${mode}`.trim();
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function syncAdcLineInspectorSettings() {
+  state.lineInspector.delimiter = el.adcDelimiterSelect?.value || "AUTO";
+  state.lineInspector.customDelimiter = el.adcCustomDelimiterInput?.value || ",";
+  state.lineInspector.xAxis = el.adcXAxisSelect?.value || "INDEX";
+  state.lineInspector.yAxis = el.adcYAxisSelect?.value || "DEFAULT";
+}
+
+function getDelimiterSpec(line, mode = state.lineInspector.delimiter) {
+  if (mode === "CUSTOM") {
+    const custom = state.lineInspector.customDelimiter || ",";
+    return { mode, label: `custom "${custom}"`, char: custom };
+  }
+  if (mode === "TAB") {
+    return { mode, label: "tab", char: "\t" };
+  }
+  if (mode === "SPACE") {
+    return { mode, label: "space", char: " " };
+  }
+  if (mode === "SEMICOLON") {
+    return { mode, label: "semicolon", char: ";" };
+  }
+  if (mode === "COMMA") {
+    return { mode, label: "comma", char: "," };
+  }
+
+  if (line.includes("\t")) {
+    return { mode: "TAB", label: "tab", char: "\t" };
+  }
+  if (line.includes(";")) {
+    return { mode: "SEMICOLON", label: "semicolon", char: ";" };
+  }
+  if (line.includes(",")) {
+    return { mode: "COMMA", label: "comma", char: "," };
+  }
+  if (/\s+/.test(line.trim())) {
+    return { mode: "SPACE", label: "space", char: " " };
+  }
+  return { mode: "NONE", label: "single column", char: "" };
+}
+
+function splitLineWithDelimiter(line, delimiter) {
+  if (!delimiter.char) {
+    return [line.trim()];
+  }
+  if (delimiter.mode === "SPACE") {
+    return line.trim().split(/\s+/);
+  }
+  return line.split(delimiter.char).map((cell) => cell.trim());
+}
+
+function parseColumnNumber(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return NaN;
+  }
+  const keyValueIndex = text.lastIndexOf(":");
+  const numericText = keyValueIndex >= 0 ? text.slice(keyValueIndex + 1).trim() : text;
+  const normalized = numericText.replace(/[^0-9eE+\-.]/g, "");
+  if (!normalized || normalized === "-" || normalized === ".") {
+    return NaN;
+  }
+  return Number(normalized);
+}
+
+function inferAdcColumnTypes(line, cells) {
+  const types = Array(Math.min(cells.length, MAX_ADC_COLUMNS)).fill("IGNORE");
+  const first = String(cells[0] || "").trim().toUpperCase();
+
+  if (first === "DATA") {
+    ["LABEL", "SEQ", "MICROS", "CHANNEL", "RAW", "MILLIVOLTS", "FILTERED"].forEach((type, index) => {
+      if (index < types.length) {
+        types[index] = type;
+      }
+    });
+    return types;
+  }
+
+  if (first === "FILT") {
+    ["LABEL", "SEQ", "MICROS", "LABEL", "MILLIVOLTS", "FILTERED"].forEach((type, index) => {
+      if (index < types.length) {
+        types[index] = type;
+      }
+    });
+    return types;
+  }
+
+  if (first === "BLE_DATA") {
+    ["LABEL", "MILLIS", "RAW"].forEach((type, index) => {
+      if (index < types.length) {
+        types[index] = type;
+      }
+    });
+    return types;
+  }
+
+  if (first === "BUF") {
+    ["LABEL", "SEQ", "MICROS"].forEach((type, index) => {
+      if (index < types.length) {
+        types[index] = type;
+      }
+    });
+    if (types.length > 3) {
+      types[3] = "RAW";
+    }
+    return types;
+  }
+
+  cells.slice(0, MAX_ADC_COLUMNS).forEach((cell, index) => {
+    const key = String(cell).split(":")[0].trim().toLowerCase();
+    if (key === "raw" || key === "adc") {
+      types[index] = "RAW";
+    } else if (key === "filtered" || key === "filt") {
+      types[index] = "FILTERED";
+    } else if (key === "mv" || key === "millivolts" || key === "voltage") {
+      types[index] = "MILLIVOLTS";
+    } else if (key === "seq") {
+      types[index] = "SEQ";
+    } else if (key === "micros" || key === "us") {
+      types[index] = "MICROS";
+    }
+  });
+
+  if (types.some((type) => type !== "IGNORE")) {
+    return types;
+  }
+
+  const numericColumns = cells
+    .slice(0, MAX_ADC_COLUMNS)
+    .map((cell, index) => ({ index, value: parseColumnNumber(cell) }))
+    .filter((item) => Number.isFinite(item.value));
+  if (numericColumns.length === 1) {
+    types[numericColumns[0].index] = "CUSTOM_Y";
+  } else if (numericColumns.length >= 2) {
+    types[numericColumns[0].index] = "CUSTOM_X";
+    types[numericColumns[1].index] = "CUSTOM_Y";
+    if (numericColumns.length >= 3) {
+      types[numericColumns[2].index] = "CUSTOM_Y2";
+    }
+  }
+  return types;
+}
+
+function analyzeDeviceLine(line) {
+  syncAdcLineInspectorSettings();
+  const delimiter = getDelimiterSpec(line);
+  const cells = splitLineWithDelimiter(line, delimiter).slice(0, MAX_ADC_COLUMNS);
+  const inferredTypes = inferAdcColumnTypes(line, cells);
+  return {
+    line,
+    delimiter,
+    cells,
+    inferredTypes,
+    summary: `${cells.length} col - ${delimiter.label}`
+  };
+}
+
+function ensureAdcColumnTypes(analysis, force = false) {
+  if (!analysis) {
+    return;
+  }
+  const next = [...state.lineInspector.columnTypes];
+  analysis.cells.forEach((_, index) => {
+    if (force || !next[index]) {
+      next[index] = analysis.inferredTypes[index] || "IGNORE";
+    }
+  });
+  state.lineInspector.columnTypes = next.slice(0, Math.max(analysis.cells.length, next.length));
+}
+
+function applyAutoAdcColumnTypes() {
+  if (!state.lineInspector.latest) {
+    return;
+  }
+  ensureAdcColumnTypes(state.lineInspector.latest, true);
+  renderDeviceLog();
+  drawPlot();
+}
+
+function refreshAdcLineInspector({ forceColumns = false } = {}) {
+  syncAdcLineInspectorSettings();
+  const latestLine = state.lineInspector.latest?.line;
+  if (latestLine) {
+    state.lineInspector.latest = analyzeDeviceLine(latestLine);
+    ensureAdcColumnTypes(state.lineInspector.latest, forceColumns);
+  }
+  renderDeviceLog();
+  drawPlot();
+}
+
+function scheduleDeviceLogRender() {
+  if (state.deviceLog.renderPending) {
+    return;
+  }
+  const elapsed = performance.now() - state.deviceLog.lastRenderTime;
+  const delay = Math.max(0, DEVICE_LOG_RENDER_INTERVAL_MS - elapsed);
+  state.deviceLog.renderPending = true;
+  setTimeout(() => {
+    state.deviceLog.renderPending = false;
+    state.deviceLog.lastRenderTime = performance.now();
+    renderDeviceLog();
+  }, delay);
+}
+
+function appendDeviceLogLine(line, direction = "rx", stream = false) {
+  const analysis = analyzeDeviceLine(line);
+  ensureAdcColumnTypes(analysis);
+  state.lineInspector.latest = analysis;
+  state.deviceLog.rows.unshift({
+    time: new Date().toLocaleTimeString(),
+    direction,
+    stream,
+    line,
+    summary: analysis.summary
+  });
+  if (state.deviceLog.rows.length > MAX_DEVICE_LOG_ROWS) {
+    state.deviceLog.rows.length = MAX_DEVICE_LOG_ROWS;
+  }
+  scheduleDeviceLogRender();
+}
+
+function renderAdcColumnTypeList() {
+  if (!el.adcColumnTypeList) {
+    return;
+  }
+  const analysis = state.lineInspector.latest;
+  if (!analysis || analysis.cells.length === 0) {
+    el.adcColumnTypeList.replaceChildren();
+    return;
+  }
+  const cards = analysis.cells.map((cell, index) => {
+    const card = document.createElement("div");
+    card.className = "adc-column-card";
+    const inferred = analysis.inferredTypes[index] || "IGNORE";
+    const selected = state.lineInspector.columnTypes[index] || inferred;
+    const indexNode = document.createElement("strong");
+    indexNode.textContent = `C${index}`;
+    const valueNode = document.createElement("code");
+    valueNode.textContent = String(cell);
+    valueNode.title = String(cell);
+    const inferredNode = document.createElement("span");
+    inferredNode.textContent = `auto: ${ADC_COLUMN_TYPES.find(([value]) => value === inferred)?.[1] || inferred}`;
+    const numberNode = document.createElement("span");
+    numberNode.textContent = Number.isFinite(parseColumnNumber(cell)) ? "numeric" : "text";
+    const select = document.createElement("select");
+    if (typeof select.setAttribute === "function") {
+      select.setAttribute("aria-label", `Column ${index} type`);
+    }
+    select.innerHTML = ADC_COLUMN_TYPES.map(([value, label]) =>
+      `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`
+    ).join("");
+    select.value = selected;
+    select.addEventListener("change", (event) => {
+      state.lineInspector.columnTypes[index] = event.target.value;
+      drawPlot();
+      renderDeviceLog();
+    });
+    card.append(indexNode, valueNode, inferredNode, numberNode, select);
+    return card;
+  });
+  el.adcColumnTypeList.replaceChildren(...cards);
+}
+
+function renderDeviceLog() {
+  if (!el.logOutput) {
+    return;
+  }
+  const latest = state.lineInspector.latest;
+  if (el.adcLineState) {
+    const plotMode = state.lineInspector.yAxis === "DEFAULT"
+      ? (el.adcPlotModeSelect?.selectedOptions?.[0]?.textContent || "Plot control")
+      : (el.adcYAxisSelect?.selectedOptions?.[0]?.textContent || state.lineInspector.yAxis);
+    el.adcLineState.textContent = latest
+      ? `${latest.summary} - x: ${state.lineInspector.xAxis} - y: ${plotMode}`
+      : "Waiting for serial lines";
+  }
+  const text = state.deviceLog.rows.map((row) => {
+    const prefix = row.direction === "tx" ? ">>" : "<<";
+    const stream = row.stream ? " stream" : "";
+    return `${row.time} ${prefix}${stream} [${row.summary}] ${row.line}`;
+  }).join("\n");
+  el.logOutput.textContent = text;
+  renderAdcColumnTypeList();
+}
+
 function logLine(line, direction = "rx") {
-  const prefix = direction === "tx" ? ">>" : "<<";
-  const text = `${new Date().toLocaleTimeString()} ${prefix} ${line}`;
-  el.logOutput.textContent = `${text}\n${el.logOutput.textContent}`.slice(0, 12000);
+  appendDeviceLogLine(line, direction, false);
 }
 
 function setUiEnabled() {
@@ -404,7 +748,9 @@ function setUiEnabled() {
     el.ppgFileInput.disabled = state.ppg.loading;
   }
   el.bootloaderButton.disabled = !("serial" in navigator) || state.flash.directBusy;
+  el.exitBootloaderButton.disabled = !("serial" in navigator) || state.flash.directBusy;
   el.flashButton.disabled = !("serial" in navigator) || state.flash.directBusy;
+  el.flashProfileSelect.disabled = state.flash.directBusy;
 
   el.recordButton.textContent = state.recording ? "Stop Rec" : "Record";
   el.datasetCaptureButton.textContent = state.dataset.captureActive ? "Stop Capture" : "Start Capture";
@@ -822,6 +1168,7 @@ function day2IirModeName(mode) {
 function syncAdcPlotSettings() {
   state.settings.adcFormat = el.adcFormatSelect?.value || "ALL";
   state.settings.adcPlotMode = el.adcPlotModeSelect?.value || "RAW_FILTERED";
+  syncAdcLineInspectorSettings();
   updateAdcFormatState();
 }
 
@@ -850,11 +1197,21 @@ function getAdcPlotValue(sample, key) {
       ? sample.filtered - sample.raw
       : NaN;
   }
+  if (key === "customY" || key === "customY2") {
+    return Number(sample[key]);
+  }
   return Number(sample[key]);
 }
 
 function getAdcPlotSeries() {
   const mode = state.settings.adcPlotMode || "RAW_FILTERED";
+  const customMode = state.lineInspector.yAxis || "DEFAULT";
+  if (mode === "CUSTOM" || customMode === "CUSTOM_Y" || customMode === "CUSTOM_Y2") {
+    return [
+      { key: "customY", ...ADC_PLOT_SERIES.customY },
+      ...(customMode === "CUSTOM_Y2" ? [{ key: "customY2", ...ADC_PLOT_SERIES.customY2 }] : [])
+    ];
+  }
   if (mode === "RAW") {
     return [{ key: "raw", ...ADC_PLOT_SERIES.raw }];
   }
@@ -871,6 +1228,56 @@ function getAdcPlotSeries() {
     ...(el.showRawToggle.checked ? [{ key: "raw", ...ADC_PLOT_SERIES.raw }] : []),
     ...(el.showFilteredToggle.checked ? [{ key: "filtered", ...ADC_PLOT_SERIES.filtered }] : [])
   ];
+}
+
+function getAdcPlotXValue(sample, index) {
+  const mode = state.lineInspector.xAxis || "INDEX";
+  if (mode === "MICROS") {
+    return Number(sample.micros);
+  }
+  if (mode === "SEQ") {
+    return Number(sample.seq);
+  }
+  if (mode === "CUSTOM") {
+    return Number(sample.customX);
+  }
+  return index;
+}
+
+function getAdcPlotXRange(samples) {
+  const values = samples
+    .map((sample, index) => getAdcPlotXValue(sample, index))
+    .filter(Number.isFinite);
+  if (values.length < 2) {
+    return { min: 0, max: Math.max(1, samples.length - 1), fallback: true };
+  }
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (Math.abs(max - min) < 1e-9) {
+    min -= 1;
+    max += 1;
+  }
+  return { min, max, fallback: false };
+}
+
+function formatAxisNumber(value) {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  if (Math.abs(value) >= 1000000) {
+    return value.toExponential(2);
+  }
+  if (Math.abs(value) >= 1000) {
+    return value.toFixed(0);
+  }
+  if (Math.abs(value) >= 10) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(3).replace(/\.?0+$/, "");
+}
+
+function formatGyroDps(value) {
+  return Number.isFinite(value) ? value.toFixed(2) : "--";
 }
 
 function createPreprocessState() {
@@ -890,6 +1297,47 @@ function createPreprocessState() {
 
 function resetPreprocessState() {
   state.preprocess = createPreprocessState();
+}
+
+function createGyroOrientationState() {
+  return {
+    roll: 0,
+    pitch: 0,
+    yaw: 0,
+    lastMicros: null,
+    lastSeq: null,
+    samples: 0
+  };
+}
+
+function resetGyroOrientation() {
+  state.gyroOrientation = createGyroOrientationState();
+}
+
+function wrapDegrees(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  const wrapped = ((((value + 180) % 360) + 360) % 360) - 180;
+  return Math.abs(wrapped) < 1e-9 ? 0 : wrapped;
+}
+
+function updateGyroOrientation(sample) {
+  if (!GYRO_AXES.every((axis) => Number.isFinite(sample[axis]))) {
+    return;
+  }
+
+  const gyro = state.gyroOrientation;
+  if (Number.isFinite(gyro.lastMicros) && Number.isFinite(sample.micros) && sample.micros > gyro.lastMicros) {
+    const dtSec = Math.min(GYRO_MAX_DT_SEC, Math.max(0, (sample.micros - gyro.lastMicros) / 1000000));
+    gyro.roll = wrapDegrees(gyro.roll + sample.gx * dtSec);
+    gyro.pitch = wrapDegrees(gyro.pitch + sample.gy * dtSec);
+    gyro.yaw = wrapDegrees(gyro.yaw + sample.gz * dtSec);
+  }
+
+  gyro.lastMicros = Number.isFinite(sample.micros) ? sample.micros : gyro.lastMicros;
+  gyro.lastSeq = Number.isFinite(sample.seq) ? sample.seq : gyro.lastSeq;
+  gyro.samples += 1;
 }
 
 function getInputWindowSize() {
@@ -2308,8 +2756,20 @@ function asDirectFlashTimeoutError(error, attemptLabel, lastProgressMessage) {
   return wrapped;
 }
 
+function getDirectFlashProfile() {
+  const profile = el.flashProfileSelect?.value || "compatibility";
+  return profile === "standard" ? "standard" : "compatibility";
+}
+
+function getDirectFlashPostEraseSettleMs() {
+  return getDirectFlashProfile() === "compatibility"
+    ? DIRECT_FLASH_COMPAT_POST_ERASE_SETTLE_MS
+    : DIRECT_FLASH_POST_ERASE_SETTLE_MS;
+}
+
 function createDirectFlasher(attemptLabel, onProgress = null) {
   return new window.KetiDirectFlash.DirectSamBaFlasher({
+    profile: getDirectFlashProfile(),
     onLog: (message) => logLine(`DIRECT_FLASH,${attemptLabel},${message}`),
     onProgress: (item) => {
       setDirectFlashProgress(item.percent, item.message);
@@ -2337,7 +2797,7 @@ async function closeDirectFlasher(flasher, reason) {
   }
 }
 
-async function runTimedDirectFlash({ port, firmwareBytes, attemptLabel }) {
+async function runTimedDirectOperation({ port, firmwareBytes, attemptLabel, operation = "flash", skipErase = false }) {
   let stallTimer = null;
   let totalTimer = null;
   let rejectForTimeout = null;
@@ -2382,27 +2842,56 @@ async function runTimedDirectFlash({ port, firmwareBytes, attemptLabel }) {
     signalTimeout(createDirectFlashTimeoutError("total", attemptLabel, DIRECT_FLASH_TOTAL_TIMEOUT_MS));
   }, DIRECT_FLASH_TOTAL_TIMEOUT_MS);
 
-  const flashPromise = flasher.flash({
-    port,
-    firmwareBytes,
-    maxSketchSize: window.KetiDirectFlash.MAX_SKETCH_SIZE
-  });
+  const operationPromise = operation === "erase"
+    ? flasher.eraseApplication({
+      port,
+      firmwareBytes,
+      maxSketchSize: window.KetiDirectFlash.MAX_SKETCH_SIZE
+    })
+    : flasher.flash({
+      port,
+      firmwareBytes,
+      maxSketchSize: window.KetiDirectFlash.MAX_SKETCH_SIZE,
+      skipErase
+    });
 
   try {
-    await Promise.race([flashPromise, timeoutPromise]);
+    await Promise.race([operationPromise, timeoutPromise]);
   } catch (error) {
     const normalizedError = asDirectFlashTimeoutError(error, attemptLabel, lastProgressMessage);
     if (isDirectFlashTimeoutError(normalizedError)) {
-      setDirectFlashProgress(0, attemptLabel === "recovery" ? "Recovery timeout" : "Flash timeout");
+      const timeoutState = operation === "erase"
+        ? "Erase timeout"
+        : attemptLabel === "recovery" ? "Recovery timeout" : "Flash timeout";
+      setDirectFlashProgress(0, timeoutState);
       await closeDirectFlasher(flasher, `timeout_${attemptLabel}`);
-      flashPromise.catch((flashError) => {
-        logLine(`ERR,direct_flash_late_reject,${flashError.message}`);
+      operationPromise.catch((operationError) => {
+        logLine(`ERR,direct_flash_late_reject,${operationError.message}`);
       });
     }
     throw normalizedError;
   } finally {
     clearTimers();
   }
+}
+
+async function runTimedDirectErase({ port, firmwareBytes, attemptLabel }) {
+  await runTimedDirectOperation({
+    port,
+    firmwareBytes,
+    attemptLabel,
+    operation: "erase"
+  });
+}
+
+async function runTimedDirectFlash({ port, firmwareBytes, attemptLabel, skipErase = false }) {
+  await runTimedDirectOperation({
+    port,
+    firmwareBytes,
+    attemptLabel,
+    operation: "flash",
+    skipErase
+  });
 }
 
 async function probeRecoveryBootloaderPort(port, source) {
@@ -2471,12 +2960,73 @@ async function selectRecoveryBootloaderPort() {
   return touchRecoveryPortIntoBootloader(selectedPort);
 }
 
+async function selectExistingBootloaderPort() {
+  const grantedBootloaderPort = await findGrantedRecoveryBootloaderPort();
+  if (grantedBootloaderPort) {
+    return grantedBootloaderPort;
+  }
+
+  setDirectFlashProgress(0, "Select bootloader");
+  const selectedPort = await requestArduinoSerialPort();
+  if (await probeRecoveryBootloaderPort(selectedPort, "exit_selected")) {
+    return selectedPort;
+  }
+  throw new Error("Selected port is not an Arduino bootloader port");
+}
+
+async function resolvePostEraseBootloaderPort(previousPort) {
+  setDirectFlashProgress(11, "Erase settle");
+  await sleep(getDirectFlashPostEraseSettleMs());
+
+  if (await probeRecoveryBootloaderPort(previousPort, "post_erase_same")) {
+    return previousPort;
+  }
+
+  const grantedBootloaderPort = await findGrantedRecoveryBootloaderPort();
+  if (grantedBootloaderPort) {
+    return grantedBootloaderPort;
+  }
+
+  setDirectFlashProgress(11, "Select bootloader");
+  logLine("DIRECT_FLASH,post_erase_manual_select_required");
+  const selectedPort = await requestArduinoSerialPort();
+  if (await probeRecoveryBootloaderPort(selectedPort, "post_erase_selected")) {
+    return selectedPort;
+  }
+
+  return touchRecoveryPortIntoBootloader(selectedPort);
+}
+
+async function runDirectFlashWithPreErase({ port, firmwareBytes, attemptLabel }) {
+  if (!DIRECT_FLASH_SEPARATE_ERASE) {
+    await runTimedDirectFlash({
+      port,
+      firmwareBytes,
+      attemptLabel
+    });
+    return;
+  }
+
+  await runTimedDirectErase({
+    port,
+    firmwareBytes,
+    attemptLabel: `${attemptLabel}_erase`
+  });
+  const writePort = await resolvePostEraseBootloaderPort(port);
+  await runTimedDirectFlash({
+    port: writePort,
+    firmwareBytes,
+    attemptLabel,
+    skipErase: true
+  });
+}
+
 async function runRecoveryFlashAfterTimeout({ loaded, firmware, reason }) {
   logLine(`DIRECT_FLASH_RECOVERY,start,firmware=${firmware.id},reason=${reason.message}`);
   state.flash.directBootloaderTouched = false;
   setDirectFlashProgress(0, "Recovery flash");
   const recoveryPort = await selectRecoveryBootloaderPort();
-  await runTimedDirectFlash({
+  await runDirectFlashWithPreErase({
     port: recoveryPort,
     firmwareBytes: loaded.bytes,
     attemptLabel: "recovery"
@@ -2510,6 +3060,35 @@ async function enterBootloaderDirect() {
   }
 }
 
+async function exitBootloaderDirect() {
+  if (!("serial" in navigator) || !window.KetiDirectFlash) {
+    setDirectFlashProgress(0, "Unavailable");
+    logLine("ERR,direct_flash,web_serial_unavailable");
+    return;
+  }
+
+  state.flash.directBusy = true;
+  setDirectFlashProgress(0, "Select bootloader");
+  setUiEnabled();
+
+  const flasher = createDirectFlasher("exit_bootloader");
+  try {
+    const port = await selectExistingBootloaderPort();
+    await flasher.resetBootloader(port);
+    state.flash.directBootloaderTouched = false;
+    setDirectFlashProgress(100, "Reset sent");
+    logLine("DIRECT_FLASH_EXIT_BOOTLOADER_OK");
+  } catch (error) {
+    state.flash.directBootloaderTouched = false;
+    setDirectFlashProgress(0, "Exit failed");
+    logLine(`ERR,direct_exit_bootloader,${error.message}`);
+  } finally {
+    await closeDirectFlasher(flasher, "exit_bootloader");
+    state.flash.directBusy = false;
+    setUiEnabled();
+  }
+}
+
 async function flashFirmware() {
   if (!("serial" in navigator) || !window.KetiDirectFlash) {
     setDirectFlashProgress(0, "Unavailable");
@@ -2524,7 +3103,7 @@ async function flashFirmware() {
 
   try {
     const loaded = await loadDirectFirmwareBytes(firmware);
-    logLine(`DIRECT_FLASH,firmware=${firmware.id},bytes=${loaded.bytes.length},source=${loaded.source}`);
+    logLine(`DIRECT_FLASH,firmware=${firmware.id},bytes=${loaded.bytes.length},source=${loaded.source},profile=${getDirectFlashProfile()}`);
 
     try {
       setDirectFlashProgress(0, state.flash.directBootloaderTouched ? "Select bootloader" : "Select app port");
@@ -2532,7 +3111,7 @@ async function flashFirmware() {
         ? await requestArduinoSerialPort()
         : await enterBootloaderAndResolvePort();
 
-      await runTimedDirectFlash({
+      await runDirectFlashWithPreErase({
         port,
         firmwareBytes: loaded.bytes,
         attemptLabel: "normal"
@@ -2558,7 +3137,7 @@ async function flashFirmware() {
     }
     logLine(`DIRECT_FLASH_OK,firmware=${firmware.id}`);
   } catch (error) {
-    state.flash.directBootloaderTouched = false;
+    state.flash.directBootloaderTouched = isDirectFlashTimeoutError(error) || Boolean(error.recoveryFailed);
     const status = error.recoveryFailed
       ? "Recovery failed"
       : isDirectFlashTimeoutError(error) ? "Flash timeout"
@@ -2677,9 +3256,7 @@ function isAdcStreamLine(line) {
 
 function handleLine(line) {
   const isStreamData = isAdcStreamLine(line) || line.startsWith("IMU,") || line.startsWith("PPG,");
-  if (!isStreamData) {
-    logLine(line);
-  }
+  appendDeviceLogLine(line, "rx", isStreamData);
 
   if (line.startsWith("ERR,EI_ACCEL_MODEL_REQUIRED")) {
     state.classification.active = false;
@@ -2766,30 +3343,116 @@ function handleLine(line) {
     state.classification.startPending = false;
     el.classificationState.textContent = "Idle";
     setUiEnabled();
+    return;
+  }
+
+  const customSample = parseCustomAdcLine(line);
+  if (customSample) {
+    addSample(customSample);
   }
 }
 
 function parseAdcLine(line) {
   if (line.startsWith("DATA,")) {
     const sample = parseDataLine(line);
-    return sample ? [sample] : [];
+    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
   }
   if (line.startsWith("BUF,")) {
     return parseBufferLine(line);
   }
   if (line.startsWith("FILT,")) {
     const sample = parseFilterLine(line);
-    return sample ? [sample] : [];
+    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
   }
   if (line.startsWith("BLE_DATA,")) {
     const sample = parseBleDataLine(line);
-    return sample ? [sample] : [];
+    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
   }
   if (/^raw\s*:/i.test(line)) {
     const sample = parseSerialPlotterLine(line);
-    return sample ? [sample] : [];
+    return sample ? [applyCustomColumnsToSample(sample, line)] : [];
   }
   return [];
+}
+
+function extractCustomColumnValues(line) {
+  const analysis = state.lineInspector.latest?.line === line
+    ? state.lineInspector.latest
+    : analyzeDeviceLine(line);
+  const values = {};
+  let mappedValueCount = 0;
+
+  analysis.cells.forEach((cell, index) => {
+    const type = state.lineInspector.columnTypes[index] || analysis.inferredTypes[index] || "IGNORE";
+    const numeric = parseColumnNumber(cell);
+    if (type === "LABEL") {
+      values.label = String(cell).trim();
+      return;
+    }
+    if (!Number.isFinite(numeric)) {
+      return;
+    }
+    if (type === "SEQ") {
+      values.seq = numeric;
+    } else if (type === "MICROS") {
+      values.micros = numeric;
+    } else if (type === "MILLIS") {
+      values.micros = numeric * 1000;
+    } else if (type === "CHANNEL") {
+      values.channel = numeric;
+    } else if (type === "RAW") {
+      values.raw = numeric;
+      mappedValueCount++;
+    } else if (type === "MILLIVOLTS") {
+      values.millivolts = numeric;
+      mappedValueCount++;
+    } else if (type === "FILTERED") {
+      values.filtered = numeric;
+      mappedValueCount++;
+    } else if (type === "CUSTOM_X") {
+      values.customX = numeric;
+    } else if (type === "CUSTOM_Y") {
+      values.customY = numeric;
+      mappedValueCount++;
+    } else if (type === "CUSTOM_Y2") {
+      values.customY2 = numeric;
+      mappedValueCount++;
+    }
+  });
+
+  return mappedValueCount > 0 ? values : null;
+}
+
+function applyCustomColumnsToSample(sample, line) {
+  const values = extractCustomColumnValues(line);
+  return values ? { ...sample, ...values } : sample;
+}
+
+function parseCustomAdcLine(line) {
+  const values = extractCustomColumnValues(line);
+  if (!values) {
+    return null;
+  }
+  const primary = values.raw ?? values.customY ?? values.filtered ?? values.millivolts;
+  if (!Number.isFinite(primary)) {
+    return null;
+  }
+  return normalizeAdcSample({
+    seq: values.seq,
+    micros: values.micros,
+    channel: values.channel,
+    raw: values.raw ?? values.customY ?? values.filtered ?? values.millivolts,
+    millivolts: values.millivolts,
+    filtered: values.filtered ?? values.customY2 ?? values.raw ?? values.customY ?? values.millivolts,
+    customX: values.customX,
+    customY: values.customY ?? values.raw ?? values.filtered ?? values.millivolts,
+    customY2: values.customY2,
+    format: "CUSTOM",
+    formatDetail: values.label ? `mapped ${values.label}` : "mapped columns",
+    valueUnit: "value",
+    rawLabel: "Mapped raw",
+    filteredLabel: Number.isFinite(values.customY2) ? "Mapped Y2" : "Mapped filtered"
+  });
 }
 
 function normalizeAdcSample(sample) {
@@ -3163,6 +3826,7 @@ function addSample(sample) {
 
 function addImuSample(sample) {
   const processed = processImuSample(sample);
+  updateGyroOrientation(sample);
   state.imuSamples.push(sample);
   state.imuProcessedSamples.push(processed);
   if (state.imuSamples.length > MAX_IMU_POINTS) {
@@ -4096,7 +4760,7 @@ async function ensureClassificationRunningFromStream(reason = "view") {
 
 function syncSettingsPanelVisibility() {
   const showAdcSettings = state.activeView === "adc";
-  const showInputSettings = ["imu1d", "imu2d", "classification", "dataset", "model"].includes(state.activeView);
+  const showInputSettings = INPUT_SETTINGS_VIEWS.has(state.activeView);
   const showClassificationSettings = state.activeView === "classification";
 
   el.adcSettingsSection.classList.toggle("is-hidden", !showAdcSettings);
@@ -4113,6 +4777,7 @@ function updateViewVisibility() {
   el.signalCanvas.classList.toggle("is-hidden", !isCanvas);
   el.metricGrid.classList.toggle("is-hidden", !isCanvas);
   el.adcPlotControls.classList.toggle("is-hidden", !isAdc);
+  el.deviceLogSection.classList.toggle("is-hidden", !isAdc);
   el.ppgView.classList.toggle("is-hidden", !isPpg);
   el.datasetView.classList.toggle("is-hidden", !isDataset);
   el.modelView.classList.toggle("is-hidden", !isModel);
@@ -4208,6 +4873,11 @@ function updateCurrentMetrics() {
     return;
   }
 
+  if (state.activeView === "gyro3d" && state.latestImu) {
+    updateGyroMetrics(state.latestImu);
+    return;
+  }
+
   if (state.activeView === "classification") {
     updateClassificationMetrics();
   }
@@ -4235,6 +4905,21 @@ function updateImuMetrics(sample) {
   el.lastTimestamp.textContent = `${sample.micros} us`;
 }
 
+function updateGyroMetrics(sample) {
+  const gyro = state.gyroOrientation;
+  el.metric1Label.textContent = "Roll";
+  el.metric2Label.textContent = "Pitch";
+  el.metric3Label.textContent = "Yaw";
+  el.metric4Label.textContent = "IMU Rate";
+  el.sampleCount.textContent = `${state.receivedImuSamples} IMU`;
+  el.recordCount.textContent = `${state.records.length} rows`;
+  el.rawMetric.textContent = `${gyro.roll.toFixed(1)} deg`;
+  el.filteredMetric.textContent = `${gyro.pitch.toFixed(1)} deg`;
+  el.voltageMetric.textContent = `${gyro.yaw.toFixed(1)} deg`;
+  el.plotMeta.textContent = `Gyro 3D - gx ${formatGyroDps(sample.gx)} dps, gy ${formatGyroDps(sample.gy)} dps, gz ${formatGyroDps(sample.gz)} dps - seq ${sample.seq}`;
+  el.lastTimestamp.textContent = `${sample.micros} us`;
+}
+
 function updateClassificationMetrics() {
   const result = state.classification;
   updateClassificationInputState();
@@ -4257,7 +4942,7 @@ function updateRateMetric(now = performance.now()) {
     return;
   }
 
-  if (state.activeView.startsWith("imu")) {
+  if (state.activeView.startsWith("imu") || state.activeView === "gyro3d") {
     const elapsed = now - state.lastImuRateCheckTime;
     if (elapsed < 1000) {
       return;
@@ -4321,6 +5006,10 @@ function drawPlot() {
     drawImuPlanarPlot();
     return;
   }
+  if (state.activeView === "gyro3d") {
+    drawGyroOrientationPlot();
+    return;
+  }
   if (state.activeView === "classification") {
     drawClassificationPlot();
     return;
@@ -4356,6 +5045,7 @@ function drawPlot() {
   }
 
   const series = getAdcPlotSeries();
+  const xRange = getAdcPlotXRange(visibleSamples);
   const values = series
     .flatMap((item) => visibleSamples.map((sample) => getAdcPlotValue(sample, item.key)))
     .filter(Number.isFinite);
@@ -4375,7 +5065,7 @@ function drawPlot() {
   }
 
   for (const item of series) {
-    drawTrace(visibleSamples, item, minY, maxY, pad, plotWidth, plotHeight);
+    drawTrace(visibleSamples, item, minY, maxY, xRange, pad, plotWidth, plotHeight);
   }
 
   drawLegend(series, pad.left + 8, height - 10);
@@ -4383,6 +5073,8 @@ function drawPlot() {
   ctx.font = "12px Segoe UI, Arial, sans-serif";
   ctx.fillText(`${maxY.toFixed(0)}`, 12, pad.top + 4);
   ctx.fillText(`${minY.toFixed(0)}`, 12, height - pad.bottom);
+  ctx.fillText(formatAxisNumber(xRange.min), pad.left, height - 8);
+  ctx.fillText(formatAxisNumber(xRange.max), Math.max(pad.left + 48, width - pad.right - 70), height - 8);
 }
 
 function drawGrid(width, height, pad, plotWidth, plotHeight) {
@@ -4409,7 +5101,7 @@ function drawGridOn(targetCtx, width, height, pad, plotWidth, plotHeight) {
   targetCtx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
 }
 
-function drawTrace(samples, series, minY, maxY, pad, plotWidth, plotHeight) {
+function drawTrace(samples, series, minY, maxY, xRange, pad, plotWidth, plotHeight) {
   ctx.strokeStyle = series.color;
   ctx.lineWidth = series.width;
   ctx.beginPath();
@@ -4419,7 +5111,12 @@ function drawTrace(samples, series, minY, maxY, pad, plotWidth, plotHeight) {
     if (!Number.isFinite(value)) {
       return;
     }
-    const x = pad.left + (plotWidth * index) / Math.max(1, samples.length - 1);
+    const rawX = getAdcPlotXValue(sample, index);
+    if (!Number.isFinite(rawX) && state.lineInspector.xAxis !== "INDEX") {
+      return;
+    }
+    const xValue = Number.isFinite(rawX) ? rawX : index;
+    const x = pad.left + ((xValue - xRange.min) / (xRange.max - xRange.min)) * plotWidth;
     const normalized = (value - minY) / (maxY - minY);
     const y = pad.top + plotHeight - normalized * plotHeight;
     if (!hasPoint) {
@@ -4810,6 +5507,175 @@ function drawImu3dPlot() {
   ctx.fillText(autoScale ? `3D auto zoom: +/-${range.toFixed(2)} ${getInputUnits()} from mean` : `3D scale: +/-${range.toFixed(2)} ${getInputUnits()}`, pad.left + 12, pad.top + 20);
 }
 
+function degreesToRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function rotateByGyroOrientation(point, orientation = state.gyroOrientation) {
+  const roll = degreesToRadians(orientation.roll);
+  const pitch = degreesToRadians(orientation.pitch);
+  const yaw = degreesToRadians(orientation.yaw);
+  const cosR = Math.cos(roll);
+  const sinR = Math.sin(roll);
+  const cosP = Math.cos(pitch);
+  const sinP = Math.sin(pitch);
+  const cosY = Math.cos(yaw);
+  const sinY = Math.sin(yaw);
+
+  const yRoll = point.y * cosR - point.z * sinR;
+  const zRoll = point.y * sinR + point.z * cosR;
+  const xPitch = point.x * cosP + zRoll * sinP;
+  const zPitch = -point.x * sinP + zRoll * cosP;
+  const xYaw = xPitch * cosY - yRoll * sinY;
+  const yYaw = xPitch * sinY + yRoll * cosY;
+
+  return { x: xYaw, y: yYaw, z: zPitch };
+}
+
+function projectGyroPoint(point, centerX, centerY, scale) {
+  return {
+    x: centerX + (point.x - point.y) * scale * 0.76,
+    y: centerY + (point.x + point.y) * scale * 0.30 - point.z * scale * 0.92
+  };
+}
+
+function drawProjectedPolygon(points, fillStyle, strokeStyle, centerX, centerY, scale) {
+  if (points.length < 3) {
+    return;
+  }
+  const screenPoints = points.map((point) => projectGyroPoint(point, centerX, centerY, scale));
+  ctx.fillStyle = fillStyle;
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  screenPoints.forEach((point, index) => {
+    if (index === 0) {
+      ctx.moveTo(point.x, point.y);
+    } else {
+      ctx.lineTo(point.x, point.y);
+    }
+  });
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawGyroArrow3d(endPoint, color, label, centerX, centerY, scale, rotate = true, alpha = 1) {
+  const origin3d = rotate ? rotateByGyroOrientation({ x: 0, y: 0, z: 0 }) : { x: 0, y: 0, z: 0 };
+  const end3d = rotate ? rotateByGyroOrientation(endPoint) : endPoint;
+  const origin = projectGyroPoint(origin3d, centerX, centerY, scale);
+  const end = projectGyroPoint(end3d, centerX, centerY, scale);
+  const angle = Math.atan2(end.y - origin.y, end.x - origin.x);
+  const head = 10;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = rotate ? 3 : 1.5;
+  ctx.beginPath();
+  ctx.moveTo(origin.x, origin.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(end.x, end.y);
+  ctx.lineTo(end.x - head * Math.cos(angle - 0.45), end.y - head * Math.sin(angle - 0.45));
+  ctx.lineTo(end.x - head * Math.cos(angle + 0.45), end.y - head * Math.sin(angle + 0.45));
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = "700 13px Segoe UI, Arial, sans-serif";
+  ctx.fillText(label, end.x + 7, end.y - 4);
+  ctx.restore();
+}
+
+function drawGyroOrientationPlot() {
+  if (!state.latestImu) {
+    drawEmptyPlot("Waiting for gyro data");
+    return;
+  }
+
+  const { width, height } = resizeCanvasToDisplaySize();
+  const compact = width < 700;
+  const pad = compact
+    ? { left: 18, right: 18, top: 18, bottom: 30 }
+    : { left: 42, right: 42, top: 32, bottom: 38 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const centerX = pad.left + plotWidth / 2;
+  const centerY = pad.top + plotHeight * (compact ? 0.56 : 0.58);
+  const scale = Math.min(plotWidth, plotHeight) / (compact ? 4.8 : 4.1);
+  const orientation = state.gyroOrientation;
+  const sample = state.latestImu;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fbfcfd";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "#d7dee8";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
+
+  ctx.save();
+  ctx.globalAlpha = 0.65;
+  ctx.strokeStyle = "#eef3f7";
+  ctx.lineWidth = 1;
+  for (let index = -2; index <= 2; index++) {
+    const a = projectGyroPoint({ x: index, y: -2, z: 0 }, centerX, centerY, scale);
+    const b = projectGyroPoint({ x: index, y: 2, z: 0 }, centerX, centerY, scale);
+    const c = projectGyroPoint({ x: -2, y: index, z: 0 }, centerX, centerY, scale);
+    const d = projectGyroPoint({ x: 2, y: index, z: 0 }, centerX, centerY, scale);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(d.x, d.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  drawGyroArrow3d({ x: 1.8, y: 0, z: 0 }, GYRO_AXIS_COLORS.gx, "X", centerX, centerY, scale, false, 0.22);
+  drawGyroArrow3d({ x: 0, y: 1.8, z: 0 }, GYRO_AXIS_COLORS.gy, "Y", centerX, centerY, scale, false, 0.22);
+  drawGyroArrow3d({ x: 0, y: 0, z: 1.8 }, GYRO_AXIS_COLORS.gz, "Z", centerX, centerY, scale, false, 0.22);
+
+  const top = [
+    { x: -1.35, y: -0.78, z: 0.08 },
+    { x: 1.35, y: -0.78, z: 0.08 },
+    { x: 1.35, y: 0.78, z: 0.08 },
+    { x: -1.35, y: 0.78, z: 0.08 }
+  ].map((point) => rotateByGyroOrientation(point, orientation));
+  const bottom = [
+    { x: -1.35, y: -0.78, z: -0.08 },
+    { x: 1.35, y: -0.78, z: -0.08 },
+    { x: 1.35, y: 0.78, z: -0.08 },
+    { x: -1.35, y: 0.78, z: -0.08 }
+  ].map((point) => rotateByGyroOrientation(point, orientation));
+  const module = [
+    { x: -0.42, y: -0.28, z: 0.11 },
+    { x: 0.42, y: -0.28, z: 0.11 },
+    { x: 0.42, y: 0.28, z: 0.11 },
+    { x: -0.42, y: 0.28, z: 0.11 }
+  ].map((point) => rotateByGyroOrientation(point, orientation));
+
+  drawProjectedPolygon(bottom, "#e8eef4", "#c8d3df", centerX, centerY, scale);
+  drawProjectedPolygon(top, "#ffffff", "#17202a", centerX, centerY, scale);
+  drawProjectedPolygon(module, "#eaf5f5", "#008c8c", centerX, centerY, scale);
+
+  drawGyroArrow3d({ x: 1.9, y: 0, z: 0 }, GYRO_AXIS_COLORS.gx, "X", centerX, centerY, scale, true, 1);
+  drawGyroArrow3d({ x: 0, y: 1.9, z: 0 }, GYRO_AXIS_COLORS.gy, "Y", centerX, centerY, scale, true, 1);
+  drawGyroArrow3d({ x: 0, y: 0, z: 1.9 }, GYRO_AXIS_COLORS.gz, "Z", centerX, centerY, scale, true, 1);
+
+  ctx.fillStyle = "#17202a";
+  ctx.font = "700 13px Segoe UI, Arial, sans-serif";
+  ctx.fillText(`roll ${orientation.roll.toFixed(1)} deg`, pad.left + 14, pad.top + 22);
+  ctx.fillText(`pitch ${orientation.pitch.toFixed(1)} deg`, pad.left + 14, pad.top + 42);
+  ctx.fillText(`yaw ${orientation.yaw.toFixed(1)} deg`, pad.left + 14, pad.top + 62);
+
+  ctx.fillStyle = "#637083";
+  ctx.font = "12px Segoe UI, Arial, sans-serif";
+  ctx.fillText(`gx ${formatGyroDps(sample.gx)} dps`, Math.max(pad.left + 150, width - pad.right - 230), pad.top + 22);
+  ctx.fillText(`gy ${formatGyroDps(sample.gy)} dps`, Math.max(pad.left + 150, width - pad.right - 230), pad.top + 42);
+  ctx.fillText(`gz ${formatGyroDps(sample.gz)} dps`, Math.max(pad.left + 150, width - pad.right - 230), pad.top + 62);
+}
+
 function drawClassificationInputWindowPlot(inputWindow, area) {
   const samples = inputWindow.frames;
   ctx.fillStyle = "#ffffff";
@@ -5065,7 +5931,9 @@ async function startStreaming() {
 
   if (state.activeView !== "adc") {
     state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
-    applyInputPreprocess();
+    if (INPUT_SETTINGS_VIEWS.has(state.activeView)) {
+      applyInputPreprocess();
+    }
     await sendCommand(`RATE ${state.settings.rateHz}`);
     await sendCommand("START");
     return;
@@ -5094,6 +5962,7 @@ function clearData() {
   state.latestSample = null;
   state.latestImu = null;
   state.latestProcessedImu = null;
+  resetGyroOrientation();
   if (state.ppg.source === "Live ADC") {
     clearLivePpgWindow(state.settings.filter === "RAW" ? "raw" : "filtered");
   }
@@ -5315,6 +6184,7 @@ function bindEvents() {
   el.exportButton.addEventListener("click", exportCsv);
   el.flashButton.addEventListener("click", flashFirmware);
   el.bootloaderButton.addEventListener("click", enterBootloaderDirect);
+  el.exitBootloaderButton.addEventListener("click", exitBootloaderDirect);
   el.showRawToggle.addEventListener("change", drawPlot);
   el.showFilteredToggle.addEventListener("change", drawPlot);
   el.autoScaleToggle.addEventListener("change", drawPlot);
@@ -5327,6 +6197,19 @@ function bindEvents() {
     syncAdcPlotSettings();
     drawPlot();
   });
+  [el.adcDelimiterSelect, el.adcCustomDelimiterInput].filter(Boolean).forEach((node) => {
+    node.addEventListener("input", () => refreshAdcLineInspector());
+    node.addEventListener("change", () => refreshAdcLineInspector({ forceColumns: true }));
+  });
+  [el.adcXAxisSelect, el.adcYAxisSelect].filter(Boolean).forEach((node) => {
+    node.addEventListener("change", () => {
+      refreshAdcLineInspector();
+      updateCurrentMetrics();
+    });
+  });
+  if (el.adcColumnAutoButton) {
+    el.adcColumnAutoButton.addEventListener("click", applyAutoAdcColumnTypes);
+  }
   [el.filterSelect, el.dspProtocolSelect, el.alphaInput, el.windowInput, el.iirOrderInput, el.iirLowInput, el.iirHighInput, el.rateInput]
     .filter(Boolean)
     .forEach((node) => {
@@ -5370,6 +6253,7 @@ function init() {
   renderModelView();
   setUiEnabled();
   renderClassification();
+  renderDeviceLog();
   drawPlot();
   loadDirectFirmwareManifest();
 }

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=8c70205460d3" />
+    <link rel="stylesheet" href="styles.css?v=f6a3096f10d1" />
   </head>
   <body>
     <div class="app-shell">
@@ -87,12 +87,21 @@
             </select>
           </label>
 
+          <label class="field">
+            <span>Flash Mode</span>
+            <select id="flashProfileSelect">
+              <option value="compatibility" selected>Compatibility - slow/reliable</option>
+              <option value="standard">Standard - faster</option>
+            </select>
+          </label>
+
           <div class="flash-main-action">
             <button id="flashButton" class="primary-button" type="button">Flash Firmware</button>
           </div>
           <progress id="flashProgress" class="flash-progress" max="100" value="0"></progress>
           <div class="flash-recovery-row">
             <button id="bootloaderButton" class="recovery-button" type="button">Recovery Bootloader</button>
+            <button id="exitBootloaderButton" class="recovery-button" type="button">Exit Bootloader</button>
           </div>
 
           <div class="divider"></div>
@@ -113,6 +122,55 @@
         </aside>
 
         <section class="plot-panel">
+          <section id="deviceLogSection" class="device-log-section adc-line-inspector">
+            <div class="panel-header compact">
+              <div>
+                <h2>Device Log</h2>
+                <span id="adcLineState">Waiting for serial lines</span>
+              </div>
+              <button id="pingButton" type="button" disabled>Ping</button>
+            </div>
+
+            <div class="adc-line-tools">
+              <label>
+                <span>Delimiter</span>
+                <select id="adcDelimiterSelect">
+                  <option value="AUTO">Auto</option>
+                  <option value="COMMA">Comma</option>
+                  <option value="TAB">Tab</option>
+                  <option value="SPACE">Space</option>
+                  <option value="SEMICOLON">Semicolon</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </label>
+              <label>
+                <span>Custom</span>
+                <input id="adcCustomDelimiterInput" type="text" maxlength="4" value="," />
+              </label>
+              <label>
+                <span>X Axis</span>
+                <select id="adcXAxisSelect">
+                  <option value="INDEX">Sample index</option>
+                  <option value="MICROS">Time us</option>
+                  <option value="SEQ">Sequence</option>
+                  <option value="CUSTOM">Custom X column</option>
+                </select>
+              </label>
+              <label>
+                <span>Y Axis</span>
+                <select id="adcYAxisSelect">
+                  <option value="DEFAULT">Plot control</option>
+                  <option value="CUSTOM_Y">Custom Y column</option>
+                  <option value="CUSTOM_Y2">Custom Y + Y2</option>
+                </select>
+              </label>
+              <button id="adcColumnAutoButton" type="button">Auto Columns</button>
+            </div>
+
+            <div id="adcColumnTypeList" class="adc-column-list" aria-label="Serial column type mapping"></div>
+            <pre id="logOutput" class="log-output" aria-live="polite"></pre>
+          </section>
+
           <div class="plot-toolbar">
             <div>
               <h2>Live Signal</h2>
@@ -123,6 +181,7 @@
                 <button class="view-tab active" type="button" data-view="adc">ADC</button>
                 <button class="view-tab" type="button" data-view="imu1d">IMU 1D</button>
                 <button class="view-tab" type="button" data-view="imu2d">IMU 2D</button>
+                <button class="view-tab" type="button" data-view="gyro3d">Gyro 3D</button>
                 <button class="view-tab" type="button" data-view="classification">Class</button>
                 <button class="view-tab" type="button" data-view="dataset">Dataset</button>
                 <button class="view-tab" type="button" data-view="model">Model</button>
@@ -139,6 +198,7 @@
                     <option value="PLOTTER">raw:/filtered:</option>
                     <option value="BLE_DATA">BLE_DATA</option>
                     <option value="PPG">PPG mirror</option>
+                    <option value="CUSTOM">Custom columns</option>
                   </select>
                 </label>
                 <label>
@@ -149,6 +209,7 @@
                     <option value="FILTERED">Filtered only</option>
                     <option value="MILLIVOLTS">Voltage mV</option>
                     <option value="DELTA">Filtered - Raw</option>
+                    <option value="CUSTOM">Custom columns</option>
                   </select>
                 </label>
                 <span id="adcFormatState" class="adc-format-state">All ADC</span>
@@ -620,14 +681,6 @@
             <div id="classificationWindowState" class="classification-window-state">Input data window: --</div>
             <div id="classificationList" class="classification-list"></div>
           </div>
-
-          <div id="deviceLogSection" class="settings-section device-log-section">
-            <div class="panel-header compact">
-              <h2>Device Log</h2>
-              <button id="pingButton" type="button" disabled>Ping</button>
-            </div>
-            <pre id="logOutput" class="log-output" aria-live="polite"></pre>
-          </div>
         </aside>
 
         <section class="data-panel">
@@ -656,6 +709,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=f750c76dcb67"></script>
+    <script src="app.js?v=590ef6571f3d"></script>
   </body>
 </html>
