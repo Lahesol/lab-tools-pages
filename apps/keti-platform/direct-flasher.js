@@ -7,8 +7,8 @@
   const MAX_SKETCH_SIZE = 983040;
   const BOOTLOADER_BAUD = 921600;
   const WRITE_TIMEOUT_MS = 5000;
-  const WRITE_CHUNK_SIZE = 512;
-  const WRITE_CHUNK_DELAY_MS = 1;
+  const WRITE_CHUNK_SIZE = 128;
+  const WRITE_CHUNK_DELAY_MS = 2;
   const PAGE_WRITE_ATTEMPTS = 2;
   const ARDUINO_USB_FILTERS = [
     { usbVendorId: 0x2341 },
@@ -38,7 +38,11 @@
     let timer = null;
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => {
-        reject(new Error(`${description} timed out after ${timeoutMs} ms`));
+        const error = new Error(`${description} timed out after ${timeoutMs} ms`);
+        error.bootloaderTimeout = true;
+        error.timeoutDescription = description;
+        error.timeoutMs = timeoutMs;
+        reject(error);
       }, timeoutMs);
     });
     return Promise.race([promise, timeout]).finally(() => {
@@ -57,6 +61,7 @@
       this.closed = false;
       this.readPumpTask = null;
       this.writeTimeoutMs = WRITE_TIMEOUT_MS;
+      this.stalled = false;
     }
 
     async open() {
@@ -154,21 +159,47 @@
     }
 
     async writeAscii(command) {
-      await withTimeout(
-        this.writer.write(encoder.encode(command)),
-        this.writeTimeoutMs,
-        `Writing bootloader command ${command.slice(0, 1) || "?"}`
-      );
+      try {
+        await withTimeout(
+          this.writer.ready,
+          this.writeTimeoutMs,
+          `Waiting bootloader writer for command ${command.slice(0, 1) || "?"}`
+        );
+        await withTimeout(
+          this.writer.write(encoder.encode(command)),
+          this.writeTimeoutMs,
+          `Writing bootloader command ${command.slice(0, 1) || "?"}`
+        );
+      } catch (error) {
+        if (error.bootloaderTimeout) {
+          this.stalled = true;
+          error.transportStalled = true;
+        }
+        throw error;
+      }
     }
 
     async writeBytes(bytes) {
       for (let offset = 0; offset < bytes.length; offset += WRITE_CHUNK_SIZE) {
         const chunk = bytes.slice(offset, Math.min(offset + WRITE_CHUNK_SIZE, bytes.length));
-        await withTimeout(
-          this.writer.write(chunk),
-          this.writeTimeoutMs,
-          `Writing bootloader bytes ${offset}-${offset + chunk.length} of ${bytes.length}`
-        );
+        try {
+          await withTimeout(
+            this.writer.ready,
+            this.writeTimeoutMs,
+            `Waiting bootloader writer for bytes ${offset}-${offset + chunk.length} of ${bytes.length}`
+          );
+          await withTimeout(
+            this.writer.write(chunk),
+            this.writeTimeoutMs,
+            `Writing bootloader bytes ${offset}-${offset + chunk.length} of ${bytes.length}`
+          );
+        } catch (error) {
+          if (error.bootloaderTimeout) {
+            this.stalled = true;
+            error.transportStalled = true;
+          }
+          throw error;
+        }
         if (WRITE_CHUNK_DELAY_MS > 0 && offset + chunk.length < bytes.length) {
           await sleep(WRITE_CHUNK_DELAY_MS);
         }
@@ -401,6 +432,13 @@
           lastError = error;
           this.log(`page=${page + 1},attempt=${attempt},error=${error.message}`);
           this.transport.discardRx();
+          if (error.transportStalled || this.transport.stalled) {
+            const stalledError = new Error(`Writing page ${page + 1}/${pageCount} failed: Web Serial transport stalled: ${error.message}`);
+            stalledError.directFlashTimeout = true;
+            stalledError.transportStalled = true;
+            stalledError.cause = error;
+            throw stalledError;
+          }
           if (attempt < PAGE_WRITE_ATTEMPTS) {
             await sleep(120);
           }

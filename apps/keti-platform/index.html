@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=45f0229864b3" />
+    <link rel="stylesheet" href="styles.css?v=8c70205460d3" />
   </head>
   <body>
     <div class="app-shell">
@@ -127,6 +127,31 @@
                 <button class="view-tab" type="button" data-view="dataset">Dataset</button>
                 <button class="view-tab" type="button" data-view="model">Model</button>
                 <button class="view-tab" type="button" data-view="ppg">PPG HRV</button>
+              </div>
+              <div id="adcPlotControls" class="adc-plot-controls" aria-label="ADC plot controls">
+                <label>
+                  <span>Format</span>
+                  <select id="adcFormatSelect">
+                    <option value="ALL">All ADC</option>
+                    <option value="DATA">DATA</option>
+                    <option value="BUF">BUF</option>
+                    <option value="FILT">FILT</option>
+                    <option value="PLOTTER">raw:/filtered:</option>
+                    <option value="BLE_DATA">BLE_DATA</option>
+                    <option value="PPG">PPG mirror</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Plot</span>
+                  <select id="adcPlotModeSelect">
+                    <option value="RAW_FILTERED">Raw + Filtered</option>
+                    <option value="RAW">Raw only</option>
+                    <option value="FILTERED">Filtered only</option>
+                    <option value="MILLIVOLTS">Voltage mV</option>
+                    <option value="DELTA">Filtered - Raw</option>
+                  </select>
+                </label>
+                <span id="adcFormatState" class="adc-format-state">All ADC</span>
               </div>
               <div class="toggle-group" role="group" aria-label="Trace visibility">
                 <label><input id="showRawToggle" type="checkbox" checked /> Raw</label>
@@ -403,67 +428,108 @@
               <strong id="rateMetric">--</strong>
             </div>
           </div>
-        </section>
 
-        <aside class="panel settings-panel">
-          <div id="adcSettingsSection" class="settings-section">
+          <section id="adcSettingsSection" class="dsp-panel settings-section" aria-label="Digital signal processing">
             <div class="panel-header">
-              <h2>Filter</h2>
+              <div>
+                <h2>Digital Signal Processing</h2>
+                <p>IIR transfer-function lab for ADC filtering</p>
+              </div>
               <span id="filterState">RAW</span>
             </div>
 
-            <label class="field">
-              <span>Mode</span>
-              <select id="filterSelect">
-                <option value="RAW">Raw passthrough</option>
-                <option value="MA">Moving average</option>
-                <option value="EMA">Exponential average</option>
-                <option value="IIR_LPF">IIR low-pass</option>
-                <option value="IIR_HPF">IIR high-pass</option>
-                <option value="IIR_BPF">IIR band-pass</option>
-              </select>
-            </label>
+            <div class="dsp-layout">
+              <div class="dsp-controls">
+                <div class="field-row dsp-mode-row">
+                  <label class="field">
+                    <span>Filter Mode</span>
+                    <select id="filterSelect">
+                      <option value="RAW">Raw passthrough</option>
+                      <option value="MA">Moving average</option>
+                      <option value="EMA">Exponential average</option>
+                      <option value="IIR_LPF">IIR low-pass</option>
+                      <option value="IIR_HPF">IIR high-pass</option>
+                      <option value="IIR_BPF">IIR band-pass</option>
+                    </select>
+                  </label>
 
-            <label class="field">
-              <span>EMA Alpha</span>
-              <div class="inline-input">
-                <input id="alphaInput" type="range" min="0.001" max="1" step="0.001" value="0.2" />
-                <output id="alphaOutput">0.200</output>
+                  <label class="field">
+                    <span>Command Target</span>
+                    <select id="dspProtocolSelect">
+                      <option value="AUTO">Auto</option>
+                      <option value="STAGE1">Stage 1 console</option>
+                      <option value="DAY2_IIR">Day2 IIR example</option>
+                    </select>
+                  </label>
+
+                  <label class="field">
+                    <span>IIR Order</span>
+                    <input id="iirOrderInput" type="number" min="1" max="4" step="1" value="2" />
+                  </label>
+                </div>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>Low Cutoff</span>
+                    <div class="inline-input">
+                      <input id="iirLowInput" type="number" min="0.01" max="450" step="0.1" value="1.0" />
+                      <span>Hz</span>
+                    </div>
+                  </label>
+
+                  <label class="field">
+                    <span>High Cutoff</span>
+                    <div class="inline-input">
+                      <input id="iirHighInput" type="number" min="0.02" max="450" step="0.1" value="10.0" />
+                      <span>Hz</span>
+                    </div>
+                  </label>
+                </div>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>EMA Alpha</span>
+                    <div class="inline-input">
+                      <input id="alphaInput" type="range" min="0.001" max="1" step="0.001" value="0.2" />
+                      <output id="alphaOutput">0.200</output>
+                    </div>
+                  </label>
+
+                  <label class="field">
+                    <span>MA Window</span>
+                    <div class="inline-input">
+                      <input id="windowInput" type="number" min="0.001" max="32" step="0.01" value="0.08" />
+                      <span>s</span>
+                    </div>
+                  </label>
+                </div>
+
+                <button id="applyFilterButton" type="button" disabled>Apply DSP Filter</button>
               </div>
-            </label>
 
-            <label class="field">
-              <span>MA Window</span>
-              <div class="inline-input">
-                <input id="windowInput" type="number" min="0.001" max="32" step="0.01" value="0.08" />
-                <span>s</span>
+              <div class="dsp-transfer">
+                <div class="section-title compact-title">
+                  <h3>IIR Transfer Function</h3>
+                  <span id="dspEquationMode">RAW</span>
+                </div>
+                <pre id="dspTransferFunction" class="dsp-formula">H(z) = 1</pre>
+                <pre id="dspSectionEquation" class="dsp-formula muted-formula">y[n] = x[n]</pre>
+                <div id="dspCoefficientGrid" class="dsp-coefficient-grid"></div>
+                <span id="dspNyquistState" class="dsp-note">Nyquist: --</span>
               </div>
-            </label>
 
-            <label class="field">
-              <span>IIR Order</span>
-              <input id="iirOrderInput" type="number" min="1" max="4" step="1" value="2" />
-            </label>
-
-            <label class="field">
-              <span>IIR Low Cutoff</span>
-              <div class="inline-input">
-                <input id="iirLowInput" type="number" min="0.01" max="450" step="0.1" value="1.0" />
-                <span>Hz</span>
+              <div class="dsp-response">
+                <div class="section-title compact-title">
+                  <h3>Frequency Response</h3>
+                  <span>Magnitude</span>
+                </div>
+                <canvas id="iirResponseCanvas" width="720" height="220" aria-label="IIR frequency response plot"></canvas>
               </div>
-            </label>
+            </div>
+          </section>
+        </section>
 
-            <label class="field">
-              <span>IIR High Cutoff</span>
-              <div class="inline-input">
-                <input id="iirHighInput" type="number" min="0.02" max="450" step="0.1" value="10.0" />
-                <span>Hz</span>
-              </div>
-            </label>
-
-            <button id="applyFilterButton" type="button" disabled>Apply Filter</button>
-          </div>
-
+        <aside class="panel settings-panel">
           <div id="inputSettingsSection" class="settings-section">
             <div class="panel-header compact">
               <h2>Input</h2>
@@ -574,6 +640,7 @@
               <thead>
                 <tr>
                   <th>Seq</th>
+                  <th>Format</th>
                   <th>Time us</th>
                   <th>Channel</th>
                   <th>Raw</th>
@@ -589,6 +656,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=19bff98be8f0"></script>
+    <script src="app.js?v=f750c76dcb67"></script>
   </body>
 </html>

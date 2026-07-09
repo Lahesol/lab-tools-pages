@@ -24,6 +24,22 @@ const PPG_MAX_PARSE_ROWS = 240000;
 const PPG_MAX_LIVE_POINTS = 30000;
 const PPG_LIVE_ANALYSIS_INTERVAL_MS = 1000;
 const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
+const ADC_FORMAT_LABELS = {
+  ALL: "All ADC",
+  DATA: "DATA",
+  BUF: "BUF",
+  FILT: "FILT",
+  PLOTTER: "raw:/filtered:",
+  BLE_DATA: "BLE_DATA",
+  PPG: "PPG mirror"
+};
+const ADC_FORMATS = ["DATA", "BUF", "FILT", "PLOTTER", "BLE_DATA", "PPG"];
+const ADC_PLOT_SERIES = {
+  raw: { label: "Raw", color: "#008c8c", width: 1.8 },
+  filtered: { label: "Filtered", color: "#d28a00", width: 2.4 },
+  millivolts: { label: "mV", color: "#2767c9", width: 2.1 },
+  delta: { label: "Filtered - Raw", color: "#c83232", width: 2.1 }
+};
 const DEFAULT_PREBUILT_FIRMWARES = [
   {
     id: "stage1_lab_console",
@@ -77,6 +93,8 @@ const state = {
   recording: false,
   activeView: "adc",
   samples: [],
+  adcFormatCounts: Object.fromEntries(ADC_FORMATS.map((format) => [format, 0])),
+  adcSyntheticSeq: 0,
   imuSamples: [],
   imuProcessedSamples: [],
   records: [],
@@ -137,6 +155,10 @@ const state = {
     channel: 0,
     resolution: 12,
     filter: "RAW",
+    adcFormat: "ALL",
+    adcPlotMode: "RAW_FILTERED",
+    dspProtocol: "AUTO",
+    dspProtocolHint: "",
     alpha: 0.2,
     window: 8,
     windowSec: 0.08,
@@ -187,6 +209,7 @@ const el = {
   rateInput: document.getElementById("rateInput"),
   resolutionSelect: document.getElementById("resolutionSelect"),
   filterSelect: document.getElementById("filterSelect"),
+  dspProtocolSelect: document.getElementById("dspProtocolSelect"),
   alphaInput: document.getElementById("alphaInput"),
   alphaOutput: document.getElementById("alphaOutput"),
   windowInput: document.getElementById("windowInput"),
@@ -194,6 +217,12 @@ const el = {
   iirLowInput: document.getElementById("iirLowInput"),
   iirHighInput: document.getElementById("iirHighInput"),
   adcSettingsSection: document.getElementById("adcSettingsSection"),
+  dspEquationMode: document.getElementById("dspEquationMode"),
+  dspTransferFunction: document.getElementById("dspTransferFunction"),
+  dspSectionEquation: document.getElementById("dspSectionEquation"),
+  dspCoefficientGrid: document.getElementById("dspCoefficientGrid"),
+  dspNyquistState: document.getElementById("dspNyquistState"),
+  iirResponseCanvas: document.getElementById("iirResponseCanvas"),
   inputSettingsSection: document.getElementById("inputSettingsSection"),
   classificationSettingsSection: document.getElementById("classificationSettingsSection"),
   deviceLogSection: document.getElementById("deviceLogSection"),
@@ -211,6 +240,10 @@ const el = {
   showRawToggle: document.getElementById("showRawToggle"),
   showFilteredToggle: document.getElementById("showFilteredToggle"),
   autoScaleToggle: document.getElementById("autoScaleToggle"),
+  adcPlotControls: document.getElementById("adcPlotControls"),
+  adcFormatSelect: document.getElementById("adcFormatSelect"),
+  adcPlotModeSelect: document.getElementById("adcPlotModeSelect"),
+  adcFormatState: document.getElementById("adcFormatState"),
   signalCanvas: document.getElementById("signalCanvas"),
   metricGrid: document.getElementById("metricGrid"),
   ppgView: document.getElementById("ppgView"),
@@ -390,6 +423,37 @@ function normalizeNumber(value, fallback, min, max) {
   return Math.min(max, Math.max(min, parsed));
 }
 
+function finiteOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatNumber(value, digits = 1) {
+  return Number.isFinite(value) ? value.toFixed(digits) : "--";
+}
+
+function formatAdcMetric(value, digits = 1, unit = "") {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  const suffix = unit ? ` ${unit}` : "";
+  return `${value.toFixed(digits)}${suffix}`;
+}
+
+function rawToMillivolts(raw) {
+  if (!Number.isFinite(raw)) {
+    return NaN;
+  }
+  const maxCode = Math.max(1, (1 << state.settings.resolution) - 1);
+  return (raw / maxCode) * 3300;
+}
+
+function nextAdcSyntheticSeq() {
+  const seq = state.adcSyntheticSeq;
+  state.adcSyntheticSeq += 1;
+  return seq;
+}
+
 function formatSeconds(value) {
   return value >= 1 ? value.toFixed(2) : value.toFixed(3);
 }
@@ -414,6 +478,399 @@ function updateAdcWindowInputFromSamples(samples) {
 
 function updateFilterStateText() {
   el.filterState.textContent = `${state.settings.filter} ${formatSeconds(state.settings.windowSec)}s`;
+  renderDspPanel();
+}
+
+function dspSampleRateHz() {
+  return normalizeNumber(el.rateInput?.value ?? state.settings.rateHz, state.settings.rateHz || 100, 1, 1000);
+}
+
+function dspMaxCutoffHz(sampleRateHz = dspSampleRateHz()) {
+  return Math.max(0.02, sampleRateHz * 0.45);
+}
+
+function lowPassCoefficientAtRate(cutoffHz, sampleRateHz) {
+  const cutoff = Math.max(0.001, cutoffHz);
+  const dt = 1 / Math.max(1, sampleRateHz);
+  const rc = 1 / (2 * Math.PI * cutoff);
+  return dt / (rc + dt);
+}
+
+function highPassCoefficientAtRate(cutoffHz, sampleRateHz) {
+  const cutoff = Math.max(0.001, cutoffHz);
+  const dt = 1 / Math.max(1, sampleRateHz);
+  const rc = 1 / (2 * Math.PI * cutoff);
+  return rc / (rc + dt);
+}
+
+function coeffText(value) {
+  return Number.isFinite(value) ? value.toPrecision(6) : "--";
+}
+
+function syncDspSettingsFromControls({ writeBack = false } = {}) {
+  const sampleRateHz = dspSampleRateHz();
+  const maxCutoff = dspMaxCutoffHz(sampleRateHz);
+  const highHz = normalizeNumber(el.iirHighInput.value, state.settings.iirHighHz, 0.02, maxCutoff);
+  const lowHz = Math.min(
+    normalizeNumber(el.iirLowInput.value, state.settings.iirLowHz, 0.01, maxCutoff),
+    Math.max(0.01, highHz - 0.01)
+  );
+  const order = Math.round(normalizeNumber(el.iirOrderInput.value, state.settings.iirOrder, 1, 4));
+
+  state.settings.filter = el.filterSelect.value;
+  state.settings.dspProtocol = el.dspProtocolSelect.value || "AUTO";
+  state.settings.rateHz = sampleRateHz;
+  state.settings.alpha = normalizeNumber(el.alphaInput.value, state.settings.alpha, 0.001, 1);
+  state.settings.windowSec = normalizeNumber(el.windowInput.value, state.settings.windowSec, 0.001, 32);
+  state.settings.window = adcWindowSamplesFromSeconds(state.settings.windowSec);
+  state.settings.windowSec = adcWindowSecondsFromSamples(state.settings.window);
+  state.settings.iirOrder = order;
+  state.settings.iirLowHz = lowHz;
+  state.settings.iirHighHz = highHz;
+
+  if (writeBack) {
+    el.rateInput.value = sampleRateHz.toFixed(Math.abs(sampleRateHz - Math.round(sampleRateHz)) < 0.01 ? 0 : 1);
+    el.alphaInput.value = String(state.settings.alpha);
+    el.alphaOutput.textContent = state.settings.alpha.toFixed(3);
+    el.windowInput.value = formatSeconds(state.settings.windowSec);
+    el.iirOrderInput.value = String(order);
+    el.iirLowInput.value = lowHz.toFixed(3).replace(/\.?0+$/, "");
+    el.iirHighInput.value = highHz.toFixed(3).replace(/\.?0+$/, "");
+  }
+
+  return {
+    mode: state.settings.filter,
+    protocol: state.settings.dspProtocol,
+    sampleRateHz,
+    nyquistHz: sampleRateHz / 2,
+    maxCutoff,
+    order,
+    lowHz,
+    highHz,
+    emaAlpha: state.settings.alpha,
+    maWindow: state.settings.window
+  };
+}
+
+function lpfMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz) {
+  const alpha = lowPassCoefficientAtRate(cutoffHz, sampleRateHz);
+  const a1 = 1 - alpha;
+  const w = (2 * Math.PI * frequencyHz) / sampleRateHz;
+  const denRe = 1 - a1 * Math.cos(w);
+  const denIm = a1 * Math.sin(w);
+  return alpha / Math.max(1e-9, Math.sqrt(denRe * denRe + denIm * denIm));
+}
+
+function hpfMagnitudeAt(frequencyHz, cutoffHz, sampleRateHz) {
+  const beta = highPassCoefficientAtRate(cutoffHz, sampleRateHz);
+  const w = (2 * Math.PI * frequencyHz) / sampleRateHz;
+  const numRe = beta * (1 - Math.cos(w));
+  const numIm = beta * Math.sin(w);
+  const denRe = 1 - beta * Math.cos(w);
+  const denIm = beta * Math.sin(w);
+  return Math.sqrt(numRe * numRe + numIm * numIm) / Math.max(1e-9, Math.sqrt(denRe * denRe + denIm * denIm));
+}
+
+function maMagnitudeAt(frequencyHz, sampleRateHz, windowSamples) {
+  const w = (2 * Math.PI * frequencyHz) / sampleRateHz;
+  const den = Math.sin(w / 2);
+  if (Math.abs(den) < 1e-9) {
+    return 1;
+  }
+  return Math.abs(Math.sin((windowSamples * w) / 2) / (windowSamples * den));
+}
+
+function dspMagnitudeAt(frequencyHz, params) {
+  if (params.mode === "IIR_LPF") {
+    return Math.pow(lpfMagnitudeAt(frequencyHz, params.highHz, params.sampleRateHz), params.order);
+  }
+  if (params.mode === "IIR_HPF") {
+    return Math.pow(hpfMagnitudeAt(frequencyHz, params.lowHz, params.sampleRateHz), params.order);
+  }
+  if (params.mode === "IIR_BPF") {
+    return Math.pow(hpfMagnitudeAt(frequencyHz, params.lowHz, params.sampleRateHz), params.order) *
+      Math.pow(lpfMagnitudeAt(frequencyHz, params.highHz, params.sampleRateHz), params.order);
+  }
+  if (params.mode === "EMA") {
+    const alpha = params.emaAlpha;
+    const a1 = 1 - alpha;
+    const w = (2 * Math.PI * frequencyHz) / params.sampleRateHz;
+    const denRe = 1 - a1 * Math.cos(w);
+    const denIm = a1 * Math.sin(w);
+    return alpha / Math.max(1e-9, Math.sqrt(denRe * denRe + denIm * denIm));
+  }
+  if (params.mode === "MA") {
+    return maMagnitudeAt(frequencyHz, params.sampleRateHz, params.maWindow);
+  }
+  return 1;
+}
+
+function describeDspTransfer(params) {
+  const lowAlpha = lowPassCoefficientAtRate(params.lowHz, params.sampleRateHz);
+  const highAlpha = lowPassCoefficientAtRate(params.highHz, params.sampleRateHz);
+  const lowBeta = highPassCoefficientAtRate(params.lowHz, params.sampleRateHz);
+  const emaA1 = 1 - params.emaAlpha;
+  const lowA1 = 1 - lowAlpha;
+  const highA1 = 1 - highAlpha;
+
+  if (params.mode === "IIR_LPF") {
+    return {
+      modeLabel: `IIR LPF / fs=${params.sampleRateHz.toFixed(1)} Hz / N=${params.order}`,
+      transfer: `H_LPF(z) = ${coeffText(highAlpha)} / (1 - ${coeffText(highA1)} z^-1)\nH_total(z) = H_LPF(z)^${params.order}`,
+      equation: `y[n] = ${coeffText(highA1)} y[n-1] + ${coeffText(highAlpha)} x[n]`,
+      coefficients: [
+        ["LPF cutoff", `${params.highHz.toFixed(3)} Hz`],
+        ["alpha", coeffText(highAlpha)],
+        ["b0", coeffText(highAlpha)],
+        ["a1", coeffText(highA1)]
+      ]
+    };
+  }
+
+  if (params.mode === "IIR_HPF") {
+    return {
+      modeLabel: `IIR HPF / fs=${params.sampleRateHz.toFixed(1)} Hz / N=${params.order}`,
+      transfer: `H_HPF(z) = ${coeffText(lowBeta)}(1 - z^-1) / (1 - ${coeffText(lowBeta)} z^-1)\nH_total(z) = H_HPF(z)^${params.order}`,
+      equation: `y[n] = ${coeffText(lowBeta)} y[n-1] + ${coeffText(lowBeta)} x[n] - ${coeffText(lowBeta)} x[n-1]`,
+      coefficients: [
+        ["HPF cutoff", `${params.lowHz.toFixed(3)} Hz`],
+        ["beta", coeffText(lowBeta)],
+        ["b0, b1", `${coeffText(lowBeta)}, ${coeffText(-lowBeta)}`],
+        ["a1", coeffText(lowBeta)]
+      ]
+    };
+  }
+
+  if (params.mode === "IIR_BPF") {
+    return {
+      modeLabel: `IIR BPF / fs=${params.sampleRateHz.toFixed(1)} Hz / N=${params.order}`,
+      transfer: `H_BPF(z) = H_HPF(z, ${params.lowHz.toFixed(3)} Hz)^${params.order} * H_LPF(z, ${params.highHz.toFixed(3)} Hz)^${params.order}`,
+      equation: `HPF: y[n] = ${coeffText(lowBeta)} y[n-1] + ${coeffText(lowBeta)} x[n] - ${coeffText(lowBeta)} x[n-1]\nLPF: y[n] = ${coeffText(highA1)} y[n-1] + ${coeffText(highAlpha)} x[n]`,
+      coefficients: [
+        ["HPF beta", coeffText(lowBeta)],
+        ["LPF alpha", coeffText(highAlpha)],
+        ["Low / High", `${params.lowHz.toFixed(3)} / ${params.highHz.toFixed(3)} Hz`],
+        ["Cascade", `HPF^${params.order} -> LPF^${params.order}`]
+      ]
+    };
+  }
+
+  if (params.mode === "EMA") {
+    return {
+      modeLabel: `EMA / fs=${params.sampleRateHz.toFixed(1)} Hz`,
+      transfer: `H_EMA(z) = ${coeffText(params.emaAlpha)} / (1 - ${coeffText(emaA1)} z^-1)`,
+      equation: `y[n] = ${coeffText(emaA1)} y[n-1] + ${coeffText(params.emaAlpha)} x[n]`,
+      coefficients: [
+        ["alpha", coeffText(params.emaAlpha)],
+        ["b0", coeffText(params.emaAlpha)],
+        ["a1", coeffText(emaA1)],
+        ["Type", "1st-order IIR"]
+      ]
+    };
+  }
+
+  if (params.mode === "MA") {
+    return {
+      modeLabel: `Moving average / fs=${params.sampleRateHz.toFixed(1)} Hz`,
+      transfer: `H_MA(z) = (1/${params.maWindow}) * (1 - z^-${params.maWindow}) / (1 - z^-1)`,
+      equation: `y[n] = average(x[n], ... x[n-${params.maWindow - 1}])`,
+      coefficients: [
+        ["Window", `${params.maWindow} samples`],
+        ["Window time", `${formatSeconds(params.maWindow / params.sampleRateHz)} s`],
+        ["b[k]", `1/${params.maWindow}`],
+        ["Type", "FIR"]
+      ]
+    };
+  }
+
+  return {
+    modeLabel: `RAW / fs=${params.sampleRateHz.toFixed(1)} Hz`,
+    transfer: "H(z) = 1",
+    equation: "y[n] = x[n]",
+    coefficients: [
+      ["Gain", "1"],
+      ["Delay", "0"],
+      ["Type", "Bypass"],
+      ["Cutoff", "--"]
+    ]
+  };
+}
+
+function renderDspCoefficientGrid(items) {
+  if (!el.dspCoefficientGrid) {
+    return;
+  }
+  el.dspCoefficientGrid.replaceChildren(
+    ...items.map(([label, value]) => {
+      const node = document.createElement("div");
+      const labelNode = document.createElement("span");
+      const valueNode = document.createElement("strong");
+      labelNode.textContent = label;
+      valueNode.textContent = value;
+      node.append(labelNode, valueNode);
+      return node;
+    })
+  );
+}
+
+function drawDspResponsePlot(params) {
+  if (!el.iirResponseCanvas) {
+    return;
+  }
+  const { ctx: responseCtx, width, height } = resizeAuxCanvasToDisplaySize(el.iirResponseCanvas, 190);
+  const pad = { left: 42, right: 14, top: 18, bottom: 30 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const minDb = -60;
+  const maxDb = 6;
+  const nyquist = params.sampleRateHz / 2;
+
+  responseCtx.clearRect(0, 0, width, height);
+  responseCtx.fillStyle = "#ffffff";
+  responseCtx.fillRect(0, 0, width, height);
+  drawGridOn(responseCtx, width, height, pad, plotWidth, plotHeight);
+
+  responseCtx.strokeStyle = "#008c8c";
+  responseCtx.lineWidth = 2;
+  responseCtx.beginPath();
+  const points = Math.max(96, Math.min(320, Math.round(plotWidth)));
+  for (let index = 0; index < points; index++) {
+    const frequency = (nyquist * index) / Math.max(1, points - 1);
+    const magnitude = Math.max(1e-6, dspMagnitudeAt(frequency, params));
+    const db = Math.max(minDb, Math.min(maxDb, 20 * Math.log10(magnitude)));
+    const x = pad.left + (plotWidth * index) / Math.max(1, points - 1);
+    const y = pad.top + plotHeight - ((db - minDb) / (maxDb - minDb)) * plotHeight;
+    if (index === 0) {
+      responseCtx.moveTo(x, y);
+    } else {
+      responseCtx.lineTo(x, y);
+    }
+  }
+  responseCtx.stroke();
+
+  const markers = [];
+  if (params.mode === "IIR_HPF" || params.mode === "IIR_BPF") {
+    markers.push({ hz: params.lowHz, label: "low", color: "#d28a00" });
+  }
+  if (params.mode === "IIR_LPF" || params.mode === "IIR_BPF") {
+    markers.push({ hz: params.highHz, label: "high", color: "#2767c9" });
+  }
+  for (const marker of markers) {
+    const x = pad.left + (Math.min(marker.hz, nyquist) / nyquist) * plotWidth;
+    responseCtx.strokeStyle = marker.color;
+    responseCtx.setLineDash([4, 4]);
+    responseCtx.beginPath();
+    responseCtx.moveTo(x, pad.top);
+    responseCtx.lineTo(x, pad.top + plotHeight);
+    responseCtx.stroke();
+    responseCtx.setLineDash([]);
+    responseCtx.fillStyle = marker.color;
+    responseCtx.font = "11px Segoe UI, Arial, sans-serif";
+    responseCtx.fillText(marker.label, Math.min(x + 4, width - 44), pad.top + 13);
+  }
+
+  responseCtx.fillStyle = "#637083";
+  responseCtx.font = "11px Segoe UI, Arial, sans-serif";
+  responseCtx.fillText(`${maxDb} dB`, 7, pad.top + 4);
+  responseCtx.fillText(`${minDb} dB`, 4, pad.top + plotHeight);
+  responseCtx.fillText("0 Hz", pad.left, height - 8);
+  responseCtx.fillText(`${nyquist.toFixed(1)} Hz`, width - pad.right - 58, height - 8);
+}
+
+function renderDspPanel({ writeBack = false } = {}) {
+  if (!el.dspTransferFunction) {
+    return;
+  }
+  const params = syncDspSettingsFromControls({ writeBack });
+  const info = describeDspTransfer(params);
+  el.dspEquationMode.textContent = info.modeLabel;
+  el.dspTransferFunction.textContent = info.transfer;
+  el.dspSectionEquation.textContent = info.equation;
+  el.dspNyquistState.textContent = `Nyquist: ${params.nyquistHz.toFixed(1)} Hz / max cutoff: ${params.maxCutoff.toFixed(1)} Hz`;
+  renderDspCoefficientGrid(info.coefficients);
+  drawDspResponsePlot(params);
+}
+
+function resolveDspProtocol() {
+  const explicit = el.dspProtocolSelect?.value || state.settings.dspProtocol || "AUTO";
+  if (explicit !== "AUTO") {
+    return explicit;
+  }
+  const latestFormat = state.latestSample?.format;
+  if (latestFormat === "FILT" || state.settings.adcFormat === "FILT") {
+    return "DAY2_IIR";
+  }
+  if (state.settings.dspProtocolHint) {
+    return state.settings.dspProtocolHint;
+  }
+  return "STAGE1";
+}
+
+function day2IirModeName(mode) {
+  if (mode === "IIR_LPF") {
+    return "LPF";
+  }
+  if (mode === "IIR_HPF") {
+    return "HPF";
+  }
+  if (mode === "IIR_BPF") {
+    return "BPF";
+  }
+  return "RAW";
+}
+
+function syncAdcPlotSettings() {
+  state.settings.adcFormat = el.adcFormatSelect?.value || "ALL";
+  state.settings.adcPlotMode = el.adcPlotModeSelect?.value || "RAW_FILTERED";
+  updateAdcFormatState();
+}
+
+function getVisibleAdcSamples() {
+  const format = state.settings.adcFormat || "ALL";
+  return format === "ALL"
+    ? state.samples
+    : state.samples.filter((sample) => sample.format === format);
+}
+
+function updateAdcFormatState() {
+  if (!el.adcFormatState) {
+    return;
+  }
+  const format = state.settings.adcFormat || "ALL";
+  const visible = getVisibleAdcSamples().length;
+  const total = state.samples.length;
+  const countText = format === "ALL" ? `${total}` : `${visible} / ${total}`;
+  const label = ADC_FORMAT_LABELS[format] || format;
+  el.adcFormatState.textContent = `${label} - ${countText}`;
+}
+
+function getAdcPlotValue(sample, key) {
+  if (key === "delta") {
+    return Number.isFinite(sample.filtered) && Number.isFinite(sample.raw)
+      ? sample.filtered - sample.raw
+      : NaN;
+  }
+  return Number(sample[key]);
+}
+
+function getAdcPlotSeries() {
+  const mode = state.settings.adcPlotMode || "RAW_FILTERED";
+  if (mode === "RAW") {
+    return [{ key: "raw", ...ADC_PLOT_SERIES.raw }];
+  }
+  if (mode === "FILTERED") {
+    return [{ key: "filtered", ...ADC_PLOT_SERIES.filtered }];
+  }
+  if (mode === "MILLIVOLTS") {
+    return [{ key: "millivolts", ...ADC_PLOT_SERIES.millivolts }];
+  }
+  if (mode === "DELTA") {
+    return [{ key: "delta", ...ADC_PLOT_SERIES.delta }];
+  }
+  return [
+    ...(el.showRawToggle.checked ? [{ key: "raw", ...ADC_PLOT_SERIES.raw }] : []),
+    ...(el.showFilteredToggle.checked ? [{ key: "filtered", ...ADC_PLOT_SERIES.filtered }] : [])
+  ];
 }
 
 function createPreprocessState() {
@@ -2210,8 +2667,16 @@ function consumeText(text) {
   }
 }
 
+function isAdcStreamLine(line) {
+  return line.startsWith("DATA,") ||
+    line.startsWith("BUF,") ||
+    line.startsWith("FILT,") ||
+    line.startsWith("BLE_DATA,") ||
+    /^raw\s*:/i.test(line);
+}
+
 function handleLine(line) {
-  const isStreamData = line.startsWith("DATA,") || line.startsWith("IMU,") || line.startsWith("PPG,");
+  const isStreamData = isAdcStreamLine(line) || line.startsWith("IMU,") || line.startsWith("PPG,");
   if (!isStreamData) {
     logLine(line);
   }
@@ -2231,10 +2696,10 @@ function handleLine(line) {
     return;
   }
 
-  if (line.startsWith("DATA,")) {
-    const sample = parseDataLine(line);
-    if (sample) {
-      addSample(sample);
+  if (isAdcStreamLine(line)) {
+    const samples = parseAdcLine(line);
+    if (samples.length > 0) {
+      samples.forEach(addSample);
     }
     return;
   }
@@ -2304,20 +2769,178 @@ function handleLine(line) {
   }
 }
 
+function parseAdcLine(line) {
+  if (line.startsWith("DATA,")) {
+    const sample = parseDataLine(line);
+    return sample ? [sample] : [];
+  }
+  if (line.startsWith("BUF,")) {
+    return parseBufferLine(line);
+  }
+  if (line.startsWith("FILT,")) {
+    const sample = parseFilterLine(line);
+    return sample ? [sample] : [];
+  }
+  if (line.startsWith("BLE_DATA,")) {
+    const sample = parseBleDataLine(line);
+    return sample ? [sample] : [];
+  }
+  if (/^raw\s*:/i.test(line)) {
+    const sample = parseSerialPlotterLine(line);
+    return sample ? [sample] : [];
+  }
+  return [];
+}
+
+function normalizeAdcSample(sample) {
+  const raw = finiteOrNull(sample.raw);
+  const filtered = finiteOrNull(sample.filtered);
+  const millivolts = finiteOrNull(sample.millivolts);
+  return {
+    ...sample,
+    seq: finiteOrNull(sample.seq) ?? nextAdcSyntheticSeq(),
+    micros: finiteOrNull(sample.micros) ?? Math.round((state.receivedSamples / Math.max(1, state.settings.rateHz)) * 1000000),
+    channel: finiteOrNull(sample.channel) ?? state.settings.channel,
+    raw: raw ?? NaN,
+    millivolts: millivolts ?? rawToMillivolts(raw),
+    filtered: filtered ?? raw ?? NaN,
+    format: sample.format || "DATA",
+    formatDetail: sample.formatDetail || "",
+    valueUnit: sample.valueUnit || "count",
+    rawLabel: sample.rawLabel || "Raw",
+    filteredLabel: sample.filteredLabel || "Filtered",
+    receivedAt: Date.now()
+  };
+}
+
 function parseDataLine(line) {
   const parts = line.split(",");
-  if (parts.length < 7) {
+  if (parts.length < 6) {
     return null;
   }
-  return {
+  const raw = Number(parts[4]);
+  const millivolts = Number(parts[5]);
+  const filtered = Number(parts[6]);
+  return normalizeAdcSample({
     seq: Number(parts[1]),
     micros: Number(parts[2]),
     channel: Number(parts[3]),
-    raw: Number(parts[4]),
-    millivolts: Number(parts[5]),
-    filtered: Number(parts[6]),
-    receivedAt: Date.now()
-  };
+    raw,
+    millivolts,
+    filtered: Number.isFinite(filtered) ? filtered : raw,
+    format: "DATA",
+    formatDetail: parts.length >= 7 ? "stage1" : "basic",
+    valueUnit: "count",
+    filteredLabel: parts.length >= 7 ? "Filtered" : "Raw copy"
+  });
+}
+
+function parseBufferLine(line) {
+  const parts = line.split(",");
+  if (parts.length < 4) {
+    return [];
+  }
+  const bufferSeq = Number(parts[1]);
+  const baseMicros = Number(parts[2]);
+  const intervalUs = Math.round(1000000 / Math.max(1, state.settings.rateHz));
+  return parts.slice(3).map((value, index) => {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) {
+      return null;
+    }
+    return normalizeAdcSample({
+      seq: Number.isFinite(bufferSeq) ? bufferSeq * 100 + index : nextAdcSyntheticSeq(),
+      micros: Number.isFinite(baseMicros) ? baseMicros + index * intervalUs : undefined,
+      channel: state.settings.channel,
+      raw,
+      millivolts: rawToMillivolts(raw),
+      filtered: raw,
+      format: "BUF",
+      formatDetail: `buf ${Number.isFinite(bufferSeq) ? bufferSeq : "--"}[${index}]`,
+      valueUnit: "count",
+      filteredLabel: "Raw copy",
+      bufferSeq: Number.isFinite(bufferSeq) ? bufferSeq : null,
+      bufferIndex: index
+    });
+  }).filter(Boolean);
+}
+
+function parseFilterLine(line) {
+  const parts = line.split(",");
+  if (parts.length < 6) {
+    return null;
+  }
+  const rawMv = Number(parts[4]);
+  const filteredMv = Number(parts[5]);
+  return normalizeAdcSample({
+    seq: Number(parts[1]),
+    micros: Number(parts[2]),
+    channel: state.settings.channel,
+    raw: rawMv,
+    millivolts: rawMv,
+    filtered: Number.isFinite(filteredMv) ? filteredMv : rawMv,
+    format: "FILT",
+    formatDetail: parts[3] || state.settings.filter,
+    valueUnit: "mV",
+    rawLabel: "Raw mV",
+    filteredLabel: "Filtered mV"
+  });
+}
+
+function parseBleDataLine(line) {
+  const parts = line.split(",");
+  if (parts.length < 3) {
+    return null;
+  }
+  const millis = Number(parts[1]);
+  const raw = Number(parts[2]);
+  if (!Number.isFinite(raw)) {
+    return null;
+  }
+  return normalizeAdcSample({
+    seq: nextAdcSyntheticSeq(),
+    micros: Number.isFinite(millis) ? millis * 1000 : undefined,
+    channel: state.settings.channel,
+    raw,
+    millivolts: rawToMillivolts(raw),
+    filtered: raw,
+    format: "BLE_DATA",
+    formatDetail: "serial mirror",
+    valueUnit: "count",
+    filteredLabel: "Raw copy"
+  });
+}
+
+function parseSerialPlotterLine(line) {
+  const values = {};
+  for (const token of line.split(",")) {
+    const separator = token.indexOf(":");
+    if (separator <= 0) {
+      continue;
+    }
+    const key = token.slice(0, separator).trim().toLowerCase();
+    const value = Number(token.slice(separator + 1).trim());
+    if (Number.isFinite(value)) {
+      values[key] = value;
+    }
+  }
+  if (!Number.isFinite(values.raw) && !Number.isFinite(values.filtered)) {
+    return null;
+  }
+  const seq = nextAdcSyntheticSeq();
+  const raw = Number.isFinite(values.raw) ? values.raw : values.filtered;
+  const filtered = Number.isFinite(values.filtered) ? values.filtered : raw;
+  return normalizeAdcSample({
+    seq,
+    micros: Math.round((seq / Math.max(1, state.settings.rateHz)) * 1000000),
+    channel: state.settings.channel,
+    raw,
+    millivolts: NaN,
+    filtered,
+    format: "PLOTTER",
+    formatDetail: "serial plotter",
+    valueUnit: "value"
+  });
 }
 
 function parseImuLine(line) {
@@ -2466,8 +3089,17 @@ function parseStatus(line) {
       state.settings.resolution = Number(value);
       el.resolutionSelect.value = value;
     } else if (key === "filter") {
+      state.settings.dspProtocolHint = "STAGE1";
       state.settings.filter = value;
       el.filterSelect.value = value;
+      updateFilterStateText();
+    } else if (key === "mode") {
+      state.settings.dspProtocolHint = "DAY2_IIR";
+      const mappedMode = value === "RAW" ? "RAW" : `IIR_${value}`;
+      state.settings.filter = mappedMode;
+      if ([...el.filterSelect.options].some((option) => option.value === mappedMode)) {
+        el.filterSelect.value = mappedMode;
+      }
       updateFilterStateText();
     } else if (key === "alpha") {
       state.settings.alpha = Number(value);
@@ -2478,18 +3110,37 @@ function parseStatus(line) {
     } else if (key === "iir_order") {
       state.settings.iirOrder = Number(value);
       el.iirOrderInput.value = value;
+    } else if (key === "order") {
+      state.settings.iirOrder = Number(value);
+      el.iirOrderInput.value = value;
     } else if (key === "iir_low_hz") {
+      state.settings.iirLowHz = Number(value);
+      el.iirLowInput.value = value;
+    } else if (key === "low") {
       state.settings.iirLowHz = Number(value);
       el.iirLowInput.value = value;
     } else if (key === "iir_high_hz") {
       state.settings.iirHighHz = Number(value);
       el.iirHighInput.value = value;
+    } else if (key === "high") {
+      state.settings.iirHighHz = Number(value);
+      el.iirHighInput.value = value;
+    } else if (key === "rate") {
+      state.settings.rateHz = Number(value);
+      el.rateInput.value = value;
+      updateAdcWindowInputFromSamples(state.settings.window);
     }
   }
+  renderDspPanel({ writeBack: true });
   setUiEnabled();
 }
 
 function addSample(sample) {
+  sample.format = sample.format || "DATA";
+  if (state.adcFormatCounts[sample.format] == null) {
+    state.adcFormatCounts[sample.format] = 0;
+  }
+  state.adcFormatCounts[sample.format] += 1;
   state.samples.push(sample);
   if (state.samples.length > MAX_POINTS) {
     state.samples.shift();
@@ -2636,8 +3287,15 @@ function addPpgSampleToAdcPlot(sample) {
       : NaN,
     filtered: sample.ppg,
     receivedAt: sample.receivedAt,
+    format: "PPG",
+    formatDetail: "stage3 raw",
+    valueUnit: "count",
+    rawLabel: "PPG raw",
+    filteredLabel: "PPG raw",
     ppgMirror: true
   };
+  adcSample.format = adcSample.format || "PPG";
+  state.adcFormatCounts.PPG = (state.adcFormatCounts.PPG || 0) + 1;
   state.samples.push(adcSample);
   if (state.samples.length > MAX_POINTS) {
     state.samples.shift();
@@ -3451,8 +4109,10 @@ function updateViewVisibility() {
   const isDataset = state.activeView === "dataset";
   const isModel = state.activeView === "model";
   const isCanvas = !NON_CANVAS_VIEWS.has(state.activeView);
+  const isAdc = state.activeView === "adc";
   el.signalCanvas.classList.toggle("is-hidden", !isCanvas);
   el.metricGrid.classList.toggle("is-hidden", !isCanvas);
+  el.adcPlotControls.classList.toggle("is-hidden", !isAdc);
   el.ppgView.classList.toggle("is-hidden", !isPpg);
   el.datasetView.classList.toggle("is-hidden", !isDataset);
   el.modelView.classList.toggle("is-hidden", !isModel);
@@ -3503,17 +4163,23 @@ function flushUiRender(now) {
 }
 
 function updateMetrics(sample) {
-  el.metric1Label.textContent = "Raw";
-  el.metric2Label.textContent = "Filtered";
-  el.metric3Label.textContent = "Voltage";
+  const unit = sample.valueUnit === "mV" ? "mV" : sample.valueUnit === "value" ? "" : "";
+  el.metric1Label.textContent = sample.rawLabel || "Raw";
+  el.metric2Label.textContent = sample.filteredLabel || "Filtered";
+  el.metric3Label.textContent = Number.isFinite(sample.millivolts) ? "Voltage" : "Format";
   el.metric4Label.textContent = "Rate";
   el.sampleCount.textContent = `${state.receivedSamples} samples`;
   el.recordCount.textContent = `${state.records.length} rows`;
-  el.rawMetric.textContent = sample.raw.toFixed(0);
-  el.filteredMetric.textContent = sample.filtered.toFixed(1);
-  el.voltageMetric.textContent = `${sample.millivolts.toFixed(1)} mV`;
-  el.plotMeta.textContent = `A${sample.channel} - ${state.settings.filter} - seq ${sample.seq}`;
+  el.rawMetric.textContent = formatAdcMetric(sample.raw, sample.valueUnit === "count" ? 0 : 3, unit);
+  el.filteredMetric.textContent = formatAdcMetric(sample.filtered, sample.valueUnit === "count" ? 1 : 3, unit);
+  el.voltageMetric.textContent = Number.isFinite(sample.millivolts)
+    ? `${sample.millivolts.toFixed(1)} mV`
+    : sample.format || "--";
+  const detail = sample.formatDetail ? ` - ${sample.formatDetail}` : "";
+  const channel = Number.isFinite(sample.channel) ? `A${sample.channel}` : "ADC";
+  el.plotMeta.textContent = `${sample.format || "ADC"}${detail} - ${channel} - seq ${sample.seq}`;
   el.lastTimestamp.textContent = `${sample.micros} us`;
+  updateAdcFormatState();
 }
 
 function updateCurrentMetrics() {
@@ -3621,11 +4287,12 @@ function updateTable() {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${sample.seq}</td>
+        <td>${sample.format || "DATA"}</td>
         <td>${sample.micros}</td>
-        <td>A${sample.channel}</td>
-        <td>${sample.raw.toFixed(0)}</td>
-        <td>${sample.millivolts.toFixed(2)}</td>
-        <td>${sample.filtered.toFixed(2)}</td>
+        <td>${Number.isFinite(sample.channel) ? `A${sample.channel}` : "--"}</td>
+        <td>${formatNumber(sample.raw, sample.valueUnit === "count" ? 0 : 3)}</td>
+        <td>${formatNumber(sample.millivolts, 2)}</td>
+        <td>${formatNumber(sample.filtered, sample.valueUnit === "count" ? 2 : 3)}</td>
       `;
       return row;
     })
@@ -3673,7 +4340,10 @@ function drawPlot() {
 
   drawGrid(width, height, pad, plotWidth, plotHeight);
 
-  if (state.samples.length < 2) {
+  syncAdcPlotSettings();
+  const visibleSamples = getVisibleAdcSamples();
+
+  if (visibleSamples.length < 2) {
     ctx.fillStyle = "#637083";
     ctx.font = "16px Segoe UI, Arial, sans-serif";
     if (compactPlot) {
@@ -3685,13 +4355,10 @@ function drawPlot() {
     return;
   }
 
-  const values = [];
-  if (el.showRawToggle.checked) {
-    values.push(...state.samples.map((sample) => sample.raw));
-  }
-  if (el.showFilteredToggle.checked) {
-    values.push(...state.samples.map((sample) => sample.filtered));
-  }
+  const series = getAdcPlotSeries();
+  const values = series
+    .flatMap((item) => visibleSamples.map((sample) => getAdcPlotValue(sample, item.key)))
+    .filter(Number.isFinite);
 
   let minY = 0;
   let maxY = (1 << state.settings.resolution) - 1;
@@ -3707,13 +4374,11 @@ function drawPlot() {
     minY -= 1;
   }
 
-  if (el.showRawToggle.checked) {
-    drawTrace("raw", "#008c8c", minY, maxY, pad, plotWidth, plotHeight);
-  }
-  if (el.showFilteredToggle.checked) {
-    drawTrace("filtered", "#d28a00", minY, maxY, pad, plotWidth, plotHeight);
+  for (const item of series) {
+    drawTrace(visibleSamples, item, minY, maxY, pad, plotWidth, plotHeight);
   }
 
+  drawLegend(series, pad.left + 8, height - 10);
   ctx.fillStyle = "#637083";
   ctx.font = "12px Segoe UI, Arial, sans-serif";
   ctx.fillText(`${maxY.toFixed(0)}`, 12, pad.top + 4);
@@ -3744,21 +4409,29 @@ function drawGridOn(targetCtx, width, height, pad, plotWidth, plotHeight) {
   targetCtx.strokeRect(pad.left, pad.top, plotWidth, plotHeight);
 }
 
-function drawTrace(key, color, minY, maxY, pad, plotWidth, plotHeight) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = key === "raw" ? 1.8 : 2.4;
+function drawTrace(samples, series, minY, maxY, pad, plotWidth, plotHeight) {
+  ctx.strokeStyle = series.color;
+  ctx.lineWidth = series.width;
   ctx.beginPath();
-  state.samples.forEach((sample, index) => {
-    const x = pad.left + (plotWidth * index) / Math.max(1, state.samples.length - 1);
-    const normalized = (sample[key] - minY) / (maxY - minY);
+  let hasPoint = false;
+  samples.forEach((sample, index) => {
+    const value = getAdcPlotValue(sample, series.key);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    const x = pad.left + (plotWidth * index) / Math.max(1, samples.length - 1);
+    const normalized = (value - minY) / (maxY - minY);
     const y = pad.top + plotHeight - normalized * plotHeight;
-    if (index === 0) {
+    if (!hasPoint) {
       ctx.moveTo(x, y);
+      hasPoint = true;
     } else {
       ctx.lineTo(x, y);
     }
   });
-  ctx.stroke();
+  if (hasPoint) {
+    ctx.stroke();
+  }
 }
 
 function drawEmptyPlot(message) {
@@ -4290,13 +4963,14 @@ function drawLegend(items, x, y) {
 }
 
 function drawLegendOn(targetCtx, items, x, y) {
-  items.forEach((item, index) => {
-    const offsetX = x + index * 58;
+  let offsetX = x;
+  items.forEach((item) => {
     targetCtx.fillStyle = item.color;
     targetCtx.fillRect(offsetX, y - 9, 16, 3);
     targetCtx.fillStyle = "#637083";
     targetCtx.font = "12px Segoe UI, Arial, sans-serif";
     targetCtx.fillText(item.label, offsetX + 20, y - 4);
+    offsetX += Math.max(58, 28 + item.label.length * 7);
   });
 }
 
@@ -4313,28 +4987,32 @@ async function applyAcquisition() {
 }
 
 async function applyFilter() {
-  state.settings.filter = el.filterSelect.value;
-  state.settings.alpha = normalizeNumber(el.alphaInput.value, 0.2, 0.001, 1);
-  state.settings.windowSec = normalizeNumber(el.windowInput.value, state.settings.windowSec, 0.001, 32);
-  state.settings.window = adcWindowSamplesFromSeconds(state.settings.windowSec);
-  state.settings.windowSec = adcWindowSecondsFromSamples(state.settings.window);
-  el.windowInput.value = formatSeconds(state.settings.windowSec);
-  state.settings.iirOrder = Math.round(normalizeNumber(el.iirOrderInput.value, 2, 1, 4));
-  state.settings.iirLowHz = normalizeNumber(el.iirLowInput.value, 1.0, 0.01, 450);
-  state.settings.iirHighHz = normalizeNumber(el.iirHighInput.value, 10.0, 0.02, 450);
+  const params = syncDspSettingsFromControls({ writeBack: true });
+  const protocol = resolveDspProtocol();
 
-  await sendCommand(`FILTER ${state.settings.filter}`);
-  await sendCommand(`ALPHA ${state.settings.alpha.toFixed(3)}`);
-  await sendCommand(`WINDOW ${state.settings.window}`);
-  if (state.settings.filter.startsWith("IIR_")) {
-    await sendCommand(`IIRORDER ${state.settings.iirOrder}`);
-    await sendCommand(`IIRHIGH ${state.settings.iirHighHz.toFixed(3)}`);
-    await sendCommand(`IIRLOW ${state.settings.iirLowHz.toFixed(3)}`);
+  if (protocol === "DAY2_IIR") {
+    await sendCommand(`RATE ${params.sampleRateHz.toFixed(1)}`);
+    await sendCommand(`MODE ${day2IirModeName(params.mode)}`);
+    await sendCommand(`ORDER ${params.order}`);
+    await sendCommand(`LOW ${params.lowHz.toFixed(3)}`);
+    await sendCommand(`HIGH ${params.highHz.toFixed(3)}`);
+  } else {
+    await sendCommand(`FILTER ${state.settings.filter}`);
+    await sendCommand(`ALPHA ${state.settings.alpha.toFixed(3)}`);
+    await sendCommand(`WINDOW ${state.settings.window}`);
+    if (state.settings.filter.startsWith("IIR_")) {
+      await sendCommand(`IIRORDER ${state.settings.iirOrder}`);
+      await sendCommand(`IIRHIGH ${state.settings.iirHighHz.toFixed(3)}`);
+      await sendCommand(`IIRLOW ${state.settings.iirLowHz.toFixed(3)}`);
+    }
   }
+
   if (state.ppg.source === "Live ADC") {
     clearLivePpgWindow(state.settings.filter === "RAW" ? "raw" : "filtered");
   }
   updateFilterStateText();
+  renderDspPanel({ writeBack: true });
+  logLine(`DSP_APPLY,protocol=${protocol},mode=${params.mode},order=${params.order},low=${params.lowHz.toFixed(3)},high=${params.highHz.toFixed(3)}`);
 }
 
 function applyInputPreprocess() {
@@ -4407,6 +5085,8 @@ async function stopStreaming() {
 
 function clearData() {
   state.samples = [];
+  state.adcFormatCounts = Object.fromEntries(ADC_FORMATS.map((format) => [format, 0]));
+  state.adcSyntheticSeq = 0;
   state.imuSamples = [];
   state.imuProcessedSamples = [];
   state.records = [];
@@ -4435,6 +5115,7 @@ function clearData() {
   el.rateMetric.textContent = "--";
   el.plotMeta.textContent = "Waiting for device data";
   el.lastTimestamp.textContent = "No data";
+  updateAdcFormatState();
   updateTable();
   drawPlot();
   setUiEnabled();
@@ -4463,6 +5144,8 @@ function exportCsv() {
   const header = [
     "label",
     "type",
+    "format",
+    "format_detail",
     "seq",
     "micros",
     "channel",
@@ -4489,6 +5172,8 @@ function exportCsv() {
   const rows = state.records.map((row) => [
     csvCell(row.label),
     csvCell(row.kind || "adc"),
+    csvCell(row.format || ""),
+    csvCell(row.formatDetail || ""),
     row.seq,
     row.micros,
     row.kind === "imu" ? "" : `A${row.channel}`,
@@ -4633,12 +5318,32 @@ function bindEvents() {
   el.showRawToggle.addEventListener("change", drawPlot);
   el.showFilteredToggle.addEventListener("change", drawPlot);
   el.autoScaleToggle.addEventListener("change", drawPlot);
+  el.adcFormatSelect.addEventListener("change", () => {
+    syncAdcPlotSettings();
+    updateCurrentMetrics();
+    drawPlot();
+  });
+  el.adcPlotModeSelect.addEventListener("change", () => {
+    syncAdcPlotSettings();
+    drawPlot();
+  });
+  [el.filterSelect, el.dspProtocolSelect, el.alphaInput, el.windowInput, el.iirOrderInput, el.iirLowInput, el.iirHighInput, el.rateInput]
+    .filter(Boolean)
+    .forEach((node) => {
+      const updateDspPreview = () => {
+        el.alphaOutput.textContent = Number(el.alphaInput.value).toFixed(3);
+        renderDspPanel();
+      };
+      node.addEventListener("input", updateDspPreview);
+      node.addEventListener("change", () => renderDspPanel({ writeBack: true }));
+    });
   for (const tab of el.viewTabs) {
     tab.addEventListener("click", () => setActiveView(tab.dataset.view));
   }
   window.addEventListener("resize", drawPlot);
   el.alphaInput.addEventListener("input", () => {
     el.alphaOutput.textContent = Number(el.alphaInput.value).toFixed(3);
+    renderDspPanel();
   });
   el.inputAlphaInput.addEventListener("input", () => {
     el.inputAlphaOutput.textContent = Number(el.inputAlphaInput.value).toFixed(3);
@@ -4657,6 +5362,8 @@ function init() {
   populateFirmwareSelect(DEFAULT_PREBUILT_FIRMWARES);
   bindEvents();
   updateAdcWindowInputFromSamples(state.settings.window);
+  syncAdcPlotSettings();
+  renderDspPanel({ writeBack: true });
   applyInputPreprocess();
   updateViewVisibility();
   renderDatasetView();
