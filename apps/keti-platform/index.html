@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=c6f78d8257d9" />
+    <link rel="stylesheet" href="styles.css?v=53bf5fc6ae28" />
   </head>
   <body>
     <div class="app-shell">
@@ -121,6 +121,7 @@
             <button id="exitBootloaderButton" class="recovery-button" type="button">Exit Bootloader</button>
           </div>
           <div class="helper-download-row">
+            <a class="download-button" href="downloads/keti_day2_setup_checker.zip" download title="Download Day2 Arduino setup checker">Setup Check</a>
             <a class="download-button" href="tools/start_flash_helper.ps1" download title="Download PowerShell helper launcher">Helper Script</a>
             <a class="download-button" href="downloads/keti_flash_helper_bundle.zip" download title="Download runnable helper bundle">Helper Bundle</a>
           </div>
@@ -183,6 +184,11 @@
                   </select>
                 </label>
                 <span id="adcFormatState" class="adc-format-state">RAW samples - 0</span>
+              </div>
+              <div id="gyroControls" class="gyro-controls is-hidden" aria-label="Gyro 3D controls">
+                <label><input id="gyroMagCorrectionToggle" type="checkbox" checked /> Mag correction</label>
+                <button id="gyroResetButton" type="button">Reset</button>
+                <span id="gyroMagState">Mag --</span>
               </div>
               <div class="toggle-group" role="group" aria-label="Trace visibility">
                 <label><input id="showRawToggle" type="checkbox" checked /> Raw</label>
@@ -683,6 +689,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=b63a6615cd10"></script>
+    <script src="app.js?v=c1d0a579db81"></script>
   </body>
 </html>

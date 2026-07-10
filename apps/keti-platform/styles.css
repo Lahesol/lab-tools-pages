@@ -317,6 +317,33 @@ h2 {
   white-space: nowrap;
 }
 
+.gyro-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gyro-controls label,
+.gyro-controls span {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gyro-controls button {
+  width: auto;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .adc-line-inspector {
   margin-bottom: 12px;
   border: 1px solid var(--border);

@@ -18,6 +18,9 @@ const GYRO_AXIS_COLORS = {
   gz: "#2767c9"
 };
 const GYRO_MAX_DT_SEC = 0.25;
+const GYRO_MAG_CORRECTION_GAIN_PER_SEC = 1.4;
+const GYRO_MAG_CORRECTION_MAX_GAIN = 0.12;
+const GYRO_MAG_CORRECTION_INITIAL_GAIN = 0.06;
 const BOOTLOADER_REENUMERATE_WAIT_MS = 6500;
 const BOOTLOADER_POLL_INTERVAL_MS = 250;
 const DIRECT_FLASH_STALL_TIMEOUT_MS = 15000;
@@ -226,7 +229,8 @@ const state = {
     inputIirOrder: 2,
     inputIirLowHz: 0.5,
     inputIirHighHz: 8.0,
-    normalizeMode: "NONE"
+    normalizeMode: "NONE",
+    gyroMagCorrection: true
   },
   preprocess: createPreprocessState(),
   flash: {
@@ -315,6 +319,10 @@ const el = {
   adcPlotControls: document.getElementById("adcPlotControls"),
   adcPlotModeSelect: document.getElementById("adcPlotModeSelect"),
   adcFormatState: document.getElementById("adcFormatState"),
+  gyroControls: document.getElementById("gyroControls"),
+  gyroMagCorrectionToggle: document.getElementById("gyroMagCorrectionToggle"),
+  gyroResetButton: document.getElementById("gyroResetButton"),
+  gyroMagState: document.getElementById("gyroMagState"),
   adcLineState: document.getElementById("adcLineState"),
   signalCanvas: document.getElementById("signalCanvas"),
   metricGrid: document.getElementById("metricGrid"),
@@ -1336,7 +1344,12 @@ function createGyroOrientationState() {
     yaw: 0,
     lastMicros: null,
     lastSeq: null,
-    samples: 0
+    samples: 0,
+    magHeading: null,
+    magMagnitude: null,
+    magYawError: null,
+    magCorrectionActive: false,
+    magCorrections: 0
   };
 }
 
@@ -1352,18 +1365,57 @@ function wrapDegrees(value) {
   return Math.abs(wrapped) < 1e-9 ? 0 : wrapped;
 }
 
+function magneticHeadingDegrees(sample) {
+  if (![sample.mx, sample.my].every(Number.isFinite)) {
+    return null;
+  }
+  const magnitude = Math.hypot(sample.mx, sample.my, Number.isFinite(sample.mz) ? sample.mz : 0);
+  if (magnitude < 1e-6) {
+    return null;
+  }
+  return wrapDegrees((Math.atan2(sample.my, sample.mx) * 180) / Math.PI);
+}
+
+function applyMagnetometerYawCorrection(gyro, sample, dtSec) {
+  const heading = magneticHeadingDegrees(sample);
+  if (!Number.isFinite(heading)) {
+    gyro.magCorrectionActive = false;
+    return;
+  }
+
+  gyro.magHeading = heading;
+  gyro.magMagnitude = Math.hypot(sample.mx, sample.my, Number.isFinite(sample.mz) ? sample.mz : 0);
+
+  if (!state.settings.gyroMagCorrection) {
+    gyro.magYawError = wrapDegrees(heading - gyro.yaw);
+    gyro.magCorrectionActive = false;
+    return;
+  }
+
+  const error = wrapDegrees(heading - gyro.yaw);
+  const gain = Number.isFinite(dtSec) && dtSec > 0
+    ? Math.min(GYRO_MAG_CORRECTION_MAX_GAIN, dtSec * GYRO_MAG_CORRECTION_GAIN_PER_SEC)
+    : GYRO_MAG_CORRECTION_INITIAL_GAIN;
+  gyro.yaw = wrapDegrees(gyro.yaw + error * gain);
+  gyro.magYawError = wrapDegrees(heading - gyro.yaw);
+  gyro.magCorrectionActive = true;
+  gyro.magCorrections += 1;
+}
+
 function updateGyroOrientation(sample) {
   if (!GYRO_AXES.every((axis) => Number.isFinite(sample[axis]))) {
     return;
   }
 
   const gyro = state.gyroOrientation;
+  let dtSec = null;
   if (Number.isFinite(gyro.lastMicros) && Number.isFinite(sample.micros) && sample.micros > gyro.lastMicros) {
-    const dtSec = Math.min(GYRO_MAX_DT_SEC, Math.max(0, (sample.micros - gyro.lastMicros) / 1000000));
+    dtSec = Math.min(GYRO_MAX_DT_SEC, Math.max(0, (sample.micros - gyro.lastMicros) / 1000000));
     gyro.roll = wrapDegrees(gyro.roll + sample.gx * dtSec);
     gyro.pitch = wrapDegrees(gyro.pitch + sample.gy * dtSec);
     gyro.yaw = wrapDegrees(gyro.yaw + sample.gz * dtSec);
   }
+  applyMagnetometerYawCorrection(gyro, sample, dtSec);
 
   gyro.lastMicros = Number.isFinite(sample.micros) ? sample.micros : gyro.lastMicros;
   gyro.lastSeq = Number.isFinite(sample.seq) ? sample.seq : gyro.lastSeq;
@@ -5324,10 +5376,12 @@ function updateViewVisibility() {
   const isModel = state.activeView === "model";
   const isCanvas = !NON_CANVAS_VIEWS.has(state.activeView);
   const isAdc = state.activeView === "adc";
+  const isGyro3d = state.activeView === "gyro3d";
   el.signalCanvas.classList.toggle("is-hidden", !isCanvas);
   el.metricGrid.classList.toggle("is-hidden", !isCanvas);
   el.metric4Card?.classList.toggle("is-hidden", isAdc);
   el.adcPlotControls.classList.toggle("is-hidden", !isAdc);
+  el.gyroControls?.classList.toggle("is-hidden", !isGyro3d);
   el.deviceLogSection.classList.toggle("is-hidden", !isAdc);
   el.ppgView.classList.toggle("is-hidden", !isPpg);
   el.datasetView.classList.toggle("is-hidden", !isDataset);
@@ -5458,6 +5512,9 @@ function updateImuMetrics(sample) {
 
 function updateGyroMetrics(sample) {
   const gyro = state.gyroOrientation;
+  const magState = Number.isFinite(gyro.magHeading)
+    ? `Mag ${gyro.magHeading.toFixed(1)} deg${gyro.magCorrectionActive ? " corrected" : ""}`
+    : "Mag --";
   el.metric1Label.textContent = "Roll";
   el.metric2Label.textContent = "Pitch";
   el.metric3Label.textContent = "Yaw";
@@ -5467,7 +5524,10 @@ function updateGyroMetrics(sample) {
   el.rawMetric.textContent = `${gyro.roll.toFixed(1)} deg`;
   el.filteredMetric.textContent = `${gyro.pitch.toFixed(1)} deg`;
   el.voltageMetric.textContent = `${gyro.yaw.toFixed(1)} deg`;
-  el.plotMeta.textContent = `Gyro 3D - gx ${formatGyroDps(sample.gx)} dps, gy ${formatGyroDps(sample.gy)} dps, gz ${formatGyroDps(sample.gz)} dps - seq ${sample.seq}`;
+  el.plotMeta.textContent = `Gyro 3D - ${magState} - gx ${formatGyroDps(sample.gx)} dps, gy ${formatGyroDps(sample.gy)} dps, gz ${formatGyroDps(sample.gz)} dps - seq ${sample.seq}`;
+  if (el.gyroMagState) {
+    el.gyroMagState.textContent = magState;
+  }
   el.lastTimestamp.textContent = `${sample.micros} us`;
 }
 
@@ -5742,11 +5802,20 @@ function drawImuSeriesPlot() {
 
   drawLegend(showProcessed
     ? [
-        { color: "#008c8c", label: "x" },
-        { color: "#d28a00", label: "y" },
-        { color: "#2767c9", label: "z" }
+        { color: "#008c8c", label: "X" },
+        { color: "#d28a00", label: "Y" },
+        { color: "#2767c9", label: "Z" }
       ]
-    : axes, pad.left + 8, pad.top + 18);
+    : axes.map((axis) => ({ ...axis, label: axis.label.toUpperCase().replace("A", "") })),
+    pad.left + 8,
+    pad.top + 24,
+    {
+      swatchWidth: 30,
+      swatchHeight: 6,
+      textOffset: 38,
+      itemSpacing: 86,
+      font: "800 17px Segoe UI, Arial, sans-serif"
+    });
 }
 
 function drawImuLine(samples, key, color, minY, maxY, pad, plotWidth, plotHeight, width, alpha) {
@@ -6216,6 +6285,20 @@ function drawGyroOrientationPlot() {
   ctx.fillText(`roll ${orientation.roll.toFixed(1)} deg`, pad.left + 14, pad.top + 22);
   ctx.fillText(`pitch ${orientation.pitch.toFixed(1)} deg`, pad.left + 14, pad.top + 42);
   ctx.fillText(`yaw ${orientation.yaw.toFixed(1)} deg`, pad.left + 14, pad.top + 62);
+  ctx.fillText(
+    Number.isFinite(orientation.magHeading)
+      ? `mag ${orientation.magHeading.toFixed(1)} deg / err ${Number.isFinite(orientation.magYawError) ? orientation.magYawError.toFixed(1) : "--"}`
+      : "mag --",
+    pad.left + 14,
+    pad.top + 82
+  );
+  ctx.fillStyle = orientation.magCorrectionActive ? "#008c8c" : "#637083";
+  ctx.font = "700 12px Segoe UI, Arial, sans-serif";
+  ctx.fillText(
+    state.settings.gyroMagCorrection ? "yaw correction: ON" : "yaw correction: OFF",
+    pad.left + 14,
+    pad.top + 101
+  );
 
   ctx.fillStyle = "#637083";
   ctx.font = "12px Segoe UI, Arial, sans-serif";
@@ -6372,19 +6455,24 @@ function drawClassificationPlot() {
   });
 }
 
-function drawLegend(items, x, y) {
-  drawLegendOn(ctx, items, x, y);
+function drawLegend(items, x, y, options = {}) {
+  drawLegendOn(ctx, items, x, y, options);
 }
 
-function drawLegendOn(targetCtx, items, x, y) {
+function drawLegendOn(targetCtx, items, x, y, options = {}) {
+  const swatchWidth = options.swatchWidth ?? 16;
+  const swatchHeight = options.swatchHeight ?? 3;
+  const textOffset = options.textOffset ?? 20;
+  const font = options.font ?? "12px Segoe UI, Arial, sans-serif";
+  const itemSpacing = options.itemSpacing ?? 58;
   let offsetX = x;
   items.forEach((item) => {
     targetCtx.fillStyle = item.color;
-    targetCtx.fillRect(offsetX, y - 9, 16, 3);
+    targetCtx.fillRect(offsetX, y - 11, swatchWidth, swatchHeight);
     targetCtx.fillStyle = "#637083";
-    targetCtx.font = "12px Segoe UI, Arial, sans-serif";
-    targetCtx.fillText(item.label, offsetX + 20, y - 4);
-    offsetX += Math.max(58, 28 + item.label.length * 7);
+    targetCtx.font = font;
+    targetCtx.fillText(item.label, offsetX + textOffset, y - 4);
+    offsetX += Math.max(itemSpacing, textOffset + item.label.length * 10 + 18);
   });
 }
 
@@ -6777,6 +6865,21 @@ function bindEvents() {
     el.adcPlotModeSelect.addEventListener("change", () => {
       syncAdcPlotSettings();
       drawPlot();
+    });
+  }
+  if (el.gyroMagCorrectionToggle) {
+    state.settings.gyroMagCorrection = el.gyroMagCorrectionToggle.checked;
+    el.gyroMagCorrectionToggle.addEventListener("change", () => {
+      state.settings.gyroMagCorrection = el.gyroMagCorrectionToggle.checked;
+      drawPlot();
+      updateCurrentMetrics();
+    });
+  }
+  if (el.gyroResetButton) {
+    el.gyroResetButton.addEventListener("click", () => {
+      resetGyroOrientation();
+      drawPlot();
+      updateCurrentMetrics();
     });
   }
   [el.filterSelect, el.dspProtocolSelect, el.alphaInput, el.windowInput, el.iirOrderInput, el.iirLowInput, el.iirHighInput, el.rateInput]
