@@ -554,6 +554,67 @@ input[type="file"] {
   display: none !important;
 }
 
+.firmware-details {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fbfcfd;
+  overflow: hidden;
+}
+
+.firmware-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.firmware-summary::-webkit-details-marker {
+  display: none;
+}
+
+.firmware-summary::before {
+  content: ">";
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.firmware-details[open] .firmware-summary::before {
+  transform: rotate(90deg);
+}
+
+.firmware-summary span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.firmware-summary #flashState {
+  flex: 0 1 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.firmware-details-body {
+  border-top: 1px solid var(--border);
+  padding: 0 12px 12px;
+}
+
+.download-callout {
+  margin-top: 10px;
+}
+
 .flash-progress {
   display: block;
   width: 100%;
@@ -618,6 +679,23 @@ input[type="file"] {
   border-color: var(--teal);
   color: var(--teal-dark);
   background: #ffffff;
+}
+
+.example-download-button {
+  flex-basis: 100%;
+  width: 100%;
+  min-height: 44px;
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.example-download-button:hover {
+  border-color: var(--teal-dark);
+  background: var(--teal-dark);
+  color: #ffffff;
 }
 
 .recovery-button {

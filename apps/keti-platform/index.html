@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=657415a614ec" />
+    <link rel="stylesheet" href="styles.css?v=cb8e773b6e99" />
   </head>
   <body>
     <div class="app-shell">
@@ -85,49 +85,55 @@
 
           <div class="divider"></div>
 
-          <div class="panel-header compact">
-            <h2>Firmware Flash</h2>
-            <span id="flashState">Ready</span>
-          </div>
+          <details class="firmware-details">
+            <summary class="firmware-summary">
+              <span>Firmware Flash</span>
+              <span id="flashState">Ready</span>
+            </summary>
+            <div class="firmware-details-body">
+              <label class="field">
+                <span>Firmware</span>
+                <select id="firmwareSelect">
+                  <option value="stage1_lab_console">Stage 1 ADC/filter v0.1.1</option>
+                </select>
+              </label>
 
-          <label class="field">
-            <span>Firmware</span>
-            <select id="firmwareSelect">
-              <option value="stage1_lab_console">Stage 1 ADC/filter v0.1.1</option>
-            </select>
-          </label>
+              <label class="field">
+                <span>Flash Mode</span>
+                <select id="flashProfileSelect">
+                  <option value="compatibility" selected>Segmented - safest Web Serial</option>
+                  <option value="standard">Standard - single-page transfer</option>
+                </select>
+              </label>
 
-          <label class="field">
-            <span>Flash Mode</span>
-            <select id="flashProfileSelect">
-              <option value="compatibility" selected>Segmented - safest Web Serial</option>
-              <option value="standard">Standard - single-page transfer</option>
-            </select>
-          </label>
+              <label class="field">
+                <span>Helper Port</span>
+                <select id="helperPortSelect" disabled>
+                  <option value="">Helper not detected</option>
+                </select>
+              </label>
+              <div class="helper-status-row">
+                <span id="helperState">Helper idle</span>
+                <button id="refreshHelperButton" class="recovery-button" type="button">Refresh</button>
+              </div>
 
-          <label class="field">
-            <span>Helper Port</span>
-            <select id="helperPortSelect" disabled>
-              <option value="">Helper not detected</option>
-            </select>
-          </label>
-          <div class="helper-status-row">
-            <span id="helperState">Helper idle</span>
-            <button id="refreshHelperButton" class="recovery-button" type="button">Refresh</button>
-          </div>
+              <div class="flash-main-action">
+                <button id="flashButton" class="primary-button" type="button">Flash Firmware</button>
+              </div>
+              <progress id="flashProgress" class="flash-progress" max="100" value="0"></progress>
+              <div class="flash-recovery-row">
+                <button id="bootloaderButton" class="recovery-button" type="button">Recovery Bootloader</button>
+                <button id="exitBootloaderButton" class="recovery-button" type="button">Exit Bootloader</button>
+              </div>
+              <div class="helper-download-row">
+                <a class="download-button" href="tools/start_flash_helper.ps1" download title="Download PowerShell helper launcher">Helper Script</a>
+                <a class="download-button" href="downloads/keti_flash_helper_bundle.zip" download title="Download runnable helper bundle">Helper Bundle</a>
+              </div>
+            </div>
+          </details>
 
-          <div class="flash-main-action">
-            <button id="flashButton" class="primary-button" type="button">Flash Firmware</button>
-          </div>
-          <progress id="flashProgress" class="flash-progress" max="100" value="0"></progress>
-          <div class="flash-recovery-row">
-            <button id="bootloaderButton" class="recovery-button" type="button">Recovery Bootloader</button>
-            <button id="exitBootloaderButton" class="recovery-button" type="button">Exit Bootloader</button>
-          </div>
-          <div class="helper-download-row">
-            <a class="download-button" href="downloads/keti_day2_setup_checker.zip" download title="Download Day2 example sketches and setup checker">Examples + Setup</a>
-            <a class="download-button" href="tools/start_flash_helper.ps1" download title="Download PowerShell helper launcher">Helper Script</a>
-            <a class="download-button" href="downloads/keti_flash_helper_bundle.zip" download title="Download runnable helper bundle">Helper Bundle</a>
+          <div class="download-callout">
+            <a class="download-button example-download-button" href="downloads/keti_day2_setup_checker.zip" download title="Download Day2 example sketches and setup checker">예제코드 다운로드</a>
           </div>
 
           <div class="divider"></div>
