@@ -134,6 +134,7 @@ const state = {
   samples: [],
   adcFormatCounts: Object.fromEntries(ADC_FORMATS.map((format) => [format, 0])),
   adcSyntheticSeq: 0,
+  adcDsp: createAdcDspState(),
   imuSamples: [],
   imuProcessedSamples: [],
   records: [],
@@ -1287,8 +1288,27 @@ function createPreprocessState() {
   };
 }
 
+function createAdcDspState() {
+  return {
+    signature: "",
+    ema: null,
+    maWindow: [],
+    iir: {
+      lpf: [],
+      lpfInit: [],
+      hpfPrevIn: [],
+      hpfPrevOut: [],
+      hpfInit: []
+    }
+  };
+}
+
 function resetPreprocessState() {
   state.preprocess = createPreprocessState();
+}
+
+function resetAdcDspState() {
+  state.adcDsp = createAdcDspState();
 }
 
 function createGyroOrientationState() {
@@ -3835,6 +3855,158 @@ function normalizeAdcSample(sample) {
   };
 }
 
+function adcDspSignature() {
+  return [
+    state.settings.filter,
+    normalizeNumber(state.settings.rateHz, 100, 1, 1000).toFixed(3),
+    normalizeNumber(state.settings.alpha, 0.2, 0.001, 1).toFixed(6),
+    Math.round(normalizeNumber(state.settings.window, 8, 1, 32)),
+    Math.round(normalizeNumber(state.settings.iirOrder, 2, 1, 4)),
+    normalizeNumber(state.settings.iirLowHz, 1, 0.001, 1000).toFixed(6),
+    normalizeNumber(state.settings.iirHighHz, 10, 0.001, 1000).toFixed(6)
+  ].join("|");
+}
+
+function ensureAdcDspStateForSettings() {
+  const signature = adcDspSignature();
+  if (state.adcDsp.signature !== signature) {
+    state.adcDsp = createAdcDspState();
+    state.adcDsp.signature = signature;
+  }
+}
+
+function adcFilterLabel(mode = state.settings.filter) {
+  if (mode === "MA") {
+    return "MA filtered";
+  }
+  if (mode === "EMA") {
+    return "EMA filtered";
+  }
+  if (mode === "IIR_LPF") {
+    return "IIR LPF";
+  }
+  if (mode === "IIR_HPF") {
+    return "IIR HPF";
+  }
+  if (mode === "IIR_BPF") {
+    return "IIR BPF";
+  }
+  return "Raw copy";
+}
+
+function applyAdcClientLowPass(value, cutoffHz, order) {
+  const alpha = lowPassCoefficientAtRate(cutoffHz, state.settings.rateHz);
+  let output = value;
+  for (let index = 0; index < order; index++) {
+    if (!state.adcDsp.iir.lpfInit[index]) {
+      state.adcDsp.iir.lpf[index] = output;
+      state.adcDsp.iir.lpfInit[index] = true;
+    } else {
+      state.adcDsp.iir.lpf[index] = state.adcDsp.iir.lpf[index] + alpha * (output - state.adcDsp.iir.lpf[index]);
+    }
+    output = state.adcDsp.iir.lpf[index];
+  }
+  return output;
+}
+
+function applyAdcClientHighPass(value, cutoffHz, order) {
+  const beta = highPassCoefficientAtRate(cutoffHz, state.settings.rateHz);
+  let output = value;
+  for (let index = 0; index < order; index++) {
+    if (!state.adcDsp.iir.hpfInit[index]) {
+      state.adcDsp.iir.hpfPrevIn[index] = output;
+      state.adcDsp.iir.hpfPrevOut[index] = 0;
+      state.adcDsp.iir.hpfInit[index] = true;
+      output = 0;
+    } else {
+      const next = beta * (state.adcDsp.iir.hpfPrevOut[index] + output - state.adcDsp.iir.hpfPrevIn[index]);
+      state.adcDsp.iir.hpfPrevIn[index] = output;
+      state.adcDsp.iir.hpfPrevOut[index] = next;
+      output = next;
+    }
+  }
+  return output;
+}
+
+function filterAdcRawValue(raw) {
+  const mode = state.settings.filter;
+  if (!Number.isFinite(raw) || mode === "RAW") {
+    return raw;
+  }
+
+  ensureAdcDspStateForSettings();
+
+  if (mode === "MA") {
+    const windowSize = Math.max(1, Math.round(normalizeNumber(state.settings.window, 8, 1, 32)));
+    state.adcDsp.maWindow.push(raw);
+    while (state.adcDsp.maWindow.length > windowSize) {
+      state.adcDsp.maWindow.shift();
+    }
+    return state.adcDsp.maWindow.reduce((sum, value) => sum + value, 0) / state.adcDsp.maWindow.length;
+  }
+
+  if (mode === "EMA") {
+    const alpha = normalizeNumber(state.settings.alpha, 0.2, 0.001, 1);
+    state.adcDsp.ema = state.adcDsp.ema == null
+      ? raw
+      : state.adcDsp.ema + alpha * (raw - state.adcDsp.ema);
+    return state.adcDsp.ema;
+  }
+
+  const order = Math.max(1, Math.min(4, Math.round(normalizeNumber(state.settings.iirOrder, 2, 1, 4))));
+  if (mode === "IIR_LPF") {
+    return applyAdcClientLowPass(raw, state.settings.iirHighHz, order);
+  }
+  if (mode === "IIR_HPF") {
+    return applyAdcClientHighPass(raw, state.settings.iirLowHz, order);
+  }
+  if (mode === "IIR_BPF") {
+    const highPassed = applyAdcClientHighPass(raw, state.settings.iirLowHz, order);
+    return applyAdcClientLowPass(highPassed, state.settings.iirHighHz, order);
+  }
+  return raw;
+}
+
+function shouldApplyAdcClientDsp(sample) {
+  if (!Number.isFinite(sample.raw) || sample.valueUnit !== "count") {
+    return false;
+  }
+  if (sample.format === "FILT" || sample.format === "PLOTTER" || sample.format === "CUSTOM" || sample.format === "PPG") {
+    return false;
+  }
+  return sample.clientFiltered || sample.filteredLabel === "Raw copy" || !Number.isFinite(sample.filtered) || sample.filtered === sample.raw;
+}
+
+function applyAdcClientDsp(sample) {
+  if (!shouldApplyAdcClientDsp(sample)) {
+    return sample;
+  }
+  const mode = state.settings.filter;
+  if (mode === "RAW") {
+    resetAdcDspState();
+  }
+  const filtered = mode === "RAW" ? sample.raw : filterAdcRawValue(sample.raw);
+  return {
+    ...sample,
+    filtered,
+    filteredLabel: adcFilterLabel(mode),
+    clientFiltered: mode !== "RAW"
+  };
+}
+
+function reprocessAdcClientDspBuffers() {
+  resetAdcDspState();
+  state.samples = state.samples.map((sample) => applyAdcClientDsp(sample));
+  state.tableRows = state.samples.slice(-MAX_TABLE_ROWS).reverse();
+  state.latestSample = state.samples[state.samples.length - 1] || null;
+  if (state.ppg.source === "Live ADC") {
+    clearLivePpgWindow(state.settings.filter === "RAW" ? "raw" : "filtered");
+  }
+  updateAdcFormatState();
+  updateCurrentMetrics();
+  drawPlot();
+}
+
 function parseDataLine(line) {
   const parts = line.split(",");
   if (parts.length < 6) {
@@ -4158,6 +4330,7 @@ function parseStatus(line) {
 }
 
 function addSample(sample) {
+  sample = applyAdcClientDsp(sample);
   sample.format = sample.format || "RAW";
   if (state.adcFormatCounts[sample.format] == null) {
     state.adcFormatCounts[sample.format] = 0;
@@ -6201,6 +6374,7 @@ async function applyAcquisition() {
   state.settings.rateHz = normalizeNumber(el.rateInput.value, 100, 1, 1000);
   state.settings.resolution = normalizeNumber(el.resolutionSelect.value, 12, 10, 12);
   updateAdcWindowInputFromSamples(state.settings.window);
+  resetAdcDspState();
 
   await sendCommand(`STOP`);
   await sendCommand(`RES ${state.settings.resolution}`);
@@ -6211,6 +6385,7 @@ async function applyAcquisition() {
 async function applyFilter() {
   const params = syncDspSettingsFromControls({ writeBack: true });
   const protocol = resolveDspProtocol();
+  resetAdcDspState();
 
   if (protocol === "DAY2_IIR") {
     await sendCommand(`RATE ${params.sampleRateHz.toFixed(1)}`);
@@ -6234,6 +6409,7 @@ async function applyFilter() {
   }
   updateFilterStateText();
   renderDspPanel({ writeBack: true });
+  reprocessAdcClientDspBuffers();
   logLine(`DSP_APPLY,protocol=${protocol},mode=${params.mode},order=${params.order},low=${params.lowHz.toFixed(3)},high=${params.highHz.toFixed(3)}`);
 }
 
@@ -6326,6 +6502,7 @@ function clearData() {
   state.samples = [];
   state.adcFormatCounts = Object.fromEntries(ADC_FORMATS.map((format) => [format, 0]));
   state.adcSyntheticSeq = 0;
+  resetAdcDspState();
   state.imuSamples = [];
   state.imuProcessedSamples = [];
   state.records = [];
