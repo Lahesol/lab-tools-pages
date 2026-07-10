@@ -90,21 +90,21 @@ const DEFAULT_PREBUILT_FIRMWARES = [
   },
   {
     id: "stage2_imu_console",
-    version: "0.2.0",
+    version: "0.2.1",
     board: "Arduino Nano 33 BLE Rev2",
     fqbn: "arduino:mbed_nano:nano33ble",
-    file: "stage2_imu_console_v0.2.0.bin",
+    file: "stage2_imu_console_v0.2.1.bin",
     size_bytes: 118336,
-    sha256: "FA30571E888C86132D9049384BC2C6B793D880B2158355C5F4E9FDDEAE5B40B8"
+    sha256: "C7C87B479AA362E4138E0EA9BED20FA17E472560E6AED19D99B7329A34560705"
   },
   {
     id: "stage2_imu_ei_motion",
-    version: "0.3.0",
+    version: "0.3.1",
     board: "Arduino Nano 33 BLE Rev2",
     fqbn: "arduino:mbed_nano:nano33ble",
-    file: "stage2_imu_ei_motion_v0.3.0.bin",
+    file: "stage2_imu_ei_motion_v0.3.1.bin",
     size_bytes: 195984,
-    sha256: "8481314E5B89B1A23C39F551AF75A1FADDF22EF0B35E98FBD9E07B14AE5EF3E8"
+    sha256: "87969467618253CB93DEDCB429207B72A6ACB04E21F62A92FC61E814097609CA"
   },
   {
     id: "stage3_ppg_hr_adc",
@@ -5345,7 +5345,7 @@ async function ensureClassificationRunningFromStream(reason = "view") {
   setUiEnabled();
 
   try {
-    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
+    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 500);
     applyInputPreprocess();
     await sendCommand(`RATE ${state.settings.rateHz}`);
     await sendCommand("CLS ON");
@@ -6559,7 +6559,7 @@ async function startStreaming() {
   }
 
   if (state.activeView === "classification") {
-    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
+    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 500);
     applyInputPreprocess();
     state.classification.startPending = true;
     renderClassification();
@@ -6577,7 +6577,7 @@ async function startStreaming() {
   }
 
   if (state.activeView !== "adc") {
-    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 200);
+    state.settings.rateHz = normalizeNumber(el.rateInput.value, 63, 1, 500);
     if (INPUT_SETTINGS_VIEWS.has(state.activeView)) {
       applyInputPreprocess();
     }
