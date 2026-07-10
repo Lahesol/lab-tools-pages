@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=15e71a723cc8" />
+    <link rel="stylesheet" href="styles.css?v=c6f78d8257d9" />
   </head>
   <body>
     <div class="app-shell">
@@ -454,7 +454,7 @@
               <span id="metric3Label">Voltage</span>
               <strong id="voltageMetric">--</strong>
             </div>
-            <div>
+            <div id="metric4Card">
               <span id="metric4Label">Rate</span>
               <strong id="rateMetric">--</strong>
             </div>
@@ -528,6 +528,10 @@
 
                   <label class="field">
                     <span>MA Window</span>
+                    <div class="window-slider-row">
+                      <input id="windowSliderInput" type="range" min="1" max="32" step="1" value="8" />
+                      <output id="windowSliderOutput">8 samples</output>
+                    </div>
                     <div class="inline-input">
                       <input id="windowInput" type="number" min="0.001" max="32" step="0.01" value="0.08" />
                       <span>s</span>
@@ -679,6 +683,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=3221adfddc95"></script>
+    <script src="app.js?v=b63a6615cd10"></script>
   </body>
 </html>

@@ -283,6 +283,8 @@ const el = {
   alphaInput: document.getElementById("alphaInput"),
   alphaOutput: document.getElementById("alphaOutput"),
   windowInput: document.getElementById("windowInput"),
+  windowSliderInput: document.getElementById("windowSliderInput"),
+  windowSliderOutput: document.getElementById("windowSliderOutput"),
   iirOrderInput: document.getElementById("iirOrderInput"),
   iirLowInput: document.getElementById("iirLowInput"),
   iirHighInput: document.getElementById("iirHighInput"),
@@ -340,6 +342,7 @@ const el = {
   metric1Label: document.getElementById("metric1Label"),
   metric2Label: document.getElementById("metric2Label"),
   metric3Label: document.getElementById("metric3Label"),
+  metric4Card: document.getElementById("metric4Card"),
   metric4Label: document.getElementById("metric4Label"),
   rawMetric: document.getElementById("rawMetric"),
   filteredMetric: document.getElementById("filteredMetric"),
@@ -831,11 +834,26 @@ function adcWindowSecondsFromSamples(samples) {
   return normalizeNumber(samples, 8, 1, 32) / rateHz;
 }
 
+function syncAdcWindowControls() {
+  const sampleCount = Math.round(normalizeNumber(state.settings.window, 8, 1, 32));
+  const seconds = adcWindowSecondsFromSamples(sampleCount);
+  state.settings.window = sampleCount;
+  state.settings.windowSec = seconds;
+  if (el.windowInput) {
+    el.windowInput.value = formatSeconds(seconds);
+  }
+  if (el.windowSliderInput) {
+    el.windowSliderInput.value = String(sampleCount);
+  }
+  if (el.windowSliderOutput) {
+    el.windowSliderOutput.textContent = `${sampleCount} samples`;
+  }
+}
+
 function updateAdcWindowInputFromSamples(samples) {
   const sampleCount = Math.round(normalizeNumber(samples, 8, 1, 32));
   state.settings.window = sampleCount;
-  state.settings.windowSec = adcWindowSecondsFromSamples(sampleCount);
-  el.windowInput.value = formatSeconds(state.settings.windowSec);
+  syncAdcWindowControls();
   updateFilterStateText();
 }
 
@@ -895,7 +913,7 @@ function syncDspSettingsFromControls({ writeBack = false } = {}) {
     el.rateInput.value = sampleRateHz.toFixed(Math.abs(sampleRateHz - Math.round(sampleRateHz)) < 0.01 ? 0 : 1);
     el.alphaInput.value = String(state.settings.alpha);
     el.alphaOutput.textContent = state.settings.alpha.toFixed(3);
-    el.windowInput.value = formatSeconds(state.settings.windowSec);
+    syncAdcWindowControls();
     el.iirOrderInput.value = String(order);
     el.iirLowInput.value = lowHz.toFixed(3).replace(/\.?0+$/, "");
     el.iirHighInput.value = highHz.toFixed(3).replace(/\.?0+$/, "");
@@ -5308,6 +5326,7 @@ function updateViewVisibility() {
   const isAdc = state.activeView === "adc";
   el.signalCanvas.classList.toggle("is-hidden", !isCanvas);
   el.metricGrid.classList.toggle("is-hidden", !isCanvas);
+  el.metric4Card?.classList.toggle("is-hidden", isAdc);
   el.adcPlotControls.classList.toggle("is-hidden", !isAdc);
   el.deviceLogSection.classList.toggle("is-hidden", !isAdc);
   el.ppgView.classList.toggle("is-hidden", !isPpg);
@@ -6770,6 +6789,12 @@ function bindEvents() {
       node.addEventListener("input", updateDspPreview);
       node.addEventListener("change", () => renderDspPanel({ writeBack: true }));
     });
+  if (el.windowSliderInput) {
+    el.windowSliderInput.addEventListener("input", () => {
+      updateAdcWindowInputFromSamples(el.windowSliderInput.value);
+    });
+    el.windowSliderInput.addEventListener("change", () => renderDspPanel({ writeBack: true }));
+  }
   for (const tab of el.viewTabs) {
     tab.addEventListener("click", () => setActiveView(tab.dataset.view));
   }
