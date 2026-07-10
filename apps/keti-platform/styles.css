@@ -150,9 +150,19 @@ h2 {
 .status-strip {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
+}
+
+.status-view-shortcuts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 2px;
 }
 
 .status-pill {
@@ -191,12 +201,31 @@ h2 {
 }
 
 .workspace {
+  --controls-col: 280px;
+  --settings-col: 300px;
+  --data-row: 240px;
+  --workspace-splitter-size: 10px;
   display: grid;
-  grid-template-columns: minmax(230px, 0.78fr) minmax(0, 2fr) minmax(230px, 0.84fr);
-  grid-template-rows: auto 240px;
-  align-items: start;
+  grid-template-columns: var(--controls-col) var(--workspace-splitter-size) minmax(360px, 1fr) var(--workspace-splitter-size) var(--settings-col);
+  grid-template-rows: auto var(--workspace-splitter-size) minmax(160px, var(--data-row));
+  align-items: stretch;
   gap: 14px;
   margin-top: 14px;
+}
+
+.controls-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.plot-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.settings-panel {
+  grid-column: 5;
+  grid-row: 1;
 }
 
 .panel,
@@ -227,9 +256,91 @@ h2 {
 }
 
 .data-panel {
-  grid-column: 1 / 4;
-  min-height: 220px;
+  display: flex;
+  grid-column: 1 / 6;
+  grid-row: 3;
+  flex-direction: column;
+  min-height: 180px;
   padding: 16px;
+}
+
+.workspace-splitter {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  touch-action: none;
+}
+
+.workspace-splitter::after {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  background: rgba(99, 112, 131, 0.26);
+  content: "";
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.workspace-splitter:hover::after,
+.workspace-splitter.is-dragging::after {
+  background: rgba(0, 140, 140, 0.58);
+}
+
+.workspace-splitter-vertical {
+  grid-row: 1;
+  cursor: col-resize;
+}
+
+.workspace-splitter-vertical::after {
+  top: 12px;
+  bottom: 12px;
+  left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+}
+
+.workspace-splitter-vertical:hover::after,
+.workspace-splitter-vertical.is-dragging::after {
+  transform: translateX(-50%) scaleX(1.45);
+}
+
+.workspace-splitter-left {
+  grid-column: 2;
+}
+
+.workspace-splitter-right {
+  grid-column: 4;
+}
+
+.workspace-splitter-horizontal {
+  grid-column: 1 / 6;
+  grid-row: 2;
+  cursor: row-resize;
+}
+
+.workspace-splitter-horizontal::after {
+  top: 50%;
+  right: 12px;
+  left: 12px;
+  height: 4px;
+  transform: translateY(-50%);
+}
+
+.workspace-splitter-horizontal:hover::after,
+.workspace-splitter-horizontal.is-dragging::after {
+  transform: translateY(-50%) scaleY(1.45);
+}
+
+body.workspace-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.workspace-resizing.workspace-resizing-row {
+  cursor: row-resize;
 }
 
 .panel-header,
@@ -271,6 +382,12 @@ h2 {
   font-size: 12px;
 }
 
+.status-view-tab {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .view-tab.active {
   border-color: var(--teal);
   background: var(--teal);
@@ -280,29 +397,32 @@ h2 {
 .adc-plot-controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   max-width: 100%;
 }
 
 .adc-plot-controls label {
-  display: grid;
-  gap: 3px;
-  min-width: min(132px, 100%);
-  flex: 1 1 132px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 0 1 auto;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
 
 .adc-plot-controls select {
+  width: clamp(180px, 18vw, 260px);
   min-height: 30px;
   padding: 0 8px;
   font-size: 12px;
 }
 
 .adc-format-state {
+  flex: 0 0 auto;
   max-width: 100%;
   min-height: 30px;
   display: inline-flex;
@@ -1013,7 +1133,9 @@ input[type="file"] {
 }
 
 .table-wrap {
-  height: 176px;
+  flex: 1 1 auto;
+  min-height: 96px;
+  height: auto;
   overflow: auto;
   margin-top: 12px;
   border: 1px solid var(--border);
@@ -1053,6 +1175,10 @@ th:first-child {
     grid-template-rows: auto auto auto;
   }
 
+  .workspace-splitter {
+    display: none;
+  }
+
   .controls-panel {
     grid-column: 1;
     grid-row: 1;
@@ -1084,14 +1210,22 @@ th:first-child {
     grid-template-rows: auto auto auto auto;
   }
 
+  .workspace-splitter {
+    display: none;
+  }
+
   .controls-panel,
+  .plot-panel,
   .settings-panel {
+    grid-column: auto;
+    grid-row: auto;
     max-height: none;
     overflow: visible;
   }
 
   .data-panel {
     grid-column: auto;
+    grid-row: auto;
   }
 
   .plot-toolbar,

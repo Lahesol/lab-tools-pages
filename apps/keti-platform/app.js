@@ -41,6 +41,22 @@ const PPG_MAX_LIVE_POINTS = 30000;
 const PPG_LIVE_ANALYSIS_INTERVAL_MS = 1000;
 const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
 const INPUT_SETTINGS_VIEWS = new Set(["imu1d", "imu2d", "classification", "dataset", "model"]);
+const WORKSPACE_LAYOUT_STORAGE_KEY = "keti_workspace_layout_v1";
+const WORKSPACE_RESIZE_BREAKPOINT_PX = 1320;
+const WORKSPACE_LAYOUT_DEFAULT = {
+  controls: 280,
+  settings: 300,
+  data: 240
+};
+const WORKSPACE_LAYOUT_LIMITS = {
+  controlsMin: 220,
+  controlsMax: 520,
+  settingsMin: 220,
+  settingsMax: 520,
+  plotMin: 360,
+  dataMin: 180,
+  dataMax: 680
+};
 const ADC_FORMAT_LABELS = {
   RAW: "RAW",
   ALL: "All ADC",
@@ -207,6 +223,7 @@ const state = {
     columnTypes: [],
     latest: null
   },
+  workspaceLayout: { ...WORKSPACE_LAYOUT_DEFAULT },
   settings: {
     rateHz: 100,
     channel: 0,
@@ -250,6 +267,8 @@ const state = {
 };
 
 const el = {
+  workspace: document.querySelector(".workspace"),
+  workspaceSplitters: [...document.querySelectorAll(".workspace-splitter")],
   browserStatus: document.getElementById("browserStatus"),
   portStatus: document.getElementById("portStatus"),
   bleStatus: document.getElementById("bleStatus"),
@@ -795,6 +814,185 @@ function normalizeNumber(value, fallback, min, max) {
     return fallback;
   }
   return Math.min(max, Math.max(min, parsed));
+}
+
+function clampPx(value, fallback, min, max) {
+  const parsed = Number(value);
+  const safeValue = Number.isFinite(parsed) ? parsed : fallback;
+  const safeMax = Math.max(min, max);
+  return Math.round(Math.min(safeMax, Math.max(min, safeValue)));
+}
+
+function getWorkspaceResizeMetrics() {
+  if (!el.workspace) {
+    return {
+      width: 0,
+      height: 0,
+      columnGap: 14,
+      rowGap: 14,
+      splitterSize: 10,
+      panelWidth: 1200
+    };
+  }
+
+  const rect = el.workspace.getBoundingClientRect();
+  const computed = getComputedStyle(el.workspace);
+  const columnGap = Number.parseFloat(computed.columnGap) || 14;
+  const rowGap = Number.parseFloat(computed.rowGap) || columnGap;
+  const splitterSize = Number.parseFloat(computed.getPropertyValue("--workspace-splitter-size")) || 10;
+  const panelWidth = Math.max(
+    WORKSPACE_LAYOUT_LIMITS.controlsMin + WORKSPACE_LAYOUT_LIMITS.settingsMin + WORKSPACE_LAYOUT_LIMITS.plotMin,
+    rect.width - splitterSize * 2 - columnGap * 4
+  );
+  return { width: rect.width, height: rect.height, columnGap, rowGap, splitterSize, panelWidth };
+}
+
+function isWorkspaceResizable() {
+  return Boolean(el.workspace) && window.innerWidth > WORKSPACE_RESIZE_BREAKPOINT_PX;
+}
+
+function clampWorkspaceLayout(layout) {
+  const metrics = getWorkspaceResizeMetrics();
+  const maxSettings = Math.min(
+    WORKSPACE_LAYOUT_LIMITS.settingsMax,
+    metrics.panelWidth - WORKSPACE_LAYOUT_LIMITS.controlsMin - WORKSPACE_LAYOUT_LIMITS.plotMin
+  );
+  let settings = clampPx(
+    layout.settings,
+    WORKSPACE_LAYOUT_DEFAULT.settings,
+    WORKSPACE_LAYOUT_LIMITS.settingsMin,
+    maxSettings
+  );
+
+  const maxControls = Math.min(
+    WORKSPACE_LAYOUT_LIMITS.controlsMax,
+    metrics.panelWidth - settings - WORKSPACE_LAYOUT_LIMITS.plotMin
+  );
+  const controls = clampPx(
+    layout.controls,
+    WORKSPACE_LAYOUT_DEFAULT.controls,
+    WORKSPACE_LAYOUT_LIMITS.controlsMin,
+    maxControls
+  );
+
+  const adjustedMaxSettings = Math.min(
+    WORKSPACE_LAYOUT_LIMITS.settingsMax,
+    metrics.panelWidth - controls - WORKSPACE_LAYOUT_LIMITS.plotMin
+  );
+  settings = clampPx(settings, WORKSPACE_LAYOUT_DEFAULT.settings, WORKSPACE_LAYOUT_LIMITS.settingsMin, adjustedMaxSettings);
+
+  const viewportDataMax = Math.max(
+    WORKSPACE_LAYOUT_LIMITS.dataMin,
+    Math.min(WORKSPACE_LAYOUT_LIMITS.dataMax, Math.round(window.innerHeight * 0.72))
+  );
+  const data = clampPx(layout.data, WORKSPACE_LAYOUT_DEFAULT.data, WORKSPACE_LAYOUT_LIMITS.dataMin, viewportDataMax);
+
+  return { controls, settings, data };
+}
+
+function saveWorkspaceLayout() {
+  try {
+    localStorage.setItem(WORKSPACE_LAYOUT_STORAGE_KEY, JSON.stringify(state.workspaceLayout));
+  } catch (error) {
+    logLine(`WARN,workspace_layout_save,${error.message}`);
+  }
+}
+
+function applyWorkspaceLayout(layout, { persist = false, redraw = true } = {}) {
+  if (!el.workspace) {
+    return;
+  }
+  state.workspaceLayout = clampWorkspaceLayout(layout);
+  el.workspace.style.setProperty("--controls-col", `${state.workspaceLayout.controls}px`);
+  el.workspace.style.setProperty("--settings-col", `${state.workspaceLayout.settings}px`);
+  el.workspace.style.setProperty("--data-row", `${state.workspaceLayout.data}px`);
+  if (persist) {
+    saveWorkspaceLayout();
+  }
+  if (redraw) {
+    drawPlot();
+  }
+}
+
+function loadWorkspaceLayout() {
+  let storedLayout = null;
+  try {
+    const raw = localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY);
+    storedLayout = raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    logLine(`WARN,workspace_layout_load,${error.message}`);
+  }
+  applyWorkspaceLayout(storedLayout || WORKSPACE_LAYOUT_DEFAULT, { persist: false, redraw: false });
+}
+
+function resetWorkspaceLayout() {
+  applyWorkspaceLayout(WORKSPACE_LAYOUT_DEFAULT, { persist: true, redraw: true });
+}
+
+function updateWorkspaceLayoutFromPointer(target, pointerEvent) {
+  const metrics = getWorkspaceResizeMetrics();
+  const rect = el.workspace.getBoundingClientRect();
+  const nextLayout = { ...state.workspaceLayout };
+
+  if (target === "controls") {
+    nextLayout.controls = pointerEvent.clientX - rect.left - metrics.columnGap - metrics.splitterSize / 2;
+  } else if (target === "settings") {
+    nextLayout.settings = rect.right - pointerEvent.clientX - metrics.columnGap - metrics.splitterSize / 2;
+  } else if (target === "data") {
+    nextLayout.data = rect.bottom - pointerEvent.clientY - metrics.rowGap - metrics.splitterSize / 2;
+  }
+
+  applyWorkspaceLayout(nextLayout, { persist: false, redraw: true });
+}
+
+function startWorkspaceResize(event) {
+  if (!isWorkspaceResizable()) {
+    return;
+  }
+  const splitter = event.currentTarget;
+  const target = splitter.dataset.resizeTarget;
+  if (!target) {
+    return;
+  }
+
+  event.preventDefault();
+  splitter.classList.add("is-dragging");
+  document.body.classList.add("workspace-resizing");
+  document.body.classList.toggle("workspace-resizing-row", target === "data");
+  splitter.setPointerCapture?.(event.pointerId);
+
+  const onPointerMove = (moveEvent) => {
+    moveEvent.preventDefault();
+    updateWorkspaceLayoutFromPointer(target, moveEvent);
+  };
+  const onPointerUp = () => {
+    splitter.classList.remove("is-dragging");
+    document.body.classList.remove("workspace-resizing", "workspace-resizing-row");
+    splitter.releasePointerCapture?.(event.pointerId);
+    saveWorkspaceLayout();
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("pointercancel", onPointerUp);
+  };
+
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+}
+
+function handleWorkspaceWindowResize() {
+  if (isWorkspaceResizable()) {
+    applyWorkspaceLayout(state.workspaceLayout, { persist: false, redraw: false });
+  }
+  drawPlot();
+}
+
+function initWorkspaceResizers() {
+  loadWorkspaceLayout();
+  for (const splitter of el.workspaceSplitters) {
+    splitter.addEventListener("pointerdown", startWorkspaceResize);
+    splitter.addEventListener("dblclick", resetWorkspaceLayout);
+  }
 }
 
 function finiteOrNull(value) {
@@ -6901,7 +7099,7 @@ function bindEvents() {
   for (const tab of el.viewTabs) {
     tab.addEventListener("click", () => setActiveView(tab.dataset.view));
   }
-  window.addEventListener("resize", drawPlot);
+  window.addEventListener("resize", handleWorkspaceWindowResize);
   el.alphaInput.addEventListener("input", () => {
     el.alphaOutput.textContent = Number(el.alphaInput.value).toFixed(3);
     renderDspPanel();
@@ -6929,6 +7127,7 @@ function init() {
   setStatus(el.bleStatus, bleReady ? "BLE ready" : "BLE unavailable", bleReady ? "muted" : "error");
   populateFirmwareSelect(DEFAULT_PREBUILT_FIRMWARES);
   bindEvents();
+  initWorkspaceResizers();
   updateAdcWindowInputFromSamples(state.settings.window);
   syncAdcPlotSettings();
   renderDspPanel({ writeBack: true });

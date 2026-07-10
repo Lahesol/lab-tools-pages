@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=53bf5fc6ae28" />
+    <link rel="stylesheet" href="styles.css?v=657415a614ec" />
   </head>
   <body>
     <div class="app-shell">
@@ -22,6 +22,10 @@
           <span id="portStatus" class="status-pill muted">Disconnected</span>
           <span id="bleStatus" class="status-pill muted">BLE check</span>
           <span id="streamStatus" class="status-pill muted">Idle</span>
+          <div class="status-view-shortcuts" role="tablist" aria-label="Dataset and model tools">
+            <button class="view-tab status-view-tab" type="button" data-view="dataset">Dataset</button>
+            <button class="view-tab status-view-tab" type="button" data-view="model">Model</button>
+          </div>
         </div>
       </header>
 
@@ -143,6 +147,8 @@
           <button id="exportButton" type="button" disabled>Export CSV</button>
         </aside>
 
+        <div class="workspace-splitter workspace-splitter-vertical workspace-splitter-left" data-resize-target="controls" role="separator" aria-orientation="vertical" title="Drag to resize Device panel. Double-click to reset layout."></div>
+
         <section class="plot-panel">
           <section id="deviceLogSection" class="device-log-section adc-line-inspector">
             <div class="panel-header compact">
@@ -168,8 +174,6 @@
                 <button class="view-tab" type="button" data-view="imu2d">IMU 2D</button>
                 <button class="view-tab" type="button" data-view="gyro3d">Gyro 3D</button>
                 <button class="view-tab" type="button" data-view="classification">Class</button>
-                <button class="view-tab" type="button" data-view="dataset">Dataset</button>
-                <button class="view-tab" type="button" data-view="model">Model</button>
                 <button class="view-tab" type="button" data-view="ppg">PPG HRV</button>
               </div>
               <div id="adcPlotControls" class="adc-plot-controls" aria-label="ADC plot controls">
@@ -570,6 +574,8 @@
           </section>
         </section>
 
+        <div class="workspace-splitter workspace-splitter-vertical workspace-splitter-right" data-resize-target="settings" role="separator" aria-orientation="vertical" title="Drag to resize Settings panel. Double-click to reset layout."></div>
+
         <aside class="panel settings-panel">
           <div id="inputSettingsSection" class="settings-section">
             <div class="panel-header compact">
@@ -663,6 +669,8 @@
           </div>
         </aside>
 
+        <div class="workspace-splitter workspace-splitter-horizontal" data-resize-target="data" role="separator" aria-orientation="horizontal" title="Drag to resize Recent Samples panel. Double-click to reset layout."></div>
+
         <section class="data-panel">
           <div class="panel-header">
             <h2>Recent Samples</h2>
@@ -689,6 +697,6 @@
     </div>
 
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=e6ffe2cde4a7"></script>
+    <script src="app.js?v=e9ddb268edc4"></script>
   </body>
 </html>
