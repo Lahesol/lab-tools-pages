@@ -783,6 +783,14 @@ tr:hover td { background: #fbf5ed; }
   border: 1px solid rgba(213, 224, 222, 0.85);
   border-radius: 8px;
 }
+.app-photo-flow-image {
+  width: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000000;
+  border: 1px solid rgba(213, 224, 222, 0.85);
+  border-radius: 8px;
+}
 .app-photo-svg text {
   fill: var(--ink);
   font-family: "Malgun Gothic", system-ui, sans-serif;

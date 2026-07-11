@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=83421132ea0f" />
+    <link rel="stylesheet" href="./styles.css?v=0f04426dc8f4" />
   </head>
   <body>
     <header class="app-header">
@@ -814,88 +814,11 @@
           <div class="app-photo-grid">
             <section class="app-photo-card app-photo-model-card">
               <h3>Array-level model structure</h3>
-              <svg class="app-photo-svg app-photo-model-svg" viewBox="0 0 780 360" role="img" aria-label="Hardware Gaussian-kernel classifier model structure">
-                <defs>
-                  <linearGradient id="photoKernelGradient" x1="0" x2="1" y1="0" y2="1">
-                    <stop offset="0" stop-color="#ef6cff" />
-                    <stop offset="1" stop-color="#6957d8" />
-                  </linearGradient>
-                  <linearGradient id="photoBoardGradient" x1="0" x2="1" y1="0" y2="1">
-                    <stop offset="0" stop-color="#9fd5c8" />
-                    <stop offset="1" stop-color="#5f8f84" />
-                  </linearGradient>
-                  <filter id="photoSoftShadow" x="-12%" y="-18%" width="124%" height="136%">
-                    <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#21343a" flood-opacity="0.15" />
-                  </filter>
-                </defs>
-
-                <g class="app-photo-node" filter="url(#photoSoftShadow)">
-                  <rect x="28" y="34" width="150" height="86" rx="10" />
-                  <text x="103" y="70" text-anchor="middle">Seed features</text>
-                  <text x="103" y="94" text-anchor="middle" class="small">7 morphology inputs</text>
-                </g>
-
-                <g class="app-photo-kernel-stack">
-                  <rect x="248" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" />
-                  <rect x="296" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.92" />
-                  <rect x="344" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.84" />
-                  <rect x="392" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.76" />
-                  <rect x="440" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.68" />
-                  <rect x="488" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.60" />
-                  <text x="388" y="124" text-anchor="middle">projection to VG1 / VG2</text>
-                </g>
-
-                <g stroke="#182f38" stroke-width="1.5" opacity="0.7">
-                  <path d="M178 76 C210 50 226 50 248 62" />
-                  <path d="M178 76 C224 86 244 86 296 62" />
-                  <path d="M178 76 C232 112 282 100 344 62" />
-                  <path d="M178 76 C250 34 332 36 392 62" />
-                  <path d="M178 76 C270 64 374 70 440 62" />
-                  <path d="M178 76 C292 104 438 102 488 62" />
-                </g>
-
-                <g class="app-photo-arrow">
-                  <path d="M388 140 L388 174" />
-                  <path d="M381 166 L388 176 L395 166" />
-                </g>
-
-                <g class="app-photo-board" filter="url(#photoSoftShadow)">
-                  <polygon points="214,202 562,202 616,302 162,302" fill="url(#photoBoardGradient)" />
-                  <polygon points="246,220 530,220 560,282 216,282" fill="#cfe4da" opacity="0.92" />
-                  <g stroke="#4c7f71" stroke-width="2" opacity="0.65">
-                    <path d="M242 245 H532" />
-                    <path d="M252 266 H542" />
-                    <path d="M286 222 V281" />
-                    <path d="M360 222 V282" />
-                    <path d="M434 222 V282" />
-                    <path d="M508 222 V282" />
-                  </g>
-                  <g class="mini-curves">
-                    <path d="M250 267 C262 244 278 244 292 267" />
-                    <path d="M318 267 C330 238 350 238 366 267" />
-                    <path d="M392 267 C404 232 428 232 446 267" />
-                    <path d="M468 267 C480 242 500 242 516 267" />
-                  </g>
-                  <text x="388" y="316" text-anchor="middle">pre-routed PCB device array + TIA/ADC readout</text>
-                </g>
-
-                <g class="app-photo-arrow">
-                  <path d="M616 252 C668 252 688 228 704 196" />
-                  <path d="M694 200 L706 192 L707 206" />
-                </g>
-                <g class="app-photo-mini-plot">
-                  <line x1="650" y1="174" x2="742" y2="174" />
-                  <line x1="650" y1="174" x2="650" y2="104" />
-                  <path d="M654 167 C670 130 690 130 704 166" />
-                  <path d="M676 166 C692 105 724 105 738 166" />
-                  <text x="696" y="96" text-anchor="middle">I(VG)</text>
-                </g>
-
-                <g class="app-photo-score">
-                  <rect x="296" y="326" width="184" height="26" rx="6" fill="#f1ecff" stroke="#d8caf8" />
-                  <text x="388" y="344" text-anchor="middle">8 activations -> summed class score</text>
-                </g>
-              </svg>
+              <img
+                class="app-photo-flow-image"
+                src="./assets/applications_model_flow_photo.png"
+                alt="Hardware Gaussian-kernel classifier workflow with device mapping, programming, sweeping, current readout, preprocessing, activation extraction, scoring, and hardware update"
+              />
             </section>
 
             <section class="app-photo-card app-photo-bimodal-card">
