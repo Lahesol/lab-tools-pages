@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=b7b9e7346055" />
+    <link rel="stylesheet" href="./styles.css?v=83421132ea0f" />
   </head>
   <body>
     <header class="app-header">
@@ -803,6 +803,152 @@
       </section>
 
       <section id="tab-applications" class="tab-panel">
+        <article class="panel app-photo-panel">
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow">photo view</p>
+              <h2>Hardware Gaussian-kernel classifier</h2>
+            </div>
+            <p class="hint">Camera-ready model structure and bimodal measured-kernel synthesis.</p>
+          </div>
+          <div class="app-photo-grid">
+            <section class="app-photo-card app-photo-model-card">
+              <h3>Array-level model structure</h3>
+              <svg class="app-photo-svg app-photo-model-svg" viewBox="0 0 780 360" role="img" aria-label="Hardware Gaussian-kernel classifier model structure">
+                <defs>
+                  <linearGradient id="photoKernelGradient" x1="0" x2="1" y1="0" y2="1">
+                    <stop offset="0" stop-color="#ef6cff" />
+                    <stop offset="1" stop-color="#6957d8" />
+                  </linearGradient>
+                  <linearGradient id="photoBoardGradient" x1="0" x2="1" y1="0" y2="1">
+                    <stop offset="0" stop-color="#9fd5c8" />
+                    <stop offset="1" stop-color="#5f8f84" />
+                  </linearGradient>
+                  <filter id="photoSoftShadow" x="-12%" y="-18%" width="124%" height="136%">
+                    <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#21343a" flood-opacity="0.15" />
+                  </filter>
+                </defs>
+
+                <g class="app-photo-node" filter="url(#photoSoftShadow)">
+                  <rect x="28" y="34" width="150" height="86" rx="10" />
+                  <text x="103" y="70" text-anchor="middle">Seed features</text>
+                  <text x="103" y="94" text-anchor="middle" class="small">7 morphology inputs</text>
+                </g>
+
+                <g class="app-photo-kernel-stack">
+                  <rect x="248" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" />
+                  <rect x="296" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.92" />
+                  <rect x="344" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.84" />
+                  <rect x="392" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.76" />
+                  <rect x="440" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.68" />
+                  <rect x="488" y="31" width="40" height="70" rx="6" fill="url(#photoKernelGradient)" opacity="0.60" />
+                  <text x="388" y="124" text-anchor="middle">projection to VG1 / VG2</text>
+                </g>
+
+                <g stroke="#182f38" stroke-width="1.5" opacity="0.7">
+                  <path d="M178 76 C210 50 226 50 248 62" />
+                  <path d="M178 76 C224 86 244 86 296 62" />
+                  <path d="M178 76 C232 112 282 100 344 62" />
+                  <path d="M178 76 C250 34 332 36 392 62" />
+                  <path d="M178 76 C270 64 374 70 440 62" />
+                  <path d="M178 76 C292 104 438 102 488 62" />
+                </g>
+
+                <g class="app-photo-arrow">
+                  <path d="M388 140 L388 174" />
+                  <path d="M381 166 L388 176 L395 166" />
+                </g>
+
+                <g class="app-photo-board" filter="url(#photoSoftShadow)">
+                  <polygon points="214,202 562,202 616,302 162,302" fill="url(#photoBoardGradient)" />
+                  <polygon points="246,220 530,220 560,282 216,282" fill="#cfe4da" opacity="0.92" />
+                  <g stroke="#4c7f71" stroke-width="2" opacity="0.65">
+                    <path d="M242 245 H532" />
+                    <path d="M252 266 H542" />
+                    <path d="M286 222 V281" />
+                    <path d="M360 222 V282" />
+                    <path d="M434 222 V282" />
+                    <path d="M508 222 V282" />
+                  </g>
+                  <g class="mini-curves">
+                    <path d="M250 267 C262 244 278 244 292 267" />
+                    <path d="M318 267 C330 238 350 238 366 267" />
+                    <path d="M392 267 C404 232 428 232 446 267" />
+                    <path d="M468 267 C480 242 500 242 516 267" />
+                  </g>
+                  <text x="388" y="316" text-anchor="middle">pre-routed PCB device array + TIA/ADC readout</text>
+                </g>
+
+                <g class="app-photo-arrow">
+                  <path d="M616 252 C668 252 688 228 704 196" />
+                  <path d="M694 200 L706 192 L707 206" />
+                </g>
+                <g class="app-photo-mini-plot">
+                  <line x1="650" y1="174" x2="742" y2="174" />
+                  <line x1="650" y1="174" x2="650" y2="104" />
+                  <path d="M654 167 C670 130 690 130 704 166" />
+                  <path d="M676 166 C692 105 724 105 738 166" />
+                  <text x="696" y="96" text-anchor="middle">I(VG)</text>
+                </g>
+
+                <g class="app-photo-score">
+                  <rect x="296" y="326" width="184" height="26" rx="6" fill="#f1ecff" stroke="#d8caf8" />
+                  <text x="388" y="344" text-anchor="middle">8 activations -> summed class score</text>
+                </g>
+              </svg>
+            </section>
+
+            <section class="app-photo-card app-photo-bimodal-card">
+              <h3>Two-peak measured-kernel synthesis</h3>
+              <svg class="app-photo-svg app-photo-curve-svg" viewBox="0 0 780 360" role="img" aria-label="Bimodal measured-current synthesis graph">
+                <defs>
+                  <linearGradient id="photoCurveFill" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0" stop-color="#8067ff" stop-opacity="0.28" />
+                    <stop offset="1" stop-color="#8067ff" stop-opacity="0.02" />
+                  </linearGradient>
+                </defs>
+                <g class="photo-plot-frame">
+                  <line x1="74" y1="300" x2="720" y2="300" />
+                  <line x1="74" y1="300" x2="74" y2="54" />
+                  <g opacity="0.45">
+                    <line x1="74" y1="238" x2="720" y2="238" />
+                    <line x1="74" y1="176" x2="720" y2="176" />
+                    <line x1="74" y1="114" x2="720" y2="114" />
+                    <line x1="203" y1="54" x2="203" y2="300" />
+                    <line x1="332" y1="54" x2="332" y2="300" />
+                    <line x1="461" y1="54" x2="461" y2="300" />
+                    <line x1="590" y1="54" x2="590" y2="300" />
+                  </g>
+                  <text x="397" y="338" text-anchor="middle">Gate voltage VG1</text>
+                  <text x="28" y="176" text-anchor="middle" transform="rotate(-90 28 176)">Summed current</text>
+                </g>
+
+                <path class="photo-curve-fill" d="M84 292 C130 286 160 263 194 226 C234 182 270 150 316 162 C350 171 376 191 410 174 C446 156 474 93 526 82 C582 72 637 145 684 246 C699 276 712 290 720 294 L720 300 L84 300 Z" />
+                <path class="photo-curve component-a" d="M84 294 C138 286 170 252 208 204 C246 158 286 125 328 144 C360 158 378 190 410 230 C430 258 454 280 494 292" />
+                <path class="photo-curve component-b" d="M220 294 C285 286 328 247 374 198 C424 145 456 92 522 80 C586 68 641 145 684 246 C700 278 711 290 720 294" />
+                <path class="photo-curve measured-sum" d="M84 292 C130 286 160 263 194 226 C234 182 270 150 316 162 C350 171 376 191 410 174 C446 156 474 93 526 82 C582 72 637 145 684 246 C699 276 712 290 720 294" />
+                <path class="photo-curve target" d="M86 293 C134 286 164 266 198 230 C238 188 274 153 318 160 C358 167 376 196 408 178 C448 156 476 102 526 88 C586 72 640 146 686 248 C701 278 712 290 720 294" />
+
+                <g class="photo-kernel-labels">
+                  <rect x="95" y="66" width="242" height="76" rx="8" />
+                  <text x="113" y="94">component kernels</text>
+                  <line x1="116" y1="116" x2="158" y2="116" class="sample-a" />
+                  <text x="170" y="121">device A</text>
+                  <line x1="252" y1="116" x2="294" y2="116" class="sample-b" />
+                  <text x="306" y="121">device B</text>
+                </g>
+                <g class="photo-kernel-labels">
+                  <rect x="458" y="214" width="210" height="64" rx="8" />
+                  <line x1="478" y1="238" x2="524" y2="238" class="sample-sum" />
+                  <text x="538" y="244">measured sum</text>
+                  <line x1="478" y1="260" x2="524" y2="260" class="sample-target" />
+                  <text x="538" y="266">software target</text>
+                </g>
+              </svg>
+            </section>
+          </div>
+        </article>
+
         <div class="grid two">
           <article class="panel">
             <div class="panel-title">
