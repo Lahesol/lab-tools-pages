@@ -615,6 +615,17 @@ input[type="file"] {
   margin-top: 10px;
 }
 
+.library-download-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.library-download-row .download-button {
+  flex: 1 1 120px;
+}
+
 .flash-progress {
   display: block;
   width: 100%;
