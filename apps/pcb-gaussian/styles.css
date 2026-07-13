@@ -878,18 +878,18 @@ tr:hover td { background: #fbf5ed; }
 }
 .photo-measured-points.component-a-points circle {
   fill: #58a79c;
-  opacity: 0.55;
+  opacity: 0.42;
 }
 .photo-measured-points.component-b-points circle {
   fill: #c75663;
-  opacity: 0.55;
+  opacity: 0.42;
 }
 .photo-measured-points.measured-sum-points circle {
   fill: #6858e8;
   opacity: 0.92;
 }
 .photo-kernel-labels rect {
-  fill: rgba(255, 255, 255, 0.88);
+  fill: rgba(255, 255, 255, 0.9);
   stroke: var(--line);
 }
 .photo-kernel-labels text {
@@ -917,6 +917,13 @@ tr:hover td { background: #fbf5ed; }
   fill: #6858e8;
   stroke: #ffffff;
   stroke-width: 1.5;
+}
+.photo-legend-band rect {
+  fill: rgba(255, 255, 255, 0.96);
+}
+.photo-legend-band text.small {
+  fill: var(--muted);
+  font-size: 12px;
 }
 .app-model-plot-panel {
   margin-top: 16px;

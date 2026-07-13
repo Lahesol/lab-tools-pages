@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCB Gaussian Web Control</title>
-    <link rel="stylesheet" href="./styles.css?v=fc2a0da28e17" />
+    <link rel="stylesheet" href="./styles.css?v=7b95968b97fe" />
   </head>
   <body>
     <header class="app-header">
@@ -823,7 +823,7 @@
 
             <section class="app-photo-card app-photo-bimodal-card">
               <h3>Two-peak measured-kernel synthesis</h3>
-              <svg class="app-photo-svg app-photo-curve-svg" viewBox="0 0 780 360" role="img" aria-label="Bimodal measured-current synthesis graph">
+              <svg class="app-photo-svg app-photo-curve-svg" viewBox="0 0 780 430" role="img" aria-label="Bimodal measured-current synthesis graph">
                 <defs>
                   <linearGradient id="photoCurveFill" x1="0" x2="0" y1="0" y2="1">
                     <stop offset="0" stop-color="#8067ff" stop-opacity="0.28" />
@@ -842,8 +842,8 @@
                     <line x1="461" y1="54" x2="461" y2="300" />
                     <line x1="590" y1="54" x2="590" y2="300" />
                   </g>
-                  <text x="397" y="338" text-anchor="middle">Gate voltage VG1</text>
-                  <text x="28" y="176" text-anchor="middle" transform="rotate(-90 28 176)">Summed current</text>
+                  <text x="397" y="328" text-anchor="middle">Gate voltage VG1</text>
+                  <text x="30" y="176" text-anchor="middle" transform="rotate(-90 30 176)">Summed current</text>
                 </g>
 
                 <path class="photo-curve-fill" d="M84 292 C130 286 160 263 194 226 C234 182 270 150 316 162 C350 171 376 191 410 174 C446 156 474 93 526 82 C582 72 637 145 684 246 C699 276 712 290 720 294 L720 300 L84 300 Z" />
@@ -880,22 +880,19 @@
                   <circle cx="660" cy="241" r="4.2" /><circle cx="684" cy="246" r="4.2" /><circle cx="708" cy="286" r="4.2" />
                 </g>
 
-                <g class="photo-kernel-labels">
-                  <rect x="95" y="66" width="242" height="76" rx="8" />
-                  <text x="113" y="94">component kernels</text>
-                  <line x1="116" y1="116" x2="158" y2="116" class="sample-a" />
-                  <text x="170" y="121">device A</text>
-                  <line x1="252" y1="116" x2="294" y2="116" class="sample-b" />
-                  <text x="306" y="121">device B</text>
-                </g>
-                <g class="photo-kernel-labels">
-                  <rect x="458" y="206" width="228" height="82" rx="8" />
-                  <line x1="478" y1="230" x2="524" y2="230" class="sample-sum" />
-                  <text x="538" y="236">measured sum</text>
-                  <circle cx="501" cy="252" r="4.4" class="sample-point" />
-                  <text x="538" y="258">measured data</text>
-                  <line x1="478" y1="274" x2="524" y2="274" class="sample-target" />
-                  <text x="538" y="280">software target</text>
+                <g class="photo-kernel-labels photo-legend-band">
+                  <rect x="74" y="350" width="646" height="56" rx="9" />
+                  <line x1="96" y1="374" x2="138" y2="374" class="sample-a" />
+                  <text x="150" y="379">device A</text>
+                  <line x1="238" y1="374" x2="280" y2="374" class="sample-b" />
+                  <text x="292" y="379">device B</text>
+                  <line x1="396" y1="374" x2="442" y2="374" class="sample-sum" />
+                  <text x="456" y="379">measured sum</text>
+                  <circle cx="598" cy="374" r="4.4" class="sample-point" />
+                  <text x="612" y="379">measured data</text>
+                  <line x1="96" y1="394" x2="142" y2="394" class="sample-target" />
+                  <text x="154" y="399">software target</text>
+                  <text x="396" y="399" class="small">component kernels and summed measured response</text>
                 </g>
               </svg>
             </section>
