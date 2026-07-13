@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=f14eee526d0b" />
+    <link rel="stylesheet" href="styles.css?v=b3fc2bb1ad9a" />
   </head>
   <body>
     <div class="app-shell">
@@ -217,7 +217,7 @@
             <div class="lab-view-header">
               <div>
                 <h2>PPG HRV CNN</h2>
-                <p>1D CNN-style pulse detection and HRV estimation from PPG windows</p>
+                <p>Browser-side 1D CNN peak scoring and HRV estimation from ADC PPG windows</p>
               </div>
               <div class="summary-stack">
                 <strong id="ppgStatus">No data</strong>
@@ -260,6 +260,12 @@
                 </label>
 
                 <div id="ppgMetrics" class="model-metrics"></div>
+
+                <div class="section-title compact-title ppg-model-title">
+                  <h3>Model Structure</h3>
+                  <span id="ppgModelState">Window --</span>
+                </div>
+                <canvas id="ppgModelCanvas" width="1000" height="260" aria-label="PPG CNN model structure diagram"></canvas>
               </section>
 
               <section class="lab-section">
@@ -707,7 +713,8 @@
       </main>
     </div>
 
+    <script src="models/ppg_hr_cnn_model.js"></script>
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=e9ddb268edc4"></script>
+    <script src="app.js?v=25e392891760"></script>
   </body>
 </html>

@@ -998,6 +998,7 @@ input[type="file"] {
 
 #datasetPreviewCanvas,
 #modelArchitectureCanvas,
+#ppgModelCanvas,
 #ppgCanvas,
 #ppgCnnCanvas {
   width: 100%;
@@ -1021,8 +1022,16 @@ input[type="file"] {
   height: 300px;
 }
 
+#ppgModelCanvas {
+  height: 260px;
+}
+
 #ppgCnnCanvas {
   height: 220px;
+}
+
+.ppg-model-title {
+  margin-top: 14px;
 }
 
 .ppg-cnn-title {

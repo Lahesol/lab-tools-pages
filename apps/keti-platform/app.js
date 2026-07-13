@@ -39,6 +39,28 @@ const PPG_SAMPLE_PATHS = [
 const PPG_MAX_PARSE_ROWS = 240000;
 const PPG_MAX_LIVE_POINTS = 30000;
 const PPG_LIVE_ANALYSIS_INTERVAL_MS = 1000;
+const PPG_WEB_CNN_FALLBACK_MODEL = {
+  id: "keti_ppg_peak_cnn_adc_web_fallback",
+  version: "0.2.0-fallback",
+  kind: "local_conv1d_peak_detector",
+  targetSampleRateHz: 32,
+  minWindowSec: 8,
+  recommendedWindowSec: 30,
+  defaultThreshold: 0.42,
+  layers: [
+    {
+      type: "conv1d",
+      activation: "relu",
+      filters: [
+        { name: "wide_systolic_peak", weights: [-0.20, -0.35, -0.15, 0.25, 0.75, 1.00, 0.75, 0.25, -0.15, -0.35, -0.20], bias: 0 },
+        { name: "medium_systolic_peak", weights: [-0.40, -0.25, 0.00, 0.35, 0.80, 0.35, 0.00, -0.25, -0.40], bias: 0 },
+        { name: "narrow_systolic_peak", weights: [-0.50, -0.20, 0.35, 0.80, 0.35, -0.20, -0.50], bias: 0 }
+      ]
+    },
+    { type: "average_pool1d", radiusSec: 0.06 },
+    { type: "minmax" }
+  ]
+};
 const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
 const INPUT_SETTINGS_VIEWS = new Set(["imu1d", "imu2d", "classification", "dataset", "model"]);
 const WORKSPACE_LAYOUT_STORAGE_KEY = "keti_workspace_layout_v1";
@@ -351,6 +373,7 @@ const el = {
   ppgMetricState: document.getElementById("ppgMetricState"),
   ppgWindowState: document.getElementById("ppgWindowState"),
   ppgCnnState: document.getElementById("ppgCnnState"),
+  ppgModelState: document.getElementById("ppgModelState"),
   ppgFileInput: document.getElementById("ppgFileInput"),
   ppgLoadSampleButton: document.getElementById("ppgLoadSampleButton"),
   ppgAnalyzeButton: document.getElementById("ppgAnalyzeButton"),
@@ -362,6 +385,7 @@ const el = {
   ppgThresholdOutput: document.getElementById("ppgThresholdOutput"),
   ppgMetrics: document.getElementById("ppgMetrics"),
   ppgCanvas: document.getElementById("ppgCanvas"),
+  ppgModelCanvas: document.getElementById("ppgModelCanvas"),
   ppgCnnCanvas: document.getElementById("ppgCnnCanvas"),
   datasetView: document.getElementById("datasetView"),
   modelView: document.getElementById("modelView"),
@@ -5029,6 +5053,100 @@ function getPpgWindow(options = getPpgOptions()) {
   return state.ppg.samples.filter((sample) => sample.tSec >= startSec && sample.tSec < startSec + durationSec);
 }
 
+function getPpgCnnModel() {
+  const model = window.KetiPpgHrCnnModel;
+  if (model && Array.isArray(model.layers)) {
+    return model;
+  }
+  return PPG_WEB_CNN_FALLBACK_MODEL;
+}
+
+function getPpgModelSampleRateHz(model = getPpgCnnModel()) {
+  return normalizeNumber(model.targetSampleRateHz || model.sampleRateHz, 32, 1, 1000);
+}
+
+function getPpgModelMinWindowSec(model = getPpgCnnModel()) {
+  return normalizeNumber(model.minWindowSec, 8, 1, 180);
+}
+
+function getPpgModelConvFilters(model = getPpgCnnModel()) {
+  const conv = model.layers.find((layer) => layer.type === "conv1d");
+  const filters = conv?.filters || conv?.kernels || [];
+  return filters.map((filter, index) => {
+    if (Array.isArray(filter)) {
+      return { name: `filter_${index + 1}`, weights: filter, bias: 0 };
+    }
+    return {
+      name: filter.name || `filter_${index + 1}`,
+      weights: Array.isArray(filter.weights) ? filter.weights : [],
+      bias: Number.isFinite(filter.bias) ? filter.bias : 0
+    };
+  }).filter((filter) => filter.weights.length > 0);
+}
+
+function getPpgModelPoolingRadiusSamples(model, sampleRateHz) {
+  const pool = model.layers.find((layer) => layer.type === "average_pool1d");
+  return Math.max(1, Math.round(normalizeNumber(pool?.radiusSec, 0.06, 0.005, 1) * sampleRateHz));
+}
+
+function ppgWindowDurationSec(window) {
+  if (window.length < 2) {
+    return 0;
+  }
+  const start = window[0].tSec;
+  const end = window[window.length - 1].tSec;
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return end - start;
+  }
+  return window.length / Math.max(1, state.ppg.sampleRateHz || state.settings.rateHz || 32);
+}
+
+function resamplePpgWindow(window, targetRateHz, sourceRateHz) {
+  const samples = window
+    .filter((sample) => Number.isFinite(sample.ppg))
+    .map((sample, index) => ({
+      ...sample,
+      tSec: Number.isFinite(sample.tSec) ? sample.tSec : index / Math.max(1, sourceRateHz)
+    }))
+    .sort((a, b) => a.tSec - b.tSec);
+  if (samples.length < 2) {
+    return { samples: [], values: [], durationSec: 0 };
+  }
+
+  const startSec = samples[0].tSec;
+  const endSec = samples[samples.length - 1].tSec;
+  const durationSec = Math.max(0, endSec - startSec);
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    return { samples: [], values: [], durationSec: 0 };
+  }
+
+  const count = Math.min(PPG_MAX_LIVE_POINTS, Math.max(2, Math.floor(durationSec * targetRateHz) + 1));
+  const resampled = [];
+  let cursor = 0;
+  for (let index = 0; index < count; index++) {
+    const tSec = startSec + index / targetRateHz;
+    while (cursor < samples.length - 2 && samples[cursor + 1].tSec < tSec) {
+      cursor++;
+    }
+    const left = samples[cursor];
+    const right = samples[Math.min(samples.length - 1, cursor + 1)];
+    const span = Math.max(1e-9, right.tSec - left.tSec);
+    const mix = Math.max(0, Math.min(1, (tSec - left.tSec) / span));
+    const ppg = left.ppg + (right.ppg - left.ppg) * mix;
+    resampled.push({
+      tSec,
+      ppg,
+      sourceIndex: cursor,
+      source: left.source || right.source || state.ppg.signalSource || "raw"
+    });
+  }
+  return {
+    samples: resampled,
+    values: resampled.map((sample) => sample.ppg),
+    durationSec
+  };
+}
+
 function movingAverage(values, radius) {
   const out = Array(values.length).fill(0);
   let sum = 0;
@@ -5046,15 +5164,7 @@ function movingAverage(values, radius) {
 
 function preprocessPpgWindow(window, sampleRateHz) {
   const raw = window.map((sample) => sample.ppg);
-  const baselineRadius = Math.max(3, Math.round(sampleRateHz * 1.2));
-  const smoothRadius = Math.max(1, Math.round(sampleRateHz * 0.08));
-  const baseline = movingAverage(raw, baselineRadius);
-  const detrended = raw.map((value, index) => value - baseline[index]);
-  const smoothed = movingAverage(detrended, smoothRadius);
-  const mean = smoothed.reduce((sum, value) => sum + value, 0) / Math.max(1, smoothed.length);
-  const variance = smoothed.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, smoothed.length);
-  const std = Math.max(1e-6, Math.sqrt(variance));
-  return smoothed.map((value) => (value - mean) / std);
+  return preprocessPpgValues(raw, sampleRateHz);
 }
 
 function convolveSame(values, kernel) {
@@ -5076,20 +5186,68 @@ function normalizeUnit(values) {
   return values.map((value) => (value - min) / span);
 }
 
+function preprocessPpgValues(raw, sampleRateHz) {
+  const baselineRadius = Math.max(3, Math.round(sampleRateHz * 1.2));
+  const smoothRadius = Math.max(1, Math.round(sampleRateHz * 0.08));
+  const baseline = movingAverage(raw, baselineRadius);
+  const detrended = raw.map((value, index) => value - baseline[index]);
+  const smoothed = movingAverage(detrended, smoothRadius);
+  const mean = smoothed.reduce((sum, value) => sum + value, 0) / Math.max(1, smoothed.length);
+  const variance = smoothed.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, smoothed.length);
+  const std = Math.max(1e-6, Math.sqrt(variance));
+  return smoothed.map((value) => (value - mean) / std);
+}
+
 function runPpgCnnDetector(processed, sampleRateHz) {
-  const kernels = [
-    [-0.20, -0.35, -0.15, 0.25, 0.75, 1.00, 0.75, 0.25, -0.15, -0.35, -0.20],
-    [-0.40, -0.25, 0.00, 0.35, 0.80, 0.35, 0.00, -0.25, -0.40],
-    [-0.50, -0.20, 0.35, 0.80, 0.35, -0.20, -0.50]
-  ];
-  const featureMaps = kernels.map((kernel) => convolveSame(processed, kernel).map((value) => Math.max(0, value)));
+  const model = getPpgCnnModel();
+  let filters = getPpgModelConvFilters(model);
+  if (filters.length === 0) {
+    filters = getPpgModelConvFilters(PPG_WEB_CNN_FALLBACK_MODEL);
+  }
+  const startedAt = performance.now();
+  const featureMaps = filters.map((filter) => (
+    convolveSame(processed, filter.weights).map((value) => Math.max(0, value + filter.bias))
+  ));
   const fused = processed.map((_, index) => (
     featureMaps.reduce((sum, map) => sum + map[index], 0) / featureMaps.length
   ));
-  const pooled = movingAverage(fused, Math.max(1, Math.round(sampleRateHz * 0.06)));
+  const pooled = movingAverage(fused, getPpgModelPoolingRadiusSamples(model, sampleRateHz));
   return {
-    kernels: kernels.map((kernel) => kernel.length),
-    score: normalizeUnit(pooled)
+    modelId: model.id || "ppg_cnn",
+    modelVersion: model.version || "",
+    kernels: filters.map((filter) => filter.weights.length),
+    filterNames: filters.map((filter) => filter.name),
+    sampleRateHz,
+    score: normalizeUnit(pooled),
+    inferenceMs: performance.now() - startedAt
+  };
+}
+
+function preparePpgCnnInput(window, options) {
+  const model = getPpgCnnModel();
+  const modelRateHz = getPpgModelSampleRateHz(model);
+  const minWindowSec = getPpgModelMinWindowSec(model);
+  const durationSec = ppgWindowDurationSec(window);
+  if (durationSec < minWindowSec) {
+    throw new Error(`Selected PPG window is too short for Web CNN (${durationSec.toFixed(1)} / ${minWindowSec.toFixed(0)} s)`);
+  }
+
+  const sourceRateHz = normalizeNumber(options.sampleRateHz, state.ppg.sampleRateHz || state.settings.rateHz || modelRateHz, 1, 1000);
+  const resampled = resamplePpgWindow(window, modelRateHz, sourceRateHz);
+  if (resampled.values.length < Math.max(10, Math.ceil(modelRateHz * minWindowSec))) {
+    throw new Error("Selected PPG window does not contain enough model input samples");
+  }
+
+  return {
+    model,
+    sampleRateHz: modelRateHz,
+    sourceRateHz,
+    sourceSamples: window.length,
+    samples: resampled.samples,
+    raw: resampled.values,
+    processed: preprocessPpgValues(resampled.values, modelRateHz),
+    durationSec: resampled.durationSec,
+    resampled: Math.abs(sourceRateHz - modelRateHz) > 0.05
   };
 }
 
@@ -5154,14 +5312,15 @@ function computeHrvFromPeaks(peaks, sampleRateHz) {
 function runPpgAnalysis(optionsOverride = {}) {
   const options = getPpgOptions();
   const window = getPpgWindow(options);
-  if (window.length < Math.max(10, options.sampleRateHz * 8)) {
+  if (window.length < 2) {
     throw new Error("Selected PPG window is too short");
   }
-  const processed = preprocessPpgWindow(window, options.sampleRateHz);
-  const cnn = runPpgCnnDetector(processed, options.sampleRateHz);
-  const refractorySamples = Math.max(1, Math.round((options.refractoryMs / 1000) * options.sampleRateHz));
+  const modelInput = preparePpgCnnInput(window, options);
+  const processed = modelInput.processed;
+  const cnn = runPpgCnnDetector(processed, modelInput.sampleRateHz);
+  const refractorySamples = Math.max(1, Math.round((options.refractoryMs / 1000) * modelInput.sampleRateHz));
   const peaks = detectPeaksFromScore(cnn.score, options.threshold, refractorySamples);
-  const hrv = computeHrvFromPeaks(peaks, options.sampleRateHz);
+  const hrv = computeHrvFromPeaks(peaks, modelInput.sampleRateHz);
   const referenceHrValues = window.map((sample) => sample.hr).filter(Number.isFinite);
   const referenceHr = referenceHrValues.length > 0
     ? referenceHrValues.reduce((sum, value) => sum + value, 0) / referenceHrValues.length
@@ -5169,6 +5328,7 @@ function runPpgAnalysis(optionsOverride = {}) {
   state.ppg.analysis = {
     options,
     window,
+    modelInput,
     processed,
     cnn,
     peaks,
@@ -5297,19 +5457,31 @@ function renderPpgView() {
     const options = getPpgOptions();
     const requiredSamples = Math.max(10, Math.ceil(options.sampleRateHz * 8));
     const windowSamples = getPpgWindow(options).length;
+    const model = getPpgCnnModel();
+    const modelRateHz = getPpgModelSampleRateHz(model);
+    const modelMinSec = getPpgModelMinWindowSec(model);
+    const modelRecommendedSec = normalizeNumber(model.recommendedWindowSec, 30, modelMinSec, 180);
+    const targetCnnSamples = Math.ceil(modelRateHz * options.durationSec);
+    const targetAdcSamples = Math.ceil(options.sampleRateHz * options.durationSec);
     el.ppgWindowState.textContent = isLive
       ? `${Math.min(windowSamples, sampleCount)} / ${Math.max(requiredSamples, Math.ceil(options.sampleRateHz * options.durationSec))} samples`
       : sampleCount > 0 ? "Ready to analyze" : "No window";
     el.ppgCnnState.textContent = isLive
-      ? "Waiting for window"
-      : "Idle";
+      ? `Waiting for ${modelRateHz.toFixed(0)} Hz model input`
+      : `${model.id || "Web CNN"} idle`;
+    el.ppgModelState.textContent = `${options.durationSec.toFixed(0)} s -> ${targetCnnSamples} CNN samples`;
     el.ppgMetrics.replaceChildren(
       metricRow("Sample Rate", `${Number(el.ppgSampleRateInput.value || state.ppg.sampleRateHz).toFixed(1)} Hz`),
+      metricRow("Web CNN", `${modelRateHz.toFixed(0)} Hz input`),
+      metricRow("Model Window", `min ${modelMinSec.toFixed(0)} s / rec ${modelRecommendedSec.toFixed(0)} s`),
+      metricRow("ADC Window", `${targetAdcSamples} samples / ${options.durationSec.toFixed(0)} s`),
+      metricRow("CNN Window", `${targetCnnSamples} samples / ${options.durationSec.toFixed(0)} s`),
       metricRow("Window", `${safeMetric(windowSamples, 0)} / ${Math.ceil(options.sampleRateHz * options.durationSec)}`),
       metricRow("ADC Source", state.ppg.signalSource || "--"),
       metricRow("Last HR", liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm` : "--"),
       metricRow("Quality", liveHr && Number.isFinite(liveHr.quality) ? liveHr.quality.toFixed(3) : "--")
     );
+    drawPpgModelDiagram(null);
     if (sampleCount > 0) {
       drawLivePpgPlot();
     } else {
@@ -5320,20 +5492,29 @@ function renderPpgView() {
   }
 
   const hrv = analysis.hrv;
-  el.ppgWindowState.textContent = `${analysis.window.length} samples - ${analysis.options.durationSec.toFixed(0)} s`;
-  el.ppgCnnState.textContent = `Conv kernels ${analysis.cnn.kernels.join("/")}`;
+  const modelMinSec = getPpgModelMinWindowSec(analysis.modelInput.model);
+  const modelRecommendedSec = normalizeNumber(analysis.modelInput.model.recommendedWindowSec, 30, modelMinSec, 180);
+  el.ppgWindowState.textContent = `${analysis.modelInput.samples.length} CNN samples / ${analysis.window.length} ADC samples - ${analysis.modelInput.durationSec.toFixed(1)} s`;
+  el.ppgCnnState.textContent = `${analysis.cnn.modelId} @ ${analysis.modelInput.sampleRateHz.toFixed(0)} Hz`;
+  el.ppgModelState.textContent = `${analysis.window.length} ADC -> ${analysis.modelInput.samples.length} CNN samples`;
   const rows = [
     metricRow("CNN HR", safeMetric(hrv.hrBpm, 1, " bpm")),
+    metricRow("Model Window", `min ${modelMinSec.toFixed(0)} s / rec ${modelRecommendedSec.toFixed(0)} s`),
+    metricRow("ADC Window", `${analysis.window.length} samples / ${analysis.modelInput.durationSec.toFixed(1)} s`),
+    metricRow("Model Input", `${analysis.modelInput.samples.length} @ ${analysis.modelInput.sampleRateHz.toFixed(1)} Hz`),
+    metricRow("Source Rate", `${analysis.modelInput.sourceRateHz.toFixed(1)} Hz${analysis.modelInput.resampled ? " -> resampled" : ""}`),
     metricRow("RMSSD", safeMetric(hrv.rmssdMs, 1, " ms")),
     metricRow("SDNN", safeMetric(hrv.sdnnMs, 1, " ms")),
     metricRow("pNN50", Number.isFinite(hrv.pnn50) ? `${(hrv.pnn50 * 100).toFixed(1)}%` : "--"),
     metricRow("Mean IBI", safeMetric(hrv.meanIbiMs, 1, " ms")),
-    metricRow("ADC Source", isLive ? state.ppg.signalSource || "--" : "CSV")
+    metricRow("ADC Source", isLive ? state.ppg.signalSource || "--" : "CSV"),
+    metricRow("Inference", `${analysis.cnn.inferenceMs.toFixed(2)} ms`)
   ];
   if (!isLive) {
     rows.splice(1, 0, metricRow("Reference HR", safeMetric(analysis.referenceHr, 1, " bpm")));
   }
   el.ppgMetrics.replaceChildren(...rows);
+  drawPpgModelDiagram(analysis);
   drawPpgSignalPlot();
   drawPpgCnnScorePlot();
 }
@@ -5388,6 +5569,107 @@ function drawEmptyAuxPlot(canvas, message) {
   auxCtx.fillText(message, 18, 34);
 }
 
+function drawPpgModelDiagram(analysis = state.ppg.analysis) {
+  if (!el.ppgModelCanvas) {
+    return;
+  }
+  const { ctx: modelCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgModelCanvas, 220);
+  const options = getPpgOptions();
+  const model = getPpgCnnModel();
+  const filters = getPpgModelConvFilters(model);
+  const targetRateHz = getPpgModelSampleRateHz(model);
+  const minWindowSec = getPpgModelMinWindowSec(model);
+  const recommendedWindowSec = normalizeNumber(model.recommendedWindowSec, 30, minWindowSec, 180);
+  const durationSec = analysis?.modelInput?.durationSec || options.durationSec;
+  const sourceRateHz = analysis?.modelInput?.sourceRateHz || options.sampleRateHz;
+  const adcSamples = analysis?.window?.length || Math.ceil(sourceRateHz * durationSec);
+  const cnnSamples = analysis?.modelInput?.samples?.length || Math.ceil(targetRateHz * durationSec);
+  const filterShape = filters.map((filter) => filter.weights.length).join("/");
+  const resampleLabel = Math.abs(sourceRateHz - targetRateHz) > 0.05
+    ? `${sourceRateHz.toFixed(1)} -> ${targetRateHz.toFixed(0)} Hz`
+    : `${targetRateHz.toFixed(0)} Hz`;
+  const nodes = [
+    { title: "ADC Window", lines: [`${durationSec.toFixed(1)} s`, `${adcSamples} samples`, `${sourceRateHz.toFixed(1)} Hz source`], color: "#008c8c" },
+    { title: "Resample", lines: [resampleLabel, "linear interpolation", "browser side"], color: "#2767c9" },
+    { title: "CNN Input", lines: [`${cnnSamples} x 1`, `${targetRateHz.toFixed(0)} Hz`, "z-score window"], color: "#008c8c" },
+    { title: "Conv1D", lines: [`${filters.length} filters`, `kernel ${filterShape || "--"}`, "ReLU"], color: "#d28a00" },
+    { title: "Peak Score", lines: ["avg pool", "0..1 score", `gate ${options.threshold.toFixed(2)}`], color: "#7b5fb2" },
+    { title: "HR / HRV", lines: ["IBI from peaks", "HR, RMSSD", "SDNN, pNN50"], color: "#008c8c" }
+  ];
+
+  modelCtx.clearRect(0, 0, width, height);
+  modelCtx.fillStyle = "#ffffff";
+  modelCtx.fillRect(0, 0, width, height);
+
+  const pad = 18;
+  const columns = width < 620 ? 2 : 3;
+  const gapX = 14;
+  const gapY = 18;
+  const boxWidth = (width - pad * 2 - gapX * (columns - 1)) / columns;
+  const rows = Math.ceil(nodes.length / columns);
+  const headerHeight = 26;
+  const boxHeight = Math.max(56, Math.min(76, (height - pad * 2 - headerHeight - gapY * (rows - 1)) / rows));
+  const startY = pad + headerHeight;
+
+  modelCtx.fillStyle = "#17202a";
+  modelCtx.font = "800 13px Segoe UI, Arial, sans-serif";
+  modelCtx.textAlign = "left";
+  modelCtx.fillText(`${model.id || "PPG Web CNN"} v${model.version || ""}`, pad, pad + 8);
+  modelCtx.fillStyle = "#637083";
+  modelCtx.font = "11px Segoe UI, Arial, sans-serif";
+  modelCtx.fillText(`Window ${durationSec.toFixed(1)} s / input ${cnnSamples} samples / min ${minWindowSec.toFixed(0)} s / rec ${recommendedWindowSec.toFixed(0)} s`, pad, pad + 23);
+
+  const centers = [];
+  nodes.forEach((node, index) => {
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const x = pad + col * (boxWidth + gapX);
+    const y = startY + row * (boxHeight + gapY);
+    centers.push({ x: x + boxWidth / 2, y: y + boxHeight / 2, row });
+
+    modelCtx.fillStyle = "#ffffff";
+    modelCtx.strokeStyle = node.color;
+    modelCtx.lineWidth = 1.8;
+    modelCtx.beginPath();
+    modelCtx.roundRect(x, y, boxWidth, boxHeight, 8);
+    modelCtx.fill();
+    modelCtx.stroke();
+
+    modelCtx.fillStyle = node.color;
+    modelCtx.font = "800 12px Segoe UI, Arial, sans-serif";
+    modelCtx.textAlign = "left";
+    modelCtx.fillText(node.title, x + 10, y + 17);
+    modelCtx.fillStyle = "#526172";
+    modelCtx.font = "11px Segoe UI, Arial, sans-serif";
+    node.lines.forEach((line, lineIndex) => {
+      modelCtx.fillText(line, x + 10, y + 35 + lineIndex * 13);
+    });
+  });
+
+  modelCtx.strokeStyle = "#c9d2df";
+  modelCtx.fillStyle = "#c9d2df";
+  modelCtx.lineWidth = 1.6;
+  for (let index = 0; index < centers.length - 1; index++) {
+    const from = centers[index];
+    const to = centers[index + 1];
+    const sameRow = from.row === to.row;
+    const endX = to.x - boxWidth / 2 + 6;
+    modelCtx.beginPath();
+    if (sameRow) {
+      modelCtx.moveTo(from.x + boxWidth / 2 - 6, from.y);
+      modelCtx.lineTo(endX, to.y);
+    } else {
+      modelCtx.moveTo(from.x, from.y + boxHeight / 2 - 6);
+      modelCtx.lineTo(from.x, to.y - boxHeight / 2 + 6);
+      modelCtx.lineTo(endX, to.y);
+    }
+    modelCtx.stroke();
+    modelCtx.beginPath();
+    modelCtx.arc(endX, to.y, 3, 0, Math.PI * 2);
+    modelCtx.fill();
+  }
+}
+
 function drawPpgSignalPlot() {
   const analysis = state.ppg.analysis;
   if (!analysis) {
@@ -5439,9 +5721,13 @@ function drawPpgCnnArchitecture() {
   cnnCtx.clearRect(0, 0, width, height);
   cnnCtx.fillStyle = "#ffffff";
   cnnCtx.fillRect(0, 0, width, height);
+  const model = getPpgCnnModel();
+  const filters = getPpgModelConvFilters(model);
+  const modelRateHz = getPpgModelSampleRateHz(model);
   const layers = [
-    { label: "Input", value: "PPG window", color: "#008c8c" },
-    { label: "Conv1D", value: "3 kernels", color: "#d28a00" },
+    { label: "ADC", value: "raw window", color: "#008c8c" },
+    { label: "Resample", value: `${modelRateHz.toFixed(0)} Hz`, color: "#2767c9" },
+    { label: "Conv1D", value: `${filters.length} filters`, color: "#d28a00" },
     { label: "ReLU + Pool", value: "score map", color: "#7b5fb2" },
     { label: "Peak Gate", value: "IBI", color: "#2767c9" },
     { label: "HRV", value: "RMSSD/SDNN", color: "#008c8c" }
