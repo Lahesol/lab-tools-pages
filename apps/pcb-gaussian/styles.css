@@ -787,7 +787,7 @@ tr:hover td { background: #fbf5ed; }
   width: 100%;
   display: block;
   object-fit: contain;
-  background: #000000;
+  background: #ffffff;
   border: 1px solid rgba(213, 224, 222, 0.85);
   border-radius: 8px;
 }
@@ -872,6 +872,22 @@ tr:hover td { background: #fbf5ed; }
   stroke-dasharray: 8 8;
   opacity: 0.75;
 }
+.photo-measured-points circle {
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+.photo-measured-points.component-a-points circle {
+  fill: #58a79c;
+  opacity: 0.55;
+}
+.photo-measured-points.component-b-points circle {
+  fill: #c75663;
+  opacity: 0.55;
+}
+.photo-measured-points.measured-sum-points circle {
+  fill: #6858e8;
+  opacity: 0.92;
+}
 .photo-kernel-labels rect {
   fill: rgba(255, 255, 255, 0.88);
   stroke: var(--line);
@@ -896,6 +912,11 @@ tr:hover td { background: #fbf5ed; }
 .photo-kernel-labels .sample-target {
   stroke: #1e2e38;
   stroke-dasharray: 7 6;
+}
+.photo-kernel-labels .sample-point {
+  fill: #6858e8;
+  stroke: #ffffff;
+  stroke-width: 1.5;
 }
 .app-model-plot-panel {
   margin-top: 16px;

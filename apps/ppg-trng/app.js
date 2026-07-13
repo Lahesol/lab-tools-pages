@@ -123,6 +123,7 @@ const MIN_ADC3_RATE_HZ = 25;
 const MAX_ADC3_RATE_HZ = 1000;
 const DEFAULT_ADC3_BATCH_MAX = 64;
 const DEFAULT_CIPHER_WIDTH_BITS = 14;
+const CIPHER_SIGNAL_MA_WINDOW = 22;
 const CIPHER_WIDTH_OPTIONS = new Set([8, 10, 12, 14]);
 const PULSE_MODE_SETTLE_MS = 80;
 const PULSE_MODE_FORCE_SEQUENCES = {
@@ -185,6 +186,7 @@ const state = {
   encryptedCount: 0,
   droppedPpg: 0,
   lastEncrypted: null,
+  cipherPlainFilters: {},
   totalAdc3Batches: 0,
   lastAdc3BatchAt: 0,
   lastAdc3BatchCount: 0,
@@ -1273,6 +1275,7 @@ function resetLiveEncryption() {
   state.encryptedCount = 0;
   state.droppedPpg = 0;
   state.lastEncrypted = null;
+  state.cipherPlainFilters = {};
   state.liveBitExtractors = {};
   state.lastAdc3BatchCount = 0;
   state.totalAdc3BatchSamples = 0;
@@ -1500,17 +1503,34 @@ function getCipherDisplayRecords() {
   return state.encryptedPpg;
 }
 
+function getCipherPlainAdcCode(rawValue) {
+  const rawAdcCode = clampInteger(rawValue, 0, 16383, 0);
+  state.cipherSignalWindow.push(rawAdcCode);
+  state.cipherSignalSum += rawAdcCode;
+  while (state.cipherSignalWindow.length > CIPHER_SIGNAL_MA_WINDOW) {
+    state.cipherSignalSum -= state.cipherSignalWindow.shift();
+  }
+  const filteredAdcCode = Math.round(state.cipherSignalSum / state.cipherSignalWindow.length);
+  return {
+    rawAdcCode,
+    adcCode: clampInteger(filteredAdcCode, 0, 16383, rawAdcCode),
+    filter: `MA${CIPHER_SIGNAL_MA_WINDOW}`,
+  };
+}
+
 function enqueuePpgEncryption(sample) {
   if (!state.encryptionEnabled) return;
   if (!Number.isFinite(sample.value)) return;
   const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
   if (adcSource !== state.adcSource) return;
-  const adcCode = clampInteger(sample.value, 0, 16383, 0);
+  const cipherPlain = getCipherPlainAdcCode(sample.value);
   state.pendingPpg.push({
     t: sample.t,
     channel: sample.channel,
     adcSource,
-    adcCode,
+    rawAdcCode: cipherPlain.rawAdcCode,
+    adcCode: cipherPlain.adcCode,
+    plainFilter: cipherPlain.filter,
   });
   if (state.pendingPpg.length > MAX_PENDING_PPG) {
     state.pendingPpg.shift();
@@ -1576,7 +1596,7 @@ function updateEncryptionUi() {
       : "";
     const batchText = state.bitMode ? ` | ${getAdc3BatchStatusText()}` : "";
     const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
-    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
+    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
@@ -2318,7 +2338,7 @@ function exportCipherCsv() {
 
   const start = cipherRecords[0]?.t || performance.now();
   const rows = [
-    "index,time_ms,channel,adc_input,cipher_width_bits,plain_adc,plain_masked,key_bits,key_dec,key_hex,cipher_masked,cipher_dec,cipher_hex,method,bit_source",
+    "index,time_ms,channel,adc_input,cipher_width_bits,plain_adc,plain_filter,plain_raw_adc,plain_masked,key_bits,key_dec,key_hex,cipher_masked,cipher_dec,cipher_hex,method,bit_source",
   ];
   cipherRecords.forEach((entry, index) => {
     const keyHexWidth = Math.ceil((entry.cipherWidthBits || state.cipherWidthBits) / 4);
@@ -2329,6 +2349,8 @@ function exportCipherCsv() {
       csvCell(entry.adcSource),
       entry.cipherWidthBits || state.cipherWidthBits,
       entry.adcCode,
+      csvCell(entry.plainFilter || ""),
+      Number.isFinite(entry.rawAdcCode) ? entry.rawAdcCode : "",
       entry.plainMasked,
       csvCell(entry.keyBits || ""),
       entry.key,
@@ -2363,6 +2385,7 @@ function resetBitAndEncryptionBuffers() {
   state.encryptedCount = 0;
   state.droppedPpg = 0;
   state.lastEncrypted = null;
+  state.cipherPlainFilters = {};
   ensureBitPlaneCapacity();
 }
 
