@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=09e3957e159a" />
+    <link rel="stylesheet" href="styles.css?v=bb0b35d266c4" />
   </head>
   <body>
     <div class="app-shell">
@@ -197,6 +197,11 @@
                     <option value="MILLIVOLTS">Voltage mV</option>
                     <option value="DELTA">Filtered - Raw</option>
                   </select>
+                </label>
+                <label class="adc-window-control">
+                  <span>View Window</span>
+                  <input id="adcViewWindowInput" type="range" min="1" max="30" step="1" value="5" />
+                  <output id="adcViewWindowOutput">5 s / 500 samples</output>
                 </label>
                 <span id="adcFormatState" class="adc-format-state">RAW samples - 0</span>
               </div>
@@ -726,6 +731,6 @@
     <script src="models/ppg_hr_cnn_model.js"></script>
     <script src="models/ppg_hr_regression_model.js"></script>
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=56ee05625669"></script>
+    <script src="app.js?v=0b70484ea397"></script>
   </body>
 </html>

@@ -295,6 +295,7 @@ const state = {
     filter: "RAW",
     adcFormat: "ALL",
     adcPlotMode: "RAW_FILTERED",
+    adcPlotWindowSec: 5,
     dspProtocol: "AUTO",
     dspProtocolHint: "",
     alpha: 0.2,
@@ -401,6 +402,8 @@ const el = {
   autoScaleToggle: document.getElementById("autoScaleToggle"),
   adcPlotControls: document.getElementById("adcPlotControls"),
   adcPlotModeSelect: document.getElementById("adcPlotModeSelect"),
+  adcViewWindowInput: document.getElementById("adcViewWindowInput"),
+  adcViewWindowOutput: document.getElementById("adcViewWindowOutput"),
   adcFormatState: document.getElementById("adcFormatState"),
   gyroControls: document.getElementById("gyroControls"),
   gyroMagCorrectionToggle: document.getElementById("gyroMagCorrectionToggle"),
@@ -1477,11 +1480,35 @@ function day2IirModeName(mode) {
 function syncAdcPlotSettings() {
   state.settings.adcFormat = "ALL";
   state.settings.adcPlotMode = el.adcPlotModeSelect?.value || "RAW_FILTERED";
+  syncAdcViewWindowControls();
   updateAdcFormatState();
 }
 
+function getAdcViewWindowSeconds() {
+  return normalizeNumber(state.settings.adcPlotWindowSec, 5, 1, 30);
+}
+
+function getAdcViewWindowSamples() {
+  const rateHz = Math.max(1, normalizeNumber(state.settings.rateHz, 100, 1, 1000));
+  const requested = Math.round(getAdcViewWindowSeconds() * rateHz);
+  return Math.max(1, Math.min(MAX_POINTS, requested));
+}
+
+function syncAdcViewWindowControls() {
+  const seconds = getAdcViewWindowSeconds();
+  const sampleCount = getAdcViewWindowSamples();
+  state.settings.adcPlotWindowSec = seconds;
+  if (el.adcViewWindowInput) {
+    el.adcViewWindowInput.value = String(seconds);
+  }
+  if (el.adcViewWindowOutput) {
+    const shownCount = Math.min(sampleCount, state.samples.length || sampleCount);
+    el.adcViewWindowOutput.textContent = `${formatSeconds(seconds)} s / ${shownCount} samples`;
+  }
+}
+
 function getVisibleAdcSamples() {
-  return state.samples;
+  return state.samples.slice(-getAdcViewWindowSamples());
 }
 
 function updateAdcFormatState() {
@@ -4659,6 +4686,7 @@ function parseStatus(line) {
       state.settings.rateHz = Number(value);
       el.rateInput.value = value;
       updateAdcWindowInputFromSamples(state.settings.window);
+      syncAdcViewWindowControls();
     }
   }
   renderDspPanel({ writeBack: true });
@@ -7958,6 +7986,13 @@ function bindEvents() {
   if (el.adcPlotModeSelect) {
     el.adcPlotModeSelect.addEventListener("change", () => {
       syncAdcPlotSettings();
+      drawPlot();
+    });
+  }
+  if (el.adcViewWindowInput) {
+    el.adcViewWindowInput.addEventListener("input", () => {
+      state.settings.adcPlotWindowSec = normalizeNumber(el.adcViewWindowInput.value, 5, 1, 30);
+      syncAdcViewWindowControls();
       drawPlot();
     });
   }
