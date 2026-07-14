@@ -213,11 +213,11 @@
             </div>
           </div>
           <canvas id="signalCanvas" width="1200" height="520" aria-label="ADC signal plot"></canvas>
-          <section id="ppgView" class="lab-view is-hidden" aria-label="PPG HRV CNN analysis">
+          <section id="ppgView" class="lab-view is-hidden" aria-label="PPG HR and HRV analysis">
             <div class="lab-view-header">
               <div>
-                <h2>PPG HRV CNN</h2>
-                <p>Browser-side 1D CNN peak scoring and HRV estimation from ADC PPG windows</p>
+                <h2>PPG HR / HRV</h2>
+                <p>Browser-side CNN peak HRV and ridge regression HR from ADC PPG windows</p>
               </div>
               <div class="summary-stack">
                 <strong id="ppgStatus">No data</strong>
@@ -714,7 +714,8 @@
     </div>
 
     <script src="models/ppg_hr_cnn_model.js"></script>
+    <script src="models/ppg_hr_regression_model.js"></script>
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=25e392891760"></script>
+    <script src="app.js?v=067523728fea"></script>
   </body>
 </html>

@@ -47,6 +47,26 @@ const PPG_WEB_CNN_FALLBACK_MODEL = {
   minWindowSec: 8,
   recommendedWindowSec: 30,
   defaultThreshold: 0.42,
+  training: {
+    status: "not_trained",
+    method: "hand_tuned_ppg_morphology_filters",
+    dataset: "none",
+    note: "The current web model uses fixed Conv1D pulse-shape filters. It was not fit from a dataset."
+  },
+  referenceDataset: {
+    name: "PPG-DaLiA subject 1 subset",
+    file: "ppg_dalia_subject1_acc_ppg_activity_temp.csv",
+    usage: "reference only; used by the separate firmware HR regression model, not by this web Conv1D detector",
+    rows: 298950,
+    sampleRateHz: 32,
+    firmwareRegression: {
+      windowSec: 15,
+      windowSamples: 480,
+      examples: 3110,
+      validationRmseBpm: 9.5157,
+      validationMaeBpm: 7.3656
+    }
+  },
   layers: [
     {
       type: "conv1d",
@@ -60,6 +80,28 @@ const PPG_WEB_CNN_FALLBACK_MODEL = {
     { type: "average_pool1d", radiusSec: 0.06 },
     { type: "minmax" }
   ]
+};
+const PPG_HR_REGRESSION_FALLBACK_MODEL = {
+  id: "keti_ppg_hr_ridge_regression_fallback",
+  version: "unavailable",
+  kind: "ridge_regression_hr_estimator",
+  targetSampleRateHz: 32,
+  windowSec: 15,
+  windowSamples: 480,
+  featureCount: 0,
+  targetBpms: [],
+  training: {
+    status: "unavailable",
+    method: "not_loaded",
+    dataset: "none"
+  },
+  model: {
+    bias: NaN,
+    means: [],
+    scales: [],
+    weights: [],
+    clampBpm: [35, 220]
+  }
 };
 const NON_CANVAS_VIEWS = new Set(["dataset", "model", "ppg"]);
 const INPUT_SETTINGS_VIEWS = new Set(["imu1d", "imu2d", "classification", "dataset", "model"]);
@@ -5061,8 +5103,24 @@ function getPpgCnnModel() {
   return PPG_WEB_CNN_FALLBACK_MODEL;
 }
 
+function getPpgRegressionModel() {
+  const model = window.KetiPpgHrRegressionModel;
+  if (model && model.model && Array.isArray(model.model.weights)) {
+    return model;
+  }
+  return PPG_HR_REGRESSION_FALLBACK_MODEL;
+}
+
 function getPpgModelSampleRateHz(model = getPpgCnnModel()) {
   return normalizeNumber(model.targetSampleRateHz || model.sampleRateHz, 32, 1, 1000);
+}
+
+function getPpgRegressionSampleRateHz(model = getPpgRegressionModel()) {
+  return normalizeNumber(model.targetSampleRateHz || model.sampleRateHz, 32, 1, 1000);
+}
+
+function getPpgRegressionWindowSec(model = getPpgRegressionModel()) {
+  return normalizeNumber(model.windowSec, 15, 1, 180);
 }
 
 function getPpgModelMinWindowSec(model = getPpgCnnModel()) {
@@ -5087,6 +5145,110 @@ function getPpgModelConvFilters(model = getPpgCnnModel()) {
 function getPpgModelPoolingRadiusSamples(model, sampleRateHz) {
   const pool = model.layers.find((layer) => layer.type === "average_pool1d");
   return Math.max(1, Math.round(normalizeNumber(pool?.radiusSec, 0.06, 0.005, 1) * sampleRateHz));
+}
+
+function formatPpgTrainingStatus(model = getPpgCnnModel()) {
+  const training = model.training || {};
+  if (training.status === "not_trained") {
+    return "Not trained - hand-tuned filters";
+  }
+  if (training.status === "weak_supervised") {
+    const mae = training.metrics?.validation?.maeBpm;
+    return Number.isFinite(mae)
+      ? `Weak-supervised HR labels (val MAE ${mae.toFixed(1)} bpm)`
+      : "Weak-supervised HR labels";
+  }
+  if (training.status === "trained") {
+    return training.method || "Trained";
+  }
+  return training.method || "Unspecified";
+}
+
+function formatPpgDatasetStatus(model = getPpgCnnModel()) {
+  const dataset = model.training?.dataset;
+  if (!dataset || dataset === "none") {
+    return "None for web model";
+  }
+  if (typeof dataset === "object") {
+    const name = dataset.name || "Training dataset";
+    const windows = Number.isFinite(dataset.windows) ? `, ${dataset.windows} windows` : "";
+    const sampleRate = Number.isFinite(dataset.sampleRateHz) ? `, ${dataset.sampleRateHz.toFixed(0)} Hz` : "";
+    return `${name}${windows}${sampleRate}`;
+  }
+  return String(dataset);
+}
+
+function formatPpgReferenceDataset(model = getPpgCnnModel()) {
+  const reference = model.referenceDataset;
+  if (!reference) {
+    return "--";
+  }
+  if (Number.isFinite(reference.validationMaeBpm)) {
+    return `${reference.name} val MAE ${reference.validationMaeBpm.toFixed(1)} bpm`;
+  }
+  if (Number.isFinite(reference.windows)) {
+    return `${reference.name} (${reference.windows} windows)`;
+  }
+  const regression = reference.firmwareRegression;
+  if (regression) {
+    return `${reference.name} ref (${regression.examples} windows)`;
+  }
+  return reference.name || "--";
+}
+
+function formatPpgTrainingSplit(model = getPpgCnnModel()) {
+  const dataset = model.training?.dataset;
+  if (!dataset || typeof dataset !== "object") {
+    return "--";
+  }
+  const train = Number.isFinite(dataset.trainWindows) ? dataset.trainWindows : null;
+  const validation = Number.isFinite(dataset.validationWindows) ? dataset.validationWindows : null;
+  const rows = Number.isFinite(dataset.rows) ? dataset.rows : null;
+  const split = train !== null && validation !== null ? `${train} train / ${validation} val` : "--";
+  return rows !== null ? `${split}, ${rows} rows` : split;
+}
+
+function formatPpgTrainingRule(model = getPpgCnnModel()) {
+  const training = model.training || {};
+  if (training.status === "weak_supervised") {
+    return "HR labels -> pseudo peaks -> Conv1D templates";
+  }
+  if (training.status === "not_trained") {
+    return "Fixed hand-tuned pulse filters";
+  }
+  return training.method || "--";
+}
+
+function formatPpgRegressionStatus(model = getPpgRegressionModel()) {
+  const training = model.training || {};
+  if (training.status === "trained") {
+    const mae = training.metrics?.validation?.maeBpm;
+    return Number.isFinite(mae)
+      ? `Ridge regression (val MAE ${mae.toFixed(1)} bpm)`
+      : "Ridge regression";
+  }
+  return "Regression model not loaded";
+}
+
+function formatPpgRegressionDataset(model = getPpgRegressionModel()) {
+  const dataset = model.training?.dataset;
+  if (!dataset || dataset === "none") {
+    return "--";
+  }
+  if (typeof dataset === "object") {
+    const windows = Number.isFinite(dataset.windows) ? `${dataset.windows} windows` : "windows --";
+    const features = Number.isFinite(model.featureCount) ? `${model.featureCount} features` : "features --";
+    return `${windows}, ${features}`;
+  }
+  return String(dataset);
+}
+
+function shortPpgLabel(text, maxChars = 54) {
+  const value = String(text || "");
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 function ppgWindowDurationSec(window) {
@@ -5186,6 +5348,165 @@ function normalizeUnit(values) {
   return values.map((value) => (value - min) / span);
 }
 
+function ppgFeatureMean(values) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function ppgFeatureStddev(values, mu = ppgFeatureMean(values)) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const variance = values.reduce((sum, value) => {
+    const delta = value - mu;
+    return sum + delta * delta;
+  }, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+function ppgZeroCrossRate(values) {
+  let count = 0;
+  for (let index = 1; index < values.length; index++) {
+    if ((values[index - 1] < 0 && values[index] >= 0) || (values[index - 1] >= 0 && values[index] < 0)) {
+      count++;
+    }
+  }
+  return values.length > 1 ? count / (values.length - 1) : 0;
+}
+
+function ppgSlopeSignChangeRate(values) {
+  let count = 0;
+  let prev = 0;
+  let seen = false;
+  for (let index = 1; index < values.length; index++) {
+    const diff = values[index] - values[index - 1];
+    const sign = diff > 0 ? 1 : diff < 0 ? -1 : 0;
+    if (sign !== 0) {
+      if (seen && prev !== sign) {
+        count++;
+      }
+      prev = sign;
+      seen = true;
+    }
+  }
+  return values.length > 2 ? count / (values.length - 2) : 0;
+}
+
+function normalizedPpgFeatureWindow(samples) {
+  const mu = ppgFeatureMean(samples);
+  const sigma = ppgFeatureStddev(samples, mu);
+  if (!Number.isFinite(sigma) || sigma < 1e-8) {
+    return null;
+  }
+  return samples.map((value) => (value - mu) / sigma);
+}
+
+function ppgCorrAtBpm(values, sampleRateHz, bpm) {
+  const lag = Math.max(1, Math.round((sampleRateHz * 60) / bpm));
+  if (lag >= values.length - 2) {
+    return 0;
+  }
+  let sum = 0;
+  let count = 0;
+  for (let index = 0; index + lag < values.length; index++) {
+    sum += values[index] * values[index + lag];
+    count++;
+  }
+  return count ? sum / count : 0;
+}
+
+function ppgSpectralMagAtBpm(values, sampleRateHz, bpm) {
+  const omega = (2 * Math.PI * bpm) / (60 * sampleRateHz);
+  let re = 0;
+  let im = 0;
+  for (let index = 0; index < values.length; index++) {
+    const angle = omega * index;
+    re += values[index] * Math.cos(angle);
+    im -= values[index] * Math.sin(angle);
+  }
+  return (2 * Math.sqrt(re * re + im * im)) / Math.max(1, values.length);
+}
+
+function ppgPositiveCentroid(targets, values) {
+  let weighted = 0;
+  let total = 0;
+  for (let index = 0; index < targets.length; index++) {
+    const value = Math.max(0, values[index]);
+    weighted += targets[index] * value;
+    total += value;
+  }
+  return total > 1e-9 ? weighted / total : targets[Math.floor(targets.length / 2)];
+}
+
+function ppgSpreadAroundCentroid(targets, values, centroid) {
+  let weighted = 0;
+  let total = 0;
+  for (let index = 0; index < targets.length; index++) {
+    const value = Math.max(0, values[index]);
+    const delta = targets[index] - centroid;
+    weighted += delta * delta * value;
+    total += value;
+  }
+  return total > 1e-9 ? Math.sqrt(weighted / total) : 0;
+}
+
+function ppgPeakTarget(targets, values) {
+  let bestIndex = 0;
+  let bestValue = values[0];
+  for (let index = 1; index < values.length; index++) {
+    if (values[index] > bestValue) {
+      bestValue = values[index];
+      bestIndex = index;
+    }
+  }
+  return { bpm: targets[bestIndex], value: bestValue };
+}
+
+function extractPpgRegressionFeatures(samples, sampleRateHz, model = getPpgRegressionModel()) {
+  const z = normalizedPpgFeatureWindow(samples);
+  if (!z) {
+    return null;
+  }
+  const targetBpms = Array.isArray(model.targetBpms) && model.targetBpms.length > 0
+    ? model.targetBpms
+    : Array.from({ length: 28 }, (_, index) => 45 + index * 5);
+
+  const diffs = [];
+  for (let index = 1; index < z.length; index++) {
+    diffs.push(z[index] - z[index - 1]);
+  }
+  const absDiffs = diffs.map((value) => Math.abs(value));
+  const rmsDiff = Math.sqrt(ppgFeatureMean(diffs.map((value) => value * value)));
+  const meanAbsDiff = ppgFeatureMean(absDiffs);
+  const maxAbsDiff = absDiffs.reduce((maxValue, value) => Math.max(maxValue, value), 0);
+
+  const corr = targetBpms.map((bpm) => ppgCorrAtBpm(z, sampleRateHz, bpm));
+  const spec = targetBpms.map((bpm) => ppgSpectralMagAtBpm(z, sampleRateHz, bpm));
+  const corrPeak = ppgPeakTarget(targetBpms, corr);
+  const specPeak = ppgPeakTarget(targetBpms, spec);
+  const corrCentroid = ppgPositiveCentroid(targetBpms, corr);
+  const specCentroid = ppgPositiveCentroid(targetBpms, spec);
+  const corrSpread = ppgSpreadAroundCentroid(targetBpms, corr, corrCentroid);
+  const specSpread = ppgSpreadAroundCentroid(targetBpms, spec, specCentroid);
+
+  return [
+    corrCentroid,
+    corrPeak.bpm,
+    corrPeak.value,
+    corrSpread,
+    specCentroid,
+    specPeak.bpm,
+    specPeak.value,
+    specSpread,
+    meanAbsDiff,
+    rmsDiff,
+    maxAbsDiff,
+    ppgZeroCrossRate(z),
+    ppgSlopeSignChangeRate(z),
+    ...corr,
+    ...spec
+  ];
+}
+
 function preprocessPpgValues(raw, sampleRateHz) {
   const baselineRadius = Math.max(3, Math.round(sampleRateHz * 1.2));
   const smoothRadius = Math.max(1, Math.round(sampleRateHz * 0.08));
@@ -5219,6 +5540,60 @@ function runPpgCnnDetector(processed, sampleRateHz) {
     filterNames: filters.map((filter) => filter.name),
     sampleRateHz,
     score: normalizeUnit(pooled),
+    inferenceMs: performance.now() - startedAt
+  };
+}
+
+function runPpgHrRegression(modelInput) {
+  const model = getPpgRegressionModel();
+  const weights = model.model?.weights || [];
+  const means = model.model?.means || [];
+  const scales = model.model?.scales || [];
+  if (!weights.length || weights.length !== means.length || weights.length !== scales.length) {
+    return {
+      available: false,
+      error: "Regression model not loaded"
+    };
+  }
+
+  const sampleRateHz = getPpgRegressionSampleRateHz(model);
+  const windowSec = getPpgRegressionWindowSec(model);
+  const requiredSamples = Math.max(2, Math.round(sampleRateHz * windowSec));
+  if (modelInput.raw.length < requiredSamples) {
+    return {
+      available: false,
+      error: `Need ${requiredSamples} samples for regression`
+    };
+  }
+
+  const startedAt = performance.now();
+  const samples = modelInput.raw.slice(modelInput.raw.length - requiredSamples);
+  const features = extractPpgRegressionFeatures(samples, sampleRateHz, model);
+  if (!features || features.length !== weights.length) {
+    return {
+      available: false,
+      error: "Could not extract regression features"
+    };
+  }
+
+  let hrBpm = Number(model.model.bias);
+  for (let index = 0; index < weights.length; index++) {
+    const scale = Math.abs(scales[index]) > 1e-9 ? scales[index] : 1;
+    hrBpm += weights[index] * ((features[index] - means[index]) / scale);
+  }
+  const clamp = Array.isArray(model.model.clampBpm) ? model.model.clampBpm : [35, 220];
+  hrBpm = Math.max(clamp[0], Math.min(clamp[1], hrBpm));
+
+  return {
+    available: true,
+    modelId: model.id || "ppg_hr_regression",
+    modelVersion: model.version || "",
+    hrBpm,
+    sampleRateHz,
+    windowSec,
+    samples: requiredSamples,
+    featureCount: features.length,
+    validationMaeBpm: model.training?.metrics?.validation?.maeBpm,
     inferenceMs: performance.now() - startedAt
   };
 }
@@ -5321,6 +5696,7 @@ function runPpgAnalysis(optionsOverride = {}) {
   const refractorySamples = Math.max(1, Math.round((options.refractoryMs / 1000) * modelInput.sampleRateHz));
   const peaks = detectPeaksFromScore(cnn.score, options.threshold, refractorySamples);
   const hrv = computeHrvFromPeaks(peaks, modelInput.sampleRateHz);
+  const regression = runPpgHrRegression(modelInput);
   const referenceHrValues = window.map((sample) => sample.hr).filter(Number.isFinite);
   const referenceHr = referenceHrValues.length > 0
     ? referenceHrValues.reduce((sum, value) => sum + value, 0) / referenceHrValues.length
@@ -5331,6 +5707,7 @@ function runPpgAnalysis(optionsOverride = {}) {
     modelInput,
     processed,
     cnn,
+    regression,
     peaks,
     hrv,
     referenceHr
@@ -5458,9 +5835,13 @@ function renderPpgView() {
     const requiredSamples = Math.max(10, Math.ceil(options.sampleRateHz * 8));
     const windowSamples = getPpgWindow(options).length;
     const model = getPpgCnnModel();
+    const regressionModel = getPpgRegressionModel();
     const modelRateHz = getPpgModelSampleRateHz(model);
     const modelMinSec = getPpgModelMinWindowSec(model);
     const modelRecommendedSec = normalizeNumber(model.recommendedWindowSec, 30, modelMinSec, 180);
+    const regressionRateHz = getPpgRegressionSampleRateHz(regressionModel);
+    const regressionWindowSec = getPpgRegressionWindowSec(regressionModel);
+    const regressionSamples = Math.ceil(regressionRateHz * regressionWindowSec);
     const targetCnnSamples = Math.ceil(modelRateHz * options.durationSec);
     const targetAdcSamples = Math.ceil(options.sampleRateHz * options.durationSec);
     el.ppgWindowState.textContent = isLive
@@ -5472,7 +5853,15 @@ function renderPpgView() {
     el.ppgModelState.textContent = `${options.durationSec.toFixed(0)} s -> ${targetCnnSamples} CNN samples`;
     el.ppgMetrics.replaceChildren(
       metricRow("Sample Rate", `${Number(el.ppgSampleRateInput.value || state.ppg.sampleRateHz).toFixed(1)} Hz`),
-      metricRow("Web CNN", `${modelRateHz.toFixed(0)} Hz input`),
+      metricRow("Web Model", `${modelRateHz.toFixed(0)} Hz Conv1D detector`),
+      metricRow("Regression Model", formatPpgRegressionStatus(regressionModel)),
+      metricRow("Regression Dataset", formatPpgRegressionDataset(regressionModel)),
+      metricRow("Regression Input", `${regressionSamples} samples / ${regressionWindowSec.toFixed(0)} s`),
+      metricRow("Training", formatPpgTrainingStatus(model)),
+      metricRow("Dataset", formatPpgDatasetStatus(model)),
+      metricRow("Train / Val", formatPpgTrainingSplit(model)),
+      metricRow("Train Rule", formatPpgTrainingRule(model)),
+      metricRow("Reference Data", formatPpgReferenceDataset(model)),
       metricRow("Model Window", `min ${modelMinSec.toFixed(0)} s / rec ${modelRecommendedSec.toFixed(0)} s`),
       metricRow("ADC Window", `${targetAdcSamples} samples / ${options.durationSec.toFixed(0)} s`),
       metricRow("CNN Window", `${targetCnnSamples} samples / ${options.durationSec.toFixed(0)} s`),
@@ -5492,13 +5881,23 @@ function renderPpgView() {
   }
 
   const hrv = analysis.hrv;
+  const regression = analysis.regression;
   const modelMinSec = getPpgModelMinWindowSec(analysis.modelInput.model);
   const modelRecommendedSec = normalizeNumber(analysis.modelInput.model.recommendedWindowSec, 30, modelMinSec, 180);
   el.ppgWindowState.textContent = `${analysis.modelInput.samples.length} CNN samples / ${analysis.window.length} ADC samples - ${analysis.modelInput.durationSec.toFixed(1)} s`;
   el.ppgCnnState.textContent = `${analysis.cnn.modelId} @ ${analysis.modelInput.sampleRateHz.toFixed(0)} Hz`;
   el.ppgModelState.textContent = `${analysis.window.length} ADC -> ${analysis.modelInput.samples.length} CNN samples`;
   const rows = [
-    metricRow("CNN HR", safeMetric(hrv.hrBpm, 1, " bpm")),
+    metricRow("Peak HR", safeMetric(hrv.hrBpm, 1, " bpm")),
+    metricRow("Regression HR", regression?.available ? safeMetric(regression.hrBpm, 1, " bpm") : regression?.error || "--"),
+    metricRow("CNN-Reg Diff", regression?.available && Number.isFinite(hrv.hrBpm) ? safeMetric(hrv.hrBpm - regression.hrBpm, 1, " bpm") : "--"),
+    metricRow("Regression Input", regression?.available ? `${regression.samples} samples / ${regression.featureCount} features` : "--"),
+    metricRow("Regression Model", formatPpgRegressionStatus(getPpgRegressionModel())),
+    metricRow("Training", formatPpgTrainingStatus(analysis.modelInput.model)),
+    metricRow("Dataset", formatPpgDatasetStatus(analysis.modelInput.model)),
+    metricRow("Train / Val", formatPpgTrainingSplit(analysis.modelInput.model)),
+    metricRow("Train Rule", formatPpgTrainingRule(analysis.modelInput.model)),
+    metricRow("Reference Data", formatPpgReferenceDataset(analysis.modelInput.model)),
     metricRow("Model Window", `min ${modelMinSec.toFixed(0)} s / rec ${modelRecommendedSec.toFixed(0)} s`),
     metricRow("ADC Window", `${analysis.window.length} samples / ${analysis.modelInput.durationSec.toFixed(1)} s`),
     metricRow("Model Input", `${analysis.modelInput.samples.length} @ ${analysis.modelInput.sampleRateHz.toFixed(1)} Hz`),
@@ -5508,7 +5907,7 @@ function renderPpgView() {
     metricRow("pNN50", Number.isFinite(hrv.pnn50) ? `${(hrv.pnn50 * 100).toFixed(1)}%` : "--"),
     metricRow("Mean IBI", safeMetric(hrv.meanIbiMs, 1, " ms")),
     metricRow("ADC Source", isLive ? state.ppg.signalSource || "--" : "CSV"),
-    metricRow("Inference", `${analysis.cnn.inferenceMs.toFixed(2)} ms`)
+    metricRow("Inference", `${analysis.cnn.inferenceMs.toFixed(2)} ms CNN${regression?.available ? ` / ${regression.inferenceMs.toFixed(2)} ms ridge` : ""}`)
   ];
   if (!isLive) {
     rows.splice(1, 0, metricRow("Reference HR", safeMetric(analysis.referenceHr, 1, " bpm")));
@@ -5576,10 +5975,13 @@ function drawPpgModelDiagram(analysis = state.ppg.analysis) {
   const { ctx: modelCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgModelCanvas, 220);
   const options = getPpgOptions();
   const model = getPpgCnnModel();
+  const regressionModel = getPpgRegressionModel();
   const filters = getPpgModelConvFilters(model);
   const targetRateHz = getPpgModelSampleRateHz(model);
   const minWindowSec = getPpgModelMinWindowSec(model);
   const recommendedWindowSec = normalizeNumber(model.recommendedWindowSec, 30, minWindowSec, 180);
+  const regressionWindowSec = getPpgRegressionWindowSec(regressionModel);
+  const regressionFeatureCount = normalizeNumber(regressionModel.featureCount, 0, 0, 10000);
   const durationSec = analysis?.modelInput?.durationSec || options.durationSec;
   const sourceRateHz = analysis?.modelInput?.sourceRateHz || options.sampleRateHz;
   const adcSamples = analysis?.window?.length || Math.ceil(sourceRateHz * durationSec);
@@ -5591,10 +5993,10 @@ function drawPpgModelDiagram(analysis = state.ppg.analysis) {
   const nodes = [
     { title: "ADC Window", lines: [`${durationSec.toFixed(1)} s`, `${adcSamples} samples`, `${sourceRateHz.toFixed(1)} Hz source`], color: "#008c8c" },
     { title: "Resample", lines: [resampleLabel, "linear interpolation", "browser side"], color: "#2767c9" },
-    { title: "CNN Input", lines: [`${cnnSamples} x 1`, `${targetRateHz.toFixed(0)} Hz`, "z-score window"], color: "#008c8c" },
-    { title: "Conv1D", lines: [`${filters.length} filters`, `kernel ${filterShape || "--"}`, "ReLU"], color: "#d28a00" },
+    { title: "32 Hz Input", lines: [`CNN ${cnnSamples} x 1`, `Ridge ${regressionWindowSec.toFixed(0)} s`, `${regressionFeatureCount || "--"} features`], color: "#008c8c" },
+    { title: "Conv1D Path", lines: [`${filters.length} filters`, `kernel ${filterShape || "--"}`, "ReLU"], color: "#d28a00" },
     { title: "Peak Score", lines: ["avg pool", "0..1 score", `gate ${options.threshold.toFixed(2)}`], color: "#7b5fb2" },
-    { title: "HR / HRV", lines: ["IBI from peaks", "HR, RMSSD", "SDNN, pNN50"], color: "#008c8c" }
+    { title: "HR Compare", lines: ["CNN IBI HR/HRV", "Ridge direct HR", "compare bpm"], color: "#008c8c" }
   ];
 
   modelCtx.clearRect(0, 0, width, height);
@@ -5607,26 +6009,69 @@ function drawPpgModelDiagram(analysis = state.ppg.analysis) {
   const gapY = 18;
   const boxWidth = (width - pad * 2 - gapX * (columns - 1)) / columns;
   const rows = Math.ceil(nodes.length / columns);
-  const headerHeight = 26;
+  const headerHeight = 56;
   const boxHeight = Math.max(56, Math.min(76, (height - pad * 2 - headerHeight - gapY * (rows - 1)) / rows));
   const startY = pad + headerHeight;
 
   modelCtx.fillStyle = "#17202a";
   modelCtx.font = "800 13px Segoe UI, Arial, sans-serif";
   modelCtx.textAlign = "left";
-  modelCtx.fillText(`${model.id || "PPG Web CNN"} v${model.version || ""}`, pad, pad + 8);
+  modelCtx.fillText(`${model.id || "PPG Web CNN"} v${model.version || ""}`, pad, pad + 6);
   modelCtx.fillStyle = "#637083";
   modelCtx.font = "11px Segoe UI, Arial, sans-serif";
-  modelCtx.fillText(`Window ${durationSec.toFixed(1)} s / input ${cnnSamples} samples / min ${minWindowSec.toFixed(0)} s / rec ${recommendedWindowSec.toFixed(0)} s`, pad, pad + 23);
+  modelCtx.fillText(`Training: ${shortPpgLabel(formatPpgTrainingStatus(model), 62)}`, pad, pad + 22);
+  modelCtx.fillText(`Dataset: ${shortPpgLabel(formatPpgDatasetStatus(model), 62)}`, pad, pad + 38);
+  modelCtx.fillText(`Window ${durationSec.toFixed(1)} s / input ${cnnSamples} samples / min ${minWindowSec.toFixed(0)} s / rec ${recommendedWindowSec.toFixed(0)} s`, pad, pad + 54);
 
-  const centers = [];
-  nodes.forEach((node, index) => {
-    const col = index % columns;
+  const boxes = nodes.map((node, index) => {
+    const logicalCol = index % columns;
     const row = Math.floor(index / columns);
+    const col = row % 2 === 0 ? logicalCol : columns - 1 - logicalCol;
     const x = pad + col * (boxWidth + gapX);
     const y = startY + row * (boxHeight + gapY);
-    centers.push({ x: x + boxWidth / 2, y: y + boxHeight / 2, row });
+    return {
+      node,
+      x,
+      y,
+      row,
+      centerX: x + boxWidth / 2,
+      centerY: y + boxHeight / 2
+    };
+  });
 
+  modelCtx.strokeStyle = "#c9d2df";
+  modelCtx.fillStyle = "#c9d2df";
+  modelCtx.lineWidth = 1.6;
+  for (let index = 0; index < boxes.length - 1; index++) {
+    const from = boxes[index];
+    const to = boxes[index + 1];
+    const sameRow = from.row === to.row;
+    let x1;
+    let y1;
+    let x2;
+    let y2;
+    if (sameRow) {
+      const leftToRight = to.centerX > from.centerX;
+      x1 = leftToRight ? from.x + boxWidth + 6 : from.x - 6;
+      y1 = from.centerY;
+      x2 = leftToRight ? to.x - 6 : to.x + boxWidth + 6;
+      y2 = to.centerY;
+    } else {
+      x1 = from.centerX;
+      y1 = from.y + boxHeight + 6;
+      x2 = to.centerX;
+      y2 = to.y - 6;
+    }
+    modelCtx.beginPath();
+    modelCtx.moveTo(x1, y1);
+    modelCtx.lineTo(x2, y2);
+    modelCtx.stroke();
+    modelCtx.beginPath();
+    modelCtx.arc(x2, y2, 3, 0, Math.PI * 2);
+    modelCtx.fill();
+  }
+
+  boxes.forEach(({ node, x, y }) => {
     modelCtx.fillStyle = "#ffffff";
     modelCtx.strokeStyle = node.color;
     modelCtx.lineWidth = 1.8;
@@ -5645,29 +6090,6 @@ function drawPpgModelDiagram(analysis = state.ppg.analysis) {
       modelCtx.fillText(line, x + 10, y + 35 + lineIndex * 13);
     });
   });
-
-  modelCtx.strokeStyle = "#c9d2df";
-  modelCtx.fillStyle = "#c9d2df";
-  modelCtx.lineWidth = 1.6;
-  for (let index = 0; index < centers.length - 1; index++) {
-    const from = centers[index];
-    const to = centers[index + 1];
-    const sameRow = from.row === to.row;
-    const endX = to.x - boxWidth / 2 + 6;
-    modelCtx.beginPath();
-    if (sameRow) {
-      modelCtx.moveTo(from.x + boxWidth / 2 - 6, from.y);
-      modelCtx.lineTo(endX, to.y);
-    } else {
-      modelCtx.moveTo(from.x, from.y + boxHeight / 2 - 6);
-      modelCtx.lineTo(from.x, to.y - boxHeight / 2 + 6);
-      modelCtx.lineTo(endX, to.y);
-    }
-    modelCtx.stroke();
-    modelCtx.beginPath();
-    modelCtx.arc(endX, to.y, 3, 0, Math.PI * 2);
-    modelCtx.fill();
-  }
 }
 
 function drawPpgSignalPlot() {
