@@ -40,6 +40,14 @@
         "accent":  "#8b5e34"
     },
     {
+        "name":  "물품검수 PDF 생성기",
+        "description":  "Invoice PDF와 물품 사진을 브라우저에서 정리해 물품검수확인서 PDF를 생성하는 행정 처리 도구.",
+        "url":  "apps/goods-inspection-pdf/",
+        "group":  "Administration",
+        "status":  "Ready",
+        "accent":  "#59636e"
+    },
+    {
         "name":  "nRF52 BLE UART Plotter",
         "description":  "Web Bluetooth NUS plotter for nRF52 UART streaming and baudrate/parser testing.",
         "url":  "apps/nrf52-ble-uart-plotter/",

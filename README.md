@@ -11,6 +11,7 @@ Open index.html through GitHub Pages, not directly from the filesystem.
 - PPG TRNG Control Console: pps/ppg-trng/
 - KETI Lab Console: pps/keti-platform/
 - SISU Baejeong Scheduling Tool: pps/sisu-baejeong/
+- Goods Inspection PDF Generator: pps/goods-inspection-pdf/
 - nRF52 BLE UART Plotter: pps/nrf52-ble-uart-plotter/
 - UV STM/LTM Architecture Simulator: pps/tj-memory/
 - SMKang Light DAC/ADC Control: pps/smkang-light/

@@ -1,0 +1,255 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Invoice와 물품 사진으로 가천대학교 물품검수확인서를 작성하고 PDF로 내보내는 브라우저 전용 정적 도구"
+    />
+    <title>물품검수 확인서 생성</title>
+    <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
+    <link rel="stylesheet" href="./styles.css?v=f92f5d0c2262" />
+    <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
+    <script defer src="./app.js?v=ab20ba53a163"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">본문으로 이동</a>
+
+    <header class="topbar">
+      <div>
+        <h1>물품검수 확인서 생성</h1>
+        <p>Invoice와 사진으로 검수 문서를 완성합니다</p>
+      </div>
+      <div class="ready-state" id="readyState" role="status" aria-live="polite">
+        <span class="ready-state__icon" aria-hidden="true">✓</span>
+        <span>
+          <strong id="readyStateTitle">자료를 추가해 주세요</strong>
+          <small id="readyStateDetail">파일은 브라우저 안에서만 처리됩니다</small>
+        </span>
+      </div>
+    </header>
+
+    <main class="workspace" id="workspace">
+      <aside class="workflow" aria-label="문서 생성 단계">
+        <section class="workflow__active" aria-labelledby="stepUpload">
+          <div class="step-heading">
+            <span>1</span>
+            <h2 id="stepUpload">자료 업로드</h2>
+          </div>
+
+          <div class="upload-group">
+            <div class="upload-label-row">
+              <label for="invoiceInput">Invoice PDF</label>
+              <span id="invoiceStatus">선택 안 됨</span>
+            </div>
+            <label class="dropzone dropzone--compact" id="invoiceDropzone" for="invoiceInput">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 2.75h8l4 4V21.25H6z" />
+                <path d="M14 2.75v4h4M8.5 15.5h7M8.5 12h7" />
+              </svg>
+              <span>
+                <strong id="invoiceFileName">PDF를 선택하거나 놓으세요</strong>
+                <small>텍스트 기반 Invoice에서 품목 후보를 추출합니다</small>
+              </span>
+              <input id="invoiceInput" type="file" accept="application/pdf,.pdf" />
+            </label>
+          </div>
+
+          <div class="upload-group">
+            <div class="upload-label-row">
+              <label for="photoInput">물품 사진</label>
+              <span id="photoCount">0장</span>
+            </div>
+            <label class="dropzone" id="photoDropzone" for="photoInput">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V4M7.5 8.5 12 4l4.5 4.5" />
+                <path d="M5.5 11.5H4A2 2 0 0 0 2 13.5v5A2 2 0 0 0 4 20.5h16a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2h-1.5" />
+              </svg>
+              <span>
+                <strong>사진을 선택하거나 놓으세요</strong>
+                <small>JPG, PNG, WEBP · 여러 장 선택 가능</small>
+              </span>
+              <input id="photoInput" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+            </label>
+            <p class="photo-order-help">아래 목록의 순서가 품목 1, 2, 3…의 사진 순서로 반영됩니다.</p>
+            <div class="photo-strip" id="photoStrip" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <ol class="step-list" start="2">
+          <li><span>2</span><strong>물품 정보</strong></li>
+          <li><span>3</span><strong>검수자 선택</strong></li>
+          <li><span>4</span><strong>검토 및 내보내기</strong></li>
+        </ol>
+
+        <div class="privacy-note">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="4.5" y="10" width="15" height="10.5" rx="2" />
+            <path d="M8 10V7.5a4 4 0 0 1 8 0V10M12 14v2.5" />
+          </svg>
+          <div>
+            <strong>파일은 브라우저 안에서만 처리됩니다</strong>
+            <p>업로드 파일과 서명은 서버로 전송되지 않습니다. 등록한 서명은 현재 브라우저에만 보관됩니다.</p>
+          </div>
+        </div>
+      </aside>
+
+      <section class="editor" aria-label="물품검수 확인서 편집">
+        <div class="section-heading">
+          <div>
+            <h2>물품 정보</h2>
+            <p>한 페이지에 4개씩 배치하고, 초과 품목은 다음 A4 페이지로 자동 분할합니다.</p>
+          </div>
+          <span class="item-counter" id="itemCounter">0개 · 1쪽</span>
+        </div>
+
+        <fieldset class="count-control">
+          <legend>넣을 물품 수</legend>
+          <div class="count-mode" role="radiogroup" aria-label="물품 수 설정 방식">
+            <label>
+              <input type="radio" name="countMode" value="auto" checked />
+              <span>
+                <strong>자동</strong>
+                <small>거래명세서 품목 수 기준</small>
+              </span>
+            </label>
+            <label>
+              <input type="radio" name="countMode" value="manual" />
+              <span>
+                <strong>수동</strong>
+                <small>필요한 칸 수 직접 지정</small>
+              </span>
+            </label>
+          </div>
+          <div class="count-value">
+            <label for="manualItemCount">전체 품목 수</label>
+            <div>
+              <input id="manualItemCount" type="number" min="1" max="40" value="4" disabled />
+              <span>개</span>
+            </div>
+            <small id="autoCountStatus">Invoice를 올리면 감지한 품목 수만큼 칸이 만들어집니다.</small>
+          </div>
+        </fieldset>
+
+        <div class="invoice-result" id="invoiceResult" hidden>
+          <div>
+            <strong id="invoiceResultTitle">Invoice 분석 결과</strong>
+            <p id="invoiceResultMessage"></p>
+          </div>
+          <details>
+            <summary>추출 텍스트 확인</summary>
+            <pre id="invoiceRawText"></pre>
+          </details>
+        </div>
+
+        <div class="item-table" role="table" aria-label="물품 목록">
+          <div class="item-table__header" role="row">
+            <span role="columnheader">번호</span>
+            <span role="columnheader">품목명</span>
+            <span role="columnheader">수량</span>
+            <span role="columnheader">사진</span>
+            <span role="columnheader">관리</span>
+          </div>
+          <div id="itemRows"></div>
+          <div class="empty-state" id="emptyItems">
+            <strong>아직 등록된 물품이 없습니다</strong>
+            <p>Invoice를 올리거나 직접 항목을 추가하세요.</p>
+          </div>
+        </div>
+
+        <div class="item-actions">
+          <button class="button button--secondary" id="addItemButton" type="button">
+            <span aria-hidden="true">＋</span> 항목 추가
+          </button>
+          <button class="button button--ghost" id="resetButton" type="button">초기화</button>
+        </div>
+
+        <section class="inspector-section" aria-labelledby="inspectorHeading">
+          <div class="section-heading section-heading--compact">
+            <div>
+              <h2 id="inspectorHeading">검수자 선택</h2>
+              <p>검수자를 선택하고 서명을 한 번 등록하면 이 브라우저에 저장됩니다.</p>
+            </div>
+            <label class="date-field">
+              <span>검수일</span>
+              <input id="inspectionDate" type="date" />
+            </label>
+          </div>
+          <div class="reviewer-grid" id="reviewerGrid"></div>
+        </section>
+      </section>
+
+      <aside class="preview-panel" aria-labelledby="previewHeading">
+        <div class="preview-heading">
+          <div>
+            <h2 id="previewHeading">생성될 파일 미리보기</h2>
+            <p id="previewMeta">A4 1쪽 · 원본 양식 기준</p>
+          </div>
+          <button class="button button--ghost button--small" id="refreshPreviewButton" type="button">
+            미리보기 새로고침
+          </button>
+        </div>
+
+        <nav class="page-controls" aria-label="미리보기 페이지 이동">
+          <button id="previewPrevButton" type="button" aria-label="이전 페이지">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
+          </button>
+          <strong id="previewPageIndicator">1 / 1</strong>
+          <button id="previewNextButton" type="button" aria-label="다음 페이지">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+          </button>
+        </nav>
+
+        <div class="sheet-stage">
+          <article class="document-sheet" id="documentPreview" aria-label="물품검수확인서 미리보기">
+            <p class="template-tagline">‘2027 TOP 10’ 글로벌 명문 도약</p>
+            <div class="template-title-row">
+              <img src="./assets/gachon-logo.png" alt="가천대학교" />
+              <h3>물품검수확인서</h3>
+              <img class="template-seal" src="./assets/gachon-seal.png" alt="가천대학교 교표" />
+            </div>
+
+            <div class="template-photo-heading">
+              <strong>물품 사진</strong>
+              <small>(※ 거래명세서 순서대로 사진을 첨부하세요.)</small>
+            </div>
+
+            <div class="template-items" id="previewItems"></div>
+
+            <p class="template-confirmation">상기와 같이 신청 물품이 동일함을 확인하였습니다.</p>
+            <p class="template-date" id="previewDate"></p>
+            <div class="template-inspector">
+              <span>물품 검수자:</span>
+              <strong id="previewReviewerName">검수자 미선택</strong>
+              <span>(인)</span>
+              <img id="previewSignature" alt="선택한 검수자 서명" hidden />
+            </div>
+            <strong class="template-recipient">가천대학교 총장 귀하</strong>
+            <small class="template-page-number" id="previewPageNumber" hidden></small>
+          </article>
+        </div>
+        <div class="preview-thumbnails" id="previewThumbnails" aria-label="전체 페이지 목록"></div>
+      </aside>
+    </main>
+
+    <footer class="actionbar">
+      <div>
+        <strong id="validationTitle">필수 항목을 확인해 주세요</strong>
+        <span id="validationMessage">품목, 사진, 검수자, 서명이 필요합니다.</span>
+      </div>
+      <button class="button button--primary button--export" id="exportButton" type="button" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v12M7.5 10.5 12 15l4.5-4.5" />
+          <path d="M4 17.5v3h16v-3" />
+        </svg>
+        <span id="exportLabel">PDF로 내보내기</span>
+      </button>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <noscript>이 도구는 브라우저 JavaScript가 필요합니다.</noscript>
+  </body>
+</html>

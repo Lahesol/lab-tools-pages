@@ -1249,6 +1249,11 @@ function dspMagnitudeAt(frequencyHz, params) {
     return Math.pow(hpfMagnitudeAt(frequencyHz, params.lowHz, params.sampleRateHz), params.order) *
       Math.pow(lpfMagnitudeAt(frequencyHz, params.highHz, params.sampleRateHz), params.order);
   }
+  if (params.mode === "IIR_NOTCH") {
+    const bandMagnitude = Math.pow(hpfMagnitudeAt(frequencyHz, params.lowHz, params.sampleRateHz), params.order) *
+      Math.pow(lpfMagnitudeAt(frequencyHz, params.highHz, params.sampleRateHz), params.order);
+    return Math.max(0, Math.min(1, 1 - bandMagnitude));
+  }
   if (params.mode === "EMA") {
     const alpha = params.emaAlpha;
     const a1 = 1 - alpha;
@@ -1309,6 +1314,20 @@ function describeDspTransfer(params) {
         ["LPF alpha", coeffText(highAlpha)],
         ["Low / High", `${params.lowHz.toFixed(3)} / ${params.highHz.toFixed(3)} Hz`],
         ["Cascade", `HPF^${params.order} -> LPF^${params.order}`]
+      ]
+    };
+  }
+
+  if (params.mode === "IIR_NOTCH") {
+    return {
+      modeLabel: `IIR notch / fs=${params.sampleRateHz.toFixed(1)} Hz / N=${params.order}`,
+      transfer: `H_NOTCH(z) = 1 - H_BPF(z)\nH_BPF(z) = H_HPF(z, ${params.lowHz.toFixed(3)} Hz)^${params.order} * H_LPF(z, ${params.highHz.toFixed(3)} Hz)^${params.order}`,
+      equation: `Band estimate: b[n] = HPF(${params.lowHz.toFixed(3)} Hz) -> LPF(${params.highHz.toFixed(3)} Hz)\nNotch output: y[n] = x[n] - b[n]`,
+      coefficients: [
+        ["Reject band", `${params.lowHz.toFixed(3)} - ${params.highHz.toFixed(3)} Hz`],
+        ["HPF beta", coeffText(lowBeta)],
+        ["LPF alpha", coeffText(highAlpha)],
+        ["Cascade", `x - (HPF^${params.order} -> LPF^${params.order})`]
       ]
     };
   }
@@ -1407,10 +1426,10 @@ function drawDspResponsePlot(params) {
   responseCtx.stroke();
 
   const markers = [];
-  if (params.mode === "IIR_HPF" || params.mode === "IIR_BPF") {
+  if (params.mode === "IIR_HPF" || params.mode === "IIR_BPF" || params.mode === "IIR_NOTCH") {
     markers.push({ hz: params.lowHz, label: "low", color: "#d28a00" });
   }
-  if (params.mode === "IIR_LPF" || params.mode === "IIR_BPF") {
+  if (params.mode === "IIR_LPF" || params.mode === "IIR_BPF" || params.mode === "IIR_NOTCH") {
     markers.push({ hz: params.highHz, label: "high", color: "#2767c9" });
   }
   for (const marker of markers) {
@@ -1473,6 +1492,9 @@ function day2IirModeName(mode) {
   }
   if (mode === "IIR_BPF") {
     return "BPF";
+  }
+  if (mode === "IIR_NOTCH") {
+    return "NOTCH";
   }
   return "RAW";
 }
@@ -1839,6 +1861,14 @@ function filterImuSample(sample) {
     return Object.fromEntries(IMU_ACCEL_AXES.map((axis) => {
       const highPassed = applyAxisHighPass(axis, sample[axis], lowHz, order);
       return [axis, applyAxisLowPass(axis, highPassed, highHz, order)];
+    }));
+  }
+
+  if (mode === "IIR_NOTCH") {
+    return Object.fromEntries(IMU_ACCEL_AXES.map((axis) => {
+      const highPassed = applyAxisHighPass(axis, sample[axis], lowHz, order);
+      const bandPassed = applyAxisLowPass(axis, highPassed, highHz, order);
+      return [axis, sample[axis] - bandPassed];
     }));
   }
 
@@ -4254,6 +4284,9 @@ function adcFilterLabel(mode = state.settings.filter) {
   if (mode === "IIR_BPF") {
     return "IIR BPF";
   }
+  if (mode === "IIR_NOTCH") {
+    return "IIR notch";
+  }
   return "Raw copy";
 }
 
@@ -4326,6 +4359,11 @@ function filterAdcRawValue(raw) {
   if (mode === "IIR_BPF") {
     const highPassed = applyAdcClientHighPass(raw, state.settings.iirLowHz, order);
     return applyAdcClientLowPass(highPassed, state.settings.iirHighHz, order);
+  }
+  if (mode === "IIR_NOTCH") {
+    const highPassed = applyAdcClientHighPass(raw, state.settings.iirLowHz, order);
+    const bandPassed = applyAdcClientLowPass(highPassed, state.settings.iirHighHz, order);
+    return raw - bandPassed;
   }
   return raw;
 }
