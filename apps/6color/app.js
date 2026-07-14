@@ -472,9 +472,36 @@ function eventBrightnessAt(channelId, timeMs) {
   return brightness;
 }
 
-function timelineProtocolBrightnessAt(channelId, timeMs) {
+function protocolNativeCommand(protocol) {
+  const width = Number(protocol.config?.bitWidth || 0);
+  if (protocol.config?.encoding === "levels" || (width !== 4 && width !== 8)) {
+    return "";
+  }
+  if (protocol.command) {
+    return protocol.command;
+  }
+  return buildDigitalTxCommand(protocol.config || {}, previewFromProtocol(protocol));
+}
+
+function protocolCanRunNatively(protocol) {
+  return Boolean(protocolNativeCommand(protocol));
+}
+
+function nativeProtocolActiveAt(channelId, timeMs) {
+  return timelineProtocolInstances.some((instance) =>
+    protocolCanRunNatively(instance) &&
+    (instance.config?.channelId || channels[0].id) === channelId &&
+    instance.startMs <= timeMs &&
+    timeMs < timelineProtocolInstanceEndMs(instance));
+}
+
+function timelineProtocolBrightnessAt(channelId, timeMs, options = {}) {
+  const includeNative = options.includeNative !== false;
   let brightness = 0;
   for (const instance of timelineProtocolInstances) {
+    if (!includeNative && protocolCanRunNatively(instance)) {
+      continue;
+    }
     const relativeMs = timeMs - instance.startMs;
     if (relativeMs < 0 || relativeMs >= instance.durationMs) {
       continue;
@@ -492,14 +519,14 @@ function timelineProtocolBrightnessAt(channelId, timeMs) {
   return brightness;
 }
 
-function timelineBrightnessAt(channelId, timeMs) {
+function timelineBrightnessAt(channelId, timeMs, options = {}) {
   return Math.max(
     eventBrightnessAt(channelId, timeMs),
-    timelineProtocolBrightnessAt(channelId, timeMs),
+    timelineProtocolBrightnessAt(channelId, timeMs, options),
   );
 }
 
-function collectTimelineTimes(channelId) {
+function collectTimelineTimes(channelId, options = {}) {
   const times = new Set(
     timelineRows
       .filter((row) => row.color === channelId)
@@ -507,6 +534,9 @@ function collectTimelineTimes(channelId) {
   );
 
   for (const instance of timelineProtocolInstances) {
+    if (options?.includeNative === false && protocolCanRunNatively(instance)) {
+      continue;
+    }
     for (const block of instance.blocks) {
       if (block.color !== channelId) {
         continue;
@@ -955,6 +985,7 @@ function cloneProtocolForTimeline(protocol, startMs) {
     config: { ...protocol.config },
     bits: protocol.bits || "",
     symbols: protocol.symbols || "",
+    command: protocol.command || protocolNativeCommand(protocol),
     blocks: protocol.blocks.map((block) => ({
       startMs: block.startMs,
       durationMs: block.durationMs,
@@ -1259,7 +1290,8 @@ function createDigitalProtocolBlocks(config) {
 }
 
 function buildDigitalTxCommand(config, preview) {
-  if (config.encoding === "levels") {
+  const width = Number(config.bitWidth || 0);
+  if (config.encoding === "levels" || (width !== 4 && width !== 8)) {
     return "";
   }
 
@@ -2046,7 +2078,7 @@ function generateDigitalBlocks({ append = false, run = false } = {}) {
     if (command) {
       sendCommand(command);
     } else {
-      appendLog("!", "Intensity-level run uses browser-timed PWM/ON/OFF commands until firmware adds a native level protocol command");
+      appendLog("!", "This protocol uses browser-timed SET commands because firmware TXBITS supports only 4/8-bit digital protocols");
       runProgram(buildBlockProgramEvents(), config.name);
     }
   }
@@ -2284,12 +2316,37 @@ function renderBlocks() {
   renderBlockPreviewPlot();
 }
 
+function currentStateBrightness(channelId) {
+  const current = state.get(channelId);
+  if (!current?.on) {
+    return 0;
+  }
+  return clampTimelineBrightness(current.duty);
+}
+
 function brightnessCommands(channelId, brightness) {
   const duty = clampTimelineBrightness(brightness);
   if (duty <= 0) {
-    return [`OFF,${channelId}`];
+    return [`SET,${channelId},0,0`];
   }
-  return [`PWM,${channelId},${duty}`, `ON,${channelId}`];
+  return [`SET,${channelId},1,${duty}`];
+}
+
+function addBrightnessChangeEvent(grouped, timeMs, changes) {
+  const sorted = [...changes].sort((a, b) => {
+    const aOn = a.brightness > 0 ? 0 : 1;
+    const bOn = b.brightness > 0 ? 0 : 1;
+    if (aOn !== bOn) {
+      return aOn - bOn;
+    }
+    return channelOrder(a.channelId) - channelOrder(b.channelId);
+  });
+  addProgramEvent(
+    grouped,
+    timeMs,
+    sorted.flatMap((change) => brightnessCommands(change.channelId, change.brightness)),
+    sorted,
+  );
 }
 
 function setStateBrightness(channelId, brightness) {
@@ -2316,38 +2373,67 @@ function addProgramEvent(grouped, timeMs, commands, updates) {
 
 function buildTimelineProgramEvents() {
   const grouped = new Map();
-  const lastBrightness = new Map(channels.map((channel) => [channel.id, 0]));
-  addProgramEvent(
-    grouped,
-    0,
-    ["OFF,ALL"],
-    channels.map((channel) => ({ channelId: channel.id, brightness: 0 })),
-  );
+  const lastBrightness = new Map(channels.map((channel) => [channel.id, currentStateBrightness(channel.id)]));
+  const forcedSync = new Map();
+
+  for (const instance of timelineProtocolInstances) {
+    const command = protocolNativeCommand(instance);
+    if (!command) {
+      continue;
+    }
+
+    const channelId = instance.config?.channelId || channels[0].id;
+    addProgramEvent(
+      grouped,
+      instance.startMs,
+      [command],
+      [{ channelId, brightness: timelineProtocolBrightnessAt(channelId, instance.startMs) }],
+    );
+
+    const endMs = timelineProtocolInstanceEndMs(instance);
+    if (!forcedSync.has(endMs)) {
+      forcedSync.set(endMs, new Set());
+    }
+    forcedSync.get(endMs).add(channelId);
+  }
 
   const times = new Set([0, timelineEventDurationMs()]);
   for (const row of timelineRows) {
     times.add(row.timeMs);
   }
   for (const instance of timelineProtocolInstances) {
+    if (protocolCanRunNatively(instance)) {
+      times.add(instance.startMs);
+      times.add(timelineProtocolInstanceEndMs(instance));
+      continue;
+    }
     for (const block of instance.blocks) {
       times.add(instance.startMs + block.startMs);
       times.add(instance.startMs + timelineEndMs(block));
     }
   }
+  for (const timeMs of forcedSync.keys()) {
+    times.add(timeMs);
+  }
 
   for (const timeMs of [...times].sort((a, b) => a - b)) {
+    const changes = [];
     for (const channel of channels) {
-      const brightness = timelineBrightnessAt(channel.id, timeMs);
-      if (brightness === lastBrightness.get(channel.id)) {
+      if (nativeProtocolActiveAt(channel.id, timeMs)) {
         continue;
       }
+      const brightness = timelineBrightnessAt(channel.id, timeMs, { includeNative: false });
+      const forced = forcedSync.get(timeMs)?.has(channel.id) || false;
+      if (!forced && brightness === lastBrightness.get(channel.id)) {
+        continue;
+      }
+
       lastBrightness.set(channel.id, brightness);
-      addProgramEvent(
-        grouped,
-        timeMs,
-        brightnessCommands(channel.id, brightness),
-        [{ channelId: channel.id, brightness }],
-      );
+      changes.push({ channelId: channel.id, brightness });
+    }
+
+    if (changes.length > 0) {
+      addBrightnessChangeEvent(grouped, timeMs, changes);
     }
   }
 
@@ -2362,27 +2448,21 @@ function buildBlockProgramEvents() {
     times.add(timelineEndMs(block));
   }
 
-  const lastBrightness = new Map(channels.map((channel) => [channel.id, 0]));
-  addProgramEvent(
-    grouped,
-    0,
-    ["OFF,ALL"],
-    channels.map((channel) => ({ channelId: channel.id, brightness: 0 })),
-  );
+  const lastBrightness = new Map(channels.map((channel) => [channel.id, currentStateBrightness(channel.id)]));
 
   for (const timeMs of [...times].sort((a, b) => a - b)) {
+    const changes = [];
     for (const channel of channels) {
       const brightness = blockBrightnessAt(channel.id, timeMs);
       if (brightness === lastBrightness.get(channel.id)) {
         continue;
       }
       lastBrightness.set(channel.id, brightness);
-      addProgramEvent(
-        grouped,
-        timeMs,
-        brightnessCommands(channel.id, brightness),
-        [{ channelId: channel.id, brightness }],
-      );
+      changes.push({ channelId: channel.id, brightness });
+    }
+
+    if (changes.length > 0) {
+      addBrightnessChangeEvent(grouped, timeMs, changes);
     }
   }
 

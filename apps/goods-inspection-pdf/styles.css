@@ -25,6 +25,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   min-width: 320px;
   background: var(--surface-subtle);
@@ -1096,7 +1100,8 @@ summary:focus-visible,
 
 .template-title-row {
   display: grid;
-  height: 8.4%;
+  height: auto;
+  aspect-ratio: 184.6 / 24.9;
   grid-template-columns: 29% 1fr 15%;
   align-items: center;
   margin-top: 1.2%;
@@ -1123,7 +1128,8 @@ summary:focus-visible,
 
 .template-photo-heading {
   display: flex;
-  height: 7.5%;
+  height: auto;
+  aspect-ratio: 184.6 / 17;
   align-items: center;
   justify-content: center;
   flex-direction: column;
@@ -1142,9 +1148,10 @@ summary:focus-visible,
 
 .template-items {
   display: grid;
-  height: 47%;
+  height: auto;
+  aspect-ratio: var(--template-grid-aspect, 184.6 / 106.4);
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  grid-template-rows: repeat(var(--template-row-count, 2), minmax(0, 1fr));
   border-top: 1px solid #222;
   border-left: 1px solid #222;
 }
@@ -1152,7 +1159,9 @@ summary:focus-visible,
 .template-item {
   display: grid;
   min-width: 0;
-  grid-template-rows: 19% 1fr;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: 19.74% minmax(0, 1fr);
   border-right: 1px solid #222;
   border-bottom: 1px solid #222;
 }
@@ -1183,17 +1192,25 @@ summary:focus-visible,
 }
 
 .template-item__photo {
-  display: grid;
+  display: flex;
+  min-width: 0;
   min-height: 0;
-  place-items: center;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   padding: 5px;
   color: #9aa3ae;
   font-size: clamp(5px, 0.62vw, 8px);
 }
 
 .template-item__photo img {
-  width: 100%;
-  height: 100%;
+  display: block;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
 
@@ -1945,7 +1962,8 @@ summary:focus-visible,
 
   .document-sheet {
     width: 210mm;
-    height: 297mm;
+    height: auto;
+    min-height: 297mm;
     box-shadow: none;
   }
 }

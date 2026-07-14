@@ -10,10 +10,10 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=89b50610ad38" />
+    <link rel="stylesheet" href="./styles.css?v=303952114005" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=53e431f2bfdf"></script>
+    <script defer src="./app.js?v=07eb4070faa7"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -101,9 +101,9 @@
         <div class="section-heading">
           <div>
             <h2>물품 정보</h2>
-            <p>한 페이지에 4개씩 배치하고, 초과 품목은 다음 A4 페이지로 자동 분할합니다.</p>
+            <p>기본 4칸에서 시작하고, 5번째부터 품명과 사진 셀 행만 아래로 추가합니다.</p>
           </div>
-          <span class="item-counter" id="itemCounter">0개 · 1쪽</span>
+          <span class="item-counter" id="itemCounter">0개 · 2행</span>
         </div>
 
         <fieldset class="count-control">
@@ -191,14 +191,14 @@
         <div class="preview-heading">
           <div>
             <h2 id="previewHeading">생성될 파일 미리보기</h2>
-            <p id="previewMeta">A4 1쪽 · 원본 양식 기준</p>
+            <p id="previewMeta">연속 양식 1장 · 기본 4칸</p>
           </div>
           <button class="button button--ghost button--small" id="refreshPreviewButton" type="button">
             미리보기 새로고침
           </button>
         </div>
 
-        <nav class="page-controls" aria-label="미리보기 페이지 이동">
+        <nav class="page-controls" aria-label="미리보기 페이지 이동" hidden>
           <button id="previewPrevButton" type="button" aria-label="이전 페이지">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
           </button>
@@ -236,7 +236,7 @@
             <small class="template-page-number" id="previewPageNumber" hidden></small>
           </article>
         </div>
-        <div class="preview-thumbnails" id="previewThumbnails" aria-label="전체 페이지 목록"></div>
+        <div class="preview-thumbnails" id="previewThumbnails" aria-label="전체 페이지 목록" hidden></div>
       </aside>
     </main>
 

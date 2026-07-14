@@ -1,7 +1,11 @@
 (() => {
   "use strict";
 
-  const ITEMS_PER_PAGE = 4;
+  const BASE_ITEM_SLOTS = 4;
+  const ITEM_COLUMNS = 2;
+  const ITEM_CELL_HEIGHT_MM = 53.2;
+  const DOCUMENT_WIDTH_MM = 210;
+  const BASE_DOCUMENT_HEIGHT_MM = 297;
   const MAX_ITEMS = 40;
   const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
   const SIGNATURE_STORAGE_PREFIX = "goods-inspection.signature.v1.";
@@ -157,7 +161,7 @@
       input.addEventListener("change", (event) => {
         state.countMode = event.target.value;
         if (state.countMode === "manual") {
-          state.manualCount = Math.max(1, state.items.length || state.manualCount || ITEMS_PER_PAGE);
+          state.manualCount = Math.max(1, state.items.length || state.manualCount || BASE_ITEM_SLOTS);
           ensureItemCount(state.manualCount);
         } else {
           syncAutomaticItemCount();
@@ -186,7 +190,7 @@
       state.photos = [];
       state.items = [];
       state.countMode = "auto";
-      state.manualCount = ITEMS_PER_PAGE;
+      state.manualCount = BASE_ITEM_SLOTS;
       state.previewPage = 0;
       resetRoiState();
       if (elements.roiDialog.open) elements.roiDialog.close();
@@ -735,7 +739,21 @@
   }
 
   function getPageCount() {
-    return Math.max(1, Math.ceil(state.items.length / ITEMS_PER_PAGE));
+    return 1;
+  }
+
+  function getPreviewSlotCount() {
+    const usedSlots = Math.max(BASE_ITEM_SLOTS, state.items.length);
+    return Math.ceil(usedSlots / ITEM_COLUMNS) * ITEM_COLUMNS;
+  }
+
+  function getItemRowCount() {
+    return getPreviewSlotCount() / ITEM_COLUMNS;
+  }
+
+  function getDocumentHeightMm() {
+    const extraRows = Math.max(0, getItemRowCount() - BASE_ITEM_SLOTS / ITEM_COLUMNS);
+    return BASE_DOCUMENT_HEIGHT_MM + extraRows * ITEM_CELL_HEIGHT_MM;
   }
 
   function renderAll() {
@@ -756,9 +774,9 @@
     elements.manualItemCount.value = String(state.manualCount);
 
     if (state.countMode === "manual") {
-      elements.autoCountStatus.textContent = `수동으로 ${state.items.length}개 품목 칸을 사용합니다. 페이지당 ${ITEMS_PER_PAGE}개씩 배치됩니다.`;
+      elements.autoCountStatus.textContent = `수동으로 ${state.items.length}개 품목 칸을 사용합니다. 5번째부터 물품 셀 행만 아래로 추가됩니다.`;
     } else if (state.invoiceCandidates.length) {
-      elements.autoCountStatus.textContent = `Invoice에서 ${state.invoiceCandidates.length}개 품목을 감지해 ${getPageCount()}쪽으로 구성했습니다.`;
+      elements.autoCountStatus.textContent = `Invoice에서 ${state.invoiceCandidates.length}개 품목을 감지해 ${getItemRowCount()}개 셀 행으로 구성했습니다.`;
     } else if (state.photos.length) {
       elements.autoCountStatus.textContent = `Invoice 품목을 아직 감지하지 못해 사진 ${state.photos.length}장 기준으로 임시 구성했습니다.`;
     } else {
@@ -894,7 +912,7 @@
   function renderItemRows() {
     elements.itemRows.replaceChildren();
     elements.emptyItems.hidden = state.items.length > 0;
-    elements.itemCounter.textContent = `${state.items.length}개 · ${getPageCount()}쪽`;
+    elements.itemCounter.textContent = `${state.items.length}개 · ${getItemRowCount()}행`;
     elements.addItemButton.disabled = state.items.length >= MAX_ITEMS;
 
     state.items.forEach((item, index) => {
@@ -1074,19 +1092,25 @@
 
   function renderPreview() {
     elements.previewItems.replaceChildren();
-    const pageCount = getPageCount();
-    state.previewPage = Math.min(Math.max(0, state.previewPage), pageCount - 1);
-    const startIndex = state.previewPage * ITEMS_PER_PAGE;
+    state.previewPage = 0;
+    const slotCount = getPreviewSlotCount();
+    const rowCount = getItemRowCount();
+    const documentHeightMm = getDocumentHeightMm();
+    elements.documentPreview.style.aspectRatio = `${DOCUMENT_WIDTH_MM} / ${documentHeightMm}`;
+    elements.previewItems.style.setProperty("--template-row-count", String(rowCount));
+    elements.previewItems.style.setProperty(
+      "--template-grid-aspect",
+      `${DOCUMENT_WIDTH_MM - 25.4} / ${rowCount * ITEM_CELL_HEIGHT_MM}`,
+    );
 
-    for (let index = 0; index < ITEMS_PER_PAGE; index += 1) {
-      const globalIndex = startIndex + index;
-      const item = state.items[globalIndex] || createItem();
+    for (let index = 0; index < slotCount; index += 1) {
+      const item = state.items[index] || createItem();
       const itemElement = document.createElement("div");
       itemElement.className = "template-item";
       const label = document.createElement("div");
       label.className = "template-item__label";
       const name = document.createElement("span");
-      name.textContent = `${globalIndex + 1}. 품명${item.name.trim() ? `: ${item.name.trim()}` : ""}`;
+      name.textContent = `${index + 1}. 품명${item.name.trim() ? `: ${item.name.trim()}` : ""}`;
       const quantity = document.createElement("small");
       quantity.textContent = item.name.trim() ? `수량 ${clampQuantity(item.quantity)}` : "";
       label.append(name, quantity);
@@ -1097,7 +1121,7 @@
       if (photo) {
         const image = document.createElement("img");
         image.src = photo.dataUrl;
-        image.alt = `${globalIndex + 1}번 ${item.name || "물품"} 사진`;
+        image.alt = `${index + 1}번 ${item.name || "물품"} 사진`;
         photoBox.append(image);
       } else {
         photoBox.textContent = "사진을 추가하세요";
@@ -1106,13 +1130,13 @@
       elements.previewItems.append(itemElement);
     }
 
-    elements.previewMeta.textContent = `A4 ${pageCount}쪽 · 페이지당 ${ITEMS_PER_PAGE}개 품목`;
-    elements.previewPageIndicator.textContent = `${state.previewPage + 1} / ${pageCount}`;
-    elements.previewPrevButton.disabled = state.previewPage === 0;
-    elements.previewNextButton.disabled = state.previewPage >= pageCount - 1;
-    elements.documentPreview.setAttribute("aria-label", `물품검수확인서 ${state.previewPage + 1}페이지 미리보기`);
-    elements.previewPageNumber.textContent = `${state.previewPage + 1} / ${pageCount}`;
-    elements.previewPageNumber.hidden = pageCount === 1;
+    elements.previewMeta.textContent = `연속 양식 1장 · ${state.items.length}개 품목 · ${rowCount}개 셀 행`;
+    elements.previewPageIndicator.textContent = "1 / 1";
+    elements.previewPrevButton.disabled = true;
+    elements.previewNextButton.disabled = true;
+    elements.documentPreview.setAttribute("aria-label", `물품검수확인서 연속 양식 미리보기, ${rowCount}개 셀 행`);
+    elements.previewPageNumber.hidden = true;
+    elements.previewThumbnails.hidden = true;
     elements.previewDate.textContent = formatKoreanDate(state.inspectionDate);
     const reviewer = getSelectedReviewer();
     elements.previewReviewerName.textContent = reviewer?.name || "검수자 미선택";
@@ -1125,32 +1149,7 @@
       elements.previewSignature.hidden = true;
     }
 
-    renderPreviewThumbnails(pageCount);
-  }
-
-  function renderPreviewThumbnails(pageCount) {
     elements.previewThumbnails.replaceChildren();
-    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
-      const start = pageIndex * ITEMS_PER_PAGE;
-      const pageItems = state.items.slice(start, start + ITEMS_PER_PAGE);
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `preview-thumbnail${pageIndex === state.previewPage ? " is-selected" : ""}`;
-      button.setAttribute("aria-pressed", String(pageIndex === state.previewPage));
-      button.setAttribute("aria-label", `${pageIndex + 1}페이지 미리보기`);
-      const title = document.createElement("strong");
-      title.textContent = `페이지 ${pageIndex + 1}`;
-      const summary = document.createElement("span");
-      summary.textContent = pageItems.length
-        ? pageItems.map((item, itemIndex) => `${start + itemIndex + 1}. ${item.name.trim() || "품목명 미입력"}`).join(" · ")
-        : "비어 있는 페이지";
-      button.append(title, summary);
-      button.addEventListener("click", () => {
-        state.previewPage = pageIndex;
-        renderPreview();
-      });
-      elements.previewThumbnails.append(button);
-    }
   }
 
   function updateValidation() {
@@ -1172,7 +1171,7 @@
       elements.readyStateTitle.textContent = "모든 항목이 준비되었습니다";
       elements.readyStateDetail.textContent = "PDF로 바로 내보낼 수 있습니다";
       elements.validationTitle.textContent = "내보낼 준비가 되었습니다";
-      elements.validationMessage.textContent = `${state.items.length}개 품목 · A4 ${getPageCount()}쪽 · ${getSelectedReviewer().name} 검수`;
+      elements.validationMessage.textContent = `${state.items.length}개 품목 · 연속 양식 1장 · ${getSelectedReviewer().name} 검수`;
     } else {
       elements.readyStateTitle.textContent = "자료를 확인해 주세요";
       elements.readyStateDetail.textContent = `${uniqueIssues.join(", ")} 입력이 필요합니다`;
@@ -1203,18 +1202,16 @@
       pdfDocument.setTitle("물품검수확인서");
       pdfDocument.setSubject("가천대학교 물품검수 확인 문서");
       pdfDocument.setCreator("물품검수 확인서 생성 정적 웹 도구");
-      const pageCount = getPageCount();
-
-      for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
-        elements.exportLabel.textContent = `${pageIndex + 1} / ${pageCount} 페이지 생성 중…`;
-        const canvas = await renderDocumentCanvas(pageIndex, pageCount);
-        const imageBytes = await canvasToJpegBytes(canvas, 0.97);
-        const page = pdfDocument.addPage([595.28, 841.89]);
-        const image = await pdfDocument.embedJpg(imageBytes);
-        page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
-        canvas.width = 1;
-        canvas.height = 1;
-      }
+      const documentHeightMm = getDocumentHeightMm();
+      const pageHeightPoints = 595.28 * (documentHeightMm / DOCUMENT_WIDTH_MM);
+      elements.exportLabel.textContent = "연속 양식 생성 중…";
+      const canvas = await renderDocumentCanvas();
+      const imageBytes = await canvasToJpegBytes(canvas, 0.97);
+      const page = pdfDocument.addPage([595.28, pageHeightPoints]);
+      const image = await pdfDocument.embedJpg(imageBytes);
+      page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
+      canvas.width = 1;
+      canvas.height = 1;
 
       const bytes = await pdfDocument.save();
       const reviewer = getSelectedReviewer();
@@ -1231,9 +1228,10 @@
     }
   }
 
-  async function renderDocumentCanvas(pageIndex, pageCount) {
+  async function renderDocumentCanvas() {
     const width = 2480;
-    const height = 3508;
+    const documentHeightMm = getDocumentHeightMm();
+    const height = Math.round(width * (documentHeightMm / DOCUMENT_WIDTH_MM));
     const scale = width / 210;
     const mm = (value) => value * scale;
     const canvas = document.createElement("canvas");
@@ -1251,13 +1249,13 @@
 
     const reviewer = getSelectedReviewer();
     const signatureDataUrl = reviewer ? readStoredSignature(reviewer.id) : "";
-    const pageStartIndex = pageIndex * ITEMS_PER_PAGE;
-    const pageItems = state.items.slice(pageStartIndex, pageStartIndex + ITEMS_PER_PAGE);
+    const slotCount = getPreviewSlotCount();
+    const rowCount = getItemRowCount();
     const [logo, seal, signature, ...itemImages] = await Promise.all([
       safeLoadImage("./assets/gachon-logo.png"),
       safeLoadImage("./assets/gachon-seal.png"),
       safeLoadImage(signatureDataUrl),
-      ...Array.from({ length: ITEMS_PER_PAGE }, (_, index) => safeLoadImage(getPhoto(pageItems[index]?.photoId)?.dataUrl || "")),
+      ...Array.from({ length: slotCount }, (_, index) => safeLoadImage(getPhoto(state.items[index]?.photoId)?.dataUrl || "")),
     ]);
 
     drawCenteredText(context, "‘2027 TOP 10’ 글로벌 명문 도약", mm(105), mm(17), 12, "400", scale);
@@ -1274,20 +1272,18 @@
     drawCenteredText(context, "물품 사진", mm(105), mm(54), 12, "700", scale);
     drawCenteredText(context, "(※ 거래명세서 순서대로 사진을 첨부하세요.)", mm(105), mm(60.5), 9.5, "700", scale);
 
-    const gap = 2.2;
-    const cellWidth = (contentWidth - gap) / 2;
+    const cellWidth = contentWidth / ITEM_COLUMNS;
     const labelHeight = 10.5;
     const photoHeight = 42.7;
     const blockHeight = labelHeight + photoHeight;
     const gridStartY = 65;
 
-    for (let index = 0; index < ITEMS_PER_PAGE; index += 1) {
-      const globalIndex = pageStartIndex + index;
-      const column = index % 2;
-      const row = Math.floor(index / 2);
-      const x = left + column * (cellWidth + gap);
-      const y = gridStartY + row * (blockHeight + 2.2);
-      const item = pageItems[index] || createItem();
+    for (let index = 0; index < slotCount; index += 1) {
+      const column = index % ITEM_COLUMNS;
+      const row = Math.floor(index / ITEM_COLUMNS);
+      const x = left + column * cellWidth;
+      const y = gridStartY + row * blockHeight;
+      const item = state.items[index] || createItem();
 
       context.strokeRect(mm(x), mm(y), mm(cellWidth), mm(blockHeight));
       context.beginPath();
@@ -1295,7 +1291,7 @@
       context.lineTo(mm(x + cellWidth), mm(y + labelHeight));
       context.stroke();
 
-      const labelText = `${globalIndex + 1}. 품명${item.name.trim() ? `: ${item.name.trim()}` : ""}`;
+      const labelText = `${index + 1}. 품명${item.name.trim() ? `: ${item.name.trim()}` : ""}`;
       drawFitText(context, labelText, mm(x + 3), mm(y + labelHeight / 2), mm(cellWidth - 24), 10.5, 7, "700", "left", scale);
       if (item.name.trim()) drawText(context, `수량 ${clampQuantity(item.quantity)}`, mm(x + cellWidth - 3), mm(y + labelHeight / 2), 8.5, "400", "right", scale);
 
@@ -1305,16 +1301,16 @@
       }
     }
 
-    drawCenteredText(context, "상기와 같이 신청 물품이 동일함을 확인하였습니다.", mm(105), mm(195), 11, "400", scale);
-    drawCenteredText(context, formatKoreanDate(state.inspectionDate), mm(105), mm(215), 11, "700", scale);
+    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * blockHeight;
+    drawCenteredText(context, "상기와 같이 신청 물품이 동일함을 확인하였습니다.", mm(105), mm(195 + extraHeight), 11, "400", scale);
+    drawCenteredText(context, formatKoreanDate(state.inspectionDate), mm(105), mm(215 + extraHeight), 11, "700", scale);
 
-    drawText(context, "물품 검수자:", mm(127), mm(236), 11, "700", "left", scale);
-    drawText(context, reviewer?.name || "", mm(164), mm(236), 11, "700", "center", scale);
-    drawText(context, "(인)", mm(187), mm(236), 11, "700", "center", scale);
-    if (signature) drawImageContain(context, signature, mm(176), mm(230), mm(22), mm(12), 0.92);
+    drawText(context, "물품 검수자:", mm(127), mm(236 + extraHeight), 11, "700", "left", scale);
+    drawText(context, reviewer?.name || "", mm(164), mm(236 + extraHeight), 11, "700", "center", scale);
+    drawText(context, "(인)", mm(187), mm(236 + extraHeight), 11, "700", "center", scale);
+    if (signature) drawImageContain(context, signature, mm(176), mm(230 + extraHeight), mm(22), mm(12), 0.92);
 
-    drawText(context, "가천대학교 총장 귀하", mm(18), mm(278), 19, "700", "left", scale);
-    if (pageCount > 1) drawText(context, `${pageIndex + 1} / ${pageCount}`, mm(192), mm(278), 8, "400", "right", scale);
+    drawText(context, "가천대학교 총장 귀하", mm(18), mm(278 + extraHeight), 19, "700", "left", scale);
     return canvas;
   }
 
