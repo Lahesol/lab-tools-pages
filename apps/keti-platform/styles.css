@@ -1027,7 +1027,7 @@ input[type="file"] {
 }
 
 #ppgCnnCanvas {
-  height: 220px;
+  height: 260px;
 }
 
 .ppg-model-title {
@@ -1036,6 +1036,96 @@ input[type="file"] {
 
 .ppg-cnn-title {
   margin-top: 14px;
+}
+
+.compact-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.compact-inline select {
+  min-width: 150px;
+  max-width: 100%;
+  height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ppg-model-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ppg-compare-card {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.ppg-compare-card.conv1d {
+  border-color: #e4b260;
+}
+
+.ppg-compare-card.regression {
+  border-color: #8ab8d8;
+}
+
+.ppg-compare-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.ppg-compare-head strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.ppg-compare-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.ppg-compare-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.45fr) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.ppg-compare-row span:first-child {
+  font-weight: 800;
+}
+
+.ppg-compare-row span:last-child {
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .file-button {
@@ -1065,6 +1155,12 @@ input[type="file"] {
   display: grid;
   gap: 8px;
   margin-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .ppg-model-compare {
+    grid-template-columns: 1fr;
+  }
 }
 
 .dataset-label-row,

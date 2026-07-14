@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=b3fc2bb1ad9a" />
+    <link rel="stylesheet" href="styles.css?v=09e3957e159a" />
   </head>
   <body>
     <div class="app-shell">
@@ -217,7 +217,7 @@
             <div class="lab-view-header">
               <div>
                 <h2>PPG HR / HRV</h2>
-                <p>Browser-side CNN peak HRV and ridge regression HR from ADC PPG windows</p>
+                <p>Browser-side Conv1D peak HRV and ridge regression HR from ADC PPG windows</p>
               </div>
               <div class="summary-stack">
                 <strong id="ppgStatus">No data</strong>
@@ -252,13 +252,14 @@
                 </div>
 
                 <label class="field">
-                  <span>CNN Threshold</span>
+                  <span>Peak Threshold</span>
                   <div class="inline-input">
                     <input id="ppgThresholdInput" type="range" min="0.10" max="0.90" step="0.01" value="0.42" />
                     <output id="ppgThresholdOutput">0.42</output>
                   </div>
                 </label>
 
+                <div id="ppgModelCompare" class="ppg-model-compare" aria-label="PPG model comparison"></div>
                 <div id="ppgMetrics" class="model-metrics"></div>
 
                 <div class="section-title compact-title ppg-model-title">
@@ -275,10 +276,19 @@
                 </div>
                 <canvas id="ppgCanvas" width="1000" height="300" aria-label="PPG signal and detected pulse peaks"></canvas>
                 <div class="section-title compact-title ppg-cnn-title">
-                  <h3>CNN Detector</h3>
-                  <span id="ppgCnnState">Idle</span>
+                  <h3>Conv1D Peak Detector</h3>
+                  <div class="compact-inline">
+                    <select id="ppgLayerViewSelect" aria-label="Conv1D layer data view">
+                      <option value="all">All layers</option>
+                      <option value="input">Input waveform</option>
+                      <option value="conv">Conv1D raw maps</option>
+                      <option value="relu">ReLU feature maps</option>
+                      <option value="pool">Pool + score</option>
+                    </select>
+                    <span id="ppgCnnState">Idle</span>
+                  </div>
                 </div>
-                <canvas id="ppgCnnCanvas" width="1000" height="220" aria-label="PPG 1D CNN pulse score"></canvas>
+                <canvas id="ppgCnnCanvas" width="1000" height="260" aria-label="PPG Conv1D layer data plot"></canvas>
               </section>
             </div>
           </section>
@@ -716,6 +726,6 @@
     <script src="models/ppg_hr_cnn_model.js"></script>
     <script src="models/ppg_hr_regression_model.js"></script>
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=067523728fea"></script>
+    <script src="app.js?v=56ee05625669"></script>
   </body>
 </html>

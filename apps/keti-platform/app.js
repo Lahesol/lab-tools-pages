@@ -425,6 +425,8 @@ const el = {
   ppgRefractoryInput: document.getElementById("ppgRefractoryInput"),
   ppgThresholdInput: document.getElementById("ppgThresholdInput"),
   ppgThresholdOutput: document.getElementById("ppgThresholdOutput"),
+  ppgLayerViewSelect: document.getElementById("ppgLayerViewSelect"),
+  ppgModelCompare: document.getElementById("ppgModelCompare"),
   ppgMetrics: document.getElementById("ppgMetrics"),
   ppgCanvas: document.getElementById("ppgCanvas"),
   ppgModelCanvas: document.getElementById("ppgModelCanvas"),
@@ -5243,6 +5245,72 @@ function formatPpgRegressionDataset(model = getPpgRegressionModel()) {
   return String(dataset);
 }
 
+function ppgCompareRow(label, value) {
+  const row = document.createElement("div");
+  row.className = "ppg-compare-row";
+  const labelNode = document.createElement("span");
+  labelNode.textContent = label;
+  const valueNode = document.createElement("span");
+  valueNode.textContent = value;
+  row.append(labelNode, valueNode);
+  return row;
+}
+
+function ppgCompareCard(kind, title, badge, rows) {
+  const card = document.createElement("div");
+  card.className = `ppg-compare-card ${kind}`.trim();
+  const head = document.createElement("div");
+  head.className = "ppg-compare-head";
+  const titleNode = document.createElement("strong");
+  titleNode.textContent = title;
+  const badgeNode = document.createElement("span");
+  badgeNode.className = "ppg-compare-badge";
+  badgeNode.textContent = badge;
+  head.append(titleNode, badgeNode);
+  card.append(head, ...rows.map(([label, value]) => ppgCompareRow(label, value)));
+  return card;
+}
+
+function renderPpgModelComparison(analysis = state.ppg.analysis) {
+  if (!el.ppgModelCompare) {
+    return;
+  }
+  const options = getPpgOptions();
+  const cnnModel = getPpgCnnModel();
+  const regressionModel = getPpgRegressionModel();
+  const cnnRateHz = getPpgModelSampleRateHz(cnnModel);
+  const regressionRateHz = getPpgRegressionSampleRateHz(regressionModel);
+  const regressionWindowSec = getPpgRegressionWindowSec(regressionModel);
+  const cnnSamples = analysis?.modelInput?.samples?.length || Math.ceil(cnnRateHz * options.durationSec);
+  const regressionSamples = analysis?.regression?.samples || Math.ceil(regressionRateHz * regressionWindowSec);
+  const cnnHr = analysis?.hrv?.hrBpm;
+  const regressionHr = analysis?.regression?.hrBpm;
+  const diff = Number.isFinite(cnnHr) && Number.isFinite(regressionHr) ? cnnHr - regressionHr : NaN;
+  const cnnMetric = Number.isFinite(cnnHr)
+    ? `${cnnHr.toFixed(1)} bpm, ${analysis.peaks.length} peaks`
+    : "waiting for peak window";
+  const regressionMetric = Number.isFinite(regressionHr)
+    ? `${regressionHr.toFixed(1)} bpm${Number.isFinite(diff) ? `, diff ${diff.toFixed(1)} bpm` : ""}`
+    : analysis?.regression?.error || "waiting for 15 s window";
+
+  el.ppgModelCompare.replaceChildren(
+    ppgCompareCard("conv1d", "Conv1D Peak Detector", "CNN-like path", [
+      ["Input", `${cnnSamples} samples @ ${cnnRateHz.toFixed(0)} Hz`],
+      ["Learns", "Pulse-shape templates from HR-derived pseudo peaks"],
+      ["Output", "Peak score -> IBI -> HR, RMSSD, SDNN, pNN50"],
+      ["Now", cnnMetric],
+      ["Limit", "Not an end-to-end trained HR regression CNN"]
+    ]),
+    ppgCompareCard("regression", "Ridge Regression", "Direct HR path", [
+      ["Input", `${regressionSamples} samples -> ${regressionModel.featureCount || "--"} features`],
+      ["Learns", "Window-level HR labels from PPG-DaLiA"],
+      ["Output", "One HR bpm estimate; no beat intervals"],
+      ["Now", regressionMetric],
+      ["Limit", "No HRV because beat timing is not estimated"]
+    ])
+  );
+}
+
 function shortPpgLabel(text, maxChars = 54) {
   const value = String(text || "");
   if (value.length <= maxChars) {
@@ -5526,20 +5594,30 @@ function runPpgCnnDetector(processed, sampleRateHz) {
     filters = getPpgModelConvFilters(PPG_WEB_CNN_FALLBACK_MODEL);
   }
   const startedAt = performance.now();
-  const featureMaps = filters.map((filter) => (
-    convolveSame(processed, filter.weights).map((value) => Math.max(0, value + filter.bias))
-  ));
+  const convMaps = filters.map((filter) => convolveSame(processed, filter.weights));
+  const reluMaps = convMaps.map((map, mapIndex) => {
+    const bias = filters[mapIndex].bias;
+    return map.map((value) => Math.max(0, value + bias));
+  });
   const fused = processed.map((_, index) => (
-    featureMaps.reduce((sum, map) => sum + map[index], 0) / featureMaps.length
+    reluMaps.reduce((sum, map) => sum + map[index], 0) / reluMaps.length
   ));
   const pooled = movingAverage(fused, getPpgModelPoolingRadiusSamples(model, sampleRateHz));
+  const score = normalizeUnit(pooled);
   return {
     modelId: model.id || "ppg_cnn",
     modelVersion: model.version || "",
     kernels: filters.map((filter) => filter.weights.length),
     filterNames: filters.map((filter) => filter.name),
     sampleRateHz,
-    score: normalizeUnit(pooled),
+    score,
+    layers: {
+      convMaps,
+      reluMaps,
+      fused,
+      pooled,
+      score
+    },
     inferenceMs: performance.now() - startedAt
   };
 }
@@ -5829,6 +5907,7 @@ function renderPpgView() {
     : liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm`
     : `${sampleCount} samples`;
   el.ppgThresholdOutput.textContent = Number(el.ppgThresholdInput.value).toFixed(2);
+  renderPpgModelComparison(analysis);
 
   if (!analysis) {
     const options = getPpgOptions();
@@ -5849,11 +5928,11 @@ function renderPpgView() {
       : sampleCount > 0 ? "Ready to analyze" : "No window";
     el.ppgCnnState.textContent = isLive
       ? `Waiting for ${modelRateHz.toFixed(0)} Hz model input`
-      : `${model.id || "Web CNN"} idle`;
-    el.ppgModelState.textContent = `${options.durationSec.toFixed(0)} s -> ${targetCnnSamples} CNN samples`;
+      : `${model.id || "Conv1D peak detector"} idle`;
+    el.ppgModelState.textContent = `${options.durationSec.toFixed(0)} s -> ${targetCnnSamples} Conv1D samples`;
     el.ppgMetrics.replaceChildren(
       metricRow("Sample Rate", `${Number(el.ppgSampleRateInput.value || state.ppg.sampleRateHz).toFixed(1)} Hz`),
-      metricRow("Web Model", `${modelRateHz.toFixed(0)} Hz Conv1D detector`),
+      metricRow("Peak Path", `${modelRateHz.toFixed(0)} Hz Conv1D peak detector`),
       metricRow("Regression Model", formatPpgRegressionStatus(regressionModel)),
       metricRow("Regression Dataset", formatPpgRegressionDataset(regressionModel)),
       metricRow("Regression Input", `${regressionSamples} samples / ${regressionWindowSec.toFixed(0)} s`),
@@ -5864,7 +5943,7 @@ function renderPpgView() {
       metricRow("Reference Data", formatPpgReferenceDataset(model)),
       metricRow("Model Window", `min ${modelMinSec.toFixed(0)} s / rec ${modelRecommendedSec.toFixed(0)} s`),
       metricRow("ADC Window", `${targetAdcSamples} samples / ${options.durationSec.toFixed(0)} s`),
-      metricRow("CNN Window", `${targetCnnSamples} samples / ${options.durationSec.toFixed(0)} s`),
+      metricRow("Conv1D Window", `${targetCnnSamples} samples / ${options.durationSec.toFixed(0)} s`),
       metricRow("Window", `${safeMetric(windowSamples, 0)} / ${Math.ceil(options.sampleRateHz * options.durationSec)}`),
       metricRow("ADC Source", state.ppg.signalSource || "--"),
       metricRow("Last HR", liveHr && Number.isFinite(liveHr.hrBpm) ? `${liveHr.hrBpm.toFixed(1)} bpm` : "--"),
@@ -5884,9 +5963,9 @@ function renderPpgView() {
   const regression = analysis.regression;
   const modelMinSec = getPpgModelMinWindowSec(analysis.modelInput.model);
   const modelRecommendedSec = normalizeNumber(analysis.modelInput.model.recommendedWindowSec, 30, modelMinSec, 180);
-  el.ppgWindowState.textContent = `${analysis.modelInput.samples.length} CNN samples / ${analysis.window.length} ADC samples - ${analysis.modelInput.durationSec.toFixed(1)} s`;
+  el.ppgWindowState.textContent = `${analysis.modelInput.samples.length} Conv1D samples / ${analysis.window.length} ADC samples - ${analysis.modelInput.durationSec.toFixed(1)} s`;
   el.ppgCnnState.textContent = `${analysis.cnn.modelId} @ ${analysis.modelInput.sampleRateHz.toFixed(0)} Hz`;
-  el.ppgModelState.textContent = `${analysis.window.length} ADC -> ${analysis.modelInput.samples.length} CNN samples`;
+  el.ppgModelState.textContent = `${analysis.window.length} ADC -> ${analysis.modelInput.samples.length} Conv1D samples`;
   const rows = [
     metricRow("Peak HR", safeMetric(hrv.hrBpm, 1, " bpm")),
     metricRow("Regression HR", regression?.available ? safeMetric(regression.hrBpm, 1, " bpm") : regression?.error || "--"),
@@ -5993,10 +6072,10 @@ function drawPpgModelDiagram(analysis = state.ppg.analysis) {
   const nodes = [
     { title: "ADC Window", lines: [`${durationSec.toFixed(1)} s`, `${adcSamples} samples`, `${sourceRateHz.toFixed(1)} Hz source`], color: "#008c8c" },
     { title: "Resample", lines: [resampleLabel, "linear interpolation", "browser side"], color: "#2767c9" },
-    { title: "32 Hz Input", lines: [`CNN ${cnnSamples} x 1`, `Ridge ${regressionWindowSec.toFixed(0)} s`, `${regressionFeatureCount || "--"} features`], color: "#008c8c" },
+    { title: "32 Hz Input", lines: [`Conv1D ${cnnSamples} x 1`, `Ridge ${regressionWindowSec.toFixed(0)} s`, `${regressionFeatureCount || "--"} features`], color: "#008c8c" },
     { title: "Conv1D Path", lines: [`${filters.length} filters`, `kernel ${filterShape || "--"}`, "ReLU"], color: "#d28a00" },
     { title: "Peak Score", lines: ["avg pool", "0..1 score", `gate ${options.threshold.toFixed(2)}`], color: "#7b5fb2" },
-    { title: "HR Compare", lines: ["CNN IBI HR/HRV", "Ridge direct HR", "compare bpm"], color: "#008c8c" }
+    { title: "HR Compare", lines: ["Peak IBI HR/HRV", "Ridge direct HR", "compare bpm"], color: "#008c8c" }
   ];
 
   modelCtx.clearRect(0, 0, width, height);
@@ -6016,7 +6095,7 @@ function drawPpgModelDiagram(analysis = state.ppg.analysis) {
   modelCtx.fillStyle = "#17202a";
   modelCtx.font = "800 13px Segoe UI, Arial, sans-serif";
   modelCtx.textAlign = "left";
-  modelCtx.fillText(`${model.id || "PPG Web CNN"} v${model.version || ""}`, pad, pad + 6);
+  modelCtx.fillText(`PPG comparison: Conv1D peak detector + ridge regression`, pad, pad + 6);
   modelCtx.fillStyle = "#637083";
   modelCtx.font = "11px Segoe UI, Arial, sans-serif";
   modelCtx.fillText(`Training: ${shortPpgLabel(formatPpgTrainingStatus(model), 62)}`, pad, pad + 22);
@@ -6149,10 +6228,10 @@ function drawPpgCnnArchitecture() {
   const layers = [
     { label: "ADC", value: "raw window", color: "#008c8c" },
     { label: "Resample", value: `${modelRateHz.toFixed(0)} Hz`, color: "#2767c9" },
-    { label: "Conv1D", value: `${filters.length} filters`, color: "#d28a00" },
+    { label: "Conv1D", value: "peak filters", color: "#d28a00" },
     { label: "ReLU + Pool", value: "score map", color: "#7b5fb2" },
     { label: "Peak Gate", value: "IBI", color: "#2767c9" },
-    { label: "HRV", value: "RMSSD/SDNN", color: "#008c8c" }
+    { label: "HR/HRV", value: "from intervals", color: "#008c8c" }
   ];
   const gap = (width - 80) / Math.max(1, layers.length - 1);
   const y = height / 2;
@@ -6179,46 +6258,152 @@ function drawPpgCnnArchitecture() {
   cnnCtx.textAlign = "start";
 }
 
+const PPG_LAYER_COLORS = ["#2767c9", "#d28a00", "#008c8c", "#7b5fb2", "#c74343"];
+
+function finiteLayerValues(series) {
+  return series.flatMap((item) => item.values).filter(Number.isFinite);
+}
+
+function layerBounds(series, fallbackMin = -1, fallbackMax = 1) {
+  const values = finiteLayerValues(series);
+  if (!values.length) {
+    return { min: fallbackMin, max: fallbackMax };
+  }
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (Math.abs(max - min) < 1e-9) {
+    min -= 1;
+    max += 1;
+  }
+  const pad = (max - min) * 0.08;
+  return { min: min - pad, max: max + pad };
+}
+
+function drawPpgLayerPanel(targetCtx, width, top, height, title, series, options = {}) {
+  const pad = { left: 46, right: 14, top: 18, bottom: 18 };
+  const plotLeft = pad.left;
+  const plotTop = top + pad.top;
+  const plotWidth = Math.max(10, width - pad.left - pad.right);
+  const plotHeight = Math.max(10, height - pad.top - pad.bottom);
+  const bounds = options.bounds || layerBounds(series);
+  const span = Math.max(1e-9, bounds.max - bounds.min);
+
+  targetCtx.fillStyle = "#17202a";
+  targetCtx.font = "800 11px Segoe UI, Arial, sans-serif";
+  targetCtx.textAlign = "left";
+  targetCtx.fillText(title, 10, top + 12);
+
+  targetCtx.strokeStyle = "#d7dee8";
+  targetCtx.lineWidth = 1;
+  targetCtx.beginPath();
+  for (let index = 0; index <= 2; index++) {
+    const y = plotTop + (plotHeight * index) / 2;
+    targetCtx.moveTo(plotLeft, y);
+    targetCtx.lineTo(width - pad.right, y);
+  }
+  for (let index = 0; index <= 4; index++) {
+    const x = plotLeft + (plotWidth * index) / 4;
+    targetCtx.moveTo(x, plotTop);
+    targetCtx.lineTo(x, plotTop + plotHeight);
+  }
+  targetCtx.stroke();
+  targetCtx.strokeStyle = "#bdc8d5";
+  targetCtx.strokeRect(plotLeft, plotTop, plotWidth, plotHeight);
+
+  targetCtx.fillStyle = "#637083";
+  targetCtx.font = "10px Segoe UI, Arial, sans-serif";
+  targetCtx.fillText(bounds.max.toFixed(Math.abs(bounds.max) >= 10 ? 0 : 2), 6, plotTop + 8);
+  targetCtx.fillText(bounds.min.toFixed(Math.abs(bounds.min) >= 10 ? 0 : 2), 6, plotTop + plotHeight);
+
+  series.forEach((item) => {
+    const values = item.values || [];
+    if (values.length < 2) {
+      return;
+    }
+    targetCtx.strokeStyle = item.color;
+    targetCtx.lineWidth = item.width || 1.4;
+    targetCtx.beginPath();
+    values.forEach((value, index) => {
+      const x = plotLeft + (plotWidth * index) / Math.max(1, values.length - 1);
+      const y = plotTop + plotHeight - ((value - bounds.min) / span) * plotHeight;
+      if (index === 0) {
+        targetCtx.moveTo(x, y);
+      } else {
+        targetCtx.lineTo(x, y);
+      }
+    });
+    targetCtx.stroke();
+  });
+
+  if (Number.isFinite(options.threshold) && bounds.min <= options.threshold && bounds.max >= options.threshold) {
+    const thresholdY = plotTop + plotHeight - ((options.threshold - bounds.min) / span) * plotHeight;
+    targetCtx.strokeStyle = "#c74343";
+    targetCtx.setLineDash([5, 4]);
+    targetCtx.beginPath();
+    targetCtx.moveTo(plotLeft, thresholdY);
+    targetCtx.lineTo(width - pad.right, thresholdY);
+    targetCtx.stroke();
+    targetCtx.setLineDash([]);
+  }
+
+  const legendItems = series.slice(0, 4).map((item) => ({ color: item.color, label: item.label }));
+  if (legendItems.length) {
+    drawLegendOn(targetCtx, legendItems, plotLeft + 8, plotTop + 16, {
+      swatchWidth: 12,
+      textOffset: 16,
+      font: "10px Segoe UI, Arial, sans-serif",
+      itemSpacing: 90
+    });
+  }
+}
+
+function ppgFilterMapSeries(maps, names, prefix) {
+  return maps.map((values, index) => ({
+    label: names[index] ? `${prefix}${index + 1}` : `${prefix}${index + 1}`,
+    values,
+    color: PPG_LAYER_COLORS[index % PPG_LAYER_COLORS.length],
+    width: 1.2
+  }));
+}
+
 function drawPpgCnnScorePlot() {
   const analysis = state.ppg.analysis;
   if (!analysis) {
     drawPpgCnnArchitecture();
     return;
   }
-  const { ctx: cnnCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgCnnCanvas, 180);
-  const pad = { left: 44, right: 16, top: 18, bottom: 30 };
-  const plotWidth = width - pad.left - pad.right;
-  const plotHeight = height - pad.top - pad.bottom;
+  const { ctx: cnnCtx, width, height } = resizeAuxCanvasToDisplaySize(el.ppgCnnCanvas, 240);
   cnnCtx.clearRect(0, 0, width, height);
   cnnCtx.fillStyle = "#ffffff";
   cnnCtx.fillRect(0, 0, width, height);
-  drawGridOn(cnnCtx, width, height, pad, plotWidth, plotHeight);
-  const score = analysis.cnn.score;
-  cnnCtx.strokeStyle = "#2767c9";
-  cnnCtx.lineWidth = 1.8;
-  cnnCtx.beginPath();
-  score.forEach((value, index) => {
-    const x = pad.left + (plotWidth * index) / Math.max(1, score.length - 1);
-    const y = pad.top + plotHeight - value * plotHeight;
-    if (index === 0) {
-      cnnCtx.moveTo(x, y);
-    } else {
-      cnnCtx.lineTo(x, y);
-    }
-  });
-  cnnCtx.stroke();
-  const thresholdY = pad.top + plotHeight - analysis.options.threshold * plotHeight;
-  cnnCtx.strokeStyle = "#d28a00";
-  cnnCtx.setLineDash([6, 5]);
-  cnnCtx.beginPath();
-  cnnCtx.moveTo(pad.left, thresholdY);
-  cnnCtx.lineTo(width - pad.right, thresholdY);
-  cnnCtx.stroke();
-  cnnCtx.setLineDash([]);
-  drawLegendOn(cnnCtx, [
-    { color: "#2767c9", label: "score" },
-    { color: "#d28a00", label: "gate" }
-  ], pad.left + 8, pad.top + 18);
+  const layerView = el.ppgLayerViewSelect?.value || "all";
+  const layerData = analysis.cnn.layers || {};
+  const filterNames = analysis.cnn.filterNames || [];
+  const convSeries = ppgFilterMapSeries(layerData.convMaps || [], filterNames, "conv");
+  const reluSeries = ppgFilterMapSeries(layerData.reluMaps || [], filterNames, "relu");
+  const poolSeries = [
+    { label: "fused", values: normalizeUnit(layerData.fused || []), color: "#008c8c", width: 1.2 },
+    { label: "pooled", values: normalizeUnit(layerData.pooled || []), color: "#7b5fb2", width: 1.4 },
+    { label: "score", values: analysis.cnn.score || [], color: "#2767c9", width: 1.8 }
+  ];
+  const inputSeries = [{ label: "z-score", values: analysis.processed, color: "#17202a", width: 1.2 }];
+
+  if (layerView === "input") {
+    drawPpgLayerPanel(cnnCtx, width, 0, height, "Layer 0 - processed input waveform", inputSeries);
+  } else if (layerView === "conv") {
+    drawPpgLayerPanel(cnnCtx, width, 0, height, "Layer 1 - Conv1D raw feature maps", convSeries);
+  } else if (layerView === "relu") {
+    drawPpgLayerPanel(cnnCtx, width, 0, height, "Layer 2 - ReLU activated feature maps", reluSeries, { bounds: layerBounds(reluSeries, 0, 1) });
+  } else if (layerView === "pool") {
+    drawPpgLayerPanel(cnnCtx, width, 0, height, "Layer 3/4 - fused, pooled, normalized peak score", poolSeries, { bounds: { min: 0, max: 1 }, threshold: analysis.options.threshold });
+  } else {
+    const gap = 8;
+    const panelHeight = (height - gap * 3) / 4;
+    drawPpgLayerPanel(cnnCtx, width, 0, panelHeight, "Layer 0 - processed input", inputSeries);
+    drawPpgLayerPanel(cnnCtx, width, panelHeight + gap, panelHeight, "Layer 1 - Conv1D raw maps", convSeries);
+    drawPpgLayerPanel(cnnCtx, width, (panelHeight + gap) * 2, panelHeight, "Layer 2 - ReLU maps", reluSeries, { bounds: layerBounds(reluSeries, 0, 1) });
+    drawPpgLayerPanel(cnnCtx, width, (panelHeight + gap) * 3, panelHeight, "Layer 3/4 - pool + peak score", poolSeries, { bounds: { min: 0, max: 1 }, threshold: analysis.options.threshold });
+  }
 }
 
 function setActiveView(view) {
@@ -7730,6 +7915,9 @@ function bindEvents() {
       }
     }
     setUiEnabled();
+  });
+  el.ppgLayerViewSelect.addEventListener("change", () => {
+    drawPpgCnnScorePlot();
   });
   [el.datasetWindowInput, el.datasetStrideInput, el.datasetFeatureSelect, el.datasetSourceSelect].forEach((node) => {
     node.addEventListener("input", () => {
