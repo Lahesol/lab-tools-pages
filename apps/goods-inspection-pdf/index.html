@@ -10,10 +10,11 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=303952114005" />
+    <link rel="stylesheet" href="./styles.css?v=b0e2779ab21c" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
+    <script defer src="./vendor/tesseract/tesseract.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=07eb4070faa7"></script>
+    <script defer src="./app.js?v=ede72efbc776"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -81,7 +82,7 @@
 
         <ol class="step-list" start="2">
           <li><span>2</span><strong>물품 정보</strong></li>
-          <li><span>3</span><strong>검수자 선택</strong></li>
+          <li><span>3</span><strong>검수자 입력</strong></li>
           <li><span>4</span><strong>검토 및 내보내기</strong></li>
         </ol>
 
@@ -175,15 +176,33 @@
         <section class="inspector-section" aria-labelledby="inspectorHeading">
           <div class="section-heading section-heading--compact">
             <div>
-              <h2 id="inspectorHeading">검수자 선택</h2>
-              <p>검수자를 선택하고 서명을 한 번 등록하면 이 브라우저에 저장됩니다.</p>
+              <h2 id="inspectorHeading">검수자 입력</h2>
+              <p>검수자 이름을 직접 입력하고 해당 이름으로 사용할 서명을 등록하세요.</p>
             </div>
             <label class="date-field">
               <span>검수일</span>
               <input id="inspectionDate" type="date" />
             </label>
           </div>
-          <div class="reviewer-grid" id="reviewerGrid"></div>
+          <div class="reviewer-entry">
+            <label class="reviewer-name-field" for="reviewerName">
+              <span>검수자 이름</span>
+              <input class="field" id="reviewerName" type="text" maxlength="30" autocomplete="name" placeholder="이름을 입력하세요" />
+              <small>입력한 이름이 미리보기, PDF 본문과 파일명에 사용됩니다.</small>
+            </label>
+            <div class="signature-editor">
+              <div class="signature-editor__preview" id="reviewerSignaturePreview">
+                <img id="reviewerSignatureImage" alt="입력한 검수자의 등록 서명" hidden />
+                <span id="reviewerSignatureStatus">검수자 이름을 먼저 입력하세요</span>
+              </div>
+              <div class="signature-editor__actions">
+                <button class="button button--secondary button--small" id="reviewerSignatureUploadButton" type="button">서명 등록</button>
+                <button class="button button--ghost button--small" id="reviewerSignatureRemoveButton" type="button" hidden>서명 삭제</button>
+                <input id="reviewerSignatureInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              </div>
+              <small>서명은 입력한 이름별로 현재 브라우저에만 저장됩니다.</small>
+            </div>
+          </div>
         </section>
       </section>
 
@@ -230,7 +249,7 @@
               <span>물품 검수자:</span>
               <strong id="previewReviewerName">검수자 미선택</strong>
               <span>(인)</span>
-              <img id="previewSignature" alt="선택한 검수자 서명" hidden />
+              <img id="previewSignature" alt="입력한 검수자 서명" hidden />
             </div>
             <strong class="template-recipient">가천대학교 총장 귀하</strong>
             <small class="template-page-number" id="previewPageNumber" hidden></small>
@@ -288,8 +307,31 @@
 
             <div class="roi-result-status" role="status" aria-live="polite">
               <strong id="roiCandidateTitle">영역을 선택해 주세요</strong>
-              <p id="roiCandidateMessage">텍스트 기반 PDF에서 선택 영역과 겹치는 글자를 찾습니다.</p>
+              <p id="roiCandidateMessage">PDF 텍스트를 먼저 찾고, 스캔 이미지라면 선택 영역만 OCR할 수 있습니다.</p>
             </div>
+
+            <section class="roi-ocr-panel" aria-labelledby="roiOcrHeading">
+              <div class="roi-ocr-heading">
+                <div>
+                  <strong id="roiOcrHeading">스캔 이미지 OCR</strong>
+                  <small>선택한 영역만 한글+영문으로 인식합니다. 첫 실행은 모델 준비에 시간이 걸립니다.</small>
+                </div>
+                <button class="button button--secondary button--small" id="roiOcrButton" type="button" disabled>
+                  선택 영역 OCR
+                </button>
+              </div>
+              <div class="roi-ocr-progress" id="roiOcrProgressGroup" role="status" aria-live="polite" hidden>
+                <progress id="roiOcrProgress" max="1" value="0"></progress>
+                <div>
+                  <span id="roiOcrStatus">OCR 준비 중…</span>
+                  <button id="roiOcrCancelButton" type="button">취소</button>
+                </div>
+              </div>
+              <details class="roi-ocr-raw" id="roiOcrRawDetails" hidden>
+                <summary>OCR 원문 확인</summary>
+                <pre id="roiOcrRawText"></pre>
+              </details>
+            </section>
 
             <div class="roi-candidate-toolbar">
               <span>추출 후보</span>

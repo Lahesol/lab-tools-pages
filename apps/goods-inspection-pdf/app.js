@@ -8,13 +8,7 @@
   const BASE_DOCUMENT_HEIGHT_MM = 297;
   const MAX_ITEMS = 40;
   const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-  const SIGNATURE_STORAGE_PREFIX = "goods-inspection.signature.v1.";
-  const REVIEWERS = [
-    { id: "kim-jaehoon", name: "김재훈" },
-    { id: "yoo-youngwoo", name: "유영우" },
-    { id: "hwang-seokyoung", name: "황석영" },
-    { id: "p-kim", name: "P. Kim" },
-  ];
+  const SIGNATURE_STORAGE_PREFIX = "goods-inspection.signature.v2.";
 
   const state = {
     invoiceFile: null,
@@ -28,7 +22,7 @@
     manualCount: 4,
     previewPage: 0,
     draggedPhotoId: null,
-    selectedReviewerId: null,
+    reviewerName: "",
     inspectionDate: todayIso(),
     exporting: false,
     roiPageNumber: 1,
@@ -36,6 +30,12 @@
     roiCandidates: [],
     roiDrawing: null,
     roiMatchedTextCount: 0,
+    roiCandidateSource: "",
+    ocrRunning: false,
+    ocrCancelRequested: false,
+    ocrProgress: 0,
+    ocrStatus: "",
+    ocrRawText: "",
   };
 
   const elements = {
@@ -64,6 +64,13 @@
     roiSelection: document.querySelector("#roiSelection"),
     roiCandidateTitle: document.querySelector("#roiCandidateTitle"),
     roiCandidateMessage: document.querySelector("#roiCandidateMessage"),
+    roiOcrButton: document.querySelector("#roiOcrButton"),
+    roiOcrProgressGroup: document.querySelector("#roiOcrProgressGroup"),
+    roiOcrProgress: document.querySelector("#roiOcrProgress"),
+    roiOcrStatus: document.querySelector("#roiOcrStatus"),
+    roiOcrCancelButton: document.querySelector("#roiOcrCancelButton"),
+    roiOcrRawDetails: document.querySelector("#roiOcrRawDetails"),
+    roiOcrRawText: document.querySelector("#roiOcrRawText"),
     roiToggleCandidatesButton: document.querySelector("#roiToggleCandidatesButton"),
     roiCandidateList: document.querySelector("#roiCandidateList"),
     roiResetButton: document.querySelector("#roiResetButton"),
@@ -80,7 +87,13 @@
     autoCountStatus: document.querySelector("#autoCountStatus"),
     addItemButton: document.querySelector("#addItemButton"),
     resetButton: document.querySelector("#resetButton"),
-    reviewerGrid: document.querySelector("#reviewerGrid"),
+    reviewerName: document.querySelector("#reviewerName"),
+    reviewerSignaturePreview: document.querySelector("#reviewerSignaturePreview"),
+    reviewerSignatureImage: document.querySelector("#reviewerSignatureImage"),
+    reviewerSignatureStatus: document.querySelector("#reviewerSignatureStatus"),
+    reviewerSignatureUploadButton: document.querySelector("#reviewerSignatureUploadButton"),
+    reviewerSignatureRemoveButton: document.querySelector("#reviewerSignatureRemoveButton"),
+    reviewerSignatureInput: document.querySelector("#reviewerSignatureInput"),
     inspectionDate: document.querySelector("#inspectionDate"),
     documentPreview: document.querySelector("#documentPreview"),
     previewItems: document.querySelector("#previewItems"),
@@ -105,6 +118,11 @@
   let toastTimer = null;
   let roiRenderToken = 0;
   let roiResizeTimer = null;
+  let ocrWorker = null;
+  let ocrWorkerPromise = null;
+  let ocrRunToken = 0;
+  let ocrPageIndex = 0;
+  let ocrPageTotal = 1;
 
   initialize();
 
@@ -180,7 +198,7 @@
 
     elements.resetButton.addEventListener("click", () => {
       if (!state.items.length && !state.photos.length && !state.invoiceFile) return;
-      if (!window.confirm("현재 문서의 Invoice, 사진, 품목 입력을 초기화할까요? 등록된 검수자 서명은 유지됩니다.")) return;
+      if (!window.confirm("현재 문서의 Invoice, 사진, 품목 입력을 초기화할까요? 검수자 이름과 등록 서명은 유지됩니다.")) return;
       state.invoiceFile = null;
       state.invoiceText = "";
       state.invoiceCandidates = [];
@@ -204,6 +222,30 @@
       renderPreview();
       updateValidation();
     });
+
+    elements.reviewerName.addEventListener("input", (event) => {
+      state.reviewerName = event.target.value;
+      renderReviewerEntry();
+      renderPreview();
+      updateValidation();
+    });
+
+    elements.reviewerSignatureUploadButton.addEventListener("click", () => {
+      if (!getSelectedReviewer()) {
+        elements.reviewerName.focus();
+        showToast("검수자 이름을 먼저 입력해 주세요.", "error");
+        return;
+      }
+      elements.reviewerSignatureInput.click();
+    });
+
+    elements.reviewerSignatureInput.addEventListener("change", async (event) => {
+      const [file] = event.target.files;
+      event.target.value = "";
+      if (file) await storeReviewerSignature(file);
+    });
+
+    elements.reviewerSignatureRemoveButton.addEventListener("click", removeReviewerSignature);
 
     elements.refreshPreviewButton.addEventListener("click", () => {
       renderPreview();
@@ -232,6 +274,8 @@
     elements.roiPrevPageButton.addEventListener("click", () => changeRoiPage(-1));
     elements.roiNextPageButton.addEventListener("click", () => changeRoiPage(1));
     elements.roiApplyAllPages.addEventListener("change", () => {
+      if (state.ocrRunning) cancelRoiOcr(true);
+      resetOcrResult();
       if (state.roiRect) extractRoiText();
     });
     elements.roiCanvasSurface.addEventListener("pointerdown", startRoiSelection);
@@ -239,6 +283,8 @@
     elements.roiCanvasSurface.addEventListener("pointerup", finishRoiSelection);
     elements.roiCanvasSurface.addEventListener("pointercancel", cancelRoiDrawing);
     elements.roiResetButton.addEventListener("click", resetRoiSelection);
+    elements.roiOcrButton.addEventListener("click", runRoiOcr);
+    elements.roiOcrCancelButton.addEventListener("click", cancelRoiOcr);
     elements.roiToggleCandidatesButton.addEventListener("click", toggleRoiCandidates);
     elements.roiApplyButton.addEventListener("click", applyRoiCandidates);
     window.addEventListener("resize", () => {
@@ -248,6 +294,10 @@
     });
 
     elements.exportButton.addEventListener("click", exportPdf);
+    window.addEventListener("pagehide", () => {
+      ocrWorker?.terminate().catch(() => {});
+      ocrWorker = null;
+    });
   }
 
   function attachDropzone(dropzone, onFiles) {
@@ -298,7 +348,9 @@
         const basis = analysis.method === "table" ? "표의 품목 행" : "행 번호와 수량·금액 패턴이 확인된 줄";
         elements.invoiceResultMessage.textContent = `${basis}에서 ${candidates.length}개 품목 후보를 입력했습니다. 주소·연락처·결제정보는 제외했으며 품목명만 최종 확인해 주세요.`;
       } else {
-        elements.invoiceResultMessage.textContent = "머리말·주소·연락처·결제정보를 제외했지만 확실한 품목 행을 찾지 못했습니다. 잘못된 자동 입력 대신 수동으로 품목 수와 품목명을 입력해 주세요.";
+        elements.invoiceResultMessage.textContent = state.invoiceLines.length
+          ? "확실한 품목 행을 찾지 못했습니다. 영역 직접 지정에서 품목명 열을 선택해 다시 추출해 주세요."
+          : "PDF 텍스트가 없습니다. 이미지로 스캔된 Invoice라면 영역 직접 지정에서 품목명 영역을 선택한 뒤 OCR을 실행해 주세요.";
       }
       elements.invoiceRawText.textContent = state.invoiceText || "추출된 텍스트가 없습니다.";
       elements.roiOpenButton.disabled = false;
@@ -307,7 +359,7 @@
     } catch (error) {
       console.error(error);
       elements.invoiceResultTitle.textContent = "Invoice 자동 분석을 완료하지 못했습니다";
-      elements.invoiceResultMessage.textContent = "품목명을 직접 입력할 수 있습니다. 암호화되었거나 이미지로 스캔된 PDF는 OCR 없이 텍스트를 추출할 수 없습니다.";
+      elements.invoiceResultMessage.textContent = "PDF를 열지 못했습니다. 암호화 여부를 확인하거나 품목명을 직접 입력해 주세요. 열 수 있는 이미지형 PDF는 영역 직접 지정 OCR을 사용할 수 있습니다.";
       elements.invoiceRawText.textContent = error instanceof Error ? error.message : String(error);
       elements.roiOpenButton.disabled = true;
       renderInvoiceStatus("error");
@@ -382,18 +434,21 @@
   }
 
   function resetRoiState() {
+    if (state.ocrRunning) cancelRoiOcr(true);
     state.roiPageNumber = 1;
     state.roiRect = null;
     state.roiCandidates = [];
     state.roiDrawing = null;
     state.roiMatchedTextCount = 0;
+    state.roiCandidateSource = "";
+    resetOcrResult();
     renderRoiSelection();
     renderRoiCandidates();
   }
 
   function openRoiDialog() {
     if (!state.invoicePdf) {
-      showToast("먼저 텍스트 기반 Invoice PDF를 올려 주세요.", "error");
+      showToast("먼저 Invoice PDF를 올려 주세요.", "error");
       return;
     }
     const pageCount = state.invoicePdf.numPages || 1;
@@ -406,11 +461,13 @@
   }
 
   function closeRoiDialog() {
+    if (state.ocrRunning) cancelRoiOcr(true);
     if (elements.roiDialog.open) elements.roiDialog.close();
   }
 
   function changeRoiPage(delta) {
     if (!state.invoicePdf) return;
+    if (state.ocrRunning) cancelRoiOcr(true);
     state.roiPageNumber = Math.min(state.invoicePdf.numPages, Math.max(1, state.roiPageNumber + delta));
     renderRoiPage().then(() => {
       if (state.roiRect) extractRoiText();
@@ -462,6 +519,7 @@
 
   function startRoiSelection(event) {
     if (!state.invoicePdf || event.button !== 0) return;
+    if (state.ocrRunning) cancelRoiOcr(true);
     const point = getRoiPoint(event);
     if (!point) return;
     event.preventDefault();
@@ -469,6 +527,8 @@
     state.roiRect = { x: point.x, y: point.y, width: 0, height: 0 };
     state.roiCandidates = [];
     state.roiMatchedTextCount = 0;
+    state.roiCandidateSource = "";
+    resetOcrResult();
     elements.roiCanvasSurface.setPointerCapture?.(event.pointerId);
     renderRoiSelection();
     renderRoiCandidates();
@@ -532,14 +592,17 @@
     elements.roiSelection.style.top = `${rect.y * 100}%`;
     elements.roiSelection.style.width = `${rect.width * 100}%`;
     elements.roiSelection.style.height = `${rect.height * 100}%`;
-    elements.roiCanvasHint.textContent = "청록색 영역과 겹치는 텍스트를 추출했습니다. 다시 드래그하면 영역이 교체됩니다.";
+    elements.roiCanvasHint.textContent = "청록색 영역을 선택했습니다. PDF 텍스트 결과를 확인하거나 선택 영역 OCR을 실행하세요.";
   }
 
   function resetRoiSelection() {
+    if (state.ocrRunning) cancelRoiOcr(true);
     state.roiRect = null;
     state.roiCandidates = [];
     state.roiDrawing = null;
     state.roiMatchedTextCount = 0;
+    state.roiCandidateSource = "";
+    resetOcrResult();
     renderRoiSelection();
     renderRoiCandidates();
   }
@@ -566,12 +629,227 @@
 
     const analysis = window.InvoiceParser.extractRoiCandidates(roiLines, { maxItems: MAX_ITEMS });
     state.roiMatchedTextCount = roiLines.length;
+    state.roiCandidateSource = "pdf-text";
     state.roiCandidates = analysis.items.map((name, index) => ({
       id: `roi-${index}-${name.toLocaleLowerCase("ko-KR")}`,
       name,
       selected: true,
     }));
     renderRoiCandidates();
+  }
+
+  function resetOcrResult() {
+    state.ocrCancelRequested = false;
+    state.ocrProgress = 0;
+    state.ocrStatus = "";
+    state.ocrRawText = "";
+    renderOcrControls();
+  }
+
+  function renderOcrControls() {
+    const runtimeReady = Boolean(window.Tesseract?.createWorker);
+    elements.roiOcrButton.disabled = !state.roiRect || state.ocrRunning || !runtimeReady;
+    elements.roiOcrButton.textContent = state.ocrRunning ? "OCR 분석 중…" : "선택 영역 OCR";
+    elements.roiOcrProgressGroup.hidden = !state.ocrRunning;
+    elements.roiOcrProgress.value = Math.min(1, Math.max(0, state.ocrProgress || 0));
+    elements.roiOcrStatus.textContent = state.ocrStatus || "OCR 준비 중…";
+    elements.roiOcrCancelButton.disabled = !state.ocrRunning;
+    elements.roiOcrRawDetails.hidden = !state.ocrRawText;
+    elements.roiOcrRawText.textContent = state.ocrRawText;
+  }
+
+  function translateOcrStatus(status) {
+    const labels = {
+      "loading tesseract core": "OCR 엔진 불러오는 중",
+      "loaded tesseract core": "OCR 엔진 준비 완료",
+      "initializing tesseract": "OCR 엔진 초기화 중",
+      "initialized tesseract": "OCR 엔진 초기화 완료",
+      "loading language traineddata": "한글·영문 모델 불러오는 중",
+      "loaded language traineddata": "한글·영문 모델 준비 완료",
+      "initializing api": "OCR 분석기 준비 중",
+      "initialized api": "OCR 분석기 준비 완료",
+      "recognizing text": "선택 영역 글자 인식 중",
+    };
+    return labels[status] || "OCR 처리 중";
+  }
+
+  function handleOcrProgress(message) {
+    if (!state.ocrRunning || !message) return;
+    const progress = Math.min(1, Math.max(0, Number(message.progress) || 0));
+    const recognizing = message.status === "recognizing text";
+    state.ocrProgress = recognizing
+      ? Math.min(1, (ocrPageIndex + progress) / Math.max(1, ocrPageTotal))
+      : Math.max(state.ocrProgress, progress * 0.16);
+    const pageLabel = ocrPageTotal > 1 && recognizing ? ` · ${ocrPageIndex + 1}/${ocrPageTotal}페이지` : "";
+    state.ocrStatus = `${translateOcrStatus(message.status)}${pageLabel} · ${Math.round(state.ocrProgress * 100)}%`;
+    renderOcrControls();
+  }
+
+  async function getOcrWorker() {
+    if (ocrWorker) return ocrWorker;
+    if (!window.Tesseract?.createWorker) throw new Error("Tesseract.js runtime is unavailable.");
+    if (!ocrWorkerPromise) {
+      const promise = (async () => {
+        const worker = await window.Tesseract.createWorker(["kor", "eng"], 1, {
+          workerPath: "./vendor/tesseract/worker.min.js",
+          langPath: "./vendor/tesseract/lang",
+          corePath: "./vendor/tesseract/core",
+          gzip: true,
+          logger: handleOcrProgress,
+          errorHandler: (error) => console.error("OCR worker error", error),
+        });
+        await worker.setParameters({
+          tessedit_pageseg_mode: window.Tesseract.PSM?.SINGLE_BLOCK || "6",
+          preserve_interword_spaces: "1",
+        });
+        return worker;
+      })();
+      ocrWorkerPromise = promise;
+      try {
+        const worker = await promise;
+        if (ocrWorkerPromise === promise) {
+          ocrWorker = worker;
+          ocrWorkerPromise = null;
+        }
+        return worker;
+      } catch (error) {
+        if (ocrWorkerPromise === promise) ocrWorkerPromise = null;
+        throw error;
+      }
+    }
+    return ocrWorkerPromise;
+  }
+
+  async function renderRoiOcrCanvas(pageNumber) {
+    const page = await state.invoicePdf.getPage(pageNumber);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const renderScale = Math.min(4, Math.max(2.4, 2400 / Math.max(1, baseViewport.width)));
+    const viewport = page.getViewport({ scale: renderScale });
+    const source = document.createElement("canvas");
+    source.width = Math.ceil(viewport.width);
+    source.height = Math.ceil(viewport.height);
+    const sourceContext = source.getContext("2d", { alpha: false, willReadFrequently: false });
+    sourceContext.fillStyle = "#ffffff";
+    sourceContext.fillRect(0, 0, source.width, source.height);
+    await page.render({ canvasContext: sourceContext, viewport }).promise;
+
+    const roi = state.roiRect;
+    const sourceX = Math.max(0, Math.floor(roi.x * source.width));
+    const sourceY = Math.max(0, Math.floor(roi.y * source.height));
+    const sourceWidth = Math.max(1, Math.min(source.width - sourceX, Math.ceil(roi.width * source.width)));
+    const sourceHeight = Math.max(1, Math.min(source.height - sourceY, Math.ceil(roi.height * source.height)));
+    const padding = 18;
+    const crop = document.createElement("canvas");
+    crop.width = sourceWidth + padding * 2;
+    crop.height = sourceHeight + padding * 2;
+    const cropContext = crop.getContext("2d", { alpha: false, willReadFrequently: true });
+    cropContext.fillStyle = "#ffffff";
+    cropContext.fillRect(0, 0, crop.width, crop.height);
+    cropContext.imageSmoothingEnabled = true;
+    cropContext.imageSmoothingQuality = "high";
+    cropContext.filter = "grayscale(1) contrast(1.18)";
+    cropContext.drawImage(source, sourceX, sourceY, sourceWidth, sourceHeight, padding, padding, sourceWidth, sourceHeight);
+    cropContext.filter = "none";
+    source.width = 1;
+    source.height = 1;
+    return crop;
+  }
+
+  async function runRoiOcr() {
+    if (!state.roiRect || !state.invoicePdf || state.ocrRunning) return;
+    if (!window.Tesseract?.createWorker) {
+      showToast("OCR 모듈을 불러오지 못했습니다. 페이지를 새로고침해 주세요.", "error");
+      return;
+    }
+
+    const pageNumbers = elements.roiApplyAllPages.checked && state.invoicePdf.numPages > 1
+      ? Array.from({ length: state.invoicePdf.numPages }, (_, index) => index + 1)
+      : [state.roiPageNumber];
+    const runToken = ++ocrRunToken;
+    ocrPageIndex = 0;
+    ocrPageTotal = pageNumbers.length;
+    state.ocrRunning = true;
+    state.ocrCancelRequested = false;
+    state.ocrProgress = 0;
+    state.ocrStatus = "OCR 엔진 준비 중 · 0%";
+    state.ocrRawText = "";
+    state.roiCandidates = [];
+    state.roiMatchedTextCount = 0;
+    state.roiCandidateSource = "ocr";
+    renderOcrControls();
+    renderRoiCandidates();
+
+    const pageTexts = [];
+    try {
+      const worker = await getOcrWorker();
+      if (runToken !== ocrRunToken) return;
+      for (let index = 0; index < pageNumbers.length; index += 1) {
+        if (runToken !== ocrRunToken) return;
+        ocrPageIndex = index;
+        state.ocrStatus = `선택 영역 이미지 준비 중 · ${index + 1}/${pageNumbers.length}페이지`;
+        renderOcrControls();
+        const crop = await renderRoiOcrCanvas(pageNumbers[index]);
+        if (runToken !== ocrRunToken) {
+          crop.width = 1;
+          crop.height = 1;
+          return;
+        }
+        const result = await worker.recognize(crop);
+        crop.width = 1;
+        crop.height = 1;
+        pageTexts.push(String(result.data?.text || "").trim());
+      }
+
+      if (runToken !== ocrRunToken) return;
+      state.ocrRawText = pageTexts
+        .map((text, index) => pageNumbers.length > 1 ? `[${pageNumbers[index]}페이지]\n${text}` : text)
+        .filter(Boolean)
+        .join("\n\n");
+      const ocrLines = pageTexts
+        .flatMap((text) => text.split(/\r?\n/))
+        .map((text) => ({ text: text.replace(/\s+/g, " ").trim() }))
+        .filter((line) => line.text);
+      const analysis = window.InvoiceParser.extractRoiCandidates(ocrLines, { maxItems: MAX_ITEMS });
+      state.roiMatchedTextCount = ocrLines.length;
+      state.roiCandidates = analysis.items.map((name, index) => ({
+        id: `ocr-${index}-${name.toLocaleLowerCase("ko-KR")}`,
+        name,
+        selected: true,
+      }));
+      state.ocrProgress = 1;
+      state.ocrStatus = "OCR 분석 완료 · 100%";
+      renderRoiCandidates();
+      showToast(state.roiCandidates.length
+        ? `OCR로 품목 후보 ${state.roiCandidates.length}개를 찾았습니다.`
+        : "OCR 원문은 읽었지만 품목 후보를 찾지 못했습니다.", state.roiCandidates.length ? "info" : "error");
+    } catch (error) {
+      if (runToken !== ocrRunToken || state.ocrCancelRequested) return;
+      console.error(error);
+      state.ocrStatus = "OCR 분석 실패";
+      showToast("OCR을 완료하지 못했습니다. 영역을 다시 선택해 시도해 주세요.", "error");
+    } finally {
+      if (runToken === ocrRunToken) {
+        state.ocrRunning = false;
+        renderOcrControls();
+        renderRoiCandidates();
+      }
+    }
+  }
+
+  function cancelRoiOcr(silent = false) {
+    if (!state.ocrRunning && !ocrWorkerPromise) return;
+    ocrRunToken += 1;
+    state.ocrCancelRequested = true;
+    state.ocrRunning = false;
+    state.ocrStatus = "OCR 취소됨";
+    const worker = ocrWorker;
+    const pendingWorker = ocrWorkerPromise;
+    ocrWorker = null;
+    ocrWorkerPromise = null;
+    worker?.terminate().catch(() => {});
+    pendingWorker?.then((createdWorker) => createdWorker.terminate()).catch(() => {});
+    renderOcrControls();
+    if (!silent) showToast("OCR 분석을 취소했습니다.");
   }
 
   function partIntersectsRoi(line, part, roi) {
@@ -589,23 +867,36 @@
   }
 
   function renderRoiCandidates() {
+    renderOcrControls();
     elements.roiCandidateList.replaceChildren();
     const candidates = state.roiCandidates;
 
     if (!candidates.length) {
       const empty = document.createElement("p");
       empty.className = "roi-candidate-empty";
-      if (state.roiRect && state.roiMatchedTextCount === 0) {
-        elements.roiCandidateTitle.textContent = "선택 영역에 텍스트가 없습니다";
-        elements.roiCandidateMessage.textContent = "스캔 이미지 PDF는 텍스트 좌표가 없어 OCR 기능이 필요합니다. 다른 영역을 선택하거나 품목명을 수동 입력해 주세요.";
-        empty.textContent = "PDF 텍스트 객체를 찾지 못했습니다.";
+      if (state.ocrRunning) {
+        elements.roiCandidateTitle.textContent = "선택 영역을 OCR로 분석 중입니다";
+        elements.roiCandidateMessage.textContent = state.ocrStatus || "한글·영문 OCR 엔진을 준비하고 있습니다.";
+        empty.textContent = "분석이 끝나면 품목 후보가 여기에 표시됩니다.";
+      } else if (state.roiCandidateSource === "ocr" && state.roiRect && state.roiMatchedTextCount === 0) {
+        elements.roiCandidateTitle.textContent = "OCR로 글자를 읽지 못했습니다";
+        elements.roiCandidateMessage.textContent = "글자가 선명하게 보이도록 품목명 영역을 다시 선택하거나 더 좁게 지정해 주세요.";
+        empty.textContent = "OCR 원문에 인식된 텍스트가 없습니다.";
+      } else if (state.roiCandidateSource === "ocr" && state.roiRect) {
+        elements.roiCandidateTitle.textContent = "OCR 품목 후보를 찾지 못했습니다";
+        elements.roiCandidateMessage.textContent = "글자는 인식했지만 머리글·주소·금액 정보로 판단했습니다. OCR 원문을 확인해 주세요.";
+        empty.textContent = "품목명 열만 포함하도록 영역을 조금 더 좁게 선택해 보세요.";
+      } else if (state.roiRect && state.roiMatchedTextCount === 0) {
+        elements.roiCandidateTitle.textContent = "선택 영역에 PDF 텍스트가 없습니다";
+        elements.roiCandidateMessage.textContent = "이미지형 PDF라면 위의 선택 영역 OCR을 실행하세요.";
+        empty.textContent = "PDF 텍스트 객체를 찾지 못했습니다. OCR로 전환할 수 있습니다.";
       } else if (state.roiRect) {
         elements.roiCandidateTitle.textContent = "품목 후보를 찾지 못했습니다";
         elements.roiCandidateMessage.textContent = "선택 영역에 글자는 있지만 품목명이 아닌 머리글·주소·금액 정보로 판단했습니다.";
         empty.textContent = "품목명 열을 조금 더 좁게 다시 선택해 보세요.";
       } else {
         elements.roiCandidateTitle.textContent = "영역을 선택해 주세요";
-        elements.roiCandidateMessage.textContent = "텍스트 기반 PDF에서 선택 영역과 겹치는 글자를 찾습니다.";
+        elements.roiCandidateMessage.textContent = "PDF 텍스트를 먼저 찾고, 이미지형 PDF는 선택 영역만 OCR합니다.";
         empty.textContent = "아직 선택된 영역이 없습니다.";
       }
       elements.roiCandidateList.append(empty);
@@ -614,10 +905,14 @@
       return;
     }
 
-    elements.roiCandidateTitle.textContent = `${candidates.length}개 품목 후보를 찾았습니다`;
-    elements.roiCandidateMessage.textContent = elements.roiApplyAllPages.checked
-      ? "같은 위치를 전체 PDF 페이지에 적용한 결과입니다."
-      : `${state.roiPageNumber}페이지의 선택 영역에서 찾은 결과입니다.`;
+    const sourceLabel = state.roiCandidateSource === "ocr" ? "OCR로" : "PDF 텍스트에서";
+    elements.roiCandidateTitle.textContent = `${sourceLabel} ${candidates.length}개 품목 후보를 찾았습니다`;
+    const scopeLabel = elements.roiApplyAllPages.checked
+      ? "같은 위치를 전체 PDF 페이지에 적용했습니다."
+      : `${state.roiPageNumber}페이지의 선택 영역을 적용했습니다.`;
+    elements.roiCandidateMessage.textContent = state.roiCandidateSource === "ocr"
+      ? `${scopeLabel} 인식 원문과 품목명을 최종 확인해 주세요.`
+      : `${scopeLabel} PDF 텍스트 좌표 추출 결과입니다.`;
 
     candidates.forEach((candidate, index) => {
       const label = document.createElement("label");
@@ -662,11 +957,14 @@
     if (!selected.length) return;
     state.countMode = "auto";
     mergeInvoiceCandidates(selected, { replaceExisting: true });
-    elements.invoiceResultTitle.textContent = "직접 지정 영역 적용 결과";
-    elements.invoiceResultMessage.textContent = `PDF에서 직접 지정한 영역의 ${selected.length}개 품목을 적용했습니다. 품목명과 순서를 최종 확인해 주세요.`;
+    const isOcrResult = state.roiCandidateSource === "ocr";
+    elements.invoiceResultTitle.textContent = isOcrResult ? "OCR 영역 적용 결과" : "직접 지정 영역 적용 결과";
+    elements.invoiceResultMessage.textContent = isOcrResult
+      ? `이미지형 PDF의 선택 영역을 OCR해 ${selected.length}개 품목을 적용했습니다. 인식된 품목명과 순서를 최종 확인해 주세요.`
+      : `PDF에서 직접 지정한 영역의 ${selected.length}개 품목을 적용했습니다. 품목명과 순서를 최종 확인해 주세요.`;
     closeRoiDialog();
     renderAll();
-    showToast(`직접 지정한 품목 ${selected.length}개를 적용했습니다.`);
+    showToast(`${isOcrResult ? "OCR로 인식한" : "직접 지정한"} 품목 ${selected.length}개를 적용했습니다.`);
   }
 
   function mergeInvoiceCandidates(candidates, options = {}) {
@@ -761,7 +1059,7 @@
     renderCountControls();
     renderPhotoStrip();
     renderItemRows();
-    renderReviewers();
+    renderReviewerEntry();
     renderPreview();
     updateValidation();
   }
@@ -993,79 +1291,35 @@
     });
   }
 
-  function renderReviewers() {
-    elements.reviewerGrid.replaceChildren();
+  function renderReviewerEntry() {
+    if (elements.reviewerName.value !== state.reviewerName) elements.reviewerName.value = state.reviewerName;
+    const reviewer = getSelectedReviewer();
+    const signature = reviewer ? readStoredSignature(reviewer.id) : "";
+    elements.reviewerSignatureUploadButton.disabled = !reviewer;
+    elements.reviewerSignatureUploadButton.textContent = signature ? "서명 교체" : "서명 등록";
+    elements.reviewerSignatureRemoveButton.hidden = !signature;
+    elements.reviewerSignaturePreview.dataset.state = signature ? "registered" : reviewer ? "missing" : "empty";
 
-    REVIEWERS.forEach((reviewer) => {
-      const signature = readStoredSignature(reviewer.id);
-      const card = document.createElement("article");
-      card.className = `reviewer-card${state.selectedReviewerId === reviewer.id ? " is-selected" : ""}`;
-      card.dataset.reviewerId = reviewer.id;
-
-      const selectButton = document.createElement("button");
-      selectButton.type = "button";
-      selectButton.className = "reviewer-card__select";
-      selectButton.setAttribute("aria-pressed", String(state.selectedReviewerId === reviewer.id));
-      selectButton.innerHTML = `
-        <span class="reviewer-card__heading"><span class="reviewer-radio" aria-hidden="true"></span><span></span></span>
-        <span class="signature-box"></span>
-      `;
-      selectButton.querySelector(".reviewer-card__heading span:last-child").textContent = reviewer.name;
-      const signatureBox = selectButton.querySelector(".signature-box");
-      if (signature) {
-        const image = document.createElement("img");
-        image.src = signature;
-        image.alt = `${reviewer.name} 등록 서명`;
-        signatureBox.append(image);
-      } else {
-        signatureBox.textContent = "서명 등록 필요";
-      }
-      selectButton.addEventListener("click", () => {
-        state.selectedReviewerId = reviewer.id;
-        renderReviewers();
-        renderPreview();
-        updateValidation();
-      });
-
-      const actions = document.createElement("div");
-      actions.className = "reviewer-card__actions";
-      const uploadButton = document.createElement("button");
-      uploadButton.type = "button";
-      uploadButton.textContent = signature ? "서명 교체" : "서명 등록";
-      const removeButton = document.createElement("button");
-      removeButton.type = "button";
-      removeButton.dataset.action = "remove-signature";
-      removeButton.textContent = "서명 삭제";
-      removeButton.hidden = !signature;
-      const fileInput = document.createElement("input");
-      fileInput.type = "file";
-      fileInput.accept = "image/png,image/jpeg,image/webp";
-
-      uploadButton.addEventListener("click", () => fileInput.click());
-      fileInput.addEventListener("change", async (event) => {
-        const [file] = event.target.files;
-        if (!file) return;
-        await storeReviewerSignature(reviewer, file);
-      });
-      removeButton.addEventListener("click", () => {
-        try {
-          localStorage.removeItem(signatureStorageKey(reviewer.id));
-        } catch (error) {
-          console.warn(error);
-        }
-        renderReviewers();
-        renderPreview();
-        updateValidation();
-        showToast(`${reviewer.name} 서명을 이 브라우저에서 삭제했습니다.`);
-      });
-
-      actions.append(uploadButton, removeButton, fileInput);
-      card.append(selectButton, actions);
-      elements.reviewerGrid.append(card);
-    });
+    if (signature) {
+      elements.reviewerSignatureImage.src = signature;
+      elements.reviewerSignatureImage.alt = `${reviewer.name} 등록 서명`;
+      elements.reviewerSignatureImage.hidden = false;
+      elements.reviewerSignatureStatus.hidden = true;
+    } else {
+      elements.reviewerSignatureImage.removeAttribute("src");
+      elements.reviewerSignatureImage.hidden = true;
+      elements.reviewerSignatureStatus.hidden = false;
+      elements.reviewerSignatureStatus.textContent = reviewer ? `${reviewer.name} 서명을 등록해 주세요` : "검수자 이름을 먼저 입력하세요";
+    }
   }
 
-  async function storeReviewerSignature(reviewer, file) {
+  async function storeReviewerSignature(file) {
+    const reviewer = getSelectedReviewer();
+    if (!reviewer) {
+      elements.reviewerName.focus();
+      showToast("검수자 이름을 먼저 입력해 주세요.", "error");
+      return;
+    }
     if (!file.type.startsWith("image/")) {
       showToast("PNG, JPG 또는 WEBP 서명 이미지를 선택해 주세요.", "error");
       return;
@@ -1083,11 +1337,24 @@
       showToast("브라우저 저장 공간에 서명을 보관하지 못했습니다.", "error");
       return;
     }
-    state.selectedReviewerId = reviewer.id;
-    renderReviewers();
+    renderReviewerEntry();
     renderPreview();
     updateValidation();
     showToast(`${reviewer.name} 서명을 이 브라우저에 등록했습니다.`);
+  }
+
+  function removeReviewerSignature() {
+    const reviewer = getSelectedReviewer();
+    if (!reviewer) return;
+    try {
+      localStorage.removeItem(signatureStorageKey(reviewer.id));
+    } catch (error) {
+      console.warn(error);
+    }
+    renderReviewerEntry();
+    renderPreview();
+    updateValidation();
+    showToast(`${reviewer.name} 서명을 이 브라우저에서 삭제했습니다.`);
   }
 
   function renderPreview() {
@@ -1403,7 +1670,17 @@
   }
 
   function getSelectedReviewer() {
-    return REVIEWERS.find((reviewer) => reviewer.id === state.selectedReviewerId) || null;
+    const name = state.reviewerName.normalize("NFKC").replace(/\s+/g, " ").trim();
+    return name ? { id: reviewerStorageId(name), name } : null;
+  }
+
+  function reviewerStorageId(name) {
+    let hash = 2166136261;
+    for (const character of name.toLocaleLowerCase("ko-KR")) {
+      hash ^= character.codePointAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `custom-${(hash >>> 0).toString(16).padStart(8, "0")}`;
   }
 
   function signatureStorageKey(reviewerId) {

@@ -909,109 +909,78 @@ summary:focus-visible,
   font-size: 10px;
 }
 
-.reviewer-grid {
+.reviewer-entry {
   display: grid;
-  grid-template-columns: repeat(4, minmax(102px, 1fr));
-  gap: 10px;
+  grid-template-columns: minmax(220px, 1fr) minmax(250px, 0.78fr);
+  gap: 14px;
   margin-top: 14px;
-}
-
-.reviewer-card {
-  position: relative;
-  min-width: 0;
-  overflow: hidden;
+  padding: 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
 }
 
-.reviewer-card.is-selected {
-  border: 2px solid var(--teal);
-}
-
-.reviewer-card__select {
-  display: block;
-  width: 100%;
-  cursor: pointer;
-  padding: 12px 10px 8px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  text-align: left;
-}
-
-.reviewer-card__heading {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.reviewer-radio {
+.reviewer-name-field {
   display: grid;
-  width: 17px;
-  height: 17px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid #8d9bb0;
-  border-radius: 50%;
+  align-content: start;
+  gap: 6px;
+  color: var(--ink-strong);
+  font-size: 10px;
+  font-weight: 800;
 }
 
-.reviewer-card.is-selected .reviewer-radio {
-  border-color: var(--teal);
+.reviewer-name-field input {
+  min-height: 42px;
+  font-size: 13px;
 }
 
-.reviewer-card.is-selected .reviewer-radio::after {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--teal);
-  content: "";
+.reviewer-name-field small,
+.signature-editor > small {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
-.signature-box {
+.signature-editor {
   display: grid;
-  height: 58px;
-  margin-top: 9px;
+  gap: 8px;
+}
+
+.signature-editor__preview {
+  display: grid;
+  min-height: 74px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  border: 1px dashed #bdcad8;
+  border-radius: 7px;
   background: var(--surface-subtle);
   color: var(--muted);
-  font-size: 8px;
+  font-size: 9px;
   text-align: center;
 }
 
-.signature-box img {
-  width: calc(100% - 10px);
-  height: calc(100% - 8px);
+.signature-editor__preview[data-state="registered"] {
+  border-style: solid;
+  border-color: #abd7d3;
+  background: var(--teal-soft);
+}
+
+.signature-editor__preview img {
+  width: calc(100% - 16px);
+  height: 62px;
   object-fit: contain;
 }
 
-.reviewer-card__actions {
+.signature-editor__actions {
   display: flex;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 0 10px 9px;
+  gap: 7px;
 }
 
-.reviewer-card__actions button {
-  cursor: pointer;
-  border: 0;
-  background: transparent;
-  color: var(--navy);
-  font-size: 8px;
-  font-weight: 700;
-}
-
-.reviewer-card__actions button[data-action="remove-signature"] {
-  color: var(--muted);
-}
-
-.reviewer-card__actions input {
-  display: none;
+.signature-editor__actions .button {
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 9px;
 }
 
 .preview-panel {
@@ -1658,6 +1627,114 @@ summary:focus-visible,
   line-height: 1.5;
 }
 
+.roi-ocr-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #d7e1ec;
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+}
+
+.roi-ocr-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.roi-ocr-heading > div {
+  min-width: 0;
+}
+
+.roi-ocr-heading strong,
+.roi-ocr-heading small {
+  display: block;
+}
+
+.roi-ocr-heading strong {
+  color: var(--ink-strong);
+  font-size: 10px;
+}
+
+.roi-ocr-heading small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
+.roi-ocr-heading .button {
+  min-width: 102px;
+  min-height: 32px;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  font-size: 9px;
+}
+
+.roi-ocr-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.roi-ocr-progress[hidden] {
+  display: none;
+}
+
+.roi-ocr-progress progress {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  accent-color: var(--teal);
+}
+
+.roi-ocr-progress > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #456075;
+  font-size: 8.5px;
+}
+
+.roi-ocr-progress button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #a33a3a;
+  font: inherit;
+  font-weight: 800;
+}
+
+.roi-ocr-raw {
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.roi-ocr-raw summary {
+  color: var(--navy);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.roi-ocr-raw pre {
+  max-height: 150px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 9px;
+  border: 1px solid #e0e7ef;
+  border-radius: 6px;
+  background: #fff;
+  color: #354a61;
+  font: 8.5px/1.5 Consolas, "Malgun Gothic", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .roi-candidate-toolbar {
   display: flex;
   align-items: center;
@@ -1748,8 +1825,8 @@ summary:focus-visible,
     padding-left: 18px;
   }
 
-  .reviewer-grid {
-    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  .reviewer-entry {
+    grid-template-columns: 1fr;
   }
 
   .count-control {
@@ -1816,13 +1893,45 @@ summary:focus-visible,
     padding: 20px 14px;
   }
 
+  .editor {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   .item-table {
-    overflow-x: auto;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   .item-table__header,
   .item-row {
-    min-width: 610px;
+    min-width: 0;
+    grid-template-columns: 32px minmax(110px, 1fr) 52px 90px 40px;
+  }
+
+  .item-table__header span,
+  .item-row > * {
+    padding: 6px 5px;
+  }
+
+  .item-row__photo {
+    gap: 5px;
+  }
+
+  .item-photo-preview {
+    width: 36px;
+    height: 48px;
+  }
+
+  .photo-select {
+    padding: 6px 18px 6px 4px;
+    font-size: 9px;
+  }
+
+  .icon-button {
+    width: 28px;
+    height: 28px;
   }
 
   .section-heading--compact {
@@ -1838,8 +1947,8 @@ summary:focus-visible,
     width: 100%;
   }
 
-  .reviewer-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .signature-editor__actions .button {
+    flex: 1;
   }
 
   .sheet-stage {
@@ -1922,6 +2031,15 @@ summary:focus-visible,
     padding: 16px 14px;
     border-top: 1px solid var(--line);
     border-left: 0;
+  }
+
+  .roi-ocr-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .roi-ocr-heading .button {
+    width: 100%;
   }
 
   .roi-dialog__footer {
