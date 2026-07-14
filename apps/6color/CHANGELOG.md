@@ -1,5 +1,11 @@
 # 6 Color GUI Changelog
 
+## 2026-07-14
+
+- Added a firmware version display in the top bar.
+- Added a `FW VERSION` command button.
+- The GUI now sends `VERSION` after BLE connection and parses `FW,...` responses from firmware.
+
 ## 2026-07-03
 
 - Added a digital pulse generator to the Blocks tab.

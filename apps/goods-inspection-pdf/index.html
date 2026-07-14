@@ -10,9 +10,10 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=f92f5d0c2262" />
+    <link rel="stylesheet" href="./styles.css?v=89b50610ad38" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
-    <script defer src="./app.js?v=ab20ba53a163"></script>
+    <script defer src="./invoice-parser.js"></script>
+    <script defer src="./app.js?v=53e431f2bfdf"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -134,9 +135,14 @@
         </fieldset>
 
         <div class="invoice-result" id="invoiceResult" hidden>
-          <div>
-            <strong id="invoiceResultTitle">Invoice 분석 결과</strong>
-            <p id="invoiceResultMessage"></p>
+          <div class="invoice-result__header">
+            <div>
+              <strong id="invoiceResultTitle">Invoice 분석 결과</strong>
+              <p id="invoiceResultMessage"></p>
+            </div>
+            <button class="button button--secondary button--small" id="roiOpenButton" type="button" disabled>
+              영역 직접 지정
+            </button>
           </div>
           <details>
             <summary>추출 텍스트 확인</summary>
@@ -233,6 +239,74 @@
         <div class="preview-thumbnails" id="previewThumbnails" aria-label="전체 페이지 목록"></div>
       </aside>
     </main>
+
+    <dialog class="roi-dialog" id="roiDialog" aria-labelledby="roiDialogTitle">
+      <div class="roi-dialog__shell">
+        <header class="roi-dialog__header">
+          <div>
+            <h2 id="roiDialogTitle">PDF에서 품목 영역 지정</h2>
+            <p>품목명이 있는 표 또는 열을 드래그하면 선택 영역의 텍스트만 추출합니다.</p>
+          </div>
+          <button class="roi-close-button" id="roiCloseButton" type="button" aria-label="영역 지정 창 닫기">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        </header>
+
+        <div class="roi-dialog__body">
+          <section class="roi-viewer" aria-label="PDF 영역 선택">
+            <div class="roi-toolbar">
+              <nav class="roi-page-controls" aria-label="PDF 페이지 이동">
+                <button id="roiPrevPageButton" type="button" aria-label="이전 PDF 페이지">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
+                </button>
+                <strong id="roiPageIndicator">1 / 1</strong>
+                <button id="roiNextPageButton" type="button" aria-label="다음 PDF 페이지">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+                </button>
+              </nav>
+              <label class="roi-all-pages">
+                <input id="roiApplyAllPages" type="checkbox" checked />
+                <span>같은 위치를 모든 페이지에 적용</span>
+              </label>
+            </div>
+
+            <div class="roi-canvas-stage" id="roiCanvasStage">
+              <div class="roi-canvas-surface" id="roiCanvasSurface">
+                <canvas id="roiCanvas" aria-label="선택한 Invoice PDF 페이지"></canvas>
+                <div class="roi-selection" id="roiSelection" hidden></div>
+              </div>
+              <p class="roi-canvas-hint" id="roiCanvasHint">PDF 위에서 품목명이 있는 영역을 드래그하세요.</p>
+            </div>
+          </section>
+
+          <aside class="roi-inspector" aria-label="영역 추출 결과">
+            <ol class="roi-instructions">
+              <li><span>1</span><p><strong>품목 영역 선택</strong><small>주소와 결제정보를 제외하고 품목명 열을 감싸세요.</small></p></li>
+              <li><span>2</span><p><strong>추출 후보 확인</strong><small>필요 없는 줄은 체크를 해제할 수 있습니다.</small></p></li>
+              <li><span>3</span><p><strong>품목 목록에 적용</strong><small>기존 자동 추출 결과를 선택한 후보로 교체합니다.</small></p></li>
+            </ol>
+
+            <div class="roi-result-status" role="status" aria-live="polite">
+              <strong id="roiCandidateTitle">영역을 선택해 주세요</strong>
+              <p id="roiCandidateMessage">텍스트 기반 PDF에서 선택 영역과 겹치는 글자를 찾습니다.</p>
+            </div>
+
+            <div class="roi-candidate-toolbar">
+              <span>추출 후보</span>
+              <button id="roiToggleCandidatesButton" type="button" disabled>전체 해제</button>
+            </div>
+            <div class="roi-candidate-list" id="roiCandidateList">
+              <p class="roi-candidate-empty">아직 선택된 영역이 없습니다.</p>
+            </div>
+          </aside>
+        </div>
+
+        <footer class="roi-dialog__footer">
+          <button class="button button--ghost" id="roiResetButton" type="button">영역 다시 선택</button>
+          <button class="button button--primary" id="roiApplyButton" type="button" disabled>선택 품목 적용</button>
+        </footer>
+      </div>
+    </dialog>
 
     <footer class="actionbar">
       <div>

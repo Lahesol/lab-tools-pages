@@ -54,9 +54,11 @@ const el = {
   connectionDot: document.querySelector("#connectionDot"),
   connectionText: document.querySelector("#connectionText"),
   deviceName: document.querySelector("#deviceName"),
+  firmwareVersion: document.querySelector("#firmwareVersion"),
   channelGrid: document.querySelector("#channelGrid"),
   channelTemplate: document.querySelector("#channelTemplate"),
   getButton: document.querySelector("#getButton"),
+  versionButton: document.querySelector("#versionButton"),
   allOnButton: document.querySelector("#allOnButton"),
   allOffButton: document.querySelector("#allOffButton"),
   allMaxButton: document.querySelector("#allMaxButton"),
@@ -2602,6 +2604,28 @@ function applyStatusLine(line) {
   syncAllCards();
 }
 
+function applyFirmwareLine(line) {
+  if (!line.startsWith("FW,")) {
+    return;
+  }
+
+  const info = new Map();
+  for (const part of line.slice(3).split(",")) {
+    const index = part.indexOf("=");
+    if (index <= 0) {
+      continue;
+    }
+    info.set(part.slice(0, index).trim().toUpperCase(), part.slice(index + 1).trim());
+  }
+
+  const version = info.get("VERSION") || "unknown";
+  const name = info.get("NAME") || "firmware";
+  const sdk = info.get("SDK") || "";
+  const build = info.get("BUILD") || "";
+  const detail = [version, name, sdk, build].filter(Boolean).join(" | ");
+  el.firmwareVersion.textContent = `FW: ${detail}`;
+}
+
 function handleNotification(event) {
   receiveBuffer += decoder.decode(event.target.value);
   const lines = receiveBuffer.split(/\r?\n/);
@@ -2613,6 +2637,7 @@ function handleNotification(event) {
     }
     appendLog("<", trimmed);
     applyStatusLine(trimmed);
+    applyFirmwareLine(trimmed);
   }
 }
 
@@ -2639,6 +2664,7 @@ async function connect() {
     txCharacteristic = null;
     server = null;
     setConnectionStatus(false);
+    el.firmwareVersion.textContent = "FW: unknown";
     appendLog("!", "Device disconnected");
   });
 
@@ -2652,6 +2678,7 @@ async function connect() {
   setConnectionStatus(true, device.name || "6COLOR_LIGHT");
   appendLog("!", `Connected to ${device.name || "device"}`);
   await sendCommand("GET");
+  await sendCommand("VERSION");
 }
 
 async function disconnect() {
@@ -2661,6 +2688,7 @@ async function disconnect() {
   rxCharacteristic = null;
   txCharacteristic = null;
   setConnectionStatus(false);
+  el.firmwareVersion.textContent = "FW: unknown";
 }
 
 async function sendAll(on, duty = null) {
@@ -2699,6 +2727,7 @@ el.connectButton.addEventListener("click", async () => {
 });
 
 el.getButton.addEventListener("click", () => sendCommand("GET"));
+el.versionButton.addEventListener("click", () => sendCommand("VERSION"));
 el.allOnButton.addEventListener("click", () => sendAll(true));
 el.allOffButton.addEventListener("click", () => sendAll(false));
 el.allMaxButton.addEventListener("click", () => sendAll(true, 1000));

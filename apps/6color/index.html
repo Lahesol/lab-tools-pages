@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=c44d1632a862">
+  <link rel="stylesheet" href="./styles.css?v=d9876d665bac">
 </head>
 <body>
   <main class="app-shell">
@@ -12,6 +12,7 @@
       <div>
         <h1>6 Color Light Control</h1>
         <p id="deviceName" class="subtle">BLE NUS</p>
+        <p id="firmwareVersion" class="subtle firmware-version">FW: unknown</p>
       </div>
       <div class="connection">
         <span id="connectionDot" class="dot"></span>
@@ -32,6 +33,7 @@
     <section id="manualPanel" class="tab-panel is-active">
       <section class="command-bar">
         <button id="getButton" type="button">GET</button>
+        <button id="versionButton" type="button">FW VERSION</button>
         <button id="allOnButton" type="button">ALL ON</button>
         <button id="allOffButton" type="button">ALL OFF</button>
         <button id="allMaxButton" type="button">ALL 100%</button>
@@ -301,6 +303,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=47c32f2a50ee"></script>
+  <script src="./app.js?v=4bc18b42f891"></script>
 </body>
 </html>

@@ -124,6 +124,11 @@ h1 {
   margin: 16px 0 0;
 }
 
+.firmware-version {
+  margin-top: 3px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
 .tab-button {
   min-width: 112px;
   font-weight: 650;
@@ -145,7 +150,7 @@ h1 {
 
 .command-bar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(88px, auto)) minmax(240px, 1fr);
+  grid-template-columns: repeat(5, minmax(88px, auto)) minmax(240px, 1fr);
   gap: 10px;
   margin: 0 0 16px;
   align-items: center;
