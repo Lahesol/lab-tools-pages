@@ -10,11 +10,11 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=b5ec1245e39d" />
+    <link rel="stylesheet" href="./styles.css?v=bb9961d7e31e" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
     <script defer src="./vendor/tesseract/tesseract.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=06d832baf700"></script>
+    <script defer src="./app.js?v=fa8835c22642"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -43,7 +43,7 @@
 
           <div class="upload-group">
             <div class="upload-label-row">
-              <label for="invoiceInput">Invoice PDF</label>
+              <label for="invoiceInput">거래명세서 / 구매내역</label>
               <span id="invoiceStatus">선택 안 됨</span>
             </div>
             <label class="dropzone dropzone--compact" id="invoiceDropzone" for="invoiceInput">
@@ -52,10 +52,10 @@
                 <path d="M14 2.75v4h4M8.5 15.5h7M8.5 12h7" />
               </svg>
               <span>
-                <strong id="invoiceFileName">PDF를 선택하거나 놓으세요</strong>
-                <small>텍스트 기반 Invoice에서 품목 후보를 추출합니다</small>
+                <strong id="invoiceFileName">PDF 또는 이미지를 선택하거나 놓으세요</strong>
+                <small>PDF 텍스트 추출 · JPG/PNG/WEBP 영역 OCR</small>
               </span>
-              <input id="invoiceInput" type="file" accept="application/pdf,.pdf" />
+              <input id="invoiceInput" type="file" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" />
             </label>
           </div>
 
@@ -263,8 +263,8 @@
       <div class="roi-dialog__shell">
         <header class="roi-dialog__header">
           <div>
-            <h2 id="roiDialogTitle">PDF에서 품목 영역 지정</h2>
-            <p>품목명이 있는 표 또는 열을 드래그하면 선택 영역의 텍스트만 추출합니다.</p>
+            <h2 id="roiDialogTitle">문서에서 품목 영역 지정</h2>
+            <p>필요한 영역을 여러 번 드래그해 추가하고, 잘못 만든 영역은 우클릭해 삭제하세요.</p>
           </div>
           <button class="roi-close-button" id="roiCloseButton" type="button" aria-label="영역 지정 창 닫기">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
@@ -272,7 +272,7 @@
         </header>
 
         <div class="roi-dialog__body">
-          <section class="roi-viewer" aria-label="PDF 영역 선택">
+          <section class="roi-viewer" aria-label="문서 영역 선택">
             <div class="roi-toolbar">
               <nav class="roi-page-controls" aria-label="PDF 페이지 이동">
                 <button id="roiPrevPageButton" type="button" aria-label="이전 PDF 페이지">
@@ -291,33 +291,33 @@
 
             <div class="roi-canvas-stage" id="roiCanvasStage">
               <div class="roi-canvas-surface" id="roiCanvasSurface">
-                <canvas id="roiCanvas" aria-label="선택한 Invoice PDF 페이지"></canvas>
-                <div class="roi-selection" id="roiSelection" hidden></div>
+                <canvas id="roiCanvas" aria-label="선택한 거래명세서 또는 구매내역 이미지"></canvas>
+                <div class="roi-selections" id="roiSelections" aria-live="polite"></div>
               </div>
-              <p class="roi-canvas-hint" id="roiCanvasHint">PDF 위에서 품목명이 있는 영역을 드래그하세요.</p>
+              <p class="roi-canvas-hint" id="roiCanvasHint">품목 영역을 드래그해 추가하세요. 선택 영역을 우클릭하면 삭제됩니다.</p>
             </div>
           </section>
 
           <aside class="roi-inspector" aria-label="영역 추출 결과">
             <ol class="roi-instructions">
-              <li><span>1</span><p><strong>품목 영역 선택</strong><small>주소와 결제정보를 제외하고 품목명 열을 감싸세요.</small></p></li>
+              <li><span>1</span><p><strong>품목 영역 여러 개 선택</strong><small>드래그할 때마다 영역이 추가되고, 영역을 우클릭하면 삭제됩니다.</small></p></li>
               <li><span>2</span><p><strong>추출 후보 확인</strong><small>필요 없는 줄은 체크를 해제할 수 있습니다.</small></p></li>
               <li><span>3</span><p><strong>품목 목록에 적용</strong><small>기존 자동 추출 결과를 선택한 후보로 교체합니다.</small></p></li>
             </ol>
 
             <div class="roi-result-status" role="status" aria-live="polite">
               <strong id="roiCandidateTitle">영역을 선택해 주세요</strong>
-              <p id="roiCandidateMessage">PDF 텍스트를 먼저 찾고, 스캔 이미지라면 선택 영역만 OCR할 수 있습니다.</p>
+              <p id="roiCandidateMessage">PDF 텍스트를 먼저 찾고, 이미지 파일과 스캔 PDF는 선택한 모든 영역을 OCR합니다.</p>
             </div>
 
             <section class="roi-ocr-panel" aria-labelledby="roiOcrHeading">
               <div class="roi-ocr-heading">
                 <div>
-                  <strong id="roiOcrHeading">스캔 이미지 OCR</strong>
-                  <small>선택한 영역만 한글+영문으로 인식합니다. 첫 실행은 모델 준비에 시간이 걸립니다.</small>
+                  <strong id="roiOcrHeading">선택 영역 OCR</strong>
+                  <small>추가한 모든 영역을 한글+영문으로 인식합니다. 첫 실행은 모델 준비에 시간이 걸립니다.</small>
                 </div>
                 <button class="button button--secondary button--small" id="roiOcrButton" type="button" disabled>
-                  선택 영역 OCR
+                  모든 영역 OCR
                 </button>
               </div>
               <div class="roi-ocr-progress" id="roiOcrProgressGroup" role="status" aria-live="polite" hidden>
@@ -344,7 +344,7 @@
         </div>
 
         <footer class="roi-dialog__footer">
-          <button class="button button--ghost" id="roiResetButton" type="button">영역 다시 선택</button>
+          <button class="button button--ghost" id="roiResetButton" type="button">모든 영역 삭제</button>
           <button class="button button--primary" id="roiApplyButton" type="button" disabled>선택 품목 적용</button>
         </footer>
       </div>

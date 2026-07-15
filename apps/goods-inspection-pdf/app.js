@@ -18,6 +18,7 @@
     invoiceCandidates: [],
     invoicePdf: null,
     invoiceLines: [],
+    invoiceSourceType: "",
     photos: [],
     items: [],
     countMode: "auto",
@@ -28,7 +29,7 @@
     inspectionDate: todayIso(),
     exporting: false,
     roiPageNumber: 1,
-    roiRect: null,
+    roiRects: [],
     roiCandidates: [],
     roiDrawing: null,
     roiMatchedTextCount: 0,
@@ -69,7 +70,7 @@
     roiCanvasSurface: document.querySelector("#roiCanvasSurface"),
     roiCanvas: document.querySelector("#roiCanvas"),
     roiCanvasHint: document.querySelector("#roiCanvasHint"),
-    roiSelection: document.querySelector("#roiSelection"),
+    roiSelections: document.querySelector("#roiSelections"),
     roiCandidateTitle: document.querySelector("#roiCandidateTitle"),
     roiCandidateMessage: document.querySelector("#roiCandidateMessage"),
     roiOcrButton: document.querySelector("#roiOcrButton"),
@@ -174,9 +175,9 @@
     });
 
     attachDropzone(elements.invoiceDropzone, (files) => {
-      const file = files.find((entry) => entry.type === "application/pdf" || entry.name.toLowerCase().endsWith(".pdf"));
+      const file = files.find((entry) => isPdfFile(entry) || isInvoiceImageFile(entry));
       if (!file) {
-        showToast("PDF 파일을 선택해 주세요.", "error");
+        showToast("PDF, JPG, PNG 또는 WEBP 파일을 선택해 주세요.", "error");
         return;
       }
       handleInvoiceFile(file);
@@ -227,13 +228,14 @@
 
     elements.resetButton.addEventListener("click", () => {
       if (!state.items.length && !state.photos.length && !state.invoiceFile) return;
-      if (!window.confirm("현재 문서의 Invoice, 사진, 품목 입력을 초기화할까요? 검수자 이름과 등록 서명은 유지됩니다.")) return;
+      if (!window.confirm("현재 문서의 거래명세서/구매내역, 사진, 품목 입력을 초기화할까요? 검수자 이름과 등록 서명은 유지됩니다.")) return;
       state.invoiceFile = null;
       state.invoiceText = "";
       state.invoiceCandidates = [];
       state.invoicePdf?.destroy?.();
       state.invoicePdf = null;
       state.invoiceLines = [];
+      state.invoiceSourceType = "";
       state.photos = [];
       state.items = [];
       state.countMode = "auto";
@@ -305,12 +307,14 @@
     elements.roiApplyAllPages.addEventListener("change", () => {
       if (state.ocrRunning) cancelRoiOcr(true);
       resetOcrResult();
-      if (state.roiRect) extractRoiText();
+      renderRoiSelection();
+      if (state.roiRects.length) extractRoiText();
     });
     elements.roiCanvasSurface.addEventListener("pointerdown", startRoiSelection);
     elements.roiCanvasSurface.addEventListener("pointermove", updateRoiSelection);
     elements.roiCanvasSurface.addEventListener("pointerup", finishRoiSelection);
     elements.roiCanvasSurface.addEventListener("pointercancel", cancelRoiDrawing);
+    elements.roiSelections.addEventListener("contextmenu", removeRoiFromContextMenu);
     elements.roiResetButton.addEventListener("click", resetRoiSelection);
     elements.roiOcrButton.addEventListener("click", runRoiOcr);
     elements.roiOcrCancelButton.addEventListener("click", cancelRoiOcr);
@@ -373,22 +377,57 @@
     dropzone.addEventListener("drop", (event) => onFiles([...event.dataTransfer.files]));
   }
 
+  function isPdfFile(file) {
+    return file?.type === "application/pdf" || file?.name?.toLowerCase().endsWith(".pdf");
+  }
+
+  function isInvoiceImageFile(file) {
+    const name = file?.name?.toLowerCase() || "";
+    return ["image/jpeg", "image/png", "image/webp"].includes(file?.type)
+      || /\.(jpe?g|png|webp)$/.test(name);
+  }
+
   async function handleInvoiceFile(file) {
+    const imageSource = isInvoiceImageFile(file);
+    if (!imageSource && !isPdfFile(file)) {
+      showToast("PDF, JPG, PNG 또는 WEBP 파일을 선택해 주세요.", "error");
+      return;
+    }
+    if (imageSource && file.size > MAX_IMAGE_BYTES) {
+      showToast("구매내역 이미지는 20MB 이하 파일을 사용해 주세요.", "error");
+      return;
+    }
+
     state.invoicePdf?.destroy?.();
     state.invoiceFile = file;
     state.invoiceText = "";
     state.invoiceCandidates = [];
     state.invoicePdf = null;
     state.invoiceLines = [];
+    state.invoiceSourceType = imageSource ? "image" : "pdf";
     resetRoiState();
     elements.roiOpenButton.disabled = true;
     elements.invoiceResult.hidden = false;
-    elements.invoiceResultTitle.textContent = "Invoice 분석 중";
-    elements.invoiceResultMessage.textContent = "PDF의 텍스트를 브라우저에서 읽고 있습니다.";
+    elements.invoiceResultTitle.textContent = imageSource ? "구매내역 이미지 준비 중" : "Invoice 분석 중";
+    elements.invoiceResultMessage.textContent = imageSource
+      ? "이미지를 브라우저에서 열고 ROI 영역 OCR을 준비하고 있습니다."
+      : "PDF의 텍스트를 브라우저에서 읽고 있습니다.";
     elements.invoiceRawText.textContent = "";
     renderInvoiceStatus("processing");
 
     try {
+      if (imageSource) {
+        state.invoicePdf = await createImageInvoiceDocument(file);
+        mergeInvoiceCandidates([]);
+        elements.invoiceResultTitle.textContent = "구매내역 이미지 준비 완료";
+        elements.invoiceResultMessage.textContent = "영역 직접 지정에서 품목명이 있는 부분을 여러 번 드래그한 뒤 모든 영역 OCR을 실행해 주세요.";
+        elements.invoiceRawText.textContent = "이미지 파일에는 내장 텍스트가 없습니다. 선택한 ROI 영역을 OCR해 품목명을 읽습니다.";
+        elements.roiOpenButton.disabled = false;
+        renderInvoiceStatus("complete");
+        renderAll();
+        return;
+      }
+
       const { pdf, lines } = await extractPdfData(file);
       state.invoicePdf = pdf;
       state.invoiceLines = lines;
@@ -413,14 +452,52 @@
       renderAll();
     } catch (error) {
       console.error(error);
-      elements.invoiceResultTitle.textContent = "Invoice 자동 분석을 완료하지 못했습니다";
-      elements.invoiceResultMessage.textContent = "PDF를 열지 못했습니다. 암호화 여부를 확인하거나 품목명을 직접 입력해 주세요. 열 수 있는 이미지형 PDF는 영역 직접 지정 OCR을 사용할 수 있습니다.";
+      elements.invoiceResultTitle.textContent = imageSource ? "구매내역 이미지를 열지 못했습니다" : "Invoice 자동 분석을 완료하지 못했습니다";
+      elements.invoiceResultMessage.textContent = imageSource
+        ? "브라우저에서 표시할 수 있는 JPG, PNG 또는 WEBP 파일인지 확인해 주세요."
+        : "PDF를 열지 못했습니다. 암호화 여부를 확인하거나 품목명을 직접 입력해 주세요. 열 수 있는 이미지형 PDF는 영역 직접 지정 OCR을 사용할 수 있습니다.";
       elements.invoiceRawText.textContent = error instanceof Error ? error.message : String(error);
       elements.roiOpenButton.disabled = true;
       renderInvoiceStatus("error");
       renderAll();
-      showToast("Invoice 텍스트를 읽지 못했습니다. 품목명을 직접 입력해 주세요.", "error");
+      showToast(imageSource ? "구매내역 이미지를 열지 못했습니다." : "Invoice 텍스트를 읽지 못했습니다. 품목명을 직접 입력해 주세요.", "error");
     }
+  }
+
+  async function createImageInvoiceDocument(file) {
+    const dataUrl = await fileToDataUrl(file);
+    const image = await safeLoadImage(dataUrl);
+    if (!image?.naturalWidth || !image?.naturalHeight) throw new Error("이미지 크기를 확인하지 못했습니다.");
+    const sourceWidth = image.naturalWidth;
+    const sourceHeight = image.naturalHeight;
+
+    return {
+      numPages: 1,
+      sourceType: "image",
+      async getPage(pageNumber) {
+        if (pageNumber !== 1) throw new Error("구매내역 이미지는 한 페이지로 처리됩니다.");
+        return {
+          getViewport({ scale = 1 } = {}) {
+            return { width: sourceWidth * scale, height: sourceHeight * scale };
+          },
+          render({ canvasContext, viewport }) {
+            const promise = Promise.resolve().then(() => {
+              canvasContext.save();
+              canvasContext.fillStyle = "#ffffff";
+              canvasContext.fillRect(0, 0, viewport.width, viewport.height);
+              canvasContext.imageSmoothingEnabled = true;
+              canvasContext.imageSmoothingQuality = "high";
+              canvasContext.drawImage(image, 0, 0, viewport.width, viewport.height);
+              canvasContext.restore();
+            });
+            return { promise, cancel() {} };
+          },
+        };
+      },
+      destroy() {
+        image.removeAttribute("src");
+      },
+    };
   }
 
   async function extractPdfData(file) {
@@ -491,7 +568,7 @@
   function resetRoiState() {
     if (state.ocrRunning) cancelRoiOcr(true);
     state.roiPageNumber = 1;
-    state.roiRect = null;
+    state.roiRects = [];
     state.roiCandidates = [];
     state.roiDrawing = null;
     state.roiMatchedTextCount = 0;
@@ -503,12 +580,13 @@
 
   function openRoiDialog() {
     if (!state.invoicePdf) {
-      showToast("먼저 Invoice PDF를 올려 주세요.", "error");
+      showToast("먼저 거래명세서 PDF 또는 구매내역 이미지를 올려 주세요.", "error");
       return;
     }
     const pageCount = state.invoicePdf.numPages || 1;
     state.roiPageNumber = Math.min(Math.max(1, state.roiPageNumber), pageCount);
     elements.roiApplyAllPages.disabled = pageCount === 1;
+    elements.roiApplyAllPages.closest("label").hidden = pageCount === 1;
     if (pageCount === 1) elements.roiApplyAllPages.checked = false;
     if (!elements.roiDialog.open) elements.roiDialog.showModal();
     renderRoiCandidates();
@@ -524,9 +602,7 @@
     if (!state.invoicePdf) return;
     if (state.ocrRunning) cancelRoiOcr(true);
     state.roiPageNumber = Math.min(state.invoicePdf.numPages, Math.max(1, state.roiPageNumber + delta));
-    renderRoiPage().then(() => {
-      if (state.roiRect) extractRoiText();
-    });
+    renderRoiPage();
   }
 
   async function renderRoiPage() {
@@ -567,8 +643,8 @@
       renderRoiSelection();
     } catch (error) {
       console.error(error);
-      elements.roiCanvasHint.textContent = "PDF 페이지를 표시하지 못했습니다. 창을 닫고 다시 시도해 주세요.";
-      showToast("PDF 영역 지정 화면을 표시하지 못했습니다.", "error");
+      elements.roiCanvasHint.textContent = "문서를 표시하지 못했습니다. 창을 닫고 다시 시도해 주세요.";
+      showToast("영역 지정 화면을 표시하지 못했습니다.", "error");
     }
   }
 
@@ -578,15 +654,15 @@
     const point = getRoiPoint(event);
     if (!point) return;
     event.preventDefault();
-    state.roiDrawing = { pointerId: event.pointerId, startX: point.x, startY: point.y };
-    state.roiRect = { x: point.x, y: point.y, width: 0, height: 0 };
-    state.roiCandidates = [];
-    state.roiMatchedTextCount = 0;
-    state.roiCandidateSource = "";
-    resetOcrResult();
+    state.roiDrawing = {
+      pointerId: event.pointerId,
+      pageNumber: state.roiPageNumber,
+      startX: point.x,
+      startY: point.y,
+      rect: { x: point.x, y: point.y, width: 0, height: 0 },
+    };
     elements.roiCanvasSurface.setPointerCapture?.(event.pointerId);
     renderRoiSelection();
-    renderRoiCandidates();
   }
 
   function updateRoiSelection(event) {
@@ -594,27 +670,34 @@
     const point = getRoiPoint(event);
     if (!point) return;
     event.preventDefault();
-    state.roiRect = normalizedRoiRect(state.roiDrawing.startX, state.roiDrawing.startY, point.x, point.y);
+    state.roiDrawing.rect = normalizedRoiRect(state.roiDrawing.startX, state.roiDrawing.startY, point.x, point.y);
     renderRoiSelection();
   }
 
   function finishRoiSelection(event) {
     if (!state.roiDrawing || state.roiDrawing.pointerId !== event.pointerId) return;
     updateRoiSelection(event);
-    elements.roiCanvasSurface.releasePointerCapture?.(event.pointerId);
+    if (elements.roiCanvasSurface.hasPointerCapture?.(event.pointerId)) {
+      elements.roiCanvasSurface.releasePointerCapture(event.pointerId);
+    }
+    const completed = state.roiDrawing.rect;
+    const pageNumber = state.roiDrawing.pageNumber;
     state.roiDrawing = null;
-    if (!state.roiRect || state.roiRect.width < 0.012 || state.roiRect.height < 0.012) {
-      resetRoiSelection();
+    if (!completed || completed.width < 0.012 || completed.height < 0.012) {
+      renderRoiSelection();
       showToast("품목 영역을 조금 더 크게 드래그해 주세요.", "error");
       return;
     }
+    state.roiRects.push({ id: cryptoRandomId(), pageNumber, ...completed });
+    invalidateRoiResults();
+    renderRoiSelection();
     extractRoiText();
   }
 
   function cancelRoiDrawing(event) {
     if (!state.roiDrawing || state.roiDrawing.pointerId !== event.pointerId) return;
     state.roiDrawing = null;
-    resetRoiSelection();
+    renderRoiSelection();
   }
 
   function getRoiPoint(event) {
@@ -636,55 +719,111 @@
   }
 
   function renderRoiSelection() {
-    const rect = state.roiRect;
-    if (!rect || rect.width <= 0 || rect.height <= 0) {
-      elements.roiSelection.hidden = true;
-      elements.roiCanvasHint.textContent = "PDF 위에서 품목명이 있는 영역을 드래그하세요.";
-      return;
+    elements.roiSelections.replaceChildren();
+    const showEveryRect = elements.roiApplyAllPages.checked && (state.invoicePdf?.numPages || 1) > 1;
+    const visibleRects = state.roiRects.filter((rect) => showEveryRect || rect.pageNumber === state.roiPageNumber);
+    visibleRects.forEach((rect) => {
+      const selection = document.createElement("div");
+      const index = state.roiRects.findIndex((entry) => entry.id === rect.id) + 1;
+      selection.className = "roi-selection";
+      selection.dataset.roiId = rect.id;
+      selection.dataset.roiLabel = `영역 ${index}`;
+      selection.style.left = `${rect.x * 100}%`;
+      selection.style.top = `${rect.y * 100}%`;
+      selection.style.width = `${rect.width * 100}%`;
+      selection.style.height = `${rect.height * 100}%`;
+      selection.title = `영역 ${index} · 우클릭하여 삭제`;
+      selection.setAttribute("aria-label", `선택 영역 ${index}, 우클릭하여 삭제`);
+      elements.roiSelections.append(selection);
+    });
+
+    const draft = state.roiDrawing?.rect;
+    if (draft?.width > 0 && draft?.height > 0 && state.roiDrawing.pageNumber === state.roiPageNumber) {
+      const selection = document.createElement("div");
+      selection.className = "roi-selection is-draft";
+      selection.dataset.roiLabel = "추가 중";
+      selection.style.left = `${draft.x * 100}%`;
+      selection.style.top = `${draft.y * 100}%`;
+      selection.style.width = `${draft.width * 100}%`;
+      selection.style.height = `${draft.height * 100}%`;
+      elements.roiSelections.append(selection);
     }
-    elements.roiSelection.hidden = false;
-    elements.roiSelection.style.left = `${rect.x * 100}%`;
-    elements.roiSelection.style.top = `${rect.y * 100}%`;
-    elements.roiSelection.style.width = `${rect.width * 100}%`;
-    elements.roiSelection.style.height = `${rect.height * 100}%`;
-    elements.roiCanvasHint.textContent = "청록색 영역을 선택했습니다. PDF 텍스트 결과를 확인하거나 선택 영역 OCR을 실행하세요.";
+
+    const count = state.roiRects.length;
+    elements.roiCanvasHint.textContent = count
+      ? `${count}개 영역이 선택되었습니다. 드래그로 추가하고, 영역을 우클릭하면 삭제됩니다.`
+      : "품목 영역을 드래그해 추가하세요. 선택 영역을 우클릭하면 삭제됩니다.";
   }
 
   function resetRoiSelection() {
     if (state.ocrRunning) cancelRoiOcr(true);
-    state.roiRect = null;
-    state.roiCandidates = [];
+    state.roiRects = [];
     state.roiDrawing = null;
+    invalidateRoiResults();
+    renderRoiSelection();
+  }
+
+  function removeRoiFromContextMenu(event) {
+    const selection = event.target.closest("[data-roi-id]");
+    if (!selection) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.ocrRunning) cancelRoiOcr(true);
+    const index = state.roiRects.findIndex((rect) => rect.id === selection.dataset.roiId);
+    if (index < 0) return;
+    state.roiRects.splice(index, 1);
+    invalidateRoiResults();
+    renderRoiSelection();
+    if (state.roiRects.length) extractRoiText();
+    showToast(`선택 영역 ${index + 1}을 삭제했습니다.`);
+  }
+
+  function invalidateRoiResults() {
+    state.roiCandidates = [];
     state.roiMatchedTextCount = 0;
     state.roiCandidateSource = "";
     resetOcrResult();
-    renderRoiSelection();
     renderRoiCandidates();
   }
 
-  function extractRoiText() {
-    if (!state.roiRect || !state.invoicePdf) return;
-    const pageNumbers = elements.roiApplyAllPages.checked && state.invoicePdf.numPages > 1
-      ? Array.from({ length: state.invoicePdf.numPages }, (_, index) => index + 1)
-      : [state.roiPageNumber];
-    const roiLines = [];
+  function getRoiTasks() {
+    if (!state.invoicePdf || !state.roiRects.length) return [];
+    const pageCount = state.invoicePdf.numPages || 1;
+    const applyAllPages = elements.roiApplyAllPages.checked && pageCount > 1;
+    if (!applyAllPages) {
+      return state.roiRects.map((rect, roiIndex) => ({ pageNumber: rect.pageNumber, rect, roiIndex }));
+    }
+    return state.roiRects.flatMap((rect, roiIndex) => (
+      Array.from({ length: pageCount }, (_, pageIndex) => ({ pageNumber: pageIndex + 1, rect, roiIndex }))
+    ));
+  }
 
-    pageNumbers.forEach((pageNumber) => {
+  function extractRoiText() {
+    if (!state.roiRects.length || !state.invoicePdf) return;
+    const tasks = getRoiTasks();
+    const roiLines = [];
+    const seenLines = new Set();
+
+    tasks.forEach(({ pageNumber, rect }) => {
       state.invoiceLines
         .filter((line) => line.pageNumber === pageNumber)
         .forEach((line) => {
           const selectedParts = (line.parts || [])
-            .filter((part) => partIntersectsRoi(line, part, state.roiRect))
+            .filter((part) => partIntersectsRoi(line, part, rect))
             .sort((a, b) => a.x - b.x);
           if (!selectedParts.length) return;
           const text = selectedParts.map((part) => part.text).join(" ").replace(/\s+/g, " ").trim();
-          if (text) roiLines.push({ ...line, text });
+          const key = `${pageNumber}:${Math.round(line.y * 10)}:${text}`;
+          if (text && !seenLines.has(key)) {
+            seenLines.add(key);
+            roiLines.push({ ...line, text });
+          }
         });
     });
 
     const analysis = window.InvoiceParser.extractRoiCandidates(roiLines, { maxItems: MAX_ITEMS });
     state.roiMatchedTextCount = roiLines.length;
-    state.roiCandidateSource = "pdf-text";
+    state.roiCandidateSource = state.invoiceSourceType === "image" ? "image" : "pdf-text";
     state.roiCandidates = analysis.items.map((name, index) => ({
       id: `roi-${index}-${name.toLocaleLowerCase("ko-KR")}`,
       name,
@@ -703,8 +842,8 @@
 
   function renderOcrControls() {
     const runtimeReady = Boolean(window.Tesseract?.createWorker);
-    elements.roiOcrButton.disabled = !state.roiRect || state.ocrRunning || !runtimeReady;
-    elements.roiOcrButton.textContent = state.ocrRunning ? "OCR 분석 중…" : "선택 영역 OCR";
+    elements.roiOcrButton.disabled = !state.roiRects.length || state.ocrRunning || !runtimeReady;
+    elements.roiOcrButton.textContent = state.ocrRunning ? "OCR 분석 중…" : "모든 영역 OCR";
     elements.roiOcrProgressGroup.hidden = !state.ocrRunning;
     elements.roiOcrProgress.value = Math.min(1, Math.max(0, state.ocrProgress || 0));
     elements.roiOcrStatus.textContent = state.ocrStatus || "OCR 준비 중…";
@@ -735,7 +874,7 @@
     state.ocrProgress = recognizing
       ? Math.min(1, (ocrPageIndex + progress) / Math.max(1, ocrPageTotal))
       : Math.max(state.ocrProgress, progress * 0.16);
-    const pageLabel = ocrPageTotal > 1 && recognizing ? ` · ${ocrPageIndex + 1}/${ocrPageTotal}페이지` : "";
+    const pageLabel = ocrPageTotal > 1 && recognizing ? ` · ${ocrPageIndex + 1}/${ocrPageTotal}영역` : "";
     state.ocrStatus = `${translateOcrStatus(message.status)}${pageLabel} · ${Math.round(state.ocrProgress * 100)}%`;
     renderOcrControls();
   }
@@ -775,10 +914,12 @@
     return ocrWorkerPromise;
   }
 
-  async function renderRoiOcrCanvas(pageNumber) {
+  async function renderRoiOcrCanvas(pageNumber, roi) {
     const page = await state.invoicePdf.getPage(pageNumber);
     const baseViewport = page.getViewport({ scale: 1 });
-    const renderScale = Math.min(4, Math.max(2.4, 2400 / Math.max(1, baseViewport.width)));
+    const renderScale = state.invoiceSourceType === "image"
+      ? Math.min(2, Math.max(1, 2400 / Math.max(1, baseViewport.width)))
+      : Math.min(4, Math.max(2.4, 2400 / Math.max(1, baseViewport.width)));
     const viewport = page.getViewport({ scale: renderScale });
     const source = document.createElement("canvas");
     source.width = Math.ceil(viewport.width);
@@ -788,7 +929,6 @@
     sourceContext.fillRect(0, 0, source.width, source.height);
     await page.render({ canvasContext: sourceContext, viewport }).promise;
 
-    const roi = state.roiRect;
     const sourceX = Math.max(0, Math.floor(roi.x * source.width));
     const sourceY = Math.max(0, Math.floor(roi.y * source.height));
     const sourceWidth = Math.max(1, Math.min(source.width - sourceX, Math.ceil(roi.width * source.width)));
@@ -811,18 +951,17 @@
   }
 
   async function runRoiOcr() {
-    if (!state.roiRect || !state.invoicePdf || state.ocrRunning) return;
+    if (!state.roiRects.length || !state.invoicePdf || state.ocrRunning) return;
     if (!window.Tesseract?.createWorker) {
       showToast("OCR 모듈을 불러오지 못했습니다. 페이지를 새로고침해 주세요.", "error");
       return;
     }
 
-    const pageNumbers = elements.roiApplyAllPages.checked && state.invoicePdf.numPages > 1
-      ? Array.from({ length: state.invoicePdf.numPages }, (_, index) => index + 1)
-      : [state.roiPageNumber];
+    const tasks = getRoiTasks();
+    if (!tasks.length) return;
     const runToken = ++ocrRunToken;
     ocrPageIndex = 0;
-    ocrPageTotal = pageNumbers.length;
+    ocrPageTotal = tasks.length;
     state.ocrRunning = true;
     state.ocrCancelRequested = false;
     state.ocrProgress = 0;
@@ -834,16 +973,17 @@
     renderOcrControls();
     renderRoiCandidates();
 
-    const pageTexts = [];
+    const taskTexts = [];
     try {
       const worker = await getOcrWorker();
       if (runToken !== ocrRunToken) return;
-      for (let index = 0; index < pageNumbers.length; index += 1) {
+      for (let index = 0; index < tasks.length; index += 1) {
         if (runToken !== ocrRunToken) return;
         ocrPageIndex = index;
-        state.ocrStatus = `선택 영역 이미지 준비 중 · ${index + 1}/${pageNumbers.length}페이지`;
+        state.ocrStatus = `선택 영역 이미지 준비 중 · ${index + 1}/${tasks.length}영역`;
         renderOcrControls();
-        const crop = await renderRoiOcrCanvas(pageNumbers[index]);
+        const task = tasks[index];
+        const crop = await renderRoiOcrCanvas(task.pageNumber, task.rect);
         if (runToken !== ocrRunToken) {
           crop.width = 1;
           crop.height = 1;
@@ -852,16 +992,21 @@
         const result = await worker.recognize(crop);
         crop.width = 1;
         crop.height = 1;
-        pageTexts.push(String(result.data?.text || "").trim());
+        taskTexts.push({ ...task, text: String(result.data?.text || "").trim() });
       }
 
       if (runToken !== ocrRunToken) return;
-      state.ocrRawText = pageTexts
-        .map((text, index) => pageNumbers.length > 1 ? `[${pageNumbers[index]}페이지]\n${text}` : text)
+      state.ocrRawText = taskTexts
+        .map((task) => {
+          const label = state.invoiceSourceType === "image"
+            ? `영역 ${task.roiIndex + 1}`
+            : `${task.pageNumber}페이지 · 영역 ${task.roiIndex + 1}`;
+          return `[${label}]\n${task.text}`;
+        })
         .filter(Boolean)
         .join("\n\n");
-      const ocrLines = pageTexts
-        .flatMap((text) => text.split(/\r?\n/))
+      const ocrLines = taskTexts
+        .flatMap((task) => task.text.split(/\r?\n/))
         .map((text) => ({ text: text.replace(/\s+/g, " ").trim() }))
         .filter((line) => line.text);
       const analysis = window.InvoiceParser.extractRoiCandidates(ocrLines, { maxItems: MAX_ITEMS });
@@ -875,7 +1020,7 @@
       state.ocrStatus = "OCR 분석 완료 · 100%";
       renderRoiCandidates();
       showToast(state.roiCandidates.length
-        ? `OCR로 품목 후보 ${state.roiCandidates.length}개를 찾았습니다.`
+        ? `${tasks.length}개 OCR 영역에서 품목 후보 ${state.roiCandidates.length}개를 찾았습니다.`
         : "OCR 원문은 읽었지만 품목 후보를 찾지 못했습니다.", state.roiCandidates.length ? "info" : "error");
     } catch (error) {
       if (runToken !== ocrRunToken || state.ocrCancelRequested) return;
@@ -925,6 +1070,7 @@
     renderOcrControls();
     elements.roiCandidateList.replaceChildren();
     const candidates = state.roiCandidates;
+    const hasRois = state.roiRects.length > 0;
 
     if (!candidates.length) {
       const empty = document.createElement("p");
@@ -933,25 +1079,29 @@
         elements.roiCandidateTitle.textContent = "선택 영역을 OCR로 분석 중입니다";
         elements.roiCandidateMessage.textContent = state.ocrStatus || "한글·영문 OCR 엔진을 준비하고 있습니다.";
         empty.textContent = "분석이 끝나면 품목 후보가 여기에 표시됩니다.";
-      } else if (state.roiCandidateSource === "ocr" && state.roiRect && state.roiMatchedTextCount === 0) {
+      } else if (state.roiCandidateSource === "ocr" && hasRois && state.roiMatchedTextCount === 0) {
         elements.roiCandidateTitle.textContent = "OCR로 글자를 읽지 못했습니다";
-        elements.roiCandidateMessage.textContent = "글자가 선명하게 보이도록 품목명 영역을 다시 선택하거나 더 좁게 지정해 주세요.";
+        elements.roiCandidateMessage.textContent = "글자가 선명하게 보이도록 ROI를 다시 추가하거나 불필요한 영역을 우클릭해 삭제해 주세요.";
         empty.textContent = "OCR 원문에 인식된 텍스트가 없습니다.";
-      } else if (state.roiCandidateSource === "ocr" && state.roiRect) {
+      } else if (state.roiCandidateSource === "ocr" && hasRois) {
         elements.roiCandidateTitle.textContent = "OCR 품목 후보를 찾지 못했습니다";
         elements.roiCandidateMessage.textContent = "글자는 인식했지만 머리글·주소·금액 정보로 판단했습니다. OCR 원문을 확인해 주세요.";
-        empty.textContent = "품목명 열만 포함하도록 영역을 조금 더 좁게 선택해 보세요.";
-      } else if (state.roiRect && state.roiMatchedTextCount === 0) {
+        empty.textContent = "품목명이 있는 부분만 ROI로 남겨 다시 실행해 보세요.";
+      } else if (state.roiCandidateSource === "image" && hasRois) {
+        elements.roiCandidateTitle.textContent = `${state.roiRects.length}개 이미지 영역을 선택했습니다`;
+        elements.roiCandidateMessage.textContent = "구매내역 이미지에는 PDF 텍스트가 없으므로 모든 영역 OCR을 실행해 주세요.";
+        empty.textContent = "선택한 모든 ROI를 순서대로 OCR할 준비가 되었습니다.";
+      } else if (hasRois && state.roiMatchedTextCount === 0) {
         elements.roiCandidateTitle.textContent = "선택 영역에 PDF 텍스트가 없습니다";
-        elements.roiCandidateMessage.textContent = "이미지형 PDF라면 위의 선택 영역 OCR을 실행하세요.";
-        empty.textContent = "PDF 텍스트 객체를 찾지 못했습니다. OCR로 전환할 수 있습니다.";
-      } else if (state.roiRect) {
+        elements.roiCandidateMessage.textContent = "스캔 PDF라면 위의 모든 영역 OCR을 실행하세요.";
+        empty.textContent = "PDF 텍스트 객체를 찾지 못했습니다. 선택한 ROI를 OCR할 수 있습니다.";
+      } else if (hasRois) {
         elements.roiCandidateTitle.textContent = "품목 후보를 찾지 못했습니다";
         elements.roiCandidateMessage.textContent = "선택 영역에 글자는 있지만 품목명이 아닌 머리글·주소·금액 정보로 판단했습니다.";
-        empty.textContent = "품목명 열을 조금 더 좁게 다시 선택해 보세요.";
+        empty.textContent = "품목명 부분을 추가하거나 불필요한 ROI를 우클릭해 삭제해 보세요.";
       } else {
         elements.roiCandidateTitle.textContent = "영역을 선택해 주세요";
-        elements.roiCandidateMessage.textContent = "PDF 텍스트를 먼저 찾고, 이미지형 PDF는 선택 영역만 OCR합니다.";
+        elements.roiCandidateMessage.textContent = "드래그할 때마다 ROI가 추가되며 이미지 파일과 스캔 PDF는 모든 영역을 OCR합니다.";
         empty.textContent = "아직 선택된 영역이 없습니다.";
       }
       elements.roiCandidateList.append(empty);
@@ -963,8 +1113,8 @@
     const sourceLabel = state.roiCandidateSource === "ocr" ? "OCR로" : "PDF 텍스트에서";
     elements.roiCandidateTitle.textContent = `${sourceLabel} ${candidates.length}개 품목 후보를 찾았습니다`;
     const scopeLabel = elements.roiApplyAllPages.checked
-      ? "같은 위치를 전체 PDF 페이지에 적용했습니다."
-      : `${state.roiPageNumber}페이지의 선택 영역을 적용했습니다.`;
+      ? `${state.roiRects.length}개 ROI 위치를 전체 PDF 페이지에 적용했습니다.`
+      : `${state.roiRects.length}개 ROI를 적용했습니다.`;
     elements.roiCandidateMessage.textContent = state.roiCandidateSource === "ocr"
       ? `${scopeLabel} 인식 원문과 품목명을 최종 확인해 주세요.`
       : `${scopeLabel} PDF 텍스트 좌표 추출 결과입니다.`;
@@ -1015,8 +1165,8 @@
     const isOcrResult = state.roiCandidateSource === "ocr";
     elements.invoiceResultTitle.textContent = isOcrResult ? "OCR 영역 적용 결과" : "직접 지정 영역 적용 결과";
     elements.invoiceResultMessage.textContent = isOcrResult
-      ? `이미지형 PDF의 선택 영역을 OCR해 ${selected.length}개 품목을 적용했습니다. 인식된 품목명과 순서를 최종 확인해 주세요.`
-      : `PDF에서 직접 지정한 영역의 ${selected.length}개 품목을 적용했습니다. 품목명과 순서를 최종 확인해 주세요.`;
+      ? `${state.invoiceSourceType === "image" ? "구매내역 이미지" : "이미지형 PDF"}의 ${state.roiRects.length}개 영역을 OCR해 ${selected.length}개 품목을 적용했습니다. 인식된 품목명과 순서를 최종 확인해 주세요.`
+      : `PDF에서 직접 지정한 ${state.roiRects.length}개 영역의 ${selected.length}개 품목을 적용했습니다. 품목명과 순서를 최종 확인해 주세요.`;
     closeRoiDialog();
     renderAll();
     showToast(`${isOcrResult ? "OCR로 인식한" : "직접 지정한"} 품목 ${selected.length}개를 적용했습니다.`);
@@ -1146,7 +1296,7 @@
 
   function renderInvoiceStatus(stateOverride) {
     const status = stateOverride || (state.invoiceFile ? "complete" : "empty");
-    elements.invoiceFileName.textContent = state.invoiceFile?.name || "PDF를 선택하거나 놓으세요";
+    elements.invoiceFileName.textContent = state.invoiceFile?.name || "PDF 또는 이미지를 선택하거나 놓으세요";
     if (status === "processing") {
       elements.invoiceStatus.textContent = "분석 중";
     } else if (status === "error") {

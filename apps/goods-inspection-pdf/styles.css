@@ -1533,13 +1533,22 @@ summary:focus-visible,
   user-select: none;
 }
 
-.roi-selection {
+.roi-selections {
   position: absolute;
   z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+.roi-selection {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
   border: 2px solid #008f8d;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9), 0 6px 20px rgba(0, 96, 95, 0.18);
   background: rgba(20, 184, 166, 0.17);
-  pointer-events: none;
+  cursor: context-menu;
+  pointer-events: auto;
 }
 
 .roi-selection::before {
@@ -1550,10 +1559,17 @@ summary:focus-visible,
   border-radius: 4px 4px 0 0;
   background: #007d7b;
   color: #fff;
-  content: "품목 ROI";
+  content: attr(data-roi-label);
   font-size: 9px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.roi-selection.is-draft {
+  z-index: 2;
+  border-style: dashed;
+  background: rgba(45, 212, 191, 0.12);
+  pointer-events: none;
 }
 
 .roi-canvas-hint {
