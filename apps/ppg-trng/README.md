@@ -5,15 +5,16 @@ YM-PPG firmware.
 
 ## Current Mapping
 
-- ADC0: unused
-- ADC1 / AIN1 / P0.03: commercial PPG sensor
+- ADC0 / AIN0 / P0.02: commercial PPG sensor
+- ADC1: unused
 - ADC2 / AIN2 / P0.04: BPTT PPG signal, selected by default
 - ADC3 / AIN3 / P0.05: BPTT noise/TRNG source
 
-The firmware always samples ADC1, ADC2, and ADC3 together. `Signal input` changes
-only which channel is retained for the main plot, filtering, CSV, and optional
-encryption. ADC3 continues feeding browser-side bit extraction when ADC1 or ADC2
-is displayed.
+The firmware always samples ADC0, ADC2, and ADC3 together. `Plot channels` can
+show any combination of the three synchronized channels on the main plot. The
+primary channel remains ADC2 by default and controls the statistics, filter,
+CSV, and optional encryption. ADC3 continues feeding browser-side bit extraction
+even when ADC0 or ADC2 is the primary display channel.
 
 ## Sampling Rate
 
@@ -26,7 +27,7 @@ scans are grouped per frame, so a 1000 Hz stream normally arrives as 62.5 frames
 
 ## Stream Decoder
 
-`protocol.js` decodes `ADCF v1` frames containing synchronized ADC1/2/3 uint16
+`protocol.js` decodes `ADCF v2` frames containing synchronized ADC0/2/3 uint16
 values and CRC-16/CCITT-FALSE. The decoder supports arbitrary serial/BLE chunk
 boundaries and text command responses mixed with binary frames. CRC failures are
 counted in the encryption status line as frame errors.
@@ -38,7 +39,7 @@ scan rate if frame errors or stale status appear.
 
 ## Commands
 
-- `RATE<hz>`, `RATE?`: set/query the common ADC1/2/3 rate
+- `RATE<hz>`, `RATE?`: set/query the common ADC0/2/3 rate
 - `ADC?`: query the fixed synchronized mapping
 - `GPIO?`: query LED GPIO state
 - `A0` to `A4095`, `B0` to `B4095`: set DAC A/B
@@ -55,7 +56,9 @@ and firmware-side bit mode are intentionally absent from the simplified firmware
 ## Plot, Bits, and Encryption
 
 The main plot supports raw ADC, moving average, low-pass, high-pass, and band-pass
-display filters. `Window` controls the retained plot/CSV and cipher history.
+display filters. `Plot channels` overlays selected ADC series using a shared Y
+axis. `Window` controls the retained samples per ADC channel, plus CSV and cipher
+history.
 `Clear` resets the plot, cipher, pending samples, key queue, bit bitmap, and batch
 error counters together.
 

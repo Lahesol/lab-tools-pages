@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=8f46aa59048f" />
+    <link rel="stylesheet" href="./styles.css?v=1b39cca726cd" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div>
           <h1>PPG_TRNG Control Console</h1>
-          <p>Synchronized ADC1/ADC2/ADC3 monitor and GPIO control</p>
+          <p>Synchronized ADC0/ADC2/ADC3 monitor and GPIO control</p>
         </div>
         <div class="status-strip" aria-live="polite">
           <label class="ui-size-control" for="uiScale">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-15 sync-adc-v2</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-15 adc0-2-3-v3</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -91,12 +91,12 @@
             <div class="subpanel">
               <div class="panel-heading compact-heading">
                 <h3>ADC Routes</h3>
-                <span id="adcSourceStatus" class="mode-pill">ADC1 / ADC2 / ADC3 sync</span>
+                <span id="adcSourceStatus" class="mode-pill">ADC0 / ADC2 / ADC3 sync</span>
               </div>
               <div class="quick-grid">
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
-                  <span class="command-code">ADC1</span>
-                  <span class="command-label">Commercial PPG - AIN1/P0.03</span>
+                  <span class="command-code">ADC0</span>
+                  <span class="command-label">Commercial PPG - AIN0/P0.02</span>
                 </button>
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC2</span>
@@ -111,7 +111,7 @@
                   <span class="command-label">Query routes</span>
                 </button>
               </div>
-              <p class="command-note">ADC0 is unused. ADC1/2/3 are sampled together; the plot selector only changes the displayed channel.</p>
+              <p class="command-note">ADC1 is unused. ADC0/2/3 are sampled together; the plot selector only changes the displayed channel.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-bit-toggle="true" type="button" title="Start browser-side ADC3 bit extraction">
@@ -221,14 +221,23 @@
                   </datalist>
                 </label>
                 <button id="sendRateButton" class="button secondary" type="button">Set</button>
-                <label class="compact-field" for="plotAdcSource">
-                  <span>Signal input</span>
-                  <select id="plotAdcSource">
-                    <option value="ADC1">ADC1 commercial PPG</option>
-                    <option value="ADC2" selected>ADC2 BPTT PPG</option>
-                    <option value="ADC3">ADC3 BPTT noise</option>
-                  </select>
-                </label>
+                <div class="compact-field plot-source-field">
+                  <span>Plot channels</span>
+                  <div id="plotAdcSource" class="plot-source-options" role="group" aria-label="Plot channels">
+                    <label class="plot-source-option">
+                      <input type="checkbox" data-plot-source="ADC0" />
+                      <span>ADC0 commercial PPG</span>
+                    </label>
+                    <label class="plot-source-option is-primary">
+                      <input type="checkbox" data-plot-source="ADC2" checked />
+                      <span>ADC2 BPTT PPG</span>
+                    </label>
+                    <label class="plot-source-option">
+                      <input type="checkbox" data-plot-source="ADC3" />
+                      <span>ADC3 BPTT noise</span>
+                    </label>
+                  </div>
+                </div>
                 <label class="switch">
                   <input id="autoScale" type="checkbox" checked />
                   <span>Auto</span>
@@ -652,8 +661,8 @@
       </main>
     </div>
 
-    <script src="./protocol.js?v=20260715-sync-adc-v2" defer></script>
-    <script src="./app.js?v=903c6024bae5" defer></script>
-    <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
+    <script src="./protocol.js?v=20260715-adc0-2-3-v4" defer></script>
+    <script src="./app.js?v=8b8fdf1e29b1" defer></script>
+    <script src="./dfu.js?v=20260715-adc0-2-3-v4" defer></script>
   </body>
 </html>

@@ -7,7 +7,7 @@
 
   const MAGIC_0 = 0xA5;
   const MAGIC_1 = 0x5A;
-  const VERSION = 1;
+  const VERSION = 2;
   const CHANNEL_COUNT = 3;
   const HEADER_SIZE = 10;
   const CRC_SIZE = 2;
@@ -56,10 +56,10 @@
     const samples = [];
     let offset = HEADER_SIZE;
     for (let scan = 0; scan < sampleCount; scan += 1) {
-      const adc1 = bytes[offset] | (bytes[offset + 1] << 8);
+      const adc0 = bytes[offset] | (bytes[offset + 1] << 8);
       const adc2 = bytes[offset + 2] | (bytes[offset + 3] << 8);
       const adc3 = bytes[offset + 4] | (bytes[offset + 5] << 8);
-      samples.push({ ADC1: adc1, ADC2: adc2, ADC3: adc3 });
+      samples.push({ ADC0: adc0, ADC2: adc2, ADC3: adc3 });
       offset += CHANNEL_COUNT * 2;
     }
 
@@ -90,7 +90,7 @@
 
     let offset = HEADER_SIZE;
     samples.forEach((scan) => {
-      [scan.ADC1, scan.ADC2, scan.ADC3].forEach((rawValue) => {
+      [scan.ADC0, scan.ADC2, scan.ADC3].forEach((rawValue) => {
         const sample = Math.max(0, Math.min(16383, Math.round(Number(rawValue) || 0)));
         frame[offset] = sample & 0xFF;
         frame[offset + 1] = (sample >>> 8) & 0xFF;

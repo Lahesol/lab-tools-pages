@@ -629,6 +629,54 @@ input[type="range"] {
   height: var(--control-height);
 }
 
+.plot-source-field {
+  min-width: 330px;
+}
+
+.plot-source-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.plot-source-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.plot-source-option.is-primary {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.plot-source-option input {
+  width: auto;
+  height: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.plot-source-option span {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-transform: none;
+}
+
 .scale-row {
   padding: 10px 16px 0;
   justify-content: flex-start;

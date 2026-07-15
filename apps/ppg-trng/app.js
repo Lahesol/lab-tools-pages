@@ -143,9 +143,10 @@ const state = {
   latest: null,
   latestChannel: "ADC",
   adcSource: "ADC2",
+  plotAdcSources: new Set(["ADC2"]),
   bitAdcSource: "ADC3",
   valueMode: "adc",
-  adcBias: { ADC1: null, ADC2: null, ADC3: null },
+  adcBias: { ADC0: null, ADC2: null, ADC3: null },
   dacValues: { A: 2048, B: 2056 },
   bitMode: false,
   encryptionEnabled: false,
@@ -238,11 +239,11 @@ const CHANNEL_COLORS = {
   A: "#5c6f82",
 };
 
-const SERIES_ORDER = ["ADC3", "ADC2", "ADC1", "G", "I", "R", "A"];
+const SERIES_ORDER = ["ADC3", "ADC2", "ADC0", "G", "I", "R", "A"];
 const ADC_SOURCE_COLORS = {
   ADC3: "#087f72",
   ADC2: "#7c4dff",
-  ADC1: "#b86800",
+  ADC0: "#b86800",
 };
 
 const ADC_SOURCE_INFO = {
@@ -256,10 +257,10 @@ const ADC_SOURCE_INFO = {
     label: "ADC2 BPTT PPG",
     detail: "BPTT PPG - AIN2/P0.04",
   },
-  ADC1: {
-    command: "ADC1",
-    label: "ADC1 commercial PPG",
-    detail: "Commercial PPG - AIN1/P0.03",
+  ADC0: {
+    command: "ADC0",
+    label: "ADC0 commercial PPG",
+    detail: "Commercial PPG - AIN0/P0.02",
   },
 };
 
@@ -467,7 +468,7 @@ function resetReceiveState() {
 }
 
 function normalizeAdcSource(value) {
-  const match = String(value || "").toUpperCase().match(/(?:ADC|AIN)?\s*([123])\b/);
+  const match = String(value || "").toUpperCase().match(/(?:ADC|AIN)?\s*([023])\b/);
   return match ? `ADC${match[1]}` : null;
 }
 
@@ -576,37 +577,49 @@ function updateValueUi() {
 function setAdcSource(source, options = {}) {
   const normalized = normalizeAdcSource(source);
   if (!normalized) return;
-  const changed = state.adcSource !== normalized;
-  state.adcSource = normalized;
-  if (changed) {
-    state.samples = [];
-    state.totalSamples = 0;
-    state.latest = null;
-    state.bits = [];
-    state.totalBits = 0;
-    state.bitLanes = {};
-    state.bitPlaneCapacity = 0;
+  const sources = new Set(state.plotAdcSources);
+  sources.add(normalized);
+  setPlotAdcSources([...sources], { ...options, primary: normalized });
+}
+
+function setPlotAdcSources(sources, options = {}) {
+  const normalizedSources = [...new Set(
+    sources.map((source) => normalizeAdcSource(source)).filter(Boolean),
+  )];
+  if (!normalizedSources.length) return false;
+
+  const previousPrimary = state.adcSource;
+  const nextPrimary = normalizeAdcSource(options.primary)
+    || (state.plotAdcSources.has(previousPrimary) ? previousPrimary : normalizedSources[0]);
+  const primary = normalizedSources.includes(nextPrimary) ? nextPrimary : normalizedSources[0];
+
+  state.plotAdcSources = new Set(normalizedSources);
+  state.adcSource = primary;
+  if (previousPrimary !== primary) {
+    resetNoiseExtractor();
     resetLiveEncryption();
   }
-  resetNoiseExtractor();
   updateAdcSourceUi(options);
   updateStats();
   updateBitStats();
   state.needsDraw = true;
   state.needsBitDraw = true;
+  return true;
 }
 
 function updateAdcSourceUi(options = {}) {
-  const info = getAdcSourceInfo();
+  const info = getAdcSourceInfo(state.adcSource);
   const pending = Boolean(options.pending);
   if (els.adcSourceStatus) {
-    const label = `Plot ${info.label} / sync ADC1-3`;
+    const label = `Plot ${getAdcPlotDescription()} / primary ${info.label}`;
     els.adcSourceStatus.textContent = pending ? `${label} pending` : label;
     els.adcSourceStatus.classList.toggle("is-muted", pending);
   }
-  if (els.plotAdcSource && els.plotAdcSource.value !== state.adcSource) {
-    els.plotAdcSource.value = state.adcSource;
-  }
+  els.plotAdcSource?.querySelectorAll("[data-plot-source]").forEach((input) => {
+    const source = normalizeAdcSource(input.dataset.plotSource);
+    input.checked = Boolean(source && state.plotAdcSources.has(source));
+    input.closest(".plot-source-option")?.classList.toggle("is-primary", source === state.adcSource);
+  });
 
   document.querySelectorAll("[data-adc-source]").forEach((button) => {
     const active = normalizeAdcSource(button.dataset.adcSource) === state.adcSource;
@@ -898,7 +911,7 @@ function ingestSynchronizedAdcFrame(frame) {
 
   frame.samples.forEach((scan, index) => {
     const t = frameEnd - (frame.samples.length - 1 - index) * intervalMs;
-    addSample(scan.ADC1, "ADC", { adcSource: "ADC1", valueKind: "raw", t });
+    addSample(scan.ADC0, "ADC", { adcSource: "ADC0", valueKind: "raw", t });
     addSample(scan.ADC2, "ADC", { adcSource: "ADC2", valueKind: "raw", t });
     addSample(scan.ADC3, "ADC", { adcSource: "ADC3", valueKind: "raw", t });
   });
@@ -967,7 +980,7 @@ function normalizeChannel(channel) {
 }
 
 function parseAdcBatchSegment(segment) {
-  const match = segment.match(/^ADC([123])B\s*[,=:]\s*(\d+)\s*,\s*(.+)$/i);
+  const match = segment.match(/^ADC([023])B\s*[,=:]\s*(\d+)\s*,\s*(.+)$/i);
   if (!match) return false;
 
   const adcSource = `ADC${match[1]}`;
@@ -995,7 +1008,7 @@ function parseAdcBatchSegment(segment) {
 }
 
 function parseTaggedSegment(segment) {
-  const matches = [...segment.matchAll(/\b(ADC[123]?|GREEN|IR|INFRARED|RED|AMBIENT|[AGIR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
+  const matches = [...segment.matchAll(/\b(ADC[023]?|GREEN|IR|INFRARED|RED|AMBIENT|[AGIR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
   if (!matches.length) return false;
 
   let parsed = false;
@@ -1044,7 +1057,7 @@ function parseAdcStatusSegment(segment) {
     return true;
   }
 
-  const match = segment.match(/^ADC\s*[,=:]\s*(?:ACTIVE|SOURCE|SELECTED)\s*[,=:]\s*([123])\b/i);
+  const match = segment.match(/^ADC\s*[,=:]\s*(?:ACTIVE|SOURCE|SELECTED)\s*[,=:]\s*([023])\b/i);
   if (!match) return false;
   setAdcSource(`ADC${match[1]}`);
   addLog("RX", segment);
@@ -1075,7 +1088,7 @@ function parseBitSegment(segment) {
 }
 
 function parseTaggedBitSegment(segment) {
-  const matches = [...segment.matchAll(/\b(?:BIT|TRNG|RNG)([123])\b\s*[,=:]\s*([01])/gi)];
+  const matches = [...segment.matchAll(/\b(?:BIT|TRNG|RNG)([023])\b\s*[,=:]\s*([01])/gi)];
   if (!matches.length) return false;
 
   const groupedBits = new Map();
@@ -1099,22 +1112,23 @@ function addSample(value, channel = "ADC", options = {}) {
   if (normalizedChannel === "ADC" && adcSource === state.bitAdcSource) {
     extractLiveBitsFromNoiseSample(value, adcSource, options.t);
   }
-  if (normalizedChannel === "ADC" && adcSource !== state.adcSource) return;
   const valueKind = options.valueKind || "raw";
   commitSample(value, normalizedChannel, adcSource, valueKind, options.t);
 }
 
 function getPlotRefreshIntervalMs() {
-  if (state.samples.length > 250000) return 500;
-  if (state.samples.length > 100000) return 250;
-  if (state.samples.length > 50000) return 100;
+  const retainedCount = getRetainedSampleCount();
+  if (retainedCount > 250000) return 500;
+  if (retainedCount > 100000) return 250;
+  if (retainedCount > 50000) return 100;
   return 33;
 }
 
 function getStatsRefreshIntervalMs() {
-  if (state.samples.length > 250000) return 1000;
-  if (state.samples.length > 100000) return 500;
-  if (state.samples.length > 50000) return 250;
+  const retainedCount = getRetainedSampleCount();
+  if (retainedCount > 250000) return 1000;
+  if (retainedCount > 100000) return 500;
+  if (retainedCount > 50000) return 250;
   return 160;
 }
 
@@ -1131,9 +1145,7 @@ function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSou
   state.samples.push(sample);
   state.totalSamples += 1;
 
-  if (state.samples.length > state.maxSamples) {
-    state.samples.splice(0, state.samples.length - state.maxSamples);
-  }
+  trimSampleHistory();
 
   const now = performance.now();
   if (now - state.lastStatsAt > getStatsRefreshIntervalMs()) {
@@ -1142,6 +1154,27 @@ function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSou
   }
   enqueuePpgEncryption(sample);
   state.needsDraw = true;
+}
+
+function trimSampleHistory() {
+  const counts = new Map();
+  state.samples.forEach((sample) => {
+    const source = sample.adcSource || state.adcSource;
+    counts.set(source, (counts.get(source) || 0) + 1);
+  });
+
+  const discard = new Map(
+    [...counts.entries()].map(([source, count]) => [source, Math.max(0, count - state.maxSamples)]),
+  );
+  if (![...discard.values()].some((count) => count > 0)) return;
+
+  state.samples = state.samples.filter((sample) => {
+    const source = sample.adcSource || state.adcSource;
+    const remaining = discard.get(source) || 0;
+    if (remaining <= 0) return true;
+    discard.set(source, remaining - 1);
+    return false;
+  });
 }
 
 function resetNoiseExtractor() {
@@ -1645,7 +1678,7 @@ function updateStats() {
     els.maxValue.textContent = "--";
     els.avgValue.textContent = "--";
     els.rateValue.textContent = "--";
-    els.sampleCount.textContent = String(state.totalSamples);
+    els.sampleCount.textContent = String(displaySamples.length);
     els.plotCaption.textContent = `Waiting for samples | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
     return;
   }
@@ -1670,8 +1703,8 @@ function updateStats() {
   els.maxValue.textContent = formatNumber(max);
   els.avgValue.textContent = formatNumber(avg);
   els.rateValue.textContent = `${rate.toFixed(rate >= 10 ? 0 : 1)} Hz`;
-  els.sampleCount.textContent = String(state.totalSamples);
-  els.plotCaption.textContent = `${values.length} samples in view | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
+  els.sampleCount.textContent = String(displaySamples.length);
+  els.plotCaption.textContent = `${displaySamples.length} samples/channel in view | ${getAdcPlotDescription()} | ${getSampleRateDescription()} | ${getValueDescription()} | ${getFilterDescription()}`;
 }
 
 function setBitMode(enabled) {
@@ -1838,9 +1871,7 @@ function applyWindowSizeInput(normalize = true) {
   if (normalize && els.windowSize) {
     els.windowSize.value = String(nextMaxSamples);
   }
-  if (state.samples.length > state.maxSamples) {
-    state.samples.splice(0, state.samples.length - state.maxSamples);
-  }
+  trimSampleHistory();
   trimEncryptedHistory();
   updateStats();
   updateEncryptionUi();
@@ -1916,11 +1947,12 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `ADC1/2/3 sync ${state.sampleRateHz} Hz | batch ${state.adcBatchSize} scans | ADCF v1`;
+  return `ADC0/2/3 sync ${state.sampleRateHz} Hz | batch ${state.adcBatchSize} scans | ADCF v2`;
 }
 
 function getSelectedAdcPlotSources() {
-  return [state.adcSource];
+  const sources = [...state.plotAdcSources].filter((source) => normalizeAdcSource(source));
+  return sources.length ? sources : [state.adcSource];
 }
 
 function getSamplesForAdcSource(samples = state.samples, sources = getSelectedAdcPlotSources()) {
@@ -1929,8 +1961,12 @@ function getSamplesForAdcSource(samples = state.samples, sources = getSelectedAd
   return samples.filter((sample) => selected.has(sample.adcSource || state.adcSource));
 }
 
+function getRetainedSampleCount(source = state.adcSource) {
+  return getSamplesForAdcSource(state.samples, [source]).length;
+}
+
 function getAdcPlotDescription() {
-  return getAdcSourceInfo(state.adcSource).label;
+  return getSelectedAdcPlotSources().map((source) => getAdcSourceInfo(source).label).join(" + ");
 }
 
 function getSeriesLabel(series) {
@@ -1950,9 +1986,9 @@ function updateFilterUi() {
   els.filterSummary.textContent = getFilterDescription();
 }
 
-function getDisplaySamples() {
+function getDisplaySamples(source = state.adcSource) {
   const settings = getFilterSettings();
-  const samples = getSamplesForAdcSource()
+  const samples = getSamplesForAdcSource(state.samples, [source])
     .map(createViewSample)
     .filter((sample) => Number.isFinite(sample.value));
   if (settings.mode === "raw") {
@@ -2972,7 +3008,7 @@ function toggleDemo() {
     const ppg = Math.sin(state.demoPhase) * 160 + Math.sin(state.demoPhase * 0.31) * 38;
     const noise = (Math.random() - 0.5) * 42;
     const noiseAdc = 7550 + Math.round((Math.random() - 0.5) * 80);
-    addSample(Math.round(6800 + ppg * 0.7 + noise), "ADC", { adcSource: "ADC1", t });
+    addSample(Math.round(6800 + ppg * 0.7 + noise), "ADC", { adcSource: "ADC0", t });
     addSample(Math.round(baseline + ppg + noise), "ADC", { adcSource: "ADC2", t });
     addSample(noiseAdc, "ADC", { adcSource: "ADC3", t });
   }, 33);
@@ -3111,15 +3147,13 @@ function drawPlot() {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
 
-  const displaySamples = getDisplaySamples();
-  const values = displaySamples.map((sample) => sample.value);
+  const series = getSelectedAdcPlotSources()
+    .map((source) => ({ source, samples: getDisplaySamples(source) }))
+    .filter(({ samples }) => samples.length);
+  const values = series.flatMap(({ samples }) => samples.map((sample) => sample.value));
   const { min, max } = getYRange(values);
-  const timeRange = getTimeRange(displaySamples);
-  const renderSamples = decimateSeriesForCanvas(
-    displaySamples,
-    Math.max(512, Math.floor(chartW * 2)),
-    (sample) => sample.value,
-  );
+  const primarySeries = series.find(({ source }) => source === state.adcSource) || series[0];
+  const timeRange = getTimeRange(primarySeries?.samples || []);
 
   drawGrid(ctx, margin, chartW, chartH, min, max);
   drawZeroLine(ctx, margin, chartW, chartH, min, max);
@@ -3136,10 +3170,17 @@ function drawPlot() {
   ctx.rect(margin.left, margin.top, chartW, chartH);
   ctx.clip();
 
-  drawSeries(ctx, renderSamples, state.adcSource, margin, chartW, chartH, min, max, timeRange);
+  series.forEach(({ source, samples }) => {
+    const renderSamples = decimateSeriesForCanvas(
+      samples,
+      Math.max(512, Math.floor(chartW * 2)),
+      (sample) => sample.value,
+    );
+    drawSeries(ctx, renderSamples, source, margin, chartW, chartH, min, max, timeRange);
+  });
   ctx.restore();
 
-  drawLegend(ctx, [state.adcSource], margin, chartW);
+  drawLegend(ctx, series.map(({ source }) => source), margin, chartW);
 }
 
 function drawSeries(ctx, samples, seriesKey, margin, chartW, chartH, min, max, timeRange) {
@@ -3465,10 +3506,20 @@ function bindEvents() {
     control?.addEventListener("change", () => applyLiveMaSettings());
   });
 
-  els.plotAdcSource.addEventListener("change", async () => {
-    const source = normalizeAdcSource(els.plotAdcSource.value);
-    if (!source) return;
-    setAdcSource(source);
+  els.plotAdcSource.addEventListener("change", (event) => {
+    const changedInput = event.target.closest("[data-plot-source]");
+    if (!changedInput) return;
+
+    const sources = [...els.plotAdcSource.querySelectorAll("[data-plot-source]:checked")]
+      .map((input) => normalizeAdcSource(input.dataset.plotSource))
+      .filter(Boolean);
+    if (!sources.length) {
+      changedInput.checked = true;
+      return;
+    }
+
+    const primary = sources.includes(state.adcSource) ? state.adcSource : sources[0];
+    setPlotAdcSources(sources, { primary });
   });
 
   els.valueMode.addEventListener("change", () => {
