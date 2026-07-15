@@ -27,7 +27,9 @@ const els = {
   windowSize: document.querySelector("#windowSize"),
   sampleRate: document.querySelector("#sampleRate"),
   sendRateButton: document.querySelector("#sendRateButton"),
-  adcGain: document.querySelector("#adcGain"),
+  adcGain0: document.querySelector("#adcGain0"),
+  adcGain2: document.querySelector("#adcGain2"),
+  adcGain3: document.querySelector("#adcGain3"),
   sendGainButton: document.querySelector("#sendGainButton"),
   adcGainStatus: document.querySelector("#adcGainStatus"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
@@ -208,8 +210,8 @@ const state = {
   maxSamples: DEFAULT_MAX_SAMPLES,
   sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
   sampleIntervalMs: 1,
-  adcGainCode: 0,
-  adcGainLabel: "1/6",
+  adcGainCodes: { ADC0: 0, ADC2: 0, ADC3: 0 },
+  adcGainLabels: { ADC0: "1/6", ADC2: "1/6", ADC3: "1/6" },
   adcBatchSize: DEFAULT_ADC_BATCH_SIZE,
   saadcBaseHz: 1000,
   saadcOversample: 0,
@@ -1057,16 +1059,34 @@ function parseStatusSegment(segment) {
 function parseAdcGainStatusSegment(segment) {
   if (!/^GAIN\b/i.test(segment)) return false;
 
-  const codeMatch = segment.match(/\bCODE\s*[,=:]\s*(\d+)/i);
-  const labelMatch = segment.match(/\bVALUE\s*[,=:]\s*([^,\s;]+)/i);
-  const code = codeMatch ? clampInteger(codeMatch[1], 0, ADC_GAIN_OPTIONS.length - 1, 0) : state.adcGainCode;
-  const option = ADC_GAIN_OPTIONS[code];
-  const label = labelMatch?.[1] || option?.label || state.adcGainLabel;
-  if (code !== state.adcGainCode && state.samples.length) {
-    clearSamples();
-    addLog("SYS", `ADC gain changed to ${label}; buffered samples and cipher state cleared`);
+  const parsed = {};
+  const matches = [...segment.matchAll(/ADC([023])\s*,\s*CODE\s*[,=:]\s*(\d+)\s*,\s*VALUE\s*[,=:]\s*([^,\s;]+)/gi)];
+  matches.forEach((match) => {
+    const source = `ADC${match[1]}`;
+    const code = clampInteger(match[2], 0, ADC_GAIN_OPTIONS.length - 1, 0);
+    parsed[source] = { code, label: match[3] || getAdcGainOption(code).label };
+  });
+
+  if (!Object.keys(parsed).length) {
+    const codeMatch = segment.match(/\bCODE\s*[,=:]\s*(\d+)/i);
+    const code = codeMatch
+      ? clampInteger(codeMatch[1], 0, ADC_GAIN_OPTIONS.length - 1, 0)
+      : 0;
+    const labelMatch = segment.match(/\bVALUE\s*[,=:]\s*([^,\s;]+)/i);
+    const label = labelMatch?.[1] || getAdcGainOption(code).label;
+    ["ADC0", "ADC2", "ADC3"].forEach((source) => {
+      parsed[source] = { code, label };
+    });
   }
-  setAdcGainUi(code, label, { normalizeInput: true });
+
+  const changed = ["ADC0", "ADC2", "ADC3"].some(
+    (source) => parsed[source] && parsed[source].code !== state.adcGainCodes[source],
+  );
+  if (changed && state.samples.length) {
+    clearSamples();
+    addLog("SYS", "ADC gain changed; buffered samples and cipher state cleared");
+  }
+  setAdcGainUi(parsed, { normalizeInput: true });
   addLog("RX", segment);
   return true;
 }
@@ -1938,16 +1958,32 @@ function getAdcGainOption(code) {
   return ADC_GAIN_OPTIONS.find((option) => option.code === code) || ADC_GAIN_OPTIONS[0];
 }
 
-function setAdcGainUi(code, label = null, options = {}) {
-  const normalizedCode = clampInteger(code, 0, ADC_GAIN_OPTIONS.length - 1, 0);
-  const option = getAdcGainOption(normalizedCode);
-  state.adcGainCode = normalizedCode;
-  state.adcGainLabel = label || option.label;
-  if (els.adcGain && options.normalizeInput !== false) {
-    els.adcGain.value = String(normalizedCode);
-  }
+function setAdcGainUi(gains, options = {}) {
+  const sources = ["ADC0", "ADC2", "ADC3"];
+  const controls = { ADC0: els.adcGain0, ADC2: els.adcGain2, ADC3: els.adcGain3 };
+  const codes = {};
+  const labels = {};
+  sources.forEach((source) => {
+    const requested = gains[source] || {};
+    const code = clampInteger(
+      requested.code,
+      0,
+      ADC_GAIN_OPTIONS.length - 1,
+      state.adcGainCodes[source],
+    );
+    const option = getAdcGainOption(code);
+    codes[source] = code;
+    labels[source] = requested.label || option.label;
+    if (controls[source] && options.normalizeInput !== false) {
+      controls[source].value = String(code);
+    }
+  });
+  state.adcGainCodes = codes;
+  state.adcGainLabels = labels;
   if (els.adcGainStatus) {
-    els.adcGainStatus.textContent = `All ADC gain ${state.adcGainLabel}`;
+    els.adcGainStatus.textContent = sources
+      .map((source) => `${source} ${labels[source]}`)
+      .join(" | ");
   }
   if (els.plotCaption && state.samples.length) {
     updateStats();
@@ -1955,11 +1991,15 @@ function setAdcGainUi(code, label = null, options = {}) {
 }
 
 async function sendAdcGainCommand() {
-  const code = clampInteger(els.adcGain?.value, 0, ADC_GAIN_OPTIONS.length - 1, state.adcGainCode);
+  const codes = [
+    clampInteger(els.adcGain0?.value, 0, ADC_GAIN_OPTIONS.length - 1, state.adcGainCodes.ADC0),
+    clampInteger(els.adcGain2?.value, 0, ADC_GAIN_OPTIONS.length - 1, state.adcGainCodes.ADC2),
+    clampInteger(els.adcGain3?.value, 0, ADC_GAIN_OPTIONS.length - 1, state.adcGainCodes.ADC3),
+  ];
   if (els.adcGainStatus) {
-    els.adcGainStatus.textContent = `Applying ADC gain ${getAdcGainOption(code).label}...`;
+    els.adcGainStatus.textContent = `Applying ADC gains ${codes.join("/")}...`;
   }
-  await sendCommand(`GAIN${code}`);
+  await sendCommand(`GAINSET${codes.join("")}`);
 }
 
 function applySampleRateInput(normalize = false) {
