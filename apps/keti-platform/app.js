@@ -2581,45 +2581,103 @@ function layerName(index, layerCount) {
   return `Hidden ${index}`;
 }
 
-function formatNeuronCount(size, pending = false) {
-  if (pending) {
-    return "set labels first";
-  }
-  return `${size} neuron${size === 1 ? "" : "s"}`;
-}
-
 function formatArchitectureShape(sizes, outputPending = false) {
   return sizes.map((size, index) => (
     outputPending && index === sizes.length - 1 ? "labels" : String(size)
   )).join(" -> ");
 }
 
-function drawArchitectureConnections(archCtx, fromNodes, toNodes, radius) {
-  const pairs = [];
-  const addPair = (fromIndex, toIndex) => {
-    const from = fromNodes[Math.max(0, Math.min(fromNodes.length - 1, fromIndex))];
-    const to = toNodes[Math.max(0, Math.min(toNodes.length - 1, toIndex))];
-    const key = `${from.x},${from.y},${to.x},${to.y}`;
-    if (!pairs.some((pair) => pair.key === key)) {
-      pairs.push({ from, to, key });
-    }
+function drawArchitectureArrow(archCtx, from, to) {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  const headLength = 7;
+  archCtx.save();
+  archCtx.strokeStyle = "#9aa8b7";
+  archCtx.fillStyle = "#9aa8b7";
+  archCtx.lineWidth = 1.6;
+  archCtx.beginPath();
+  archCtx.moveTo(from.x, from.y);
+  archCtx.lineTo(to.x, to.y);
+  archCtx.stroke();
+  archCtx.beginPath();
+  archCtx.moveTo(to.x, to.y);
+  archCtx.lineTo(to.x - headLength * Math.cos(angle - Math.PI / 6), to.y - headLength * Math.sin(angle - Math.PI / 6));
+  archCtx.lineTo(to.x - headLength * Math.cos(angle + Math.PI / 6), to.y - headLength * Math.sin(angle + Math.PI / 6));
+  archCtx.closePath();
+  archCtx.fill();
+  archCtx.restore();
+}
+
+function getArchitectureBlockContent(size, layerIndex, layerCount, outputPending, shape, activation) {
+  if (layerIndex === 0) {
+    return {
+      title: "Input",
+      primary: `${size} features`,
+      detail: `${shape.featureMode} feature vector`,
+      footer: `${shape.windowSamples} samples / window`,
+      fill: "#eaf7f6",
+      accent: "#008c8c"
+    };
+  }
+  if (layerIndex === layerCount - 1 && outputPending) {
+    return {
+      title: "Output",
+      primary: "Labels needed",
+      detail: "Class score layer",
+      footer: "Collect 2+ labels",
+      fill: "#f3f6f8",
+      accent: "#9aa8b7",
+      pending: true
+    };
+  }
+  if (layerIndex === layerCount - 1) {
+    return {
+      title: "Output",
+      primary: `${size} classes`,
+      detail: "Class score layer",
+      footer: "Softmax output",
+      fill: "#edf4ff",
+      accent: "#2767c9"
+    };
+  }
+  return {
+    title: layerName(layerIndex, layerCount),
+    primary: `${size} neurons`,
+    detail: "Dense layer",
+    footer: `${activation.toUpperCase()} activation`,
+    fill: "#fff6e7",
+    accent: "#d28a00"
   };
+}
 
-  for (let index = 0; index < fromNodes.length; index++) {
-    const targetIndex = Math.round((index * Math.max(0, toNodes.length - 1)) / Math.max(1, fromNodes.length - 1));
-    addPair(index, targetIndex);
+function drawArchitectureBlock(archCtx, block, compact = false) {
+  const { x, y, width, height, content } = block;
+  const textLeft = x + (compact ? 13 : 16);
+  archCtx.save();
+  archCtx.fillStyle = content.fill;
+  archCtx.strokeStyle = content.accent;
+  archCtx.lineWidth = content.pending ? 1.5 : 1.8;
+  if (content.pending) {
+    archCtx.setLineDash([5, 4]);
   }
-  for (let index = 0; index < toNodes.length; index++) {
-    const sourceIndex = Math.round((index * Math.max(0, fromNodes.length - 1)) / Math.max(1, toNodes.length - 1));
-    addPair(sourceIndex, index);
-  }
-
-  for (const { from, to } of pairs) {
-    archCtx.beginPath();
-    archCtx.moveTo(from.x + radius, from.y);
-    archCtx.lineTo(to.x - radius, to.y);
-    archCtx.stroke();
-  }
+  archCtx.beginPath();
+  archCtx.roundRect(x, y, width, height, 7);
+  archCtx.fill();
+  archCtx.stroke();
+  archCtx.setLineDash([]);
+  archCtx.fillStyle = content.accent;
+  archCtx.fillRect(x, y + 8, 5, height - 16);
+  archCtx.textAlign = "left";
+  archCtx.fillStyle = "#17202a";
+  archCtx.font = `700 ${compact ? 11 : 12}px Segoe UI, Arial, sans-serif`;
+  archCtx.fillText(content.title, textLeft, y + (compact ? 20 : 23));
+  archCtx.font = `700 ${compact ? 15 : 18}px Segoe UI, Arial, sans-serif`;
+  archCtx.fillText(content.primary, textLeft, y + (compact ? 43 : 50));
+  archCtx.fillStyle = "#637083";
+  archCtx.font = `${compact ? 10 : 11}px Segoe UI, Arial, sans-serif`;
+  archCtx.fillText(content.detail, textLeft, y + (compact ? 61 : 70));
+  archCtx.font = `700 ${compact ? 9 : 10}px Segoe UI, Arial, sans-serif`;
+  archCtx.fillText(content.footer, textLeft, y + height - 13);
+  archCtx.restore();
 }
 
 function renderModelArchitecture() {
@@ -2631,7 +2689,21 @@ function renderModelArchitecture() {
   const trained = state.model.trained;
   const sizes = trained?.sizes || planned.sizes;
   const outputPending = !trained && !planned.outputReady;
-  const { ctx: archCtx, width, height } = resizeAuxCanvasToDisplaySize(el.modelArchitectureCanvas, 210);
+  const options = trained?.options || getModelOptions();
+  const shape = getDatasetShape();
+  const displayWidth = Math.max(280, Math.round(el.modelArchitectureCanvas.getBoundingClientRect().width));
+  const layerCount = sizes.length;
+  const horizontalGap = displayWidth < 760 ? 24 : 36;
+  const horizontalBlockWidth = (displayWidth - 48 - horizontalGap * Math.max(0, layerCount - 1)) / Math.max(1, layerCount);
+  const horizontal = displayWidth >= 520 && horizontalBlockWidth >= 104;
+  const desiredHeight = horizontal
+    ? 220
+    : 48 + layerCount * 96 + Math.max(0, layerCount - 1) * 28;
+  el.modelArchitectureCanvas.style.height = `${desiredHeight}px`;
+  const { ctx: archCtx, width, height } = resizeAuxCanvasToDisplaySize(
+    el.modelArchitectureCanvas,
+    desiredHeight
+  );
   archCtx.clearRect(0, 0, width, height);
   archCtx.fillStyle = "#ffffff";
   archCtx.fillRect(0, 0, width, height);
@@ -2643,64 +2715,63 @@ function renderModelArchitecture() {
     return;
   }
 
-  const pad = width < 620
-    ? { left: 46, right: 46, top: 38, bottom: 48 }
-    : { left: 62, right: 62, top: 42, bottom: 52 };
-  const layerGap = sizes.length === 1 ? 0 : (width - pad.left - pad.right) / Math.max(1, sizes.length - 1);
-  const maxVisibleNeurons = width < 620 ? 8 : 12;
-  const radius = width < 620 ? 5 : 6;
-  const layerNodes = sizes.map((size, layerIndex) => {
-    const visible = Math.max(1, Math.min(size, maxVisibleNeurons));
-    const usableHeight = height - pad.top - pad.bottom;
-    const spacing = visible <= 1 ? 0 : Math.min(20, usableHeight / Math.max(1, visible - 1));
-    const totalHeight = spacing * Math.max(0, visible - 1);
-    const startY = pad.top + usableHeight / 2 - totalHeight / 2;
-    const x = pad.left + layerGap * layerIndex;
-    return Array.from({ length: visible }, (_, nodeIndex) => ({
-      x,
-      y: startY + spacing * nodeIndex
+  let blocks;
+  if (horizontal) {
+    const availableWidth = width - 48;
+    const blockWidth = Math.min(230, (availableWidth - horizontalGap * Math.max(0, layerCount - 1)) / layerCount);
+    const blockHeight = blockWidth < 128 ? 96 : 112;
+    const totalWidth = blockWidth * layerCount + horizontalGap * Math.max(0, layerCount - 1);
+    const startX = (width - totalWidth) / 2;
+    const startY = (height - blockHeight) / 2;
+    blocks = sizes.map((size, layerIndex) => ({
+      x: startX + layerIndex * (blockWidth + horizontalGap),
+      y: startY,
+      width: blockWidth,
+      height: blockHeight,
+      content: getArchitectureBlockContent(
+        size,
+        layerIndex,
+        layerCount,
+        outputPending && layerIndex === layerCount - 1,
+        shape,
+        options.activation
+      )
     }));
-  });
-
-  archCtx.save();
-  archCtx.globalAlpha = 0.24;
-  archCtx.strokeStyle = "#637083";
-  archCtx.lineWidth = 1;
-  for (let layerIndex = 0; layerIndex < layerNodes.length - 1; layerIndex++) {
-    drawArchitectureConnections(archCtx, layerNodes[layerIndex], layerNodes[layerIndex + 1], radius);
+  } else {
+    const blockWidth = Math.min(360, width - 48);
+    const blockHeight = 96;
+    const gap = 28;
+    const startX = (width - blockWidth) / 2;
+    blocks = sizes.map((size, layerIndex) => ({
+      x: startX,
+      y: 24 + layerIndex * (blockHeight + gap),
+      width: blockWidth,
+      height: blockHeight,
+      content: getArchitectureBlockContent(
+        size,
+        layerIndex,
+        layerCount,
+        outputPending && layerIndex === layerCount - 1,
+        shape,
+        options.activation
+      )
+    }));
   }
-  archCtx.restore();
 
-  sizes.forEach((size, layerIndex) => {
-    const nodes = layerNodes[layerIndex];
-    const isOutput = layerIndex === sizes.length - 1;
-    const isInput = layerIndex === 0;
-    const pendingOutput = outputPending && isOutput;
-    const fill = isInput ? "#008c8c" : isOutput ? "#2767c9" : "#d28a00";
-    for (const node of nodes) {
-      archCtx.fillStyle = pendingOutput ? "#f2f5f8" : fill;
-      archCtx.beginPath();
-      archCtx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      archCtx.fill();
-      archCtx.strokeStyle = pendingOutput ? "#9aa8b7" : "#ffffff";
-      archCtx.lineWidth = pendingOutput ? 1.8 : 1.5;
-      archCtx.stroke();
-    }
-    if (size > nodes.length) {
-      archCtx.fillStyle = "#637083";
-      archCtx.font = "12px Segoe UI, Arial, sans-serif";
-      archCtx.textAlign = "center";
-      archCtx.fillText(`+${size - nodes.length}`, nodes[0].x, height - pad.bottom + 2);
-    }
-    archCtx.fillStyle = "#17202a";
-    archCtx.font = "700 12px Segoe UI, Arial, sans-serif";
-    archCtx.textAlign = "center";
-    archCtx.fillText(layerName(layerIndex, sizes.length), nodes[0].x, 18);
-    archCtx.fillStyle = "#637083";
-    archCtx.font = "12px Segoe UI, Arial, sans-serif";
-    archCtx.fillText(formatNeuronCount(size, pendingOutput), nodes[0].x, height - 18);
-  });
-  archCtx.textAlign = "start";
+  for (let layerIndex = 0; layerIndex < blocks.length - 1; layerIndex++) {
+    const current = blocks[layerIndex];
+    const next = blocks[layerIndex + 1];
+    drawArchitectureArrow(
+      archCtx,
+      horizontal
+        ? { x: current.x + current.width + 6, y: current.y + current.height / 2 }
+        : { x: current.x + current.width / 2, y: current.y + current.height + 6 },
+      horizontal
+        ? { x: next.x - 6, y: next.y + next.height / 2 }
+        : { x: next.x + next.width / 2, y: next.y - 6 }
+    );
+  }
+  blocks.forEach((block) => drawArchitectureBlock(archCtx, block, block.width < 128));
 }
 
 function trainBrowserModel() {

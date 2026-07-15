@@ -8,6 +8,8 @@
   const BASE_DOCUMENT_HEIGHT_MM = 297;
   const MAX_ITEMS = 40;
   const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+  const MAX_CROP_OUTPUT_DIMENSION = 4096;
+  const PHOTO_CROP_ASPECT = 2.23;
   const SIGNATURE_STORAGE_PREFIX = "goods-inspection.signature.v2.";
 
   const state = {
@@ -36,6 +38,12 @@
     ocrProgress: 0,
     ocrStatus: "",
     ocrRawText: "",
+    cropPhotoId: null,
+    cropRect: null,
+    cropRotation: 0,
+    cropAspect: "document",
+    cropZoom: 1,
+    cropDrag: null,
   };
 
   const elements = {
@@ -75,6 +83,24 @@
     roiCandidateList: document.querySelector("#roiCandidateList"),
     roiResetButton: document.querySelector("#roiResetButton"),
     roiApplyButton: document.querySelector("#roiApplyButton"),
+    cropDialog: document.querySelector("#cropDialog"),
+    cropCloseButton: document.querySelector("#cropCloseButton"),
+    cropPhotoName: document.querySelector("#cropPhotoName"),
+    cropStage: document.querySelector("#cropStage"),
+    cropSurface: document.querySelector("#cropSurface"),
+    cropCanvas: document.querySelector("#cropCanvas"),
+    cropSelection: document.querySelector("#cropSelection"),
+    cropAspectInputs: [...document.querySelectorAll('input[name="cropAspect"]')],
+    cropZoom: document.querySelector("#cropZoom"),
+    cropZoomValue: document.querySelector("#cropZoomValue"),
+    cropRotateLeftButton: document.querySelector("#cropRotateLeftButton"),
+    cropRotateRightButton: document.querySelector("#cropRotateRightButton"),
+    cropSummaryTitle: document.querySelector("#cropSummaryTitle"),
+    cropSummaryDetail: document.querySelector("#cropSummaryDetail"),
+    cropSelectionResetButton: document.querySelector("#cropSelectionResetButton"),
+    cropRestoreOriginalButton: document.querySelector("#cropRestoreOriginalButton"),
+    cropCancelButton: document.querySelector("#cropCancelButton"),
+    cropApplyButton: document.querySelector("#cropApplyButton"),
     photoInput: document.querySelector("#photoInput"),
     photoDropzone: document.querySelector("#photoDropzone"),
     photoCount: document.querySelector("#photoCount"),
@@ -123,6 +149,9 @@
   let ocrRunToken = 0;
   let ocrPageIndex = 0;
   let ocrPageTotal = 1;
+  let cropImage = null;
+  let cropRenderToken = 0;
+  let cropResizeTimer = null;
 
   initialize();
 
@@ -291,6 +320,32 @@
       if (!elements.roiDialog.open) return;
       window.clearTimeout(roiResizeTimer);
       roiResizeTimer = window.setTimeout(renderRoiPage, 120);
+    });
+
+    elements.cropCloseButton.addEventListener("click", closeCropDialog);
+    elements.cropCancelButton.addEventListener("click", closeCropDialog);
+    elements.cropDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeCropDialog();
+    });
+    elements.cropDialog.addEventListener("click", (event) => {
+      if (event.target === elements.cropDialog) closeCropDialog();
+    });
+    elements.cropAspectInputs.forEach((input) => input.addEventListener("change", handleCropAspectChange));
+    elements.cropZoom.addEventListener("input", handleCropZoomChange);
+    elements.cropRotateLeftButton.addEventListener("click", () => rotateCropPhoto(-90));
+    elements.cropRotateRightButton.addEventListener("click", () => rotateCropPhoto(90));
+    elements.cropSelectionResetButton.addEventListener("click", resetCropSelection);
+    elements.cropRestoreOriginalButton.addEventListener("click", restoreOriginalPhoto);
+    elements.cropApplyButton.addEventListener("click", applyPhotoCrop);
+    elements.cropSelection.addEventListener("pointerdown", startCropInteraction);
+    elements.cropSelection.addEventListener("pointermove", updateCropInteraction);
+    elements.cropSelection.addEventListener("pointerup", finishCropInteraction);
+    elements.cropSelection.addEventListener("pointercancel", finishCropInteraction);
+    window.addEventListener("resize", () => {
+      if (!elements.cropDialog.open) return;
+      window.clearTimeout(cropResizeTimer);
+      cropResizeTimer = window.setTimeout(renderCropCanvas, 120);
     });
 
     elements.exportButton.addEventListener("click", exportPdf);
@@ -1003,7 +1058,14 @@
         continue;
       }
       const dataUrl = await fileToDataUrl(file);
-      state.photos.push({ id: cryptoRandomId(), name: file.name, dataUrl });
+      state.photos.push({
+        id: cryptoRandomId(),
+        name: file.name,
+        type: file.type,
+        originalDataUrl: dataUrl,
+        dataUrl,
+        crop: null,
+      });
     }
 
     if (state.countMode === "auto" && !state.invoiceCandidates.length) syncAutomaticItemCount();
@@ -1102,7 +1164,7 @@
 
     state.photos.forEach((photo, index) => {
       const container = document.createElement("div");
-      container.className = "photo-order-item";
+      container.className = `photo-order-item${photo.crop ? " is-cropped" : ""}`;
       container.draggable = true;
       container.dataset.photoId = photo.id;
 
@@ -1116,6 +1178,12 @@
       image.src = photo.dataUrl;
       image.alt = photo.name;
       thumbnail.append(image);
+      if (photo.crop) {
+        const cropBadge = document.createElement("span");
+        cropBadge.className = "photo-order-item__crop-badge";
+        cropBadge.textContent = "크롭";
+        thumbnail.append(cropBadge);
+      }
 
       const name = document.createElement("span");
       name.className = "photo-order-item__name";
@@ -1126,6 +1194,12 @@
       actions.className = "photo-order-item__actions";
       const moveUpButton = createPhotoOrderButton("up", `${photo.name}을 앞 순서로 이동`, index === 0);
       const moveDownButton = createPhotoOrderButton("down", `${photo.name}을 뒤 순서로 이동`, index === state.photos.length - 1);
+      const cropButton = document.createElement("button");
+      cropButton.type = "button";
+      cropButton.dataset.action = "crop";
+      cropButton.title = photo.crop ? "크롭 다시 편집" : "사진 크롭";
+      cropButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v13a2 2 0 0 0 2 2h11M3 8h13a2 2 0 0 1 2 2v11" /><path d="M3 3h5M3 3v5M21 21h-5M21 21v-5" /></svg>';
+      cropButton.setAttribute("aria-label", `${photo.name} ${photo.crop ? "크롭 다시 편집" : "사진 크롭"}`);
       const removeButton = document.createElement("button");
       removeButton.type = "button";
       removeButton.dataset.action = "remove";
@@ -1133,8 +1207,10 @@
       removeButton.setAttribute("aria-label", `${photo.name} 사진 삭제`);
       moveUpButton.addEventListener("click", () => movePhoto(photo.id, -1));
       moveDownButton.addEventListener("click", () => movePhoto(photo.id, 1));
+      cropButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+      cropButton.addEventListener("click", () => openCropDialog(photo.id));
       removeButton.addEventListener("click", () => removePhoto(photo.id));
-      actions.append(moveUpButton, moveDownButton, removeButton);
+      actions.append(moveUpButton, moveDownButton, cropButton, removeButton);
       container.append(number, thumbnail, name, actions);
 
       container.addEventListener("dragstart", (event) => {
@@ -1198,6 +1274,7 @@
   }
 
   function removePhoto(photoId) {
+    if (state.cropPhotoId === photoId) closeCropDialog();
     state.photos = state.photos.filter((photo) => photo.id !== photoId);
     state.items.forEach((item) => {
       if (item.photoId === photoId) item.photoId = "";
@@ -1205,6 +1282,382 @@
     if (state.countMode === "auto" && !state.invoiceCandidates.length) syncAutomaticItemCount();
     else syncItemsToPhotoOrder();
     renderAll();
+  }
+
+  async function openCropDialog(photoId) {
+    const photo = getPhoto(photoId);
+    if (!photo) return;
+
+    const token = ++cropRenderToken;
+    state.cropPhotoId = photoId;
+    state.cropRect = photo.crop?.rect ? { ...photo.crop.rect } : null;
+    state.cropRotation = normalizeCropRotation(photo.crop?.rotation || 0);
+    state.cropAspect = photo.crop?.aspect === "free" ? "free" : "document";
+    state.cropZoom = clampCropZoom(photo.crop?.zoom || 1);
+    state.cropDrag = null;
+    elements.cropPhotoName.textContent = photo.name;
+    elements.cropApplyButton.disabled = true;
+    elements.cropRestoreOriginalButton.disabled = !photo.crop;
+    elements.cropSummaryTitle.textContent = "사진을 준비하고 있습니다";
+    elements.cropSummaryDetail.textContent = "원본 이미지를 불러오는 중입니다.";
+
+    if (!elements.cropDialog.open) elements.cropDialog.showModal();
+    cropImage = await safeLoadImage(photo.originalDataUrl || photo.dataUrl);
+    if (token !== cropRenderToken || state.cropPhotoId !== photoId) return;
+    if (!cropImage) {
+      closeCropDialog();
+      showToast("사진을 불러오지 못했습니다.", "error");
+      return;
+    }
+
+    await renderCropCanvas();
+    elements.cropApplyButton.disabled = false;
+  }
+
+  function closeCropDialog() {
+    cropRenderToken += 1;
+    state.cropPhotoId = null;
+    state.cropRect = null;
+    state.cropRotation = 0;
+    state.cropAspect = "document";
+    state.cropZoom = 1;
+    state.cropDrag = null;
+    cropImage = null;
+    elements.cropSelection.hidden = true;
+    elements.cropApplyButton.disabled = false;
+    elements.cropApplyButton.textContent = "크롭 적용";
+    if (elements.cropDialog.open) elements.cropDialog.close();
+  }
+
+  function normalizeCropRotation(rotation) {
+    return ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
+  }
+
+  function clampCropZoom(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 1;
+    return Math.min(4, Math.max(1, numeric));
+  }
+
+  function getRotatedCropDimensions() {
+    if (!cropImage) return { width: 1, height: 1 };
+    return state.cropRotation % 180 === 0
+      ? { width: cropImage.naturalWidth, height: cropImage.naturalHeight }
+      : { width: cropImage.naturalHeight, height: cropImage.naturalWidth };
+  }
+
+  function getDocumentCropAspect() {
+    const dimensions = getRotatedCropDimensions();
+    return PHOTO_CROP_ASPECT * dimensions.height / dimensions.width;
+  }
+
+  function createDefaultCropRect() {
+    const coverage = 0.92 / clampCropZoom(state.cropZoom);
+    if (state.cropAspect === "free") {
+      return { x: (1 - coverage) / 2, y: (1 - coverage) / 2, width: coverage, height: coverage };
+    }
+
+    const aspect = getDocumentCropAspect();
+    let width = coverage;
+    let height = coverage;
+    if (width / height > aspect) width = height * aspect;
+    else height = width / aspect;
+    return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
+  }
+
+  function clampCropRect(rect) {
+    const minimum = 0.035;
+    let width = Math.min(1, Math.max(minimum, Number(rect?.width) || minimum));
+    let height = Math.min(1, Math.max(minimum, Number(rect?.height) || minimum));
+    const x = Math.min(1 - width, Math.max(0, Number(rect?.x) || 0));
+    const y = Math.min(1 - height, Math.max(0, Number(rect?.y) || 0));
+    if (x + width > 1) width = 1 - x;
+    if (y + height > 1) height = 1 - y;
+    return { x, y, width, height };
+  }
+
+  async function renderCropCanvas() {
+    if (!elements.cropDialog.open || !cropImage) return;
+    const token = cropRenderToken;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (token !== cropRenderToken || !cropImage) return;
+
+    const dimensions = getRotatedCropDimensions();
+    const stageRect = elements.cropStage.getBoundingClientRect();
+    const availableWidth = Math.max(220, stageRect.width - 36);
+    const availableHeight = Math.max(260, Math.min(stageRect.height - 36, window.innerHeight - 220));
+    const cssScale = Math.min(1, availableWidth / dimensions.width, availableHeight / dimensions.height);
+    const cssWidth = Math.max(1, Math.round(dimensions.width * cssScale));
+    const cssHeight = Math.max(1, Math.round(dimensions.height * cssScale));
+    const pixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const canvasWidth = Math.max(1, Math.round(cssWidth * pixelRatio));
+    const canvasHeight = Math.max(1, Math.round(cssHeight * pixelRatio));
+    const canvas = elements.cropCanvas;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    elements.cropSurface.style.width = `${cssWidth}px`;
+    elements.cropSurface.style.height = `${cssHeight}px`;
+
+    const context = canvas.getContext("2d", { alpha: false });
+    context.save();
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvasWidth, canvasHeight);
+    context.translate(canvasWidth / 2, canvasHeight / 2);
+    context.rotate(state.cropRotation * Math.PI / 180);
+    const drawScale = cssScale * pixelRatio;
+    context.drawImage(
+      cropImage,
+      -cropImage.naturalWidth * drawScale / 2,
+      -cropImage.naturalHeight * drawScale / 2,
+      cropImage.naturalWidth * drawScale,
+      cropImage.naturalHeight * drawScale,
+    );
+    context.restore();
+
+    state.cropRect = state.cropRect ? clampCropRect(state.cropRect) : createDefaultCropRect();
+    renderCropSelection();
+  }
+
+  function renderCropSelection() {
+    if (!state.cropRect || !cropImage) {
+      elements.cropSelection.hidden = true;
+      return;
+    }
+
+    const rect = clampCropRect(state.cropRect);
+    state.cropRect = rect;
+    elements.cropSelection.hidden = false;
+    elements.cropSelection.style.left = `${rect.x * 100}%`;
+    elements.cropSelection.style.top = `${rect.y * 100}%`;
+    elements.cropSelection.style.width = `${rect.width * 100}%`;
+    elements.cropSelection.style.height = `${rect.height * 100}%`;
+    elements.cropAspectInputs.forEach((input) => {
+      input.checked = input.value === state.cropAspect;
+    });
+    elements.cropZoom.value = String(state.cropZoom);
+    elements.cropZoomValue.value = `${state.cropZoom.toFixed(1)}×`;
+    elements.cropZoomValue.textContent = `${state.cropZoom.toFixed(1)}×`;
+
+    const dimensions = getRotatedCropDimensions();
+    const outputWidth = Math.max(1, Math.round(rect.width * dimensions.width));
+    const outputHeight = Math.max(1, Math.round(rect.height * dimensions.height));
+    elements.cropSummaryTitle.textContent = state.cropAspect === "document" ? "문서 사진 칸 비율 고정" : "자유 비율 선택";
+    elements.cropSummaryDetail.textContent = `${outputWidth} × ${outputHeight}px · ${state.cropRotation}° 회전`;
+  }
+
+  function resetCropSelection() {
+    if (!cropImage) return;
+    state.cropZoom = 1;
+    state.cropRect = createDefaultCropRect();
+    renderCropSelection();
+  }
+
+  function handleCropAspectChange(event) {
+    if (!cropImage || !event.target.checked) return;
+    state.cropAspect = event.target.value === "free" ? "free" : "document";
+    if (state.cropAspect === "document") {
+      const centerX = (state.cropRect?.x || 0) + (state.cropRect?.width || 1) / 2;
+      const centerY = (state.cropRect?.y || 0) + (state.cropRect?.height || 1) / 2;
+      const next = createDefaultCropRect();
+      next.x = centerX - next.width / 2;
+      next.y = centerY - next.height / 2;
+      state.cropRect = clampCropRect(next);
+    }
+    renderCropSelection();
+  }
+
+  function handleCropZoomChange(event) {
+    if (!state.cropRect) return;
+    const nextZoom = clampCropZoom(event.target.value);
+    const scale = state.cropZoom / nextZoom;
+    const centerX = state.cropRect.x + state.cropRect.width / 2;
+    const centerY = state.cropRect.y + state.cropRect.height / 2;
+    state.cropZoom = nextZoom;
+    state.cropRect = clampCropRect({
+      x: centerX - state.cropRect.width * scale / 2,
+      y: centerY - state.cropRect.height * scale / 2,
+      width: state.cropRect.width * scale,
+      height: state.cropRect.height * scale,
+    });
+    renderCropSelection();
+  }
+
+  function rotateCropPhoto(delta) {
+    if (!cropImage) return;
+    state.cropRotation = normalizeCropRotation(state.cropRotation + delta);
+    state.cropZoom = 1;
+    state.cropRect = null;
+    renderCropCanvas();
+  }
+
+  function startCropInteraction(event) {
+    if (event.button !== 0 || !state.cropRect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.target.closest("[data-crop-handle]")?.dataset.cropHandle || "move";
+    const point = cropPointerPosition(event);
+    state.cropDrag = {
+      pointerId: event.pointerId,
+      handle,
+      startPoint: point,
+      startRect: { ...state.cropRect },
+    };
+    elements.cropSelection.setPointerCapture(event.pointerId);
+    elements.cropSelection.classList.add("is-dragging");
+  }
+
+  function cropPointerPosition(event) {
+    const bounds = elements.cropCanvas.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width))),
+      y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / Math.max(1, bounds.height))),
+    };
+  }
+
+  function updateCropInteraction(event) {
+    const drag = state.cropDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const point = cropPointerPosition(event);
+    if (drag.handle === "move") {
+      const dx = point.x - drag.startPoint.x;
+      const dy = point.y - drag.startPoint.y;
+      state.cropRect = clampCropRect({
+        ...drag.startRect,
+        x: Math.min(1 - drag.startRect.width, Math.max(0, drag.startRect.x + dx)),
+        y: Math.min(1 - drag.startRect.height, Math.max(0, drag.startRect.y + dy)),
+      });
+    } else {
+      state.cropRect = resizeCropRect(drag, point);
+    }
+    renderCropSelection();
+  }
+
+  function resizeCropRect(drag, point) {
+    const start = drag.startRect;
+    const east = drag.handle.includes("e");
+    const south = drag.handle.includes("s");
+    const anchorX = east ? start.x : start.x + start.width;
+    const anchorY = south ? start.y : start.y + start.height;
+    const directionX = east ? 1 : -1;
+    const directionY = south ? 1 : -1;
+    const minimum = 0.035;
+    const maxWidth = east ? 1 - anchorX : anchorX;
+    const maxHeight = south ? 1 - anchorY : anchorY;
+    let width = Math.min(maxWidth, Math.max(minimum, Math.abs(point.x - anchorX)));
+    let height = Math.min(maxHeight, Math.max(minimum, Math.abs(point.y - anchorY)));
+
+    if (state.cropAspect === "document") {
+      const aspect = getDocumentCropAspect();
+      const widthFromHeight = height * aspect;
+      const heightFromWidth = width / aspect;
+      if (widthFromHeight <= maxWidth && Math.abs(widthFromHeight - width) < Math.abs(heightFromWidth - height) * aspect) {
+        width = widthFromHeight;
+      } else {
+        height = heightFromWidth;
+      }
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * aspect;
+      }
+      if (width > maxWidth) {
+        width = maxWidth;
+        height = width / aspect;
+      }
+    }
+
+    width = Math.max(minimum, width);
+    height = Math.max(minimum, height);
+    return clampCropRect({
+      x: anchorX + (directionX < 0 ? -width : 0),
+      y: anchorY + (directionY < 0 ? -height : 0),
+      width,
+      height,
+    });
+  }
+
+  function finishCropInteraction(event) {
+    if (!state.cropDrag || state.cropDrag.pointerId !== event.pointerId) return;
+    if (elements.cropSelection.hasPointerCapture(event.pointerId)) elements.cropSelection.releasePointerCapture(event.pointerId);
+    state.cropDrag = null;
+    elements.cropSelection.classList.remove("is-dragging");
+  }
+
+  function createRotatedPhotoCanvas() {
+    const dimensions = getRotatedCropDimensions();
+    const canvas = document.createElement("canvas");
+    canvas.width = dimensions.width;
+    canvas.height = dimensions.height;
+    const context = canvas.getContext("2d", { alpha: false });
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(state.cropRotation * Math.PI / 180);
+    context.drawImage(cropImage, -cropImage.naturalWidth / 2, -cropImage.naturalHeight / 2);
+    return canvas;
+  }
+
+  async function applyPhotoCrop() {
+    const photo = getPhoto(state.cropPhotoId);
+    if (!photo || !cropImage || !state.cropRect) return;
+    const applyButton = elements.cropApplyButton;
+    applyButton.disabled = true;
+    applyButton.textContent = "적용 중…";
+
+    try {
+      const source = createRotatedPhotoCanvas();
+      const rect = clampCropRect(state.cropRect);
+      const sourceX = Math.max(0, Math.round(rect.x * source.width));
+      const sourceY = Math.max(0, Math.round(rect.y * source.height));
+      const sourceWidth = Math.max(1, Math.min(source.width - sourceX, Math.round(rect.width * source.width)));
+      const sourceHeight = Math.max(1, Math.min(source.height - sourceY, Math.round(rect.height * source.height)));
+      const outputScale = Math.min(1, MAX_CROP_OUTPUT_DIMENSION / Math.max(sourceWidth, sourceHeight));
+      const output = document.createElement("canvas");
+      output.width = Math.max(1, Math.round(sourceWidth * outputScale));
+      output.height = Math.max(1, Math.round(sourceHeight * outputScale));
+      const context = output.getContext("2d", { alpha: false });
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, output.width, output.height);
+      context.drawImage(source, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, output.width, output.height);
+      const blob = await canvasToBlob(output, "image/jpeg", 0.94);
+      photo.dataUrl = await fileToDataUrl(blob);
+      photo.crop = {
+        rect: { ...rect },
+        rotation: state.cropRotation,
+        aspect: state.cropAspect,
+        zoom: state.cropZoom,
+      };
+      source.width = source.height = output.width = output.height = 1;
+      closeCropDialog();
+      renderAll();
+      showToast(`${photo.name}에 크롭을 적용했습니다.`);
+    } catch (error) {
+      console.error(error);
+      applyButton.disabled = false;
+      applyButton.textContent = "크롭 적용";
+      showToast("사진 크롭을 적용하지 못했습니다.", "error");
+    }
+  }
+
+  function restoreOriginalPhoto() {
+    const photo = getPhoto(state.cropPhotoId);
+    if (!photo || !photo.originalDataUrl) return;
+    photo.dataUrl = photo.originalDataUrl;
+    photo.crop = null;
+    closeCropDialog();
+    renderAll();
+    showToast(`${photo.name}을 원본으로 복원했습니다.`);
+  }
+
+  function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Canvas conversion returned no data."));
+      }, type, quality);
+    });
   }
 
   function renderItemRows() {

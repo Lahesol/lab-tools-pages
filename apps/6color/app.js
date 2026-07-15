@@ -45,6 +45,8 @@ let rxCharacteristic = null;
 let txCharacteristic = null;
 let receiveBuffer = "";
 let commandQueue = Promise.resolve();
+let firmwareDetail = "unknown";
+let resetDetail = "";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -2702,8 +2704,33 @@ function applyFirmwareLine(line) {
   const name = info.get("NAME") || "firmware";
   const sdk = info.get("SDK") || "";
   const build = info.get("BUILD") || "";
-  const detail = [version, name, sdk, build].filter(Boolean).join(" | ");
-  el.firmwareVersion.textContent = `FW: ${detail}`;
+  firmwareDetail = [version, name, sdk, build].filter(Boolean).join(" | ");
+  renderFirmwareVersion();
+}
+
+function applyResetLine(line) {
+  if (!line.startsWith("RST,")) {
+    return;
+  }
+
+  const info = new Map();
+  for (const part of line.slice(4).split(",")) {
+    const index = part.indexOf("=");
+    if (index <= 0) {
+      continue;
+    }
+    info.set(part.slice(0, index).trim().toUpperCase(), part.slice(index + 1).trim());
+  }
+
+  const reason = info.get("REASON") || "unknown";
+  const raw = info.get("RAW") || "";
+  resetDetail = [reason, raw].filter(Boolean).join(" ");
+  renderFirmwareVersion();
+}
+
+function renderFirmwareVersion() {
+  const resetText = resetDetail ? ` | Reset: ${resetDetail}` : "";
+  el.firmwareVersion.textContent = `FW: ${firmwareDetail}${resetText}`;
 }
 
 function handleNotification(event) {
@@ -2718,6 +2745,7 @@ function handleNotification(event) {
     appendLog("<", trimmed);
     applyStatusLine(trimmed);
     applyFirmwareLine(trimmed);
+    applyResetLine(trimmed);
   }
 }
 
@@ -2744,7 +2772,9 @@ async function connect() {
     txCharacteristic = null;
     server = null;
     setConnectionStatus(false);
-    el.firmwareVersion.textContent = "FW: unknown";
+    firmwareDetail = "unknown";
+    resetDetail = "";
+    renderFirmwareVersion();
     appendLog("!", "Device disconnected");
   });
 
@@ -2768,7 +2798,9 @@ async function disconnect() {
   rxCharacteristic = null;
   txCharacteristic = null;
   setConnectionStatus(false);
-  el.firmwareVersion.textContent = "FW: unknown";
+  firmwareDetail = "unknown";
+  resetDetail = "";
+  renderFirmwareVersion();
 }
 
 async function sendAll(on, duty = null) {

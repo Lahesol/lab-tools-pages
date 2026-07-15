@@ -5,6 +5,7 @@
 - Added a firmware version display in the top bar.
 - Added a `FW VERSION` command button.
 - The GUI now sends `VERSION` after BLE connection and parses `FW,...` responses from firmware.
+- Added parsing/display for firmware `RST,...` reset-reason diagnostics.
 - Fixed Timeline protocol execution so 4/8-bit OOK, Manchester, and PWM-width protocols run through firmware `TXBITS` instead of browser-timed ON/OFF expansion.
 - Kept 16/32-bit and intensity-level protocols on browser-timed fallback and reduced fallback brightness changes to single `SET,<CH>,<ON>,<DUTY>` commands to avoid first/last pulse edge drift.
 

@@ -10,11 +10,11 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=b0e2779ab21c" />
+    <link rel="stylesheet" href="./styles.css?v=b5ec1245e39d" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
     <script defer src="./vendor/tesseract/tesseract.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=ede72efbc776"></script>
+    <script defer src="./app.js?v=06d832baf700"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -346,6 +346,74 @@
         <footer class="roi-dialog__footer">
           <button class="button button--ghost" id="roiResetButton" type="button">영역 다시 선택</button>
           <button class="button button--primary" id="roiApplyButton" type="button" disabled>선택 품목 적용</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <dialog class="crop-dialog" id="cropDialog" aria-labelledby="cropDialogTitle">
+      <div class="crop-dialog__shell">
+        <header class="crop-dialog__header">
+          <div>
+            <h2 id="cropDialogTitle">물품 사진 크롭</h2>
+            <p id="cropPhotoName">사진의 필요한 부분만 선택해 미리보기와 PDF에 반영합니다.</p>
+          </div>
+          <button class="roi-close-button" id="cropCloseButton" type="button" aria-label="사진 크롭 창 닫기">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        </header>
+
+        <div class="crop-dialog__body">
+          <section class="crop-viewer" aria-label="사진 크롭 영역 선택">
+            <div class="crop-stage" id="cropStage">
+              <div class="crop-surface" id="cropSurface">
+                <canvas id="cropCanvas" aria-label="크롭할 물품 사진"></canvas>
+                <div class="crop-selection" id="cropSelection" hidden>
+                  <span class="crop-selection__grid" aria-hidden="true"></span>
+                  <button type="button" data-crop-handle="nw" aria-label="왼쪽 위 크롭 크기 조절"></button>
+                  <button type="button" data-crop-handle="ne" aria-label="오른쪽 위 크롭 크기 조절"></button>
+                  <button type="button" data-crop-handle="sw" aria-label="왼쪽 아래 크롭 크기 조절"></button>
+                  <button type="button" data-crop-handle="se" aria-label="오른쪽 아래 크롭 크기 조절"></button>
+                </div>
+              </div>
+            </div>
+            <p class="crop-hint">청록색 영역을 드래그해 이동하고, 모서리 손잡이로 크기를 조절하세요.</p>
+          </section>
+
+          <aside class="crop-controls" aria-label="사진 크롭 설정">
+            <fieldset class="crop-control-group">
+              <legend>크롭 비율</legend>
+              <label><input type="radio" name="cropAspect" value="document" checked /><span>문서 사진 칸 비율</span></label>
+              <label><input type="radio" name="cropAspect" value="free" /><span>자유 비율</span></label>
+            </fieldset>
+
+            <label class="crop-zoom-control" for="cropZoom">
+              <span><strong>확대/축소</strong><output id="cropZoomValue">1.0×</output></span>
+              <input id="cropZoom" type="range" min="1" max="4" step="0.05" value="1" />
+              <small>확대할수록 선택 영역이 작아져 물품을 크게 표시합니다.</small>
+            </label>
+
+            <div class="crop-rotation-controls">
+              <strong>사진 회전</strong>
+              <div>
+                <button class="button button--secondary button--small" id="cropRotateLeftButton" type="button">↶ 왼쪽 90°</button>
+                <button class="button button--secondary button--small" id="cropRotateRightButton" type="button">오른쪽 90° ↷</button>
+              </div>
+            </div>
+
+            <div class="crop-summary" role="status" aria-live="polite">
+              <strong id="cropSummaryTitle">문서 사진 칸에 맞춤</strong>
+              <span id="cropSummaryDetail">선택 영역을 준비하고 있습니다.</span>
+            </div>
+
+            <button class="button button--ghost button--small crop-selection-reset" id="cropSelectionResetButton" type="button">선택 영역 초기화</button>
+          </aside>
+        </div>
+
+        <footer class="crop-dialog__footer">
+          <button class="button button--ghost" id="cropRestoreOriginalButton" type="button">원본 복원</button>
+          <span></span>
+          <button class="button button--secondary" id="cropCancelButton" type="button">취소</button>
+          <button class="button button--primary" id="cropApplyButton" type="button">크롭 적용</button>
         </footer>
       </div>
     </dialog>
