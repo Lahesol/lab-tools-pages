@@ -159,6 +159,7 @@ select {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
+  max-width: 100%;
   padding: 0 12px;
   border: 1px solid rgba(19, 122, 69, 0.3);
   border-radius: 999px;
@@ -166,6 +167,9 @@ select {
   background: #effaf4;
   font-size: 13px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-dot.is-muted {
@@ -599,10 +603,30 @@ input[type="range"] {
   border-bottom: 1px solid var(--line);
 }
 
+.plot-toolbar > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.plot-toolbar h2,
 .plot-toolbar p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-toolbar h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-toolbar p {
+  height: 18px;
   margin: 6px 0 0;
   color: var(--muted);
   font-size: 13px;
+  line-height: 18px;
 }
 
 .toolbar-actions,
@@ -617,6 +641,12 @@ input[type="range"] {
 
 .compact-field {
   min-width: 100px;
+}
+
+.compact-field > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bias-field {
@@ -735,6 +765,7 @@ input[type="range"] {
   display: inline-flex;
   align-items: center;
   min-height: var(--control-height);
+  max-width: 100%;
   padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -743,6 +774,9 @@ input[type="range"] {
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvas-wrap {
@@ -805,6 +839,7 @@ canvas {
   margin-top: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
   font-size: 21px;
   line-height: 1;
@@ -851,17 +886,23 @@ canvas {
 
 .bit-adc2-header h3 {
   margin: 0;
+  overflow: hidden;
   color: var(--ink);
   font-size: 14px;
   font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bit-adc2-header p {
   margin: 5px 0 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 11px;
   font-weight: 650;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mini-plot-badge {
