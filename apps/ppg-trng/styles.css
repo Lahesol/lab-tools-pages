@@ -605,6 +605,9 @@ input[type="range"] {
 }
 
 .metric {
+  width: 100%;
+  min-width: 0;
+  height: 86px;
   min-height: 86px;
   padding: 13px 14px;
   border: 1px solid var(--line);
@@ -624,11 +627,13 @@ input[type="range"] {
 .metric strong {
   display: block;
   margin-top: 10px;
+  min-width: 0;
+  min-height: 29px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: clamp(17px, 2.05vw, 29px);
+  font-size: 29px;
   line-height: 1;
 }
 
@@ -871,6 +876,9 @@ canvas {
 }
 
 .bit-stat {
+  width: 100%;
+  min-width: 0;
+  height: 62px;
   min-height: 62px;
   padding: 10px 11px;
   border: 1px solid var(--line);
@@ -889,6 +897,8 @@ canvas {
 .bit-stat strong {
   display: block;
   margin-top: 8px;
+  min-width: 0;
+  min-height: 21px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

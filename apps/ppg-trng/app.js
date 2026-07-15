@@ -1929,6 +1929,59 @@ function formatNumber(value) {
   return value.toFixed(3);
 }
 
+const DYNAMIC_TEXT_SELECTOR = [
+  ".metric strong",
+  ".bit-stat strong",
+  ".status-dot",
+  ".mode-pill",
+  ".filter-summary",
+  ".plot-toolbar p",
+  ".bit-adc2-header p",
+].join(", ");
+
+function fitTextToBox(element) {
+  if (!element?.isConnected || element.clientWidth <= 0) return;
+
+  element.style.removeProperty("font-size");
+  const computedSize = Number.parseFloat(window.getComputedStyle(element).fontSize);
+  if (!Number.isFinite(computedSize)) return;
+
+  const minimumSize = element.matches(".metric strong") ? 16 : 10;
+  let size = computedSize;
+  element.style.fontSize = `${size}px`;
+  while (size > minimumSize && element.scrollWidth > element.clientWidth + 1) {
+    size = Math.max(minimumSize, size - 0.5);
+    element.style.fontSize = `${size}px`;
+  }
+}
+
+function fitDynamicText() {
+  document.querySelectorAll(DYNAMIC_TEXT_SELECTOR).forEach(fitTextToBox);
+}
+
+function setupDynamicTextFitting() {
+  const targets = [...document.querySelectorAll(DYNAMIC_TEXT_SELECTOR)];
+  if (!targets.length) return;
+
+  let framePending = false;
+  const scheduleFit = () => {
+    if (framePending) return;
+    framePending = true;
+    window.requestAnimationFrame(() => {
+      framePending = false;
+      fitDynamicText();
+    });
+  };
+
+  targets.forEach((target) => {
+    const mutationObserver = new MutationObserver(scheduleFit);
+    mutationObserver.observe(target, { childList: true, characterData: true, subtree: true });
+    const resizeObserver = new ResizeObserver(scheduleFit);
+    resizeObserver.observe(target);
+  });
+  fitDynamicText();
+}
+
 function clampInteger(value, min, max, fallback) {
   const number = Number.parseInt(value, 10);
   if (!Number.isFinite(number)) return fallback;
@@ -3858,6 +3911,7 @@ function init() {
   new ResizeObserver(resizeBitAdc2Canvas).observe(els.bitAdc2CanvasWrap || els.bitAdc2Canvas);
   new ResizeObserver(resizeCipherCanvas).observe(els.cipherCanvasWrap || els.cipherCanvas);
   new ResizeObserver(resizeNoiseBitCanvas).observe(els.noiseBitCanvasWrap || els.noiseBitCanvas);
+  setupDynamicTextFitting();
   updateStats();
   animationLoop();
 }
