@@ -150,6 +150,7 @@ const state = {
   writer: null,
   firmwareVersion: "",
   firmwareProtocol: "",
+  perChannelGainSupported: false,
   keepReading: false,
   decoder: new TextDecoder(),
   parseBuffer: "",
@@ -1062,6 +1063,9 @@ function parseAdcGainStatusSegment(segment) {
 
   const parsed = {};
   const matches = [...segment.matchAll(/ADC([023])\s*,\s*CODE\s*[,=:]\s*(\d+)\s*,\s*VALUE\s*[,=:]\s*([^,\s;]+)/gi)];
+  if (new Set(matches.map((match) => `ADC${match[1]}`)).size === 3) {
+    state.perChannelGainSupported = true;
+  }
   matches.forEach((match) => {
     const source = `ADC${match[1]}`;
     const code = clampInteger(match[2], 0, ADC_GAIN_OPTIONS.length - 1, 0);
@@ -1099,8 +1103,10 @@ function parseFirmwareInfoSegment(segment) {
     state.firmwareVersion = match[1];
   }
   const protocolMatch = segment.match(/\bPROTO\s*,\s*([^,\s;]+)/i);
+  state.perChannelGainSupported = false;
   if (protocolMatch) {
     state.firmwareProtocol = protocolMatch[1];
+    state.perChannelGainSupported = /gain-v4/i.test(state.firmwareProtocol);
   }
   addLog("RX", segment);
   return true;
@@ -1964,7 +1970,7 @@ function getAdcGainOption(code) {
 }
 
 function supportsPerChannelGain() {
-  return /gain-v4/i.test(state.firmwareProtocol);
+  return state.perChannelGainSupported || /gain-v4/i.test(state.firmwareProtocol);
 }
 
 function setAdcGainUi(gains, options = {}) {
