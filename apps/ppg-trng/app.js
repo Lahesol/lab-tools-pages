@@ -149,6 +149,7 @@ const state = {
   bleNotifyCharacteristic: null,
   writer: null,
   firmwareVersion: "",
+  firmwareProtocol: "",
   keepReading: false,
   decoder: new TextDecoder(),
   parseBuffer: "",
@@ -1097,6 +1098,10 @@ function parseFirmwareInfoSegment(segment) {
   if (match) {
     state.firmwareVersion = match[1];
   }
+  const protocolMatch = segment.match(/\bPROTO\s*,\s*([^,\s;]+)/i);
+  if (protocolMatch) {
+    state.firmwareProtocol = protocolMatch[1];
+  }
   addLog("RX", segment);
   return true;
 }
@@ -1958,6 +1963,10 @@ function getAdcGainOption(code) {
   return ADC_GAIN_OPTIONS.find((option) => option.code === code) || ADC_GAIN_OPTIONS[0];
 }
 
+function supportsPerChannelGain() {
+  return /gain-v4/i.test(state.firmwareProtocol);
+}
+
 function setAdcGainUi(gains, options = {}) {
   const sources = ["ADC0", "ADC2", "ADC3"];
   const controls = { ADC0: els.adcGain0, ADC2: els.adcGain2, ADC3: els.adcGain3 };
@@ -1998,6 +2007,19 @@ async function sendAdcGainCommand() {
   ];
   if (els.adcGainStatus) {
     els.adcGainStatus.textContent = `Applying ADC gains ${codes.join("/")}...`;
+  }
+  if (!supportsPerChannelGain()) {
+    if (new Set(codes).size !== 1) {
+      const protocol = state.firmwareProtocol || "unknown";
+      if (els.adcGainStatus) {
+        els.adcGainStatus.textContent = "Firmware update required for channel gain";
+      }
+      addLog("ERR", `Per-channel gain is unavailable on firmware protocol ${protocol}; update to gain-v4 first`, true);
+      return;
+    }
+    addLog("SYS", "Using legacy common ADC gain command");
+    await sendCommand(`GAIN${codes[0]}`);
+    return;
   }
   await sendCommand(`GAINSET${codes.join("")}`);
 }

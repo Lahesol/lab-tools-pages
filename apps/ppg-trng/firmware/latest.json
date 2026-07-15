@@ -6,7 +6,7 @@
   "protocol": "ppg-trng-sync-adc0-2-3-gain-v4",
   "appVersion": 31,
   "package": "./ppg_trng_gain_dfu.zip",
-  "size": 71427,
-  "sha256": "2C96C70698E3B8099831817324FA1C6426FB725A1F15942247F353305D6C6602",
+  "size": 71443,
+  "sha256": "228C610C61ECF19C33437AB77EBF729303FE2B80A3BAB0DEEBC21A158C939843",
   "message": "Generated from the synchronized ADC0/ADC2/ADC3 Debug build on 2026-07-15. ADC0, ADC2, and ADC3 have independent SAADC gain controls; GAINSET applies all three in one synchronized reinitialization."
 }

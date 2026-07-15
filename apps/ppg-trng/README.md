@@ -59,7 +59,9 @@ values are 1/6, 1/5, 1/4, 1/3, 1/2, 1, 2, and 4. The GUI sends one `GAINSET`
 command so a multi-channel change briefly pauses the hardware-triggered scan only
 once. The scan rate and ADC channel mapping are preserved. After the new gains are
 confirmed, the GUI clears buffered ADC, key, bitmap, and cipher data so samples
-from different scales are not mixed.
+from different scales are not mixed. The GUI checks `VER?`/`PROTO` before sending
+`GAINSET`; old firmware is limited to the legacy common gain command and cannot
+apply different gains per channel.
 
 ## Plot, Bits, and Encryption
 
