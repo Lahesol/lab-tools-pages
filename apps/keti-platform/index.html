@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=a086520114b7" />
+    <link rel="stylesheet" href="styles.css?v=5ec0b4139254" />
   </head>
   <body>
     <div class="app-shell">
@@ -351,6 +351,45 @@
                   </select>
                 </label>
 
+                <details class="learning-guide" open>
+                  <summary>
+                    <span>Input Feature Guide</span>
+                    <strong>Window to ANN input</strong>
+                  </summary>
+                  <div class="learning-guide-body">
+                    <p id="datasetFeatureGuideState" class="guide-current">Waiting for feature settings</p>
+                    <dl class="guide-definitions">
+                      <div>
+                        <dt>Window</dt>
+                        <dd>하나의 학습 샘플에 포함되는 연속 IMU 샘플 수입니다. 샘플 수를 늘리면 더 긴 동작을 관찰합니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Stride</dt>
+                        <dd>다음 윈도우를 저장할 때 이동하는 샘플 수입니다. Window보다 작으면 서로 겹치는 학습 샘플을 만듭니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Stats 15</dt>
+                        <dd>가속도 X/Y/Z 각 축에서 mean, std, min, max, RMS를 계산합니다. 3축 x 5개 통계값으로 항상 15 features입니다.</dd>
+                        <code>mean=sum(x)/N, std=sqrt(sum((x-mean)^2)/N), RMS=sqrt(sum(x^2)/N)</code>
+                      </div>
+                      <div>
+                        <dt>Flatten Window</dt>
+                        <dd>시간 순서대로 ax, ay, az를 펼칩니다. 입력 크기는 Window x 3이며 시계열 모양을 보존하지만 모델이 커집니다.</dd>
+                        <code>[ax0, ay0, az0, ax1, ay1, az1, ...]</code>
+                      </div>
+                      <div>
+                        <dt>Raw / Processed</dt>
+                        <dd>Raw는 수신한 ax/ay/az를 사용하고, Processed는 Input 설정의 필터와 정규화를 적용한 pax/pay/paz를 사용합니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Training Standardization</dt>
+                        <dd>특징 추출 후에는 Source와 관계없이 학습 데이터 전체의 특징별 mean/std로 다시 Z-score 표준화합니다.</dd>
+                        <code>feature_z=(feature-dataset_mean)/dataset_std</code>
+                      </div>
+                    </dl>
+                  </div>
+                </details>
+
                 <div class="button-row">
                   <button id="datasetCaptureButton" type="button">Start Capture</button>
                   <button id="datasetCaptureOneButton" type="button">Capture One</button>
@@ -417,6 +456,51 @@
                   <span id="modelShapeState">No model</span>
                 </div>
                 <canvas id="modelArchitectureCanvas" width="900" height="220" aria-label="ANN layer block diagram"></canvas>
+
+                <details class="learning-guide" open>
+                  <summary>
+                    <span>Training Parameter Guide</span>
+                    <strong>Browser ANN settings</strong>
+                  </summary>
+                  <div class="learning-guide-body">
+                    <p id="modelTrainingGuideState" class="guide-current">Waiting for model settings</p>
+                    <dl class="guide-definitions">
+                      <div>
+                        <dt>Hidden Layers</dt>
+                        <dd>Input과 Output 사이 Dense 레이어 수입니다. 많을수록 복잡한 패턴을 표현하지만 계산량과 과적합 위험이 증가합니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Neurons / Layer</dt>
+                        <dd>각 Hidden 레이어의 출력 개수입니다. 뉴런 수가 늘면 가중치와 RAM 사용량도 함께 증가합니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Activation</dt>
+                        <dd>Hidden 레이어의 비선형 함수입니다. ReLU는 기본 선택이며, Tanh와 Sigmoid는 출력 범위가 제한됩니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Learning Rate</dt>
+                        <dd>한 번의 역전파에서 가중치를 수정하는 크기입니다. 너무 크면 발산하고, 너무 작으면 학습이 느려질 수 있습니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Epochs</dt>
+                        <dd>전체 학습 윈도우를 반복해서 사용하는 횟수입니다. Epoch마다 데이터 순서를 무작위로 섞습니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Pruning Sparsity</dt>
+                        <dd>학습 후 절댓값이 작은 가중치를 0으로 만드는 목표 비율입니다. 현재는 프루닝 후 재학습하지 않습니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Quantized Export</dt>
+                        <dd>내보낼 때 레이어별 가중치를 INT8로 변환합니다. 현재 Bias와 입력 mean/std는 float로 유지됩니다.</dd>
+                      </div>
+                      <div>
+                        <dt>Output</dt>
+                        <dd>라벨마다 하나의 출력이 생성되고 Softmax가 클래스 확률을 만듭니다. 출력 수는 Dataset의 서로 다른 라벨 수입니다.</dd>
+                      </div>
+                    </dl>
+                    <p class="guide-caution"><strong>현재 평가 방식:</strong> 별도의 Validation/Test 분할 없이 학습에 사용한 동일 데이터로 Accuracy를 계산하므로 실제 일반화 성능보다 높게 나타날 수 있습니다.</p>
+                  </div>
+                </details>
 
                 <div class="field-row">
                   <label class="field">
@@ -733,6 +817,6 @@
     <script src="models/ppg_hr_cnn_model.js"></script>
     <script src="models/ppg_hr_regression_model.js"></script>
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=b1ae9995d2b1"></script>
+    <script src="app.js?v=503a47a18af5"></script>
   </body>
 </html>

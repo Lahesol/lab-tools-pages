@@ -1037,6 +1037,118 @@ input[type="file"] {
   margin-bottom: 14px;
 }
 
+.learning-guide {
+  margin: 14px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.learning-guide > summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 4px 10px 22px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.learning-guide > summary::-webkit-details-marker {
+  display: none;
+}
+
+.learning-guide > summary::before {
+  position: absolute;
+  left: 5px;
+  content: ">";
+  color: var(--teal-dark);
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.learning-guide[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.learning-guide > summary strong {
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.learning-guide-body {
+  border-top: 1px solid var(--border);
+  padding: 10px 4px 12px;
+}
+
+.guide-current {
+  margin: 0 0 10px;
+  border-left: 3px solid var(--teal);
+  padding: 7px 9px;
+  background: #f1f8f7;
+  color: var(--teal-dark);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.guide-definitions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+  margin: 0;
+}
+
+.guide-definitions > div {
+  min-width: 0;
+  border-top: 1px solid #e8edf1;
+  padding: 9px 0;
+}
+
+.guide-definitions dt {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.guide-definitions dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.guide-definitions code {
+  display: block;
+  margin-top: 5px;
+  color: #28556b;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.guide-caution {
+  margin: 8px 0 0;
+  border-left: 3px solid #d28a00;
+  padding: 7px 9px;
+  background: #fff8ec;
+  color: #5d4a28;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 #ppgCanvas {
   height: 300px;
 }
@@ -1489,6 +1601,18 @@ th:first-child {
   }
 
   .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .learning-guide > summary {
+    grid-template-columns: 1fr;
+  }
+
+  .learning-guide > summary strong {
+    text-align: left;
+  }
+
+  .guide-definitions {
     grid-template-columns: 1fr;
   }
 

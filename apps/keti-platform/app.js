@@ -477,9 +477,11 @@ const el = {
   datasetPreviewCanvas: document.getElementById("datasetPreviewCanvas"),
   datasetLabelList: document.getElementById("datasetLabelList"),
   datasetTableBody: document.getElementById("datasetTableBody"),
+  datasetFeatureGuideState: document.getElementById("datasetFeatureGuideState"),
   modelStatus: document.getElementById("modelStatus"),
   modelShapeState: document.getElementById("modelShapeState"),
   modelArchitectureCanvas: document.getElementById("modelArchitectureCanvas"),
+  modelTrainingGuideState: document.getElementById("modelTrainingGuideState"),
   hiddenLayerInput: document.getElementById("hiddenLayerInput"),
   neuronInput: document.getElementById("neuronInput"),
   activationSelect: document.getElementById("activationSelect"),
@@ -2090,6 +2092,28 @@ function labelCounts() {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
+function renderDatasetFeatureGuide() {
+  if (!el.datasetFeatureGuideState) {
+    return;
+  }
+  const windowSize = getDatasetWindowSize();
+  const strideSize = getDatasetStrideSize();
+  const rateHz = Math.max(1, normalizeNumber(state.settings.rateHz, 63, 1, 1000));
+  const featureMode = el.datasetFeatureSelect?.value || "STATS";
+  const source = el.datasetSourceSelect?.value === "RAW"
+    ? "Raw ax/ay/az"
+    : "Processed pax/pay/paz";
+  const featureText = featureMode === "FLATTEN"
+    ? `Flatten: ${windowSize} samples x 3 axes = ${windowSize * IMU_ACCEL_AXES.length} features`
+    : "Stats 15: 3 axes x 5 statistics = 15 features";
+  el.datasetFeatureGuideState.textContent = [
+    featureText,
+    `window ${(windowSize / rateHz).toFixed(2)} s @ ${rateHz.toFixed(1)} Hz`,
+    `stride ${(strideSize / rateHz).toFixed(2)} s`,
+    source
+  ].join(" | ");
+}
+
 function renderDatasetView() {
   const examples = state.dataset.examples;
   const counts = labelCounts();
@@ -2100,6 +2124,7 @@ function renderDatasetView() {
     ? `${shape.featureSize} features`
     : `${shape.featureSize} planned`;
   el.datasetCaptureState.textContent = state.dataset.captureActive ? "Capturing" : "Idle";
+  renderDatasetFeatureGuide();
   drawDatasetPreview();
 
   el.datasetLabelList.replaceChildren(
@@ -2825,9 +2850,31 @@ function trainBrowserModel() {
   }
 }
 
+function renderModelTrainingGuide() {
+  if (!el.modelTrainingGuideState) {
+    return;
+  }
+  const options = getModelOptions();
+  const planned = getPlannedModelArchitecture();
+  const activation = options.activation === "relu"
+    ? "ReLU"
+    : options.activation === "tanh" ? "Tanh" : "Sigmoid";
+  const shape = formatArchitectureShape(planned.sizes, !planned.outputReady);
+  const exportMode = options.quantizedExport ? "INT8 weight export" : "float export";
+  el.modelTrainingGuideState.textContent = [
+    `Next training: ${shape}`,
+    activation,
+    `LR ${options.learningRate}`,
+    `${options.epochs} epochs`,
+    `pruning ${(options.pruningSparsity * 100).toFixed(0)}%`,
+    exportMode
+  ].join(" | ");
+}
+
 function renderModelView() {
   const examples = state.dataset.examples.length;
   const shape = getDatasetShape();
+  renderModelTrainingGuide();
   renderModelArchitecture();
   if (!state.model.trained) {
     const planned = getPlannedModelArchitecture();
@@ -8068,10 +8115,11 @@ function bindEvents() {
       setUiEnabled();
     });
   });
-  [el.hiddenLayerInput, el.neuronInput].forEach((node) => {
+  [el.hiddenLayerInput, el.neuronInput, el.activationSelect, el.learningRateInput, el.epochInput].forEach((node) => {
     node.addEventListener("input", renderModelView);
     node.addEventListener("change", renderModelView);
   });
+  el.quantizeToggle.addEventListener("change", renderModelView);
   el.trainModelButton.addEventListener("click", trainBrowserModel);
   el.exportModelJsonButton.addEventListener("click", exportModelJson);
   el.exportCArrayButton.addEventListener("click", exportCArray);
@@ -8149,6 +8197,7 @@ function bindEvents() {
   });
   el.pruningInput.addEventListener("input", () => {
     el.pruningOutput.textContent = `${(Number(el.pruningInput.value) * 100).toFixed(0)}%`;
+    renderModelView();
   });
 }
 
