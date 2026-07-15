@@ -1017,6 +1017,7 @@ input[type="file"] {
 
 #datasetPreviewCanvas,
 #modelArchitectureCanvas,
+#modelLiveCanvas,
 #ppgModelCanvas,
 #ppgCanvas,
 #ppgCnnCanvas {
@@ -1035,6 +1036,21 @@ input[type="file"] {
 #modelArchitectureCanvas {
   height: 220px;
   margin-bottom: 14px;
+}
+
+#modelLiveCanvas {
+  height: 220px;
+  margin-top: 10px;
+}
+
+.model-live-section {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.model-live-section .button-row {
+  margin-top: 10px;
 }
 
 .learning-guide {

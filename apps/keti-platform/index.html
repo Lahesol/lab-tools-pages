@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>KETI Nano 33 BLE Rev2 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=5ec0b4139254" />
+    <link rel="stylesheet" href="styles.css?v=78bc35b02ae9" />
   </head>
   <body>
     <div class="app-shell">
@@ -486,6 +486,10 @@
                         <dd>전체 학습 윈도우를 반복해서 사용하는 횟수입니다. Epoch마다 데이터 순서를 무작위로 섞습니다.</dd>
                       </div>
                       <div>
+                        <dt>Train / Test Split</dt>
+                        <dd>라벨별 비율을 유지하면서 일부 윈도우를 Test로 분리합니다. 특징 mean/std와 가중치 학습에는 Train 데이터만 사용합니다.</dd>
+                      </div>
+                      <div>
                         <dt>Pruning Sparsity</dt>
                         <dd>학습 후 절댓값이 작은 가중치를 0으로 만드는 목표 비율입니다. 현재는 프루닝 후 재학습하지 않습니다.</dd>
                       </div>
@@ -497,8 +501,12 @@
                         <dt>Output</dt>
                         <dd>라벨마다 하나의 출력이 생성되고 Softmax가 클래스 확률을 만듭니다. 출력 수는 Dataset의 서로 다른 라벨 수입니다.</dd>
                       </div>
+                      <div>
+                        <dt>Live Inference</dt>
+                        <dd>학습 시 저장한 Window, Stride, Feature Mode, Raw/Processed Source, 전처리와 Train mean/std를 재사용해 브라우저에서 실시간 분류합니다.</dd>
+                      </div>
                     </dl>
-                    <p class="guide-caution"><strong>현재 평가 방식:</strong> 별도의 Validation/Test 분할 없이 학습에 사용한 동일 데이터로 Accuracy를 계산하므로 실제 일반화 성능보다 높게 나타날 수 있습니다.</p>
+                    <p class="guide-caution"><strong>Test 해석:</strong> Test Accuracy는 학습에 사용하지 않은 윈도우로 계산합니다. 단, Stride가 작아 서로 겹친 윈도우는 Train/Test에 유사한 데이터가 포함될 수 있습니다.</p>
                   </div>
                 </details>
 
@@ -536,6 +544,14 @@
                 </div>
 
                 <label class="field">
+                  <span>Test Split</span>
+                  <div class="inline-input">
+                    <input id="testSplitInput" type="range" min="0.1" max="0.5" step="0.05" value="0.2" />
+                    <output id="testSplitOutput">20%</output>
+                  </div>
+                </label>
+
+                <label class="field">
                   <span>Pruning Sparsity</span>
                   <div class="inline-input">
                     <input id="pruningInput" type="range" min="0" max="0.95" step="0.01" value="0" />
@@ -563,6 +579,24 @@
                 </div>
                 <div id="modelMetrics" class="model-metrics"></div>
                 <pre id="modelLog" class="model-log"></pre>
+
+                <div class="model-live-section">
+                  <div class="section-title">
+                    <h3>Live Browser Inference</h3>
+                    <span id="modelLiveStatus">Train a model first</span>
+                  </div>
+                  <div class="button-row">
+                    <button id="modelLiveStartButton" type="button" disabled>Start Live</button>
+                    <button id="modelLiveStopButton" type="button" disabled>Stop Live</button>
+                  </div>
+                  <div class="classification-summary">
+                    <span id="modelLiveTopLabel">--</span>
+                    <strong id="modelLiveTopScore">--</strong>
+                  </div>
+                  <div id="modelLiveWindowState" class="classification-window-state">Model input window: --</div>
+                  <canvas id="modelLiveCanvas" width="900" height="220" aria-label="Live browser ANN input window"></canvas>
+                  <div id="modelLiveScoreList" class="classification-list"></div>
+                </div>
               </section>
             </div>
           </section>
@@ -817,6 +851,6 @@
     <script src="models/ppg_hr_cnn_model.js"></script>
     <script src="models/ppg_hr_regression_model.js"></script>
     <script src="direct-flasher.js"></script>
-    <script src="app.js?v=503a47a18af5"></script>
+    <script src="app.js?v=7708f932f422"></script>
   </body>
 </html>

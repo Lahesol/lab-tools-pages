@@ -237,7 +237,17 @@ const state = {
     labels: [],
     inputSize: 0,
     metrics: null,
-    trainingLog: []
+    trainingLog: [],
+    live: {
+      active: false,
+      lastInferenceSeq: null,
+      topLabel: "--",
+      topScore: null,
+      scores: [],
+      timingMs: null,
+      updatedAt: null,
+      error: ""
+    }
   },
   classification: {
     active: false,
@@ -487,6 +497,8 @@ const el = {
   activationSelect: document.getElementById("activationSelect"),
   learningRateInput: document.getElementById("learningRateInput"),
   epochInput: document.getElementById("epochInput"),
+  testSplitInput: document.getElementById("testSplitInput"),
+  testSplitOutput: document.getElementById("testSplitOutput"),
   pruningInput: document.getElementById("pruningInput"),
   pruningOutput: document.getElementById("pruningOutput"),
   quantizeToggle: document.getElementById("quantizeToggle"),
@@ -495,7 +507,15 @@ const el = {
   exportCArrayButton: document.getElementById("exportCArrayButton"),
   modelMetricState: document.getElementById("modelMetricState"),
   modelMetrics: document.getElementById("modelMetrics"),
-  modelLog: document.getElementById("modelLog")
+  modelLog: document.getElementById("modelLog"),
+  modelLiveStatus: document.getElementById("modelLiveStatus"),
+  modelLiveStartButton: document.getElementById("modelLiveStartButton"),
+  modelLiveStopButton: document.getElementById("modelLiveStopButton"),
+  modelLiveTopLabel: document.getElementById("modelLiveTopLabel"),
+  modelLiveTopScore: document.getElementById("modelLiveTopScore"),
+  modelLiveWindowState: document.getElementById("modelLiveWindowState"),
+  modelLiveCanvas: document.getElementById("modelLiveCanvas"),
+  modelLiveScoreList: document.getElementById("modelLiveScoreList")
 };
 
 const ctx = el.signalCanvas.getContext("2d");
@@ -848,9 +868,11 @@ function setUiEnabled() {
   el.datasetCaptureOneButton.disabled = state.imuSamples.length < getDatasetWindowSize();
   el.datasetExportJsonButton.disabled = state.dataset.examples.length === 0;
   el.datasetExportCsvButton.disabled = state.dataset.examples.length === 0;
-  el.trainModelButton.disabled = state.dataset.examples.length < 2 || labelCounts().length < 2;
+  el.trainModelButton.disabled = !hasTrainTestReadyDataset();
   el.exportModelJsonButton.disabled = !state.model.trained;
   el.exportCArrayButton.disabled = !state.model.trained;
+  el.modelLiveStartButton.disabled = !state.model.trained || state.model.live.active;
+  el.modelLiveStopButton.disabled = !state.model.live.active;
   if (el.ppgAnalyzeButton) {
     el.ppgAnalyzeButton.disabled = state.ppg.loading || state.ppg.samples.length === 0;
   }
@@ -2092,6 +2114,11 @@ function labelCounts() {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
+function hasTrainTestReadyDataset() {
+  const counts = labelCounts();
+  return counts.length >= 2 && counts.every(([, count]) => count >= 2);
+}
+
 function renderDatasetFeatureGuide() {
   if (!el.datasetFeatureGuideState) {
     return;
@@ -2240,6 +2267,16 @@ function clearDataset() {
   state.model.trained = null;
   state.model.metrics = null;
   state.model.trainingLog = [];
+  state.model.live = {
+    active: false,
+    lastInferenceSeq: null,
+    topLabel: "--",
+    topScore: null,
+    scores: [],
+    timingMs: null,
+    updatedAt: null,
+    error: ""
+  };
   renderDatasetView();
   renderModelView();
   setUiEnabled();
@@ -2309,10 +2346,34 @@ async function importDatasetJson(event) {
   }
 }
 
-function getTrainingDataset() {
+function splitExamplesByLabel(examples, labels, testRatio) {
+  const trainExamples = [];
+  const testExamples = [];
+  for (const label of labels) {
+    const bucket = examples.filter((example) => example.label === label);
+    if (bucket.length < 2) {
+      throw new Error(`Need at least two windows for label: ${label}`);
+    }
+    shuffle(bucket);
+    const testCount = Math.max(1, Math.min(bucket.length - 1, Math.round(bucket.length * testRatio)));
+    testExamples.push(...bucket.slice(0, testCount));
+    trainExamples.push(...bucket.slice(testCount));
+  }
+  shuffle(trainExamples);
+  shuffle(testExamples);
+  return { trainExamples, testExamples };
+}
+
+function standardizeExamples(examples, mean, std) {
+  return examples.map((example) => example.features.map((value, index) => (
+    (value - mean[index]) / std[index]
+  )));
+}
+
+function getTrainingDataset(testRatio = getModelOptions().testRatio) {
   const examples = state.dataset.examples.filter((example) => Array.isArray(example.features));
-  if (examples.length < 2) {
-    throw new Error("Need at least two captured windows");
+  if (examples.length < 4) {
+    throw new Error("Need at least four captured windows");
   }
   const inputSize = examples[0].features.length;
   if (!examples.every((example) => example.features.length === inputSize)) {
@@ -2323,33 +2384,41 @@ function getTrainingDataset() {
     throw new Error("Need at least two labels");
   }
 
+  const split = splitExamplesByLabel(examples, labels, testRatio);
+  const { trainExamples, testExamples } = split;
+
   const mean = Array(inputSize).fill(0);
   const std = Array(inputSize).fill(0);
-  for (const example of examples) {
+  for (const example of trainExamples) {
     example.features.forEach((value, index) => {
       mean[index] += value;
     });
   }
   for (let i = 0; i < inputSize; i++) {
-    mean[i] /= examples.length;
+    mean[i] /= trainExamples.length;
   }
-  for (const example of examples) {
+  for (const example of trainExamples) {
     example.features.forEach((value, index) => {
       std[index] += (value - mean[index]) ** 2;
     });
   }
   for (let i = 0; i < inputSize; i++) {
-    std[i] = Math.max(1e-6, Math.sqrt(std[i] / examples.length));
+    std[i] = Math.max(1e-6, Math.sqrt(std[i] / trainExamples.length));
   }
 
   return {
     examples,
+    trainExamples,
+    testExamples,
     labels,
     inputSize,
     mean,
     std,
-    x: examples.map((example) => example.features.map((value, index) => (value - mean[index]) / std[index])),
-    y: examples.map((example) => labels.indexOf(example.label))
+    testRatio,
+    x: standardizeExamples(trainExamples, mean, std),
+    y: trainExamples.map((example) => labels.indexOf(example.label)),
+    testX: standardizeExamples(testExamples, mean, std),
+    testY: testExamples.map((example) => labels.indexOf(example.label))
   };
 }
 
@@ -2522,19 +2591,22 @@ function pruneAnn(model, sparsity) {
   return pruned / weights.length;
 }
 
-function evaluateAnn(model, dataset) {
+function evaluateAnn(model, dataset, partition = "train") {
   let correct = 0;
   const confusion = dataset.labels.map(() => Array(dataset.labels.length).fill(0));
-  dataset.x.forEach((input, index) => {
+  const inputs = partition === "test" ? dataset.testX : dataset.x;
+  const targets = partition === "test" ? dataset.testY : dataset.y;
+  inputs.forEach((input, index) => {
     const prediction = argMax(annForward(model, input).output);
-    const actual = dataset.y[index];
+    const actual = targets[index];
     confusion[actual][prediction]++;
     if (prediction === actual) {
       correct++;
     }
   });
   return {
-    accuracy: correct / dataset.x.length,
+    accuracy: correct / Math.max(1, inputs.length),
+    examples: inputs.length,
     confusion
   };
 }
@@ -2571,6 +2643,7 @@ function getModelOptions() {
     activation: el.activationSelect.value,
     learningRate: normalizeNumber(el.learningRateInput.value, 0.02, 0.0001, 1),
     epochs: Math.round(normalizeNumber(el.epochInput.value, 120, 1, 2000)),
+    testRatio: normalizeNumber(el.testSplitInput?.value, 0.2, 0.1, 0.5),
     pruningSparsity: normalizeNumber(el.pruningInput.value, 0, 0, 0.95),
     quantizedExport: el.quantizeToggle.checked
   };
@@ -2801,13 +2874,15 @@ function renderModelArchitecture() {
 
 function trainBrowserModel() {
   try {
-    const dataset = getTrainingDataset();
     const options = getModelOptions();
+    const dataset = getTrainingDataset(options.testRatio);
     el.modelStatus.textContent = "Training";
     renderModelLog(["Training started"]);
     const { model, history } = trainAnn(dataset, options);
     const actualSparsity = pruneAnn(model, options.pruningSparsity);
-    const metrics = evaluateAnn(model, dataset);
+    const trainMetrics = evaluateAnn(model, dataset, "train");
+    const testMetrics = evaluateAnn(model, dataset, "test");
+    const referenceExample = dataset.trainExamples[0];
     state.model = {
       trained: {
         type: "keti_browser_ann",
@@ -2818,11 +2893,20 @@ function trainBrowserModel() {
         inputSize: dataset.inputSize,
         inputMean: dataset.mean,
         inputStd: dataset.std,
-        featureNames: dataset.examples[0].featureNames || featureNamesForMode(dataset.examples[0].featureMode, dataset.examples[0].windowSamples),
-        featureMode: dataset.examples[0].featureMode,
-        windowSamples: dataset.examples[0].windowSamples,
-        source: dataset.examples[0].source,
-        preprocessing: dataset.examples[0].preprocessing,
+        featureNames: referenceExample.featureNames || featureNamesForMode(referenceExample.featureMode, referenceExample.windowSamples),
+        featureMode: referenceExample.featureMode,
+        windowSamples: referenceExample.windowSamples,
+        strideSamples: referenceExample.strideSamples || 1,
+        sampleRateHz: referenceExample.rateHz || state.settings.rateHz,
+        source: referenceExample.source,
+        preprocessing: referenceExample.preprocessing,
+        split: {
+          testRatio: dataset.testRatio,
+          trainCount: dataset.trainExamples.length,
+          testCount: dataset.testExamples.length,
+          trainIds: dataset.trainExamples.map((example) => example.id),
+          testIds: dataset.testExamples.map((example) => example.id)
+        },
         sizes: model.sizes,
         activation: model.activation,
         layers: model.layers,
@@ -2831,16 +2915,31 @@ function trainBrowserModel() {
       labels: dataset.labels,
       inputSize: dataset.inputSize,
       metrics: {
-        ...metrics,
+        accuracy: testMetrics.accuracy,
+        trainAccuracy: trainMetrics.accuracy,
+        testAccuracy: testMetrics.accuracy,
+        confusion: testMetrics.confusion,
         examples: dataset.examples.length,
+        trainExamples: trainMetrics.examples,
+        testExamples: testMetrics.examples,
         totalWeights: countWeights(model),
         nonzeroWeights: countNonzeroWeights(model),
         actualSparsity
       },
-      trainingLog: history
+      trainingLog: history,
+      live: {
+        active: false,
+        lastInferenceSeq: null,
+        topLabel: "--",
+        topScore: null,
+        scores: [],
+        timingMs: null,
+        updatedAt: null,
+        error: ""
+      }
     };
     renderModelView();
-    logLine(`MODEL_TRAINED,labels=${dataset.labels.length},input=${dataset.inputSize},acc=${metrics.accuracy.toFixed(3)}`);
+    logLine(`MODEL_TRAINED,labels=${dataset.labels.length},input=${dataset.inputSize},train=${dataset.trainExamples.length},test=${dataset.testExamples.length},test_acc=${testMetrics.accuracy.toFixed(3)}`);
   } catch (error) {
     el.modelStatus.textContent = "Error";
     renderModelLog([`ERR ${error.message}`]);
@@ -2861,14 +2960,226 @@ function renderModelTrainingGuide() {
     : options.activation === "tanh" ? "Tanh" : "Sigmoid";
   const shape = formatArchitectureShape(planned.sizes, !planned.outputReady);
   const exportMode = options.quantizedExport ? "INT8 weight export" : "float export";
+  if (el.testSplitOutput) {
+    el.testSplitOutput.textContent = `${(options.testRatio * 100).toFixed(0)}%`;
+  }
   el.modelTrainingGuideState.textContent = [
     `Next training: ${shape}`,
     activation,
     `LR ${options.learningRate}`,
     `${options.epochs} epochs`,
+    `train/test ${((1 - options.testRatio) * 100).toFixed(0)}/${(options.testRatio * 100).toFixed(0)}`,
     `pruning ${(options.pruningSparsity * 100).toFixed(0)}%`,
     exportMode
   ].join(" | ");
+}
+
+function applyStoredPreprocessingForLiveModel(model) {
+  if (!model || model.source !== "PROCESSED" || !model.preprocessing) {
+    return;
+  }
+  const settings = model.preprocessing;
+  el.inputWindowInput.value = String(settings.inputWindowSamples || model.windowSamples);
+  el.inputFilterSelect.value = settings.inputFilter || "NONE";
+  el.normalizeSelect.value = settings.normalizeMode || "NONE";
+  el.inputAlphaInput.value = String(settings.inputAlpha ?? 0.2);
+  el.inputMaWindowInput.value = String(settings.inputMaWindow ?? 5);
+  el.inputIirOrderInput.value = String(settings.inputIirOrder ?? 2);
+  el.inputIirLowInput.value = String(settings.inputIirLowHz ?? 0.5);
+  el.inputIirHighInput.value = String(settings.inputIirHighHz ?? 8.0);
+  applyInputPreprocess();
+}
+
+function getModelLiveInputWindow(model = state.model.trained) {
+  if (!model) {
+    return { samples: [], available: 0, windowSize: 0, first: null, latest: null, sourceName: "--" };
+  }
+  const useProcessed = model.source === "PROCESSED";
+  const frames = useProcessed ? state.imuProcessedSamples : state.imuSamples;
+  const windowSize = model.windowSamples;
+  const selected = frames.slice(-windowSize);
+  const samples = selected.map((frame) => ({
+    ax: useProcessed ? frame.pax : frame.ax,
+    ay: useProcessed ? frame.pay : frame.ay,
+    az: useProcessed ? frame.paz : frame.az,
+    seq: frame.seq,
+    micros: frame.micros
+  }));
+  return {
+    samples,
+    available: samples.length,
+    windowSize,
+    first: samples[0] || null,
+    latest: samples[samples.length - 1] || null,
+    sourceName: useProcessed ? "processed" : "raw"
+  };
+}
+
+function drawModelLiveWindow(inputWindow = getModelLiveInputWindow()) {
+  if (!el.modelLiveCanvas) {
+    return;
+  }
+  const { ctx: liveCtx, width, height } = resizeAuxCanvasToDisplaySize(el.modelLiveCanvas, 180);
+  liveCtx.clearRect(0, 0, width, height);
+  liveCtx.fillStyle = "#ffffff";
+  liveCtx.fillRect(0, 0, width, height);
+  const pad = width < 560
+    ? { left: 40, right: 14, top: 18, bottom: 30 }
+    : { left: 54, right: 18, top: 18, bottom: 34 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  drawGridOn(liveCtx, width, height, pad, plotWidth, plotHeight);
+  if (inputWindow.samples.length < 2) {
+    liveCtx.fillStyle = "#637083";
+    liveCtx.font = "13px Segoe UI, Arial, sans-serif";
+    liveCtx.fillText("Waiting for the trained model input window", pad.left + 10, pad.top + 28);
+    return;
+  }
+  const values = inputWindow.samples.flatMap((sample) => IMU_ACCEL_AXES.map((axis) => sample[axis]));
+  let minY = Math.min(...values);
+  let maxY = Math.max(...values);
+  const padding = Math.max(0.02, (maxY - minY) * 0.12);
+  minY -= padding;
+  maxY += padding;
+  if (Math.abs(maxY - minY) < 1e-6) {
+    minY -= 0.5;
+    maxY += 0.5;
+  }
+  for (const axis of IMU_ACCEL_AXES) {
+    drawDatasetPreviewLine(liveCtx, inputWindow.samples, axis, AXIS_COLORS[axis], minY, maxY, pad, plotWidth, plotHeight);
+  }
+  drawLegendOn(liveCtx, [
+    { color: AXIS_COLORS.ax, label: "x" },
+    { color: AXIS_COLORS.ay, label: "y" },
+    { color: AXIS_COLORS.az, label: "z" }
+  ], pad.left + 8, pad.top + 18);
+}
+
+function renderModelLiveView() {
+  if (!el.modelLiveStatus) {
+    return;
+  }
+  const model = state.model.trained;
+  const live = state.model.live;
+  const inputWindow = getModelLiveInputWindow(model);
+  if (!model) {
+    el.modelLiveStatus.textContent = "Train a model first";
+  } else if (live.error) {
+    el.modelLiveStatus.textContent = "Inference error";
+  } else if (live.active && inputWindow.available < inputWindow.windowSize) {
+    el.modelLiveStatus.textContent = `Collecting ${inputWindow.available}/${inputWindow.windowSize}`;
+  } else if (live.active) {
+    el.modelLiveStatus.textContent = "Running";
+  } else {
+    el.modelLiveStatus.textContent = "Ready";
+  }
+  el.modelLiveTopLabel.textContent = live.topLabel || "--";
+  el.modelLiveTopScore.textContent = Number.isFinite(live.topScore)
+    ? `${(live.topScore * 100).toFixed(1)}%`
+    : "--";
+  const seqText = inputWindow.first && inputWindow.latest
+    ? `seq ${inputWindow.first.seq}-${inputWindow.latest.seq}`
+    : "no IMU window";
+  const featureText = model
+    ? `${model.featureMode} -> ${model.inputSize} features`
+    : "no model";
+  const timingText = Number.isFinite(live.timingMs) ? ` | ${live.timingMs.toFixed(2)} ms` : "";
+  el.modelLiveWindowState.textContent = model
+    ? `Model input window: ${inputWindow.available}/${inputWindow.windowSize} ${inputWindow.sourceName} samples | ${featureText} | stride ${model.strideSamples} | ${seqText}${timingText}`
+    : "Model input window: --";
+  const sortedScores = [...(live.scores || [])].sort((a, b) => b.value - a.value);
+  el.modelLiveScoreList.replaceChildren(...sortedScores.map((score) => {
+    const row = document.createElement("div");
+    row.className = "classification-row";
+    const percent = Math.max(0, Math.min(100, score.value * 100));
+    const name = document.createElement("span");
+    name.className = "classification-name";
+    name.textContent = score.label;
+    const value = document.createElement("span");
+    value.className = "classification-score";
+    value.textContent = `${percent.toFixed(1)}%`;
+    const bar = document.createElement("span");
+    bar.className = "classification-bar";
+    const fill = document.createElement("span");
+    fill.className = "classification-fill";
+    fill.style.width = `${percent.toFixed(1)}%`;
+    bar.append(fill);
+    row.append(name, value, bar);
+    return row;
+  }));
+  drawModelLiveWindow(inputWindow);
+}
+
+function runModelLiveInference(latestSample = null, force = false) {
+  const model = state.model.trained;
+  const live = state.model.live;
+  if (!model || !live.active) {
+    return false;
+  }
+  const inputWindow = getModelLiveInputWindow(model);
+  if (inputWindow.available < inputWindow.windowSize) {
+    if (state.activeView === "model") {
+      renderModelLiveView();
+    }
+    return false;
+  }
+  const latestSeq = latestSample?.seq ?? inputWindow.latest?.seq;
+  const stride = Math.max(1, model.strideSamples || 1);
+  if (!force && live.lastInferenceSeq != null && latestSeq >= live.lastInferenceSeq && latestSeq - live.lastInferenceSeq < stride) {
+    return false;
+  }
+  try {
+    const startedAt = performance.now();
+    const features = extractWindowFeatures(inputWindow.samples, model.featureMode);
+    if (features.length !== model.inputSize) {
+      throw new Error(`Feature size mismatch: ${features.length} != ${model.inputSize}`);
+    }
+    const input = features.map((value, index) => (
+      (value - model.inputMean[index]) / Math.max(1e-6, model.inputStd[index])
+    ));
+    const output = annForward(model, input).output;
+    const topIndex = argMax(output);
+    live.lastInferenceSeq = latestSeq;
+    live.topLabel = model.labels[topIndex];
+    live.topScore = output[topIndex];
+    live.scores = model.labels.map((label, index) => ({ label, value: output[index] }));
+    live.timingMs = performance.now() - startedAt;
+    live.updatedAt = new Date().toISOString();
+    live.error = "";
+    if (state.activeView === "model") {
+      renderModelLiveView();
+    }
+    return true;
+  } catch (error) {
+    live.error = error.message;
+    live.active = false;
+    logLine(`ERR,model_live,${error.message}`);
+    renderModelLiveView();
+    setUiEnabled();
+    return false;
+  }
+}
+
+function startModelLiveInference() {
+  const model = state.model.trained;
+  if (!model) {
+    return;
+  }
+  applyStoredPreprocessingForLiveModel(model);
+  state.model.live.active = true;
+  state.model.live.lastInferenceSeq = null;
+  state.model.live.error = "";
+  runModelLiveInference(state.latestImu, true);
+  renderModelLiveView();
+  setUiEnabled();
+  logLine(`MODEL_LIVE_START,window=${model.windowSamples},stride=${model.strideSamples},feature=${model.featureMode},source=${model.source}`);
+}
+
+function stopModelLiveInference() {
+  state.model.live.active = false;
+  renderModelLiveView();
+  setUiEnabled();
+  logLine("MODEL_LIVE_STOP");
 }
 
 function renderModelView() {
@@ -2876,21 +3187,23 @@ function renderModelView() {
   const shape = getDatasetShape();
   renderModelTrainingGuide();
   renderModelArchitecture();
+  renderModelLiveView();
   if (!state.model.trained) {
     const planned = getPlannedModelArchitecture();
-    el.modelStatus.textContent = examples > 1 && shape.labels >= 2
+    el.modelStatus.textContent = hasTrainTestReadyDataset()
       ? "Ready"
-      : shape.labels < 2 ? "Need labels" : "Need data";
+      : shape.labels < 2 ? "Need labels" : "Need 2/label";
     el.modelShapeState.textContent = `${formatArchitectureShape(planned.sizes, !planned.outputReady)} planned`;
     el.modelMetricState.textContent = formatDatasetSize(shape);
     el.modelMetrics.replaceChildren(
       metricRow("Input Dataset", formatDatasetSize(shape)),
       metricRow("Windows", `${examples}`),
       metricRow("Labels", shape.labels >= 2 ? `${shape.labels}` : `${shape.labels}/2 needed`),
+      metricRow("Split Minimum", "2 windows / label"),
       metricRow("Window Samples", `${shape.windowSamples}`),
       metricRow("Feature Mode", shape.featureMode)
     );
-    renderModelLog(state.model.trainingLog.length ? state.model.trainingLog : ["Capture at least two labels, then train."]);
+    renderModelLog(state.model.trainingLog.length ? state.model.trainingLog : ["Capture at least two windows for each of two labels, then train."]);
     return;
   }
 
@@ -2898,9 +3211,11 @@ function renderModelView() {
   const metrics = state.model.metrics;
   el.modelStatus.textContent = "Trained";
   el.modelShapeState.textContent = trained.sizes.join(" -> ");
-  el.modelMetricState.textContent = `${(metrics.accuracy * 100).toFixed(1)}%`;
+  el.modelMetricState.textContent = `Test ${(metrics.testAccuracy * 100).toFixed(1)}%`;
   el.modelMetrics.replaceChildren(
-    metricRow("Accuracy", `${(metrics.accuracy * 100).toFixed(1)}%`),
+    metricRow("Test Accuracy", `${(metrics.testAccuracy * 100).toFixed(1)}%`),
+    metricRow("Train Accuracy", `${(metrics.trainAccuracy * 100).toFixed(1)}%`),
+    metricRow("Train / Test", `${metrics.trainExamples} / ${metrics.testExamples}`),
     metricRow("Input Dataset", `${metrics.examples} x ${trained.inputSize} features`),
     metricRow("Window Samples", `${trained.windowSamples}`),
     metricRow("Labels", trained.labels.join(", ")),
@@ -2908,9 +3223,12 @@ function renderModelView() {
     metricRow("Sparsity", `${(metrics.actualSparsity * 100).toFixed(1)}%`),
     metricRow("Export", trained.quantizedLayers ? "int8 + float metadata" : "float arrays")
   );
-  renderModelLog(state.model.trainingLog.map((item) => (
-    `epoch ${item.epoch}: loss=${item.loss.toFixed(4)}, acc=${(item.accuracy * 100).toFixed(1)}%`
-  )));
+  renderModelLog([
+    ...state.model.trainingLog.map((item) => (
+      `epoch ${item.epoch}: train_loss=${item.loss.toFixed(4)}, train_acc=${(item.accuracy * 100).toFixed(1)}%`
+    )),
+    `test: examples=${metrics.testExamples}, acc=${(metrics.testAccuracy * 100).toFixed(1)}%`
+  ]);
 }
 
 function metricRow(label, value) {
@@ -4900,6 +5218,7 @@ function addImuSample(sample) {
     });
   }
   maybeCaptureDatasetWindow(sample);
+  runModelLiveInference(sample);
   scheduleUiRender();
 }
 
@@ -8119,10 +8438,17 @@ function bindEvents() {
     node.addEventListener("input", renderModelView);
     node.addEventListener("change", renderModelView);
   });
+  el.testSplitInput.addEventListener("input", () => {
+    el.testSplitOutput.textContent = `${(Number(el.testSplitInput.value) * 100).toFixed(0)}%`;
+    renderModelView();
+  });
+  el.testSplitInput.addEventListener("change", renderModelView);
   el.quantizeToggle.addEventListener("change", renderModelView);
   el.trainModelButton.addEventListener("click", trainBrowserModel);
   el.exportModelJsonButton.addEventListener("click", exportModelJson);
   el.exportCArrayButton.addEventListener("click", exportCArray);
+  el.modelLiveStartButton.addEventListener("click", startModelLiveInference);
+  el.modelLiveStopButton.addEventListener("click", stopModelLiveInference);
   el.pingButton.addEventListener("click", () => sendCommand("PING"));
   el.classStartButton.addEventListener("click", startClassification);
   el.classStopButton.addEventListener("click", stopClassification);
