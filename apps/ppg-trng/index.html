@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=1b39cca726cd" />
+    <link rel="stylesheet" href="./styles.css?v=ac44071b4fd2" />
   </head>
   <body>
     <div class="app-shell">
@@ -221,6 +221,21 @@
                   </datalist>
                 </label>
                 <button id="sendRateButton" class="button secondary" type="button">Set</button>
+                <label class="compact-field adc-gain-field" for="adcGain">
+                  <span>ADC gain</span>
+                  <select id="adcGain">
+                    <option value="0" selected>1/6 (default)</option>
+                    <option value="1">1/5</option>
+                    <option value="2">1/4</option>
+                    <option value="3">1/3</option>
+                    <option value="4">1/2</option>
+                    <option value="5">1</option>
+                    <option value="6">2</option>
+                    <option value="7">4</option>
+                  </select>
+                </label>
+                <button id="sendGainButton" class="button secondary" type="button">Set</button>
+                <span id="adcGainStatus" class="filter-summary gain-status">All ADC gain 1/6</span>
                 <div class="compact-field plot-source-field">
                   <span>Plot channels</span>
                   <div id="plotAdcSource" class="plot-source-options" role="group" aria-label="Plot channels">
@@ -661,8 +676,8 @@
       </main>
     </div>
 
-    <script src="./protocol.js?v=20260715-adc0-2-3-v4" defer></script>
-    <script src="./app.js?v=8b8fdf1e29b1" defer></script>
-    <script src="./dfu.js?v=20260715-adc0-2-3-v4" defer></script>
+    <script src="./protocol.js?v=20260715-adc0-2-3-gain-v5" defer></script>
+    <script src="./app.js?v=93d7abbc1420" defer></script>
+    <script src="./dfu.js?v=20260715-adc0-2-3-gain-v5" defer></script>
   </body>
 </html>

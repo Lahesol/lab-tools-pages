@@ -27,6 +27,9 @@ const els = {
   windowSize: document.querySelector("#windowSize"),
   sampleRate: document.querySelector("#sampleRate"),
   sendRateButton: document.querySelector("#sendRateButton"),
+  adcGain: document.querySelector("#adcGain"),
+  sendGainButton: document.querySelector("#sendGainButton"),
+  adcGainStatus: document.querySelector("#adcGainStatus"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
   bitMethod: document.querySelector("#bitMethod"),
   cipherWidth: document.querySelector("#cipherWidth"),
@@ -118,6 +121,16 @@ const DEFAULT_ADC_BATCH_SIZE = 16;
 const DEFAULT_CIPHER_WIDTH_BITS = 14;
 const CIPHER_SIGNAL_MA_WINDOW = 22;
 const CIPHER_WIDTH_OPTIONS = new Set([8, 10, 12, 14]);
+const ADC_GAIN_OPTIONS = [
+  { code: 0, label: "1/6", text: "1/6 (default)" },
+  { code: 1, label: "1/5", text: "1/5" },
+  { code: 2, label: "1/4", text: "1/4" },
+  { code: 3, label: "1/3", text: "1/3" },
+  { code: 4, label: "1/2", text: "1/2" },
+  { code: 5, label: "1", text: "1" },
+  { code: 6, label: "2", text: "2" },
+  { code: 7, label: "4", text: "4" },
+];
 const MAX_KEY_BITS = 8192;
 const MAX_RATE_HISTORY = 10000;
 const MAX_PENDING_PPG = 512;
@@ -195,6 +208,8 @@ const state = {
   maxSamples: DEFAULT_MAX_SAMPLES,
   sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
   sampleIntervalMs: 1,
+  adcGainCode: 0,
+  adcGainLabel: "1/6",
   adcBatchSize: DEFAULT_ADC_BATCH_SIZE,
   saadcBaseHz: 1000,
   saadcOversample: 0,
@@ -665,6 +680,7 @@ function queryDeviceStateSoon() {
     await sendCommand("VER?");
     await sendCommand("ADC?");
     await sendCommand("RATE?");
+    await sendCommand("GAIN?");
   }, 250);
 }
 
@@ -1028,6 +1044,7 @@ function parseStatusSegment(segment) {
   if (parseFirmwareInfoSegment(segment)) return true;
   if (parseAdcStatusSegment(segment)) return true;
   if (parseRateStatusSegment(segment)) return true;
+  if (parseAdcGainStatusSegment(segment)) return true;
 
   if (/^(DFU|PONG|GPIO)\b/i.test(segment)) {
     addLog("RX", segment);
@@ -1035,6 +1052,23 @@ function parseStatusSegment(segment) {
   }
 
   return false;
+}
+
+function parseAdcGainStatusSegment(segment) {
+  if (!/^GAIN\b/i.test(segment)) return false;
+
+  const codeMatch = segment.match(/\bCODE\s*[,=:]\s*(\d+)/i);
+  const labelMatch = segment.match(/\bVALUE\s*[,=:]\s*([^,\s;]+)/i);
+  const code = codeMatch ? clampInteger(codeMatch[1], 0, ADC_GAIN_OPTIONS.length - 1, 0) : state.adcGainCode;
+  const option = ADC_GAIN_OPTIONS[code];
+  const label = labelMatch?.[1] || option?.label || state.adcGainLabel;
+  if (code !== state.adcGainCode && state.samples.length) {
+    clearSamples();
+    addLog("SYS", `ADC gain changed to ${label}; buffered samples and cipher state cleared`);
+  }
+  setAdcGainUi(code, label, { normalizeInput: true });
+  addLog("RX", segment);
+  return true;
 }
 
 function parseFirmwareInfoSegment(segment) {
@@ -1898,6 +1932,34 @@ function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
   if (options.normalizeInput !== false && els.sampleRate) {
     els.sampleRate.value = String(state.sampleRateHz);
   }
+}
+
+function getAdcGainOption(code) {
+  return ADC_GAIN_OPTIONS.find((option) => option.code === code) || ADC_GAIN_OPTIONS[0];
+}
+
+function setAdcGainUi(code, label = null, options = {}) {
+  const normalizedCode = clampInteger(code, 0, ADC_GAIN_OPTIONS.length - 1, 0);
+  const option = getAdcGainOption(normalizedCode);
+  state.adcGainCode = normalizedCode;
+  state.adcGainLabel = label || option.label;
+  if (els.adcGain && options.normalizeInput !== false) {
+    els.adcGain.value = String(normalizedCode);
+  }
+  if (els.adcGainStatus) {
+    els.adcGainStatus.textContent = `All ADC gain ${state.adcGainLabel}`;
+  }
+  if (els.plotCaption && state.samples.length) {
+    updateStats();
+  }
+}
+
+async function sendAdcGainCommand() {
+  const code = clampInteger(els.adcGain?.value, 0, ADC_GAIN_OPTIONS.length - 1, state.adcGainCode);
+  if (els.adcGainStatus) {
+    els.adcGainStatus.textContent = `Applying ADC gain ${getAdcGainOption(code).label}...`;
+  }
+  await sendCommand(`GAIN${code}`);
 }
 
 function applySampleRateInput(normalize = false) {
@@ -3491,6 +3553,9 @@ function bindEvents() {
   els.sampleRate.addEventListener("change", () => applySampleRateInput(true));
   els.sendRateButton.addEventListener("click", () => {
     sendSampleRateCommand().catch((error) => addLog("ERR", error.message || error, true));
+  });
+  els.sendGainButton.addEventListener("click", () => {
+    sendAdcGainCommand().catch((error) => addLog("ERR", error.message || error, true));
   });
   els.bitMethod?.addEventListener("change", () => {
     setBitGenerationMethod(els.bitMethod.value, { enable: true });

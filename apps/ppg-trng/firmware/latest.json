@@ -2,11 +2,11 @@
   "schema": 1,
   "project": "YM-PPG",
   "available": true,
-  "version": "2026-07-05-adc2-led-sync",
-  "protocol": "ppg-trng-3led-dfu-v1",
-  "appVersion": 30,
-  "package": "./ppg_trng_latest_dfu.zip",
-  "size": 78393,
-  "sha256": "95a719022fe237a9f64dec70d53af7b597957d91243d1cc09733dba5c2bf7616",
-  "message": "Generated from Stimulation_2emg.hex Debug build on 2026-07-05. Firmware exposes independent ADC2 PPG and ADC3 noise sampling controls. ADC2 PPG frames now drive the selected LED pulse directly: each frame takes an LEDs-off ambient sample, turns the selected LED on, samples ADC2 at the end of the configured LED-on pulse, then turns LEDs off for the rest of the frame. ADC3RATE still controls ADC3 noise decimation from the 1 ms SAADC base tick."
+  "version": "2026-07-15-adc0-commercial-gain",
+  "protocol": "ppg-trng-sync-adc0-2-3-gain-v4",
+  "appVersion": 31,
+  "package": "./ppg_trng_gain_dfu.zip",
+  "size": 70899,
+  "sha256": "5B110BA3EA53500B7B82ABBE887EC61D4AC313A46E7BA2456ECF48B98D6E5C4F",
+  "message": "Generated from the synchronized ADC0/ADC2/ADC3 Debug build on 2026-07-15. ADC gain is selectable for all three SAADC channels with GAIN0..GAIN7; applying a new gain reinitializes the synchronized SAADC path."
 }

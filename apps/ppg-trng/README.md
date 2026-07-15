@@ -40,6 +40,7 @@ scan rate if frame errors or stale status appear.
 ## Commands
 
 - `RATE<hz>`, `RATE?`: set/query the common ADC0/2/3 rate
+- `GAIN0` to `GAIN7`, `GAIN?`: set/query the common ADC0/2/3 SAADC gain
 - `ADC?`: query the fixed synchronized mapping
 - `GPIO?`: query LED GPIO state
 - `A0` to `A4095`, `B0` to `B4095`: set DAC A/B
@@ -52,6 +53,13 @@ scan rate if frame errors or stale status appear.
 
 The previous `776x` pulse modes, `0000` sweep/reset, per-channel ADC rate controls,
 and firmware-side bit mode are intentionally absent from the simplified firmware.
+
+`ADC gain` applies one common hardware gain to ADC0, ADC2, and ADC3. The available
+values are 1/6, 1/5, 1/4, 1/3, 1/2, 1, 2, and 4. A gain change briefly pauses the
+hardware-triggered scan while the SAADC channels are reinitialized; the scan rate
+and ADC channel mapping are preserved. After the new gain is confirmed, the GUI
+clears buffered ADC, key, bitmap, and cipher data so samples from different scales
+are not mixed.
 
 ## Plot, Bits, and Encryption
 

@@ -623,6 +623,16 @@ input[type="range"] {
   min-width: 82px;
 }
 
+.adc-gain-field {
+  min-width: 118px;
+}
+
+.gain-status {
+  align-self: end;
+  min-height: var(--control-height);
+  white-space: nowrap;
+}
+
 .compact-field select,
 .compact-field input {
   width: 100%;
