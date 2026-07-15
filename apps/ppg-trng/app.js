@@ -125,6 +125,8 @@ const MAX_SAMPLE_RATE_HZ = 1000;
 const DEFAULT_ADC_BATCH_SIZE = 16;
 const DEFAULT_CIPHER_WIDTH_BITS = 14;
 const CIPHER_SIGNAL_MA_WINDOW = 22;
+const FILTER_WARMUP_TIME_CONSTANTS = 5;
+const MAX_FILTER_CONTEXT_SAMPLES = 100000;
 const CIPHER_WIDTH_OPTIONS = new Set([8, 10, 12, 14]);
 const ADC_GAIN_OPTIONS = [
   { code: 0, label: "1/6", text: "1/6 (default)" },
@@ -1235,6 +1237,7 @@ function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSou
 }
 
 function trimSampleHistory() {
+  const retainedPerSource = state.maxSamples + getFilterContextSamples();
   const counts = new Map();
   state.samples.forEach((sample) => {
     const source = sample.adcSource || state.adcSource;
@@ -1242,7 +1245,7 @@ function trimSampleHistory() {
   });
 
   const discard = new Map(
-    [...counts.entries()].map(([source, count]) => [source, Math.max(0, count - state.maxSamples)]),
+    [...counts.entries()].map(([source, count]) => [source, Math.max(0, count - retainedPerSource)]),
   );
   if (![...discard.values()].some((count) => count > 0)) return;
 
@@ -2023,8 +2026,13 @@ function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
   const nextInterval = Number.isFinite(intervalMs) && intervalMs > 0
     ? intervalMs
     : rateHzToIntervalMs(nextRate);
+  const rateChanged = nextRate !== state.sampleRateHz;
   state.sampleIntervalMs = nextInterval;
   state.sampleRateHz = nextRate;
+
+  if (rateChanged && state.samples.length) {
+    trimSampleHistory();
+  }
 
   if (options.normalizeInput !== false && els.sampleRate) {
     els.sampleRate.value = String(state.sampleRateHz);
@@ -2127,6 +2135,25 @@ function getFilterSettings() {
   return { mode, windowSize, highCutoff, lowCutoff };
 }
 
+function getFilterContextSamples(settings = getFilterSettings()) {
+  if (settings.mode === "raw") return 0;
+  if (settings.mode === "moving-average") {
+    return Math.max(0, settings.windowSize - 1);
+  }
+
+  const sampleRateHz = clampSampleRateHz(state.sampleRateHz || DEFAULT_SAMPLE_RATE_HZ);
+  const cutoffHz = settings.mode === "low-pass"
+    ? settings.lowCutoff
+    : settings.mode === "high-pass"
+      ? settings.highCutoff
+      : Math.min(settings.highCutoff, settings.lowCutoff);
+  const timeConstantSamples = sampleRateHz / (2 * Math.PI * cutoffHz);
+  return Math.min(
+    MAX_FILTER_CONTEXT_SAMPLES,
+    Math.max(0, Math.ceil(FILTER_WARMUP_TIME_CONSTANTS * timeConstantSamples) + 2),
+  );
+}
+
 function formatHz(value) {
   if (!Number.isFinite(value)) return "--";
   return value.toFixed(value >= 10 ? 1 : 2).replace(/\.?0+$/, "");
@@ -2158,7 +2185,7 @@ function getSamplesForAdcSource(samples = state.samples, sources = getSelectedAd
 }
 
 function getRetainedSampleCount(source = state.adcSource) {
-  return getSamplesForAdcSource(state.samples, [source]).length;
+  return Math.min(state.maxSamples, getSamplesForAdcSource(state.samples, [source]).length);
 }
 
 function getAdcPlotDescription() {
@@ -2187,22 +2214,27 @@ function getDisplaySamples(source = state.adcSource) {
   const samples = getSamplesForAdcSource(state.samples, [source])
     .map(createViewSample)
     .filter((sample) => Number.isFinite(sample.value));
+  const visibleStart = Math.max(0, samples.length - state.maxSamples);
+  const visibleSamples = samples.slice(visibleStart);
   if (settings.mode === "raw") {
-    return samples;
+    return visibleSamples;
   }
 
   const filteredValues = applyFilter(samples, settings);
-  return samples.map((sample, index) => ({
-    t: sample.t,
-    channel: sample.channel || "ADC",
-    adcSource: sample.adcSource || state.adcSource,
-    valueKind: sample.valueKind,
-    deviceValue: sample.deviceValue,
-    adcCode: sample.adcCode,
-    biasCode: sample.biasCode,
-    rawValue: sample.value,
-    value: filteredValues[index],
-  }));
+  return visibleSamples.map((sample, index) => {
+    const sourceIndex = visibleStart + index;
+    return {
+      t: sample.t,
+      channel: sample.channel || "ADC",
+      adcSource: sample.adcSource || state.adcSource,
+      valueKind: sample.valueKind,
+      deviceValue: sample.deviceValue,
+      adcCode: sample.adcCode,
+      biasCode: sample.biasCode,
+      rawValue: sample.value,
+      value: filteredValues[sourceIndex],
+    };
+  });
 }
 
 function applyFilter(samples, settings) {
@@ -3832,11 +3864,13 @@ function bindEvents() {
   [els.filterMode, els.filterWindow, els.highCutoff, els.lowCutoff].forEach((control) => {
     control.addEventListener("input", () => {
       updateFilterUi();
+      trimSampleHistory();
       updateStats();
       state.needsDraw = true;
     });
     control.addEventListener("change", () => {
       updateFilterUi();
+      trimSampleHistory();
       updateStats();
       state.needsDraw = true;
     });
