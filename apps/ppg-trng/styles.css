@@ -258,6 +258,8 @@ select {
 .bit-panel,
 .dfu-panel,
 .noise-panel {
+  width: 100%;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.93);
@@ -602,6 +604,7 @@ input[type="range"] {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
+  min-width: 0;
 }
 
 .metric {
@@ -856,6 +859,7 @@ canvas {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+  min-width: 0;
   padding: 12px 16px 0;
   background: #fbfdfc;
 }
@@ -864,8 +868,15 @@ canvas {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
+  min-width: 0;
   padding: 0 16px 16px;
   background: #fbfdfc;
+}
+
+.metric-grid > *,
+.bit-stats > *,
+.encryption-grid > * {
+  min-width: 0;
 }
 
 .cipher-canvas-wrap {
