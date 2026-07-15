@@ -11,7 +11,7 @@
       <header class="topbar">
         <div>
           <h1>PPG_TRNG Control Console</h1>
-          <p>Web Serial DAC control and live ADC monitor</p>
+          <p>Synchronized ADC1/ADC2/ADC3 monitor and GPIO control</p>
         </div>
         <div class="status-strip" aria-live="polite">
           <label class="ui-size-control" for="uiScale">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-05 pulse-force</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-15 sync-adc-v2</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -91,32 +91,32 @@
             <div class="subpanel">
               <div class="panel-heading compact-heading">
                 <h3>ADC Routes</h3>
-                <span id="adcSourceStatus" class="mode-pill">ADC2 signal / ADC3 noise</span>
+                <span id="adcSourceStatus" class="mode-pill">ADC1 / ADC2 / ADC3 sync</span>
               </div>
               <div class="quick-grid">
-                <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query dual ADC routing">
+                <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
+                  <span class="command-code">ADC1</span>
+                  <span class="command-label">Commercial PPG - AIN1/P0.03</span>
+                </button>
+                <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC2</span>
-                  <span class="command-label">Signal - AIN2/P0.04</span>
+                  <span class="command-label">BPTT PPG - AIN2/P0.04</span>
                 </button>
-                <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query dual ADC routing">
+                <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC3</span>
-                  <span class="command-label">Noise/TRNG · AIN3/P0.05</span>
+                  <span class="command-label">BPTT noise/TRNG - AIN3/P0.05</span>
                 </button>
-                <button class="button secondary command-button" data-command="ADC?" type="button" title="Query dual ADC routing">
+                <button class="button secondary command-button" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC?</span>
                   <span class="command-label">Query routes</span>
                 </button>
               </div>
-              <p class="command-note">ADC2 streams the measured signal. ADC3 streams raw noise for key bits.</p>
+              <p class="command-note">ADC0 is unused. ADC1/2/3 are sampled together; the plot selector only changes the displayed channel.</p>
             </div>
             <div class="quick-grid">
               <button id="bitModeButton" class="button secondary command-button" data-bit-toggle="true" type="button" title="Start browser-side ADC3 bit extraction">
                 <span class="command-code">WEB</span>
                 <span class="command-label">Bit extract</span>
-              </button>
-              <button class="button secondary warn command-button" data-command="0000" type="button" title="DAC sweep, then reset">
-                <span class="command-code">0000</span>
-                <span class="command-label">DAC sweep/reset</span>
               </button>
               <button class="button secondary command-button" data-command="8881" type="button" title="Manual static Green LED on/off toggle">
                 <span class="command-code">8881</span>
@@ -142,32 +142,8 @@
                 <span class="command-code">8889</span>
                 <span class="command-label">All LEDs on</span>
               </button>
-              <button class="button secondary command-button" data-command="7761" type="button" title="Green LED pulse sampling">
-                <span class="command-code">7761</span>
-                <span class="command-label">Green LED pulse - 25 Hz</span>
-              </button>
-              <button class="button secondary command-button" data-command="7762" type="button" title="IR LED pulse sampling">
-                <span class="command-code">7762</span>
-                <span class="command-label">IR LED pulse - 25 Hz</span>
-              </button>
-              <button class="button secondary command-button" data-command="7763" type="button" title="Red LED pulse sampling">
-                <span class="command-code">7763</span>
-                <span class="command-label">Red LED pulse - 25 Hz</span>
-              </button>
-              <button class="button secondary command-button" data-command="7764" type="button" title="Alternating Green/IR/Red LED pulse sampling">
-                <span class="command-code">7764</span>
-                <span class="command-label">G/I/R LED pulse - 8.3 Hz/ch</span>
-              </button>
-              <button class="button secondary command-button" data-command="7769" type="button" title="Raw ambient and LED diagnostic stream">
-                <span class="command-code">7769</span>
-                <span class="command-label">Pulse diagnostic - 8.3 Hz/ch</span>
-              </button>
-              <button class="button secondary command-button" data-command="7777" type="button" title="Legacy toggle for alternating Green/IR/Red LED pulse sampling">
-                <span class="command-code">7777</span>
-                <span class="command-label">Legacy LED pulse - 8.3 Hz/ch</span>
-              </button>
             </div>
-            <p class="command-note">888x LED commands are manual static GPIO controls. 776x commands are LED pulse sampling modes.</p>
+            <p class="command-note">888x commands directly control the Green, IR, and Red GPIO outputs.</p>
           </section>
 
           <section class="panel log-panel">
@@ -233,30 +209,24 @@
                   </datalist>
                 </label>
                 <label class="compact-field" for="sampleRate">
-                  <span>ADC2 pulse Hz</span>
-                  <input id="sampleRate" type="number" min="25" max="100" step="1" value="25" list="sampleRatePresets" inputmode="numeric" />
+                  <span>ADC scan Hz</span>
+                  <input id="sampleRate" type="number" min="1" max="1000" step="1" value="1000" list="sampleRatePresets" inputmode="numeric" />
                   <datalist id="sampleRatePresets">
+                    <option value="1"></option>
                     <option value="25"></option>
-                    <option value="50"></option>
-                    <option value="100"></option>
-                  </datalist>
-                </label>
-                <button id="sendRateButton" class="button secondary" type="button">Set</button>
-                <label class="compact-field" for="adc3Rate">
-                  <span>ADC3 noise Hz</span>
-                  <input id="adc3Rate" type="number" min="25" max="1000" step="1" value="1000" list="adc3RatePresets" inputmode="numeric" />
-                  <datalist id="adc3RatePresets">
                     <option value="100"></option>
                     <option value="250"></option>
                     <option value="500"></option>
                     <option value="1000"></option>
                   </datalist>
                 </label>
-                <button id="sendAdc3RateButton" class="button secondary" type="button">Set</button>
+                <button id="sendRateButton" class="button secondary" type="button">Set</button>
                 <label class="compact-field" for="plotAdcSource">
                   <span>Signal input</span>
                   <select id="plotAdcSource">
-                    <option value="ADC2" selected>ADC2 signal</option>
+                    <option value="ADC1">ADC1 commercial PPG</option>
+                    <option value="ADC2" selected>ADC2 BPTT PPG</option>
+                    <option value="ADC3">ADC3 BPTT noise</option>
                   </select>
                 </label>
                 <label class="switch">
@@ -682,7 +652,8 @@
       </main>
     </div>
 
-    <script src="./app.js?v=67b7d36a2077" defer></script>
+    <script src="./protocol.js?v=20260715-sync-adc-v2" defer></script>
+    <script src="./app.js?v=903c6024bae5" defer></script>
     <script src="./dfu.js?v=20260627-noise-extractor-v3" defer></script>
   </body>
 </html>

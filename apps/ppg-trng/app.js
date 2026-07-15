@@ -27,8 +27,6 @@ const els = {
   windowSize: document.querySelector("#windowSize"),
   sampleRate: document.querySelector("#sampleRate"),
   sendRateButton: document.querySelector("#sendRateButton"),
-  adc3Rate: document.querySelector("#adc3Rate"),
-  sendAdc3RateButton: document.querySelector("#sendAdc3RateButton"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
   bitMethod: document.querySelector("#bitMethod"),
   cipherWidth: document.querySelector("#cipherWidth"),
@@ -113,31 +111,18 @@ const els = {
 const DEFAULT_MAX_SAMPLES = 20000;
 const MIN_MAX_SAMPLES = 100;
 const MAX_MAX_SAMPLES = 1000000;
-const DEFAULT_SAMPLE_RATE_HZ = 25;
-const MIN_SAMPLE_RATE_HZ = 25;
-const MAX_SAMPLE_RATE_HZ = 100;
-const DEFAULT_PPG_RATE_HZ = 25;
-const DEFAULT_PPG_LED_ON_MS = 10;
-const DEFAULT_ADC3_RATE_HZ = 1000;
-const MIN_ADC3_RATE_HZ = 25;
-const MAX_ADC3_RATE_HZ = 1000;
-const DEFAULT_ADC3_BATCH_MAX = 64;
+const DEFAULT_SAMPLE_RATE_HZ = 1000;
+const MIN_SAMPLE_RATE_HZ = 1;
+const MAX_SAMPLE_RATE_HZ = 1000;
+const DEFAULT_ADC_BATCH_SIZE = 16;
 const DEFAULT_CIPHER_WIDTH_BITS = 14;
 const CIPHER_SIGNAL_MA_WINDOW = 22;
 const CIPHER_WIDTH_OPTIONS = new Set([8, 10, 12, 14]);
-const PULSE_MODE_SETTLE_MS = 80;
-const PULSE_MODE_FORCE_SEQUENCES = {
-  7761: ["7764", "7761"],
-  7762: ["7764", "7762"],
-  7763: ["7764", "7763"],
-  7764: ["7761", "7764"],
-  7769: ["7761", "7769"],
-  7777: ["7761", "7777"],
-};
 const MAX_KEY_BITS = 8192;
 const MAX_RATE_HISTORY = 10000;
 const MAX_PENDING_PPG = 512;
 const MAX_ENCRYPTED_PPG = MAX_MAX_SAMPLES;
+const LIVE_STATUS_REFRESH_MS = 100;
 
 const state = {
   transport: "none",
@@ -152,7 +137,7 @@ const state = {
   keepReading: false,
   decoder: new TextDecoder(),
   parseBuffer: "",
-  binaryBuffer: [],
+  streamDecoder: null,
   samples: [],
   totalSamples: 0,
   latest: null,
@@ -160,7 +145,7 @@ const state = {
   adcSource: "ADC2",
   bitAdcSource: "ADC3",
   valueMode: "adc",
-  adcBias: { ADC3: null, ADC2: null, ADC0: null },
+  adcBias: { ADC1: null, ADC2: null, ADC3: null },
   dacValues: { A: 2048, B: 2056 },
   bitMode: false,
   encryptionEnabled: false,
@@ -187,10 +172,13 @@ const state = {
   droppedPpg: 0,
   lastEncrypted: null,
   cipherPlainFilters: {},
-  totalAdc3Batches: 0,
-  lastAdc3BatchAt: 0,
-  lastAdc3BatchCount: 0,
-  totalAdc3BatchSamples: 0,
+  totalAdcBatches: 0,
+  lastAdcBatchAt: 0,
+  lastAdcBatchCount: 0,
+  totalAdcBatchSamples: 0,
+  adcBatchErrors: 0,
+  adcSequenceDrops: 0,
+  lastAdcFrameSequence: null,
   liveMaWindow: 33,
   liveMaOffset: 0,
   noiseBaseline: null,
@@ -205,17 +193,12 @@ const state = {
   writeQueue: Promise.resolve(),
   maxSamples: DEFAULT_MAX_SAMPLES,
   sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
-  sampleIntervalMs: 40,
-  ppgRateHz: DEFAULT_PPG_RATE_HZ,
-  ppgSampleIntervalMs: 40,
-  ppgLedOnMs: DEFAULT_PPG_LED_ON_MS,
-  adc3RateHz: DEFAULT_ADC3_RATE_HZ,
-  adc3SampleIntervalMs: 1,
-  adc3BatchMax: DEFAULT_ADC3_BATCH_MAX,
+  sampleIntervalMs: 1,
+  adcBatchSize: DEFAULT_ADC_BATCH_SIZE,
   saadcBaseHz: 1000,
   saadcOversample: 0,
-  activePulseCommand: null,
   lastStatsAt: 0,
+  lastLiveStatusAt: 0,
   needsDraw: true,
   lastDrawAt: 0,
   needsBitDraw: true,
@@ -255,28 +238,28 @@ const CHANNEL_COLORS = {
   A: "#5c6f82",
 };
 
-const SERIES_ORDER = ["ADC3", "ADC2", "ADC0", "G", "I", "R", "A"];
+const SERIES_ORDER = ["ADC3", "ADC2", "ADC1", "G", "I", "R", "A"];
 const ADC_SOURCE_COLORS = {
   ADC3: "#087f72",
   ADC2: "#7c4dff",
-  ADC0: "#b86800",
+  ADC1: "#b86800",
 };
 
 const ADC_SOURCE_INFO = {
   ADC3: {
     command: "ADC3",
-    label: "ADC3 noise/TRNG",
-    detail: "Noise/TRNG - AIN3/P0.05",
+    label: "ADC3 BPTT noise/TRNG",
+    detail: "BPTT noise/TRNG - AIN3/P0.05",
   },
   ADC2: {
     command: "ADC2",
-    label: "ADC2 signal",
-    detail: "Signal - AIN2/P0.04",
+    label: "ADC2 BPTT PPG",
+    detail: "BPTT PPG - AIN2/P0.04",
   },
-  ADC0: {
-    command: "ADC0",
-    label: "ADC0 commercial",
-    detail: "Commercial PPG - AIN0/P0.02",
+  ADC1: {
+    command: "ADC1",
+    label: "ADC1 commercial PPG",
+    detail: "Commercial PPG - AIN1/P0.03",
   },
 };
 
@@ -479,11 +462,12 @@ function updateTransportSupport() {
 function resetReceiveState() {
   state.decoder = new TextDecoder();
   state.parseBuffer = "";
-  state.binaryBuffer = [];
+  state.streamDecoder = new PpgTrngProtocol.StreamDecoder();
+  state.lastAdcFrameSequence = null;
 }
 
 function normalizeAdcSource(value) {
-  const match = String(value || "").toUpperCase().match(/(?:ADC|AIN)?\s*([023])\b/);
+  const match = String(value || "").toUpperCase().match(/(?:ADC|AIN)?\s*([123])\b/);
   return match ? `ADC${match[1]}` : null;
 }
 
@@ -602,6 +586,7 @@ function setAdcSource(source, options = {}) {
     state.totalBits = 0;
     state.bitLanes = {};
     state.bitPlaneCapacity = 0;
+    resetLiveEncryption();
   }
   resetNoiseExtractor();
   updateAdcSourceUi(options);
@@ -615,8 +600,7 @@ function updateAdcSourceUi(options = {}) {
   const info = getAdcSourceInfo();
   const pending = Boolean(options.pending);
   if (els.adcSourceStatus) {
-    const bitInfo = getAdcSourceInfo(state.bitAdcSource);
-    const label = `${info.label} / ${bitInfo.label}`;
+    const label = `Plot ${info.label} / sync ADC1-3`;
     els.adcSourceStatus.textContent = pending ? `${label} pending` : label;
     els.adcSourceStatus.classList.toggle("is-muted", pending);
   }
@@ -666,7 +650,6 @@ function queryDeviceStateSoon() {
   window.setTimeout(async () => {
     if (!isConnected()) return;
     await sendCommand("VER?");
-    if (state.adcSource) await sendCommand(state.adcSource);
     await sendCommand("ADC?");
     await sendCommand("RATE?");
   }, 250);
@@ -880,52 +863,51 @@ async function readLoop() {
   }
 }
 
-function ingestBytes(bytes, source = "serial") {
-  if (source === "bluetooth" && !isTextPayload(bytes)) {
-    ingestBinarySamples(bytes);
-    return;
-  }
-
-  const text = state.decoder.decode(bytes, { stream: true });
-  ingestText(text);
-}
-
-function isTextPayload(bytes) {
-  const usefulBytes = [...bytes].filter((byte) => byte !== 0);
-  if (!usefulBytes.length) return false;
-
-  return usefulBytes.every((byte) => (
-    byte === 9 ||
-    byte === 10 ||
-    byte === 13 ||
-    byte === 32 ||
-    byte === 43 ||
-    byte === 44 ||
-    byte === 45 ||
-    byte === 46 ||
-    byte === 59 ||
-    byte === 58 ||
-    byte === 95 ||
-    (byte >= 48 && byte <= 57) ||
-    (byte >= 65 && byte <= 90) ||
-    (byte >= 97 && byte <= 122)
-  ));
-}
-
-function ingestBinarySamples(bytes) {
-  state.binaryBuffer.push(...bytes);
-
-  while (state.binaryBuffer.length >= 2) {
-    const low = state.binaryBuffer.shift();
-    const high = state.binaryBuffer.shift();
-    const value = low | (high << 8);
-
-    if (state.bitMode) {
-      addSample(value, "ADC", { adcSource: state.bitAdcSource });
-    } else {
-      addSample(value);
+function ingestBytes(bytes) {
+  if (!state.streamDecoder) resetReceiveState();
+  const result = state.streamDecoder.push(bytes);
+  result.textChunks.forEach((chunk) => {
+    const text = state.decoder.decode(chunk, { stream: true });
+    ingestText(text);
+  });
+  result.frames.forEach(ingestSynchronizedAdcFrame);
+  if (result.errors.length) {
+    state.adcBatchErrors += result.errors.length;
+    if (state.adcBatchErrors <= 3 || state.adcBatchErrors % 100 === 0) {
+      addLog("ERR", `${result.errors.at(-1)} | frame errors ${state.adcBatchErrors}`, true);
     }
   }
+}
+
+function ingestSynchronizedAdcFrame(frame) {
+  const rateHz = clampSampleRateHz(frame.sampleRateHz || state.sampleRateHz);
+  const intervalMs = 1000 / rateHz;
+  const frameEnd = performance.now();
+  setSampleRateUi(rateHz, intervalMs, { normalizeInput: false });
+  state.saadcBaseHz = rateHz;
+  state.adcBatchSize = frame.sampleCount;
+
+  if (state.lastAdcFrameSequence !== null) {
+    const expectedSequence = (state.lastAdcFrameSequence + 1) & 0xFFFF;
+    const missingFrames = (frame.sequence - expectedSequence) & 0xFFFF;
+    if (missingFrames > 0 && missingFrames < 0x8000) {
+      state.adcSequenceDrops += missingFrames;
+    }
+  }
+  state.lastAdcFrameSequence = frame.sequence;
+
+  frame.samples.forEach((scan, index) => {
+    const t = frameEnd - (frame.samples.length - 1 - index) * intervalMs;
+    addSample(scan.ADC1, "ADC", { adcSource: "ADC1", valueKind: "raw", t });
+    addSample(scan.ADC2, "ADC", { adcSource: "ADC2", valueKind: "raw", t });
+    addSample(scan.ADC3, "ADC", { adcSource: "ADC3", valueKind: "raw", t });
+  });
+
+  state.totalAdcBatches += 1;
+  state.lastAdcBatchAt = frameEnd;
+  state.lastAdcBatchCount = frame.sampleCount;
+  state.totalAdcBatchSamples += frame.sampleCount;
+  refreshLiveStatusIfDue();
 }
 
 function ingestText(text) {
@@ -985,7 +967,7 @@ function normalizeChannel(channel) {
 }
 
 function parseAdcBatchSegment(segment) {
-  const match = segment.match(/^ADC([023])B\s*[,=:]\s*(\d+)\s*,\s*(.+)$/i);
+  const match = segment.match(/^ADC([123])B\s*[,=:]\s*(\d+)\s*,\s*(.+)$/i);
   if (!match) return false;
 
   const adcSource = `ADC${match[1]}`;
@@ -1001,19 +983,19 @@ function parseAdcBatchSegment(segment) {
     addSample(value, "ADC", { adcSource, valueKind: "raw" });
   });
 
-  state.totalAdc3Batches += 1;
-  state.lastAdc3BatchAt = performance.now();
-  state.lastAdc3BatchCount = limitedValues.length;
-  state.totalAdc3BatchSamples = (state.totalAdc3BatchSamples || 0) + limitedValues.length;
+  state.totalAdcBatches += 1;
+  state.lastAdcBatchAt = performance.now();
+  state.lastAdcBatchCount = limitedValues.length;
+  state.totalAdcBatchSamples += limitedValues.length;
   if (expectedCount !== limitedValues.length) {
     addLog("RX", `ADC${match[1]}B count ${limitedValues.length}/${expectedCount}`);
   }
-  updateEncryptionUi();
+  refreshLiveStatusIfDue();
   return true;
 }
 
 function parseTaggedSegment(segment) {
-  const matches = [...segment.matchAll(/\b(ADC[023]?|GREEN|IR|INFRARED|RED|AMBIENT|[AGIR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
+  const matches = [...segment.matchAll(/\b(ADC[123]?|GREEN|IR|INFRARED|RED|AMBIENT|[AGIR])\b\s*[,=:]\s*([-+]?\d+(?:\.\d+)?)/gi)];
   if (!matches.length) return false;
 
   let parsed = false;
@@ -1034,7 +1016,7 @@ function parseStatusSegment(segment) {
   if (parseAdcStatusSegment(segment)) return true;
   if (parseRateStatusSegment(segment)) return true;
 
-  if (/^(DFU|PONG)\b/i.test(segment)) {
+  if (/^(DFU|PONG|GPIO)\b/i.test(segment)) {
     addLog("RX", segment);
     return true;
   }
@@ -1053,11 +1035,8 @@ function parseFirmwareInfoSegment(segment) {
 }
 
 function parseAdcStatusSegment(segment) {
-  const dualMatch = segment.match(/^ADC\b/i) && segment.match(/\bPPG\s*[,=:]\s*([023])\b/i);
-  if (dualMatch) {
-    const bitMatch = segment.match(/\bBIT\s*[,=:]\s*([023])\b/i);
-    state.adcSource = `ADC${dualMatch[1]}`;
-    state.bitAdcSource = bitMatch ? `ADC${bitMatch[1]}` : "ADC3";
+  if (/^ADC\b/i.test(segment) && /\bCOUNT\s*[,=:]\s*3\b/i.test(segment)) {
+    state.bitAdcSource = "ADC3";
     updateAdcSourceUi();
     updateBitStats();
     updateEncryptionUi();
@@ -1065,7 +1044,7 @@ function parseAdcStatusSegment(segment) {
     return true;
   }
 
-  const match = segment.match(/^ADC\s*[,=:]\s*(?:ACTIVE|SOURCE|SELECTED)\s*[,=:]\s*([023])\b/i);
+  const match = segment.match(/^ADC\s*[,=:]\s*(?:ACTIVE|SOURCE|SELECTED)\s*[,=:]\s*([123])\b/i);
   if (!match) return false;
   setAdcSource(`ADC${match[1]}`);
   addLog("RX", segment);
@@ -1074,57 +1053,16 @@ function parseAdcStatusSegment(segment) {
 
 function parseRateStatusSegment(segment) {
   if (!/^RATE\b/i.test(segment)) return false;
-  const hzMatch = segment.match(/\bRAW_HZ\s*[,=:]\s*(\d+)\b/i);
-  const msMatch = segment.match(/\bRAW_MS\s*[,=:]\s*(\d+)\b/i);
-  const adc2HzMatch = segment.match(/\bADC2_HZ\s*[,=:]\s*(\d+)\b/i);
-  const adc2FrameMatch = segment.match(/\bADC2_FRAME_MS\s*[,=:]\s*(\d+)\b/i);
-  const ppgHzMatch = segment.match(/\bPPG_HZ\s*[,=:]\s*(\d+)\b/i);
-  const ppgFrameMatch = segment.match(/\bPPG_FRAME_MS\s*[,=:]\s*(\d+)\b/i);
-  const ppgPhaseMatch = segment.match(/\bPPG_PHASE_MS\s*[,=:]\s*(\d+)\b/i);
-  const ppgLedOnMatch = segment.match(/\bPPG_LED_ON_MS\s*[,=:]\s*(\d+)\b/i);
-  const adc3HzMatch = segment.match(/\bADC3_HZ\s*[,=:]\s*(\d+)\b/i);
-  const adc3MsMatch = segment.match(/\bADC3_MS\s*[,=:]\s*(\d+)\b/i);
-  const adc3BatchMaxMatch = segment.match(/\bADC3_BATCH_MAX\s*[,=:]\s*(\d+)\b/i);
-  const saadcBaseHzMatch = segment.match(/\bSAADC_BASE_HZ\s*[,=:]\s*(\d+)\b/i);
-  const saadcOversampleMatch = segment.match(/\bSAADC_OVERSAMPLE\s*[,=:]\s*(\d+)\b/i);
+  const hzMatch = segment.match(/\bADC_HZ\s*[,=:]\s*(\d+)\b/i)
+    || segment.match(/\bRAW_HZ\s*[,=:]\s*(\d+)\b/i);
+  const periodMatch = segment.match(/\bPERIOD_US\s*[,=:]\s*(\d+)\b/i);
+  const batchMatch = segment.match(/\bBATCH\s*[,=:]\s*(\d+)\b/i);
   const hz = hzMatch ? Number.parseInt(hzMatch[1], 10) : null;
-  const ms = msMatch ? Number.parseInt(msMatch[1], 10) : null;
-  const adc2Hz = adc2HzMatch ? Number.parseInt(adc2HzMatch[1], 10) : null;
-  const adc2FrameMs = adc2FrameMatch ? Number.parseInt(adc2FrameMatch[1], 10) : null;
-  const ppgHz = ppgHzMatch ? Number.parseInt(ppgHzMatch[1], 10) : null;
-  const ppgFrameMs = ppgFrameMatch ? Number.parseInt(ppgFrameMatch[1], 10) : null;
-  const ppgPhaseMs = ppgPhaseMatch ? Number.parseInt(ppgPhaseMatch[1], 10) : null;
-  const ppgLedOnMs = ppgLedOnMatch ? Number.parseInt(ppgLedOnMatch[1], 10) : null;
-  const adc3Hz = adc3HzMatch ? Number.parseInt(adc3HzMatch[1], 10) : null;
-  const adc3Ms = adc3MsMatch ? Number.parseInt(adc3MsMatch[1], 10) : null;
-  const adc3BatchMax = adc3BatchMaxMatch ? Number.parseInt(adc3BatchMaxMatch[1], 10) : null;
-  const saadcBaseHz = saadcBaseHzMatch ? Number.parseInt(saadcBaseHzMatch[1], 10) : null;
-  const saadcOversample = saadcOversampleMatch ? Number.parseInt(saadcOversampleMatch[1], 10) : null;
-  const normalizedPpgFrameMs = Number.isFinite(adc2FrameMs) && adc2FrameMs > 0
-    ? adc2FrameMs
-    : Number.isFinite(ppgFrameMs) && ppgFrameMs > 0
-    ? ppgFrameMs
-    : (Number.isFinite(ppgPhaseMs) && ppgPhaseMs > 0 ? ppgPhaseMs * 4 : null);
-  const normalizedPpgHz = Number.isFinite(adc2Hz) && adc2Hz > 0
-    ? adc2Hz
-    : Number.isFinite(ppgHz) && ppgHz > 0
-    ? ppgHz
-    : (Number.isFinite(normalizedPpgFrameMs) && normalizedPpgFrameMs > 0
-      ? Math.round(1000 / normalizedPpgFrameMs)
-      : null);
-
-  setSampleRateUi(normalizedPpgHz ?? hz, normalizedPpgFrameMs ?? ms, { normalizeInput: true });
-  setPpgRateUi(normalizedPpgHz, normalizedPpgFrameMs, ppgLedOnMs);
-  setAdc3RateUi(adc3Hz, adc3Ms, { normalizeInput: true });
-  if (Number.isFinite(adc3BatchMax) && adc3BatchMax > 0) {
-    state.adc3BatchMax = adc3BatchMax;
-  }
-  if (Number.isFinite(saadcBaseHz) && saadcBaseHz > 0) {
-    state.saadcBaseHz = saadcBaseHz;
-  }
-  if (Number.isFinite(saadcOversample)) {
-    state.saadcOversample = saadcOversample;
-  }
+  const periodUs = periodMatch ? Number.parseInt(periodMatch[1], 10) : null;
+  const intervalMs = Number.isFinite(periodUs) && periodUs > 0 ? periodUs / 1000 : null;
+  setSampleRateUi(hz, intervalMs, { normalizeInput: true });
+  if (Number.isFinite(hz) && hz > 0) state.saadcBaseHz = hz;
+  if (batchMatch) state.adcBatchSize = Number.parseInt(batchMatch[1], 10);
   addLog("RX", segment);
   return true;
 }
@@ -1137,7 +1075,7 @@ function parseBitSegment(segment) {
 }
 
 function parseTaggedBitSegment(segment) {
-  const matches = [...segment.matchAll(/\b(?:BIT|TRNG|RNG)([023])\b\s*[,=:]\s*([01])/gi)];
+  const matches = [...segment.matchAll(/\b(?:BIT|TRNG|RNG)([123])\b\s*[,=:]\s*([01])/gi)];
   if (!matches.length) return false;
 
   const groupedBits = new Map();
@@ -1159,16 +1097,30 @@ function addSample(value, channel = "ADC", options = {}) {
   const normalizedChannel = normalizeChannel(channel) || "ADC";
   const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
   if (normalizedChannel === "ADC" && adcSource === state.bitAdcSource) {
-    extractLiveBitsFromNoiseSample(value, adcSource);
+    extractLiveBitsFromNoiseSample(value, adcSource, options.t);
   }
   if (normalizedChannel === "ADC" && adcSource !== state.adcSource) return;
   const valueKind = options.valueKind || "raw";
-  commitSample(value, normalizedChannel, adcSource, valueKind);
+  commitSample(value, normalizedChannel, adcSource, valueKind, options.t);
 }
 
-function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSource, valueKind = "raw") {
+function getPlotRefreshIntervalMs() {
+  if (state.samples.length > 250000) return 500;
+  if (state.samples.length > 100000) return 250;
+  if (state.samples.length > 50000) return 100;
+  return 33;
+}
+
+function getStatsRefreshIntervalMs() {
+  if (state.samples.length > 250000) return 1000;
+  if (state.samples.length > 100000) return 500;
+  if (state.samples.length > 50000) return 250;
+  return 160;
+}
+
+function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSource, valueKind = "raw", sampleTime = null) {
   const sample = {
-    t: performance.now(),
+    t: Number.isFinite(sampleTime) ? sampleTime : performance.now(),
     value,
     channel: normalizedChannel || "ADC",
     adcSource: normalizeAdcSource(adcSource) || state.adcSource,
@@ -1184,7 +1136,7 @@ function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSou
   }
 
   const now = performance.now();
-  if (now - state.lastStatsAt > 160) {
+  if (now - state.lastStatsAt > getStatsRefreshIntervalMs()) {
     state.lastStatsAt = now;
     updateStats();
   }
@@ -1277,10 +1229,6 @@ function resetLiveEncryption() {
   state.lastEncrypted = null;
   state.cipherPlainFilters = {};
   state.liveBitExtractors = {};
-  state.lastAdc3BatchCount = 0;
-  state.totalAdc3BatchSamples = 0;
-  state.totalAdc3Batches = 0;
-  state.lastAdc3BatchAt = 0;
   state.bitInputEvents = [];
   state.totalBitInputSamples = 0;
   state.needsCipherDraw = true;
@@ -1401,12 +1349,15 @@ function collectLiveBitsForMethod(value, adcSource, method) {
   return [];
 }
 
-function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource) {
+function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource, sampleTime = null) {
   const source = normalizeAdcSource(adcSource) || state.bitAdcSource;
   if (source !== state.bitAdcSource || !Number.isFinite(value)) return;
   if (!state.bitMode) return;
 
-  state.bitInputEvents.push({ t: performance.now(), adcSource: source });
+  state.bitInputEvents.push({
+    t: Number.isFinite(sampleTime) ? sampleTime : performance.now(),
+    adcSource: source,
+  });
   state.totalBitInputSamples += 1;
   if (state.bitInputEvents.length > MAX_RATE_HISTORY) {
     state.bitInputEvents.splice(0, state.bitInputEvents.length - MAX_RATE_HISTORY);
@@ -1480,11 +1431,13 @@ function getRecentBitInputRate() {
   return estimateRecentRate(state.bitInputEvents);
 }
 
-function getAdc3BatchStatusText() {
-  if (!state.totalAdc3Batches) return "ADC3B none - click 776x pulse";
-  const ageMs = performance.now() - state.lastAdc3BatchAt;
+function getAdcBatchStatusText() {
+  if (!state.totalAdcBatches) return "ADCF waiting";
+  const ageMs = performance.now() - state.lastAdcBatchAt;
   const staleText = ageMs > 3000 ? " stale" : "";
-  return `ADC3B ${state.lastAdc3BatchCount}/${state.totalAdc3BatchSamples}${staleText}`;
+  const errors = state.adcBatchErrors ? ` err ${state.adcBatchErrors}` : "";
+  const drops = state.adcSequenceDrops ? ` drop ${state.adcSequenceDrops}` : "";
+  return `ADCF ${state.lastAdcBatchCount}/${state.totalAdcBatchSamples}${errors}${drops}${staleText}`;
 }
 
 function getCipherWindowSize() {
@@ -1503,14 +1456,19 @@ function getCipherDisplayRecords() {
   return state.encryptedPpg;
 }
 
-function getCipherPlainAdcCode(rawValue) {
+function getCipherPlainAdcCode(rawValue, adcSource, channel) {
   const rawAdcCode = clampInteger(rawValue, 0, 16383, 0);
-  state.cipherSignalWindow.push(rawAdcCode);
-  state.cipherSignalSum += rawAdcCode;
-  while (state.cipherSignalWindow.length > CIPHER_SIGNAL_MA_WINDOW) {
-    state.cipherSignalSum -= state.cipherSignalWindow.shift();
+  const filterKey = `${normalizeAdcSource(adcSource) || state.adcSource}:${normalizeChannel(channel) || "ADC"}`;
+  if (!state.cipherPlainFilters[filterKey]) {
+    state.cipherPlainFilters[filterKey] = { window: [], sum: 0 };
   }
-  const filteredAdcCode = Math.round(state.cipherSignalSum / state.cipherSignalWindow.length);
+  const filter = state.cipherPlainFilters[filterKey];
+  filter.window.push(rawAdcCode);
+  filter.sum += rawAdcCode;
+  while (filter.window.length > CIPHER_SIGNAL_MA_WINDOW) {
+    filter.sum -= filter.window.shift();
+  }
+  const filteredAdcCode = Math.round(filter.sum / filter.window.length);
   return {
     rawAdcCode,
     adcCode: clampInteger(filteredAdcCode, 0, 16383, rawAdcCode),
@@ -1523,7 +1481,7 @@ function enqueuePpgEncryption(sample) {
   if (!Number.isFinite(sample.value)) return;
   const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
   if (adcSource !== state.adcSource) return;
-  const cipherPlain = getCipherPlainAdcCode(sample.value);
+  const cipherPlain = getCipherPlainAdcCode(sample.value, adcSource, sample.channel);
   state.pendingPpg.push({
     t: sample.t,
     channel: sample.channel,
@@ -1537,6 +1495,7 @@ function enqueuePpgEncryption(sample) {
     state.droppedPpg += 1;
   }
   processEncryptionQueue();
+  refreshLiveStatusIfDue();
 }
 
 function processEncryptionQueue() {
@@ -1566,6 +1525,13 @@ function processEncryptionQueue() {
     trimEncryptedHistory();
     state.needsCipherDraw = true;
   }
+}
+
+function refreshLiveStatusIfDue(force = false) {
+  const now = performance.now();
+  if (!force && now - state.lastLiveStatusAt < LIVE_STATUS_REFRESH_MS) return;
+  state.lastLiveStatusAt = now;
+  updateBitStats({ updateEncryption: false });
   updateEncryptionUi();
 }
 
@@ -1594,7 +1560,7 @@ function updateEncryptionUi() {
     const methodParams = isMovingAverageBitMethod()
       ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
       : "";
-    const batchText = state.bitMode ? ` | ${getAdc3BatchStatusText()}` : "";
+    const batchText = state.bitMode ? ` | ${getAdcBatchStatusText()}` : "";
     const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
     els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
@@ -1663,13 +1629,11 @@ function addBits(bits, adcSource = state.bitAdcSource, source = getBitMethodLabe
     state.bits.splice(0, state.bits.length - state.maxBits);
   }
 
-  updateBitModeUi();
-  ensureBitPlaneCapacity();
+  if (!state.bitPlaneCapacity) ensureBitPlaneCapacity();
   normalizedBits.forEach((bit) => writeBitToPlane(bit, normalizedSource));
   processEncryptionQueue();
-  updateBitStats();
+  refreshLiveStatusIfDue();
   state.needsBitDraw = true;
-  window.requestAnimationFrame(resizeBitCanvas);
 }
 
 function updateStats() {
@@ -1686,9 +1650,15 @@ function updateStats() {
     return;
   }
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  let sum = 0;
+  values.forEach((value) => {
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+    sum += value;
+  });
+  const avg = sum / values.length;
   const first = displaySamples[0];
   const last = displaySamples[displaySamples.length - 1];
   const elapsed = Math.max(0.001, (last.t - first.t) / 1000);
@@ -1733,7 +1703,7 @@ function updateBitModeUi() {
   els.bitPanel.hidden = !state.bitMode && state.bits.length === 0;
 }
 
-function updateBitStats() {
+function updateBitStats(options = {}) {
   const lanes = getBitLanes();
   const planeBits = lanes.flatMap(([, lane]) => lane.plane.filter((bit) => bit === 0 || bit === 1));
   const ones = planeBits.reduce((sum, bit) => sum + bit, 0);
@@ -1751,7 +1721,7 @@ function updateBitStats() {
     ? `${source} | ${getAdcSourceInfo(state.bitAdcSource).label} | plane ${state.bitColumns}x${state.bitRows} | saved ${state.bits.length}/${state.maxBits} | total ${state.totalBits}`
     : `Waiting for ${source} bits | plane ${state.bitColumns}x${state.bitRows} | saved ${state.bits.length}/${state.maxBits}`;
   updateBitModeUi();
-  updateEncryptionUi();
+  if (options.updateEncryption !== false) updateEncryptionUi();
 }
 
 function getBitColumns() {
@@ -1821,7 +1791,7 @@ function ensureBitPlaneCapacity() {
 }
 
 function writeBitToPlane(bit, adcSource = state.adcSource) {
-  ensureBitPlaneCapacity();
+  if (!state.bitPlaneCapacity) ensureBitPlaneCapacity();
   if (!state.bitPlaneCapacity) return;
 
   const lane = ensureBitLane(adcSource);
@@ -1882,64 +1852,20 @@ function clampSampleRateHz(value) {
   return clampInteger(value, MIN_SAMPLE_RATE_HZ, MAX_SAMPLE_RATE_HZ, DEFAULT_SAMPLE_RATE_HZ);
 }
 
-function clampAdc3RateHz(value) {
-  return clampInteger(value, MIN_ADC3_RATE_HZ, MAX_ADC3_RATE_HZ, DEFAULT_ADC3_RATE_HZ);
-}
-
 function rateHzToIntervalMs(rateHz) {
-  return Math.max(1, Math.round(1000 / clampSampleRateHz(rateHz)));
-}
-
-function adc3RateHzToIntervalMs(rateHz) {
-  return Math.max(1, Math.round(1000 / clampAdc3RateHz(rateHz)));
+  return 1000 / clampSampleRateHz(rateHz);
 }
 
 function setSampleRateUi(rateHz, intervalMs = null, options = {}) {
   const nextRate = clampSampleRateHz(rateHz ?? state.sampleRateHz);
   const nextInterval = Number.isFinite(intervalMs) && intervalMs > 0
-    ? Math.max(1, Math.round(intervalMs))
+    ? intervalMs
     : rateHzToIntervalMs(nextRate);
   state.sampleIntervalMs = nextInterval;
-  state.sampleRateHz = Math.max(1, Math.round(1000 / nextInterval));
+  state.sampleRateHz = nextRate;
 
   if (options.normalizeInput !== false && els.sampleRate) {
     els.sampleRate.value = String(state.sampleRateHz);
-  }
-}
-
-function setPpgRateUi(rateHz = null, frameMs = null, ledOnMs = null) {
-  const parsedRate = Number.parseInt(rateHz, 10);
-  const parsedFrameMs = Number.parseInt(frameMs, 10);
-  const parsedLedOnMs = Number.parseInt(ledOnMs, 10);
-  if (Number.isFinite(parsedRate) && parsedRate > 0) {
-    state.ppgRateHz = parsedRate;
-    state.ppgSampleIntervalMs = Number.isFinite(parsedFrameMs) && parsedFrameMs > 0
-      ? Math.max(1, parsedFrameMs)
-      : Math.max(1, Math.round(1000 / parsedRate));
-  } else if (Number.isFinite(parsedFrameMs) && parsedFrameMs > 0) {
-    state.ppgSampleIntervalMs = Math.max(1, parsedFrameMs);
-    state.ppgRateHz = Math.max(1, Math.round(1000 / state.ppgSampleIntervalMs));
-  }
-  if (Number.isFinite(parsedLedOnMs) && parsedLedOnMs > 0) {
-    state.ppgLedOnMs = parsedLedOnMs;
-  }
-}
-
-function setAdc3RateUi(rateHz = null, intervalMs = null, options = {}) {
-  const parsedRate = Number.parseInt(rateHz, 10);
-  const parsedIntervalMs = Number.parseInt(intervalMs, 10);
-  if (Number.isFinite(parsedRate) && parsedRate > 0) {
-    state.adc3RateHz = parsedRate;
-    state.adc3SampleIntervalMs = Number.isFinite(parsedIntervalMs) && parsedIntervalMs > 0
-      ? Math.max(1, parsedIntervalMs)
-      : adc3RateHzToIntervalMs(parsedRate);
-  } else if (Number.isFinite(parsedIntervalMs) && parsedIntervalMs > 0) {
-    state.adc3SampleIntervalMs = Math.max(1, parsedIntervalMs);
-    state.adc3RateHz = Math.max(1, Math.round(1000 / state.adc3SampleIntervalMs));
-  }
-
-  if (options.normalizeInput !== false && els.adc3Rate) {
-    els.adc3Rate.value = String(state.adc3RateHz);
   }
 }
 
@@ -1950,21 +1876,9 @@ function applySampleRateInput(normalize = false) {
   setSampleRateUi(nextRate, null, { normalizeInput: normalize });
 }
 
-function applyAdc3RateInput(normalize = false) {
-  const rawValue = String(els.adc3Rate?.value ?? "").trim();
-  if (!rawValue) return;
-  const nextRate = clampAdc3RateHz(rawValue);
-  setAdc3RateUi(nextRate, null, { normalizeInput: normalize });
-}
-
 async function sendSampleRateCommand() {
   applySampleRateInput(true);
-  await sendCommand(`ADC2RATE${state.sampleRateHz}`);
-}
-
-async function sendAdc3RateCommand() {
-  applyAdc3RateInput(true);
-  await sendCommand(`ADC3RATE${state.adc3RateHz}`);
+  await sendCommand(`RATE${state.sampleRateHz}`);
 }
 
 function clampPositive(value, fallback) {
@@ -2002,7 +1916,7 @@ function getFilterDescription(settings = getFilterSettings()) {
 }
 
 function getSampleRateDescription() {
-  return `ADC2 pulse ${state.ppgRateHz} Hz | ADC3 noise ${state.adc3RateHz} Hz | LED ${state.ppgLedOnMs} ms | SAADC base ${state.saadcBaseHz} Hz | OS ${state.saadcOversample}`;
+  return `ADC1/2/3 sync ${state.sampleRateHz} Hz | batch ${state.adcBatchSize} scans | ADCF v1`;
 }
 
 function getSelectedAdcPlotSources() {
@@ -2179,46 +2093,6 @@ async function sendCommand(value) {
   }
 }
 
-function delay(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-function getPulseModeSequence(command) {
-  const normalized = String(command).trim();
-  return PULSE_MODE_FORCE_SEQUENCES[normalized] || null;
-}
-
-function setActivePulseCommand(command) {
-  const normalized = command ? String(command).trim() : null;
-  state.activePulseCommand = normalized;
-  document.querySelectorAll("[data-command]").forEach((button) => {
-    const buttonCommand = String(button.dataset.command || "").trim();
-    if (!getPulseModeSequence(buttonCommand)) return;
-    button.classList.toggle("is-active", buttonCommand === normalized);
-  });
-}
-
-async function sendPulseModeCommand(command) {
-  const normalized = String(command).trim();
-  const sequence = getPulseModeSequence(normalized);
-  if (!sequence) {
-    await sendCommand(normalized);
-    return;
-  }
-
-  addLog("SYS", `Pulse mode ${normalized}: ${sequence.join(" -> ")}`);
-  for (let index = 0; index < sequence.length; index += 1) {
-    await sendCommand(sequence[index]);
-    if (index < sequence.length - 1) {
-      await delay(PULSE_MODE_SETTLE_MS);
-    }
-  }
-  if (isConnected()) {
-    setActivePulseCommand(normalized);
-  }
-  await sendCommand("RATE?");
-}
-
 async function writeBluetoothPayload(payload) {
   const characteristic = state.bleWriteCharacteristic;
   if (!characteristic) throw new Error("Bluetooth write characteristic is not ready");
@@ -2238,38 +2112,17 @@ async function toggleBitModeCommand() {
   setBitMode(!state.bitMode);
 }
 
-function applyPpgCommandPreset(command) {
-  if (command === "7769") {
-    els.filterMode.value = "raw";
-  } else if (command === "7761") {
-    els.filterMode.value = "band-pass";
-    els.highCutoff.value = "0.5";
-    els.lowCutoff.value = "5";
-  } else if (command === "7762") {
-    els.filterMode.value = "band-pass";
-    els.highCutoff.value = "0.5";
-    els.lowCutoff.value = "5";
-  } else if (command === "7763") {
-    els.filterMode.value = "band-pass";
-    els.highCutoff.value = "0.5";
-    els.lowCutoff.value = "5";
-  } else if (command === "7764" || command === "7777") {
-    els.filterMode.value = "band-pass";
-    els.highCutoff.value = "0.5";
-    els.lowCutoff.value = "5";
-  } else {
-    return;
-  }
-
-  updateFilterUi();
-  updateStats();
-  state.needsDraw = true;
-}
-
 function clearSamples() {
   state.samples = [];
   state.totalSamples = 0;
   state.latest = null;
+  state.totalAdcBatches = 0;
+  state.lastAdcBatchAt = 0;
+  state.lastAdcBatchCount = 0;
+  state.totalAdcBatchSamples = 0;
+  state.adcBatchErrors = 0;
+  state.adcSequenceDrops = 0;
+  state.lastAdcFrameSequence = null;
   resetNoiseExtractor();
   resetBitAndEncryptionBuffers();
   updateStats();
@@ -3114,15 +2967,14 @@ function toggleDemo() {
   state.demoTimer = window.setInterval(() => {
     const dac = clampDac(els.dacInput.value);
     state.demoPhase += 0.18;
+    const t = performance.now();
     const baseline = 7200 + (dac - 2056) * 0.42;
     const ppg = Math.sin(state.demoPhase) * 160 + Math.sin(state.demoPhase * 0.31) * 38;
     const noise = (Math.random() - 0.5) * 42;
     const noiseAdc = 7550 + Math.round((Math.random() - 0.5) * 80);
-    addSample(noiseAdc, "ADC", { adcSource: state.bitAdcSource });
-    addSample(Math.round(baseline + ppg + noise), "G", { adcSource: state.adcSource });
-    addSample(Math.round(baseline + ppg * 0.82 + Math.sin(state.demoPhase * 0.73) * 22 + noise * 0.45), "I", { adcSource: state.adcSource });
-    addSample(Math.round(baseline + ppg * 0.62 + noise * 0.55), "R", { adcSource: state.adcSource });
-    addSample(Math.round(baseline + noise * 0.2), "A");
+    addSample(Math.round(6800 + ppg * 0.7 + noise), "ADC", { adcSource: "ADC1", t });
+    addSample(Math.round(baseline + ppg + noise), "ADC", { adcSource: "ADC2", t });
+    addSample(noiseAdc, "ADC", { adcSource: "ADC3", t });
   }, 33);
   els.demoButton.textContent = "Stop demo";
   addLog("SYS", "Demo started");
@@ -3178,14 +3030,62 @@ function getYRange(values) {
     }
   }
 
-  let min = Math.min(...values);
-  let max = Math.max(...values);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  values.forEach((value) => {
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  });
   if (min === max) {
     min -= 1;
     max += 1;
   }
   const pad = Math.max((max - min) * 0.12, 8);
   return { min: min - pad, max: max + pad };
+}
+
+function decimateSeriesForCanvas(items, maxPoints, valueSelector) {
+  if (!items.length) return [];
+
+  const withIndex = (item, plotIndex) => ({ ...item, plotIndex });
+  if (items.length <= maxPoints) {
+    return items.map(withIndex);
+  }
+
+  const interiorBucketCount = Math.max(1, Math.floor((maxPoints - 2) / 2));
+  const bucketSize = Math.ceil((items.length - 2) / interiorBucketCount);
+  const selected = [withIndex(items[0], 0)];
+
+  for (let start = 1; start < items.length - 1; start += bucketSize) {
+    const end = Math.min(items.length - 1, start + bucketSize);
+    let minIndex = start;
+    let maxIndex = start;
+    let minValue = valueSelector(items[start]);
+    let maxValue = minValue;
+
+    for (let index = start + 1; index < end; index += 1) {
+      const value = valueSelector(items[index]);
+      if (value < minValue) {
+        minValue = value;
+        minIndex = index;
+      }
+      if (value > maxValue) {
+        maxValue = value;
+        maxIndex = index;
+      }
+    }
+
+    if (minIndex === maxIndex) {
+      selected.push(withIndex(items[minIndex], minIndex));
+    } else if (minIndex < maxIndex) {
+      selected.push(withIndex(items[minIndex], minIndex), withIndex(items[maxIndex], maxIndex));
+    } else {
+      selected.push(withIndex(items[maxIndex], maxIndex), withIndex(items[minIndex], minIndex));
+    }
+  }
+
+  selected.push(withIndex(items.at(-1), items.length - 1));
+  return selected;
 }
 
 function getTimeRange(samples) {
@@ -3212,12 +3112,14 @@ function drawPlot() {
   ctx.fillRect(0, 0, width, height);
 
   const displaySamples = getDisplaySamples();
-  displaySamples.forEach((sample, index) => {
-    sample.plotIndex = index;
-  });
   const values = displaySamples.map((sample) => sample.value);
   const { min, max } = getYRange(values);
   const timeRange = getTimeRange(displaySamples);
+  const renderSamples = decimateSeriesForCanvas(
+    displaySamples,
+    Math.max(512, Math.floor(chartW * 2)),
+    (sample) => sample.value,
+  );
 
   drawGrid(ctx, margin, chartW, chartH, min, max);
   drawZeroLine(ctx, margin, chartW, chartH, min, max);
@@ -3234,7 +3136,7 @@ function drawPlot() {
   ctx.rect(margin.left, margin.top, chartW, chartH);
   ctx.clip();
 
-  drawSeries(ctx, displaySamples, state.adcSource, margin, chartW, chartH, min, max, timeRange);
+  drawSeries(ctx, renderSamples, state.adcSource, margin, chartW, chartH, min, max, timeRange);
   ctx.restore();
 
   drawLegend(ctx, [state.adcSource], margin, chartW);
@@ -3360,14 +3262,19 @@ function drawCipherPlot() {
     return;
   }
 
-  const visible = records;
-  const span = Math.max(1, visible.length - 1);
+  const visible = decimateSeriesForCanvas(
+    records,
+    Math.max(512, Math.floor(chartW * 2)),
+    (record) => record.cipher,
+  );
+  const span = Math.max(1, records.length - 1);
   const yFor = (value) => margin.top + (1 - (value - min) / (max - min)) * chartH;
 
   ctx.save();
   ctx.beginPath();
   visible.forEach((record, index) => {
-    const x = margin.left + (index / span) * chartW;
+    const position = Number.isFinite(record.plotIndex) ? record.plotIndex : index;
+    const x = margin.left + (position / span) * chartW;
     const y = yFor(record.cipher);
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
@@ -3377,7 +3284,8 @@ function drawCipherPlot() {
   ctx.stroke();
 
   const latest = visible.at(-1);
-  const latestX = margin.left + ((visible.length - 1) / span) * chartW;
+  const latestPosition = Number.isFinite(latest.plotIndex) ? latest.plotIndex : records.length - 1;
+  const latestX = margin.left + (latestPosition / span) * chartW;
   const latestY = yFor(latest.cipher);
   ctx.fillStyle = "#b86800";
   ctx.beginPath();
@@ -3386,7 +3294,7 @@ function drawCipherPlot() {
 
   ctx.font = "800 12px Segoe UI, sans-serif";
   ctx.fillStyle = "#30423d";
-  ctx.fillText(`Cipher | latest ${formatHex(latest.cipher)} | window ${visible.length}/${getCipherWindowSize()}`, margin.left, margin.top - 7);
+  ctx.fillText(`Cipher | latest ${formatHex(latest.cipher)} | window ${records.length}/${getCipherWindowSize()}`, margin.left, margin.top - 7);
   ctx.restore();
 }
 
@@ -3469,7 +3377,7 @@ function drawBitMap() {
 
 function animationLoop() {
   const now = performance.now();
-  if (state.needsDraw && now - state.lastDrawAt > 33) {
+  if (state.needsDraw && now - state.lastDrawAt > getPlotRefreshIntervalMs()) {
     drawPlot();
     state.lastDrawAt = now;
     state.needsDraw = false;
@@ -3528,18 +3436,7 @@ function bindEvents() {
   document.querySelectorAll("[data-command]").forEach((button) => {
     button.addEventListener("click", async () => {
       const command = button.dataset.command;
-      if (button.dataset.adcSource && isConnected()) {
-        setAdcSource(button.dataset.adcSource, { pending: true });
-      }
-      applyPpgCommandPreset(command);
-      if (getPulseModeSequence(command)) {
-        await sendPulseModeCommand(command);
-      } else {
-        if (/^(0000|888\d)$/.test(String(command).trim())) {
-          setActivePulseCommand(null);
-        }
-        await sendCommand(command);
-      }
+      await sendCommand(command);
     });
   });
 
@@ -3553,11 +3450,6 @@ function bindEvents() {
   els.sampleRate.addEventListener("change", () => applySampleRateInput(true));
   els.sendRateButton.addEventListener("click", () => {
     sendSampleRateCommand().catch((error) => addLog("ERR", error.message || error, true));
-  });
-  els.adc3Rate?.addEventListener("input", () => applyAdc3RateInput(false));
-  els.adc3Rate?.addEventListener("change", () => applyAdc3RateInput(true));
-  els.sendAdc3RateButton?.addEventListener("click", () => {
-    sendAdc3RateCommand().catch((error) => addLog("ERR", error.message || error, true));
   });
   els.bitMethod?.addEventListener("change", () => {
     setBitGenerationMethod(els.bitMethod.value, { enable: true });
@@ -3576,9 +3468,7 @@ function bindEvents() {
   els.plotAdcSource.addEventListener("change", async () => {
     const source = normalizeAdcSource(els.plotAdcSource.value);
     if (!source) return;
-    const connected = isConnected();
-    setAdcSource(source, { pending: connected });
-    if (connected) await sendCommand(source);
+    setAdcSource(source);
   });
 
   els.valueMode.addEventListener("change", () => {
@@ -3674,8 +3564,6 @@ function init() {
   setUiScale(loadUiScale(), false);
   applyWindowSizeInput();
   setSampleRateUi(DEFAULT_SAMPLE_RATE_HZ, rateHzToIntervalMs(DEFAULT_SAMPLE_RATE_HZ));
-  setPpgRateUi(DEFAULT_PPG_RATE_HZ, 10, DEFAULT_PPG_LED_ON_MS);
-  setAdc3RateUi(DEFAULT_ADC3_RATE_HZ, 1);
   setDacValue(2056, "init");
   applyLiveMaSettings();
   setBitGenerationMethod(getSelectedBitMethod());

@@ -1,0 +1,175 @@
+(function initPpgTrngProtocol(root, factory) {
+  const api = factory();
+  if (typeof module === "object" && module.exports) module.exports = api;
+  if (root) root.PpgTrngProtocol = api;
+}(typeof globalThis !== "undefined" ? globalThis : this, () => {
+  "use strict";
+
+  const MAGIC_0 = 0xA5;
+  const MAGIC_1 = 0x5A;
+  const VERSION = 1;
+  const CHANNEL_COUNT = 3;
+  const HEADER_SIZE = 10;
+  const CRC_SIZE = 2;
+
+  function asBytes(value) {
+    return value instanceof Uint8Array ? value : Uint8Array.from(value || []);
+  }
+
+  function crc16Ccitt(value, length = null) {
+    const bytes = asBytes(value);
+    const limit = length === null ? bytes.length : Math.min(bytes.length, length);
+    let crc = 0xFFFF;
+    for (let index = 0; index < limit; index += 1) {
+      crc ^= bytes[index] << 8;
+      for (let bit = 0; bit < 8; bit += 1) {
+        crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+        crc &= 0xFFFF;
+      }
+    }
+    return crc;
+  }
+
+  function getFrameLength(sampleCount, channelCount = CHANNEL_COUNT) {
+    return HEADER_SIZE + sampleCount * channelCount * 2 + CRC_SIZE;
+  }
+
+  function decodeAdcFrame(value) {
+    const bytes = asBytes(value);
+    if (bytes.length < HEADER_SIZE + CRC_SIZE) throw new Error("ADC frame is too short");
+    if (bytes[0] !== MAGIC_0 || bytes[1] !== MAGIC_1) throw new Error("ADC frame magic mismatch");
+    if (bytes[2] !== VERSION) throw new Error(`Unsupported ADC frame version ${bytes[2]}`);
+    if (bytes[3] !== CHANNEL_COUNT) throw new Error(`Unsupported ADC channel count ${bytes[3]}`);
+
+    const sampleCount = bytes[4];
+    if (sampleCount < 1 || sampleCount > 64) throw new Error(`Invalid ADC sample count ${sampleCount}`);
+    const frameLength = getFrameLength(sampleCount, bytes[3]);
+    if (bytes.length !== frameLength) throw new Error(`ADC frame length ${bytes.length}/${frameLength}`);
+
+    const crcOffset = frameLength - CRC_SIZE;
+    const expectedCrc = bytes[crcOffset] | (bytes[crcOffset + 1] << 8);
+    const actualCrc = crc16Ccitt(bytes, crcOffset);
+    if (actualCrc !== expectedCrc) {
+      throw new Error(`ADC frame CRC mismatch ${actualCrc.toString(16)}/${expectedCrc.toString(16)}`);
+    }
+
+    const samples = [];
+    let offset = HEADER_SIZE;
+    for (let scan = 0; scan < sampleCount; scan += 1) {
+      const adc1 = bytes[offset] | (bytes[offset + 1] << 8);
+      const adc2 = bytes[offset + 2] | (bytes[offset + 3] << 8);
+      const adc3 = bytes[offset + 4] | (bytes[offset + 5] << 8);
+      samples.push({ ADC1: adc1, ADC2: adc2, ADC3: adc3 });
+      offset += CHANNEL_COUNT * 2;
+    }
+
+    return {
+      version: bytes[2],
+      channelCount: bytes[3],
+      sampleCount,
+      flags: bytes[5],
+      sequence: bytes[6] | (bytes[7] << 8),
+      sampleRateHz: bytes[8] | (bytes[9] << 8),
+      samples,
+    };
+  }
+
+  function encodeAdcFrame({ sequence = 0, sampleRateHz = 1000, samples = [] } = {}) {
+    if (!samples.length || samples.length > 64) throw new Error("ADC frame requires 1-64 scans");
+    const frame = new Uint8Array(getFrameLength(samples.length));
+    frame[0] = MAGIC_0;
+    frame[1] = MAGIC_1;
+    frame[2] = VERSION;
+    frame[3] = CHANNEL_COUNT;
+    frame[4] = samples.length;
+    frame[5] = 0;
+    frame[6] = sequence & 0xFF;
+    frame[7] = (sequence >>> 8) & 0xFF;
+    frame[8] = sampleRateHz & 0xFF;
+    frame[9] = (sampleRateHz >>> 8) & 0xFF;
+
+    let offset = HEADER_SIZE;
+    samples.forEach((scan) => {
+      [scan.ADC1, scan.ADC2, scan.ADC3].forEach((rawValue) => {
+        const sample = Math.max(0, Math.min(16383, Math.round(Number(rawValue) || 0)));
+        frame[offset] = sample & 0xFF;
+        frame[offset + 1] = (sample >>> 8) & 0xFF;
+        offset += 2;
+      });
+    });
+
+    const crc = crc16Ccitt(frame, frame.length - CRC_SIZE);
+    frame[frame.length - 2] = crc & 0xFF;
+    frame[frame.length - 1] = (crc >>> 8) & 0xFF;
+    return frame;
+  }
+
+  class StreamDecoder {
+    constructor() {
+      this.buffer = [];
+    }
+
+    reset() {
+      this.buffer = [];
+    }
+
+    push(value) {
+      this.buffer.push(...asBytes(value));
+      const result = { textChunks: [], frames: [], errors: [] };
+
+      while (this.buffer.length) {
+        let magicIndex = -1;
+        for (let index = 0; index < this.buffer.length - 1; index += 1) {
+          if (this.buffer[index] === MAGIC_0 && this.buffer[index + 1] === MAGIC_1) {
+            magicIndex = index;
+            break;
+          }
+        }
+
+        if (magicIndex < 0) {
+          const keep = this.buffer.at(-1) === MAGIC_0 ? 1 : 0;
+          const textLength = this.buffer.length - keep;
+          if (textLength > 0) result.textChunks.push(Uint8Array.from(this.buffer.splice(0, textLength)));
+          break;
+        }
+
+        if (magicIndex > 0) {
+          result.textChunks.push(Uint8Array.from(this.buffer.splice(0, magicIndex)));
+          continue;
+        }
+
+        if (this.buffer.length < HEADER_SIZE) break;
+        const version = this.buffer[2];
+        const channelCount = this.buffer[3];
+        const sampleCount = this.buffer[4];
+        if (version !== VERSION || channelCount !== CHANNEL_COUNT || sampleCount < 1 || sampleCount > 64) {
+          result.errors.push(`Invalid ADC frame header v${version} ch${channelCount} n${sampleCount}`);
+          this.buffer.splice(0, 2);
+          continue;
+        }
+
+        const frameLength = getFrameLength(sampleCount, channelCount);
+        if (this.buffer.length < frameLength) break;
+        const candidate = Uint8Array.from(this.buffer.splice(0, frameLength));
+        try {
+          result.frames.push(decodeAdcFrame(candidate));
+        } catch (error) {
+          result.errors.push(error.message || String(error));
+        }
+      }
+
+      return result;
+    }
+  }
+
+  return {
+    MAGIC_0,
+    MAGIC_1,
+    VERSION,
+    CHANNEL_COUNT,
+    crc16Ccitt,
+    decodeAdcFrame,
+    encodeAdcFrame,
+    StreamDecoder,
+  };
+}));
