@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=f91e68832a1c" />
+    <link rel="stylesheet" href="./styles.css?v=d8b13c76ab8d" />
   </head>
   <body>
     <div class="app-shell">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-16 adc0-2-3-gain-v8</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-16 adc0-2-3-gain-v10</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -469,8 +469,22 @@
                 <strong id="onesRatio">--</strong>
               </div>
             </div>
-            <div class="bit-canvas-wrap">
-              <canvas id="bitCanvas" aria-label="Random bit bitmap"></canvas>
+            <div class="bit-visual-grid">
+              <div class="bit-canvas-wrap">
+                <canvas id="bitCanvas" aria-label="Random bit bitmap"></canvas>
+              </div>
+              <section class="bit-adc2-panel" aria-labelledby="bitAdc2Title">
+                <div class="bit-adc2-header">
+                  <div>
+                    <h3 id="bitAdc2Title">ADC2 BPTT PPG</h3>
+                    <p id="bitAdc2Caption">Waiting for ADC2 samples</p>
+                  </div>
+                  <span class="mini-plot-badge">ADC2 only</span>
+                </div>
+                <div class="bit-adc2-canvas-wrap">
+                  <canvas id="bitAdc2Canvas" aria-label="ADC2 BPTT PPG plot"></canvas>
+                </div>
+              </section>
             </div>
           </section>
 
@@ -707,8 +721,8 @@
       </main>
     </div>
 
-    <script src="./protocol.js?v=20260716-adc0-2-3-gain-v8" defer></script>
-    <script src="./app.js?v=416934062315" defer></script>
-    <script src="./dfu.js?v=20260716-adc0-2-3-gain-v8" defer></script>
+    <script src="./protocol.js?v=20260716-adc0-2-3-gain-v10" defer></script>
+    <script src="./app.js?v=72264d2380fb" defer></script>
+    <script src="./dfu.js?v=20260716-adc0-2-3-gain-v10" defer></script>
   </body>
 </html>

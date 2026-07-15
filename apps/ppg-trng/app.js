@@ -86,6 +86,9 @@ const els = {
   onesRatio: document.querySelector("#onesRatio"),
   bitCanvas: document.querySelector("#bitCanvas"),
   bitCanvasWrap: document.querySelector(".bit-canvas-wrap"),
+  bitAdc2Caption: document.querySelector("#bitAdc2Caption"),
+  bitAdc2Canvas: document.querySelector("#bitAdc2Canvas"),
+  bitAdc2CanvasWrap: document.querySelector(".bit-adc2-canvas-wrap"),
   viewTabs: document.querySelectorAll("[data-view-target]"),
   liveView: document.querySelector("#liveView"),
   noiseView: document.querySelector("#noiseView"),
@@ -223,6 +226,8 @@ const state = {
   lastDrawAt: 0,
   needsBitDraw: true,
   lastBitDrawAt: 0,
+  needsBitAdc2Draw: true,
+  lastBitAdc2DrawAt: 0,
   needsCipherDraw: true,
   lastCipherDrawAt: 0,
   noiseTable: null,
@@ -292,6 +297,13 @@ const plot = {
 
 const bitMap = {
   ctx: els.bitCanvas.getContext("2d"),
+  width: 0,
+  height: 0,
+  dpr: 1,
+};
+
+const bitAdc2Plot = {
+  ctx: els.bitAdc2Canvas.getContext("2d"),
   width: 0,
   height: 0,
   dpr: 1,
@@ -1219,6 +1231,7 @@ function commitSample(value, normalizedChannel = "ADC", adcSource = state.adcSou
   }
   enqueuePpgEncryption(sample);
   state.needsDraw = true;
+  state.needsBitAdc2Draw = true;
 }
 
 function trimSampleHistory() {
@@ -2295,9 +2308,11 @@ function clearSamples() {
   updateBitStats();
   updateEncryptionUi();
   state.needsDraw = true;
+  state.needsBitAdc2Draw = true;
   state.needsBitDraw = true;
   state.needsCipherDraw = true;
   drawPlot();
+  drawAdc2BitPlot();
   drawBitMap();
   drawCipherPlot();
   addLog("SYS", "Cleared ADC, cipher, and bit views");
@@ -2311,7 +2326,10 @@ function exportCsv() {
 
   const start = state.samples[0].t;
   const settings = getFilterSettings();
-  const displaySamples = getDisplaySamples();
+  const selectedSources = getSelectedAdcPlotSources();
+  const displaySamples = selectedSources
+    .flatMap((source) => getDisplaySamples(source))
+    .sort((left, right) => left.t - right.t);
   const currentMode = getValueMode() === "current";
   const rows = currentMode
     ? (settings.mode === "raw"
@@ -2345,7 +2363,7 @@ function exportCsv() {
   link.download = `adc_signal_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  addLog("SYS", `Exported ${displaySamples.length} samples`);
+  addLog("SYS", `Exported ${displaySamples.length} samples from ${selectedSources.join(" + ")}`);
 }
 
 function exportCipherCsv() {
@@ -3171,6 +3189,21 @@ function resizeBitCanvas() {
   ensureBitPlaneCapacity();
   state.needsBitDraw = true;
   drawBitMap();
+  resizeBitAdc2Canvas();
+}
+
+function resizeBitAdc2Canvas() {
+  if (els.bitPanel.hidden) return;
+
+  const rect = els.bitAdc2Canvas.getBoundingClientRect();
+  bitAdc2Plot.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  bitAdc2Plot.width = Math.floor(rect.width);
+  bitAdc2Plot.height = Math.floor(rect.height);
+  els.bitAdc2Canvas.width = Math.floor(bitAdc2Plot.width * bitAdc2Plot.dpr);
+  els.bitAdc2Canvas.height = Math.floor(bitAdc2Plot.height * bitAdc2Plot.dpr);
+  bitAdc2Plot.ctx.setTransform(bitAdc2Plot.dpr, 0, 0, bitAdc2Plot.dpr, 0, 0);
+  state.needsBitAdc2Draw = true;
+  drawAdc2BitPlot();
 }
 
 function resizeCipherCanvas() {
@@ -3469,6 +3502,56 @@ function drawCipherPlot() {
   ctx.restore();
 }
 
+function drawAdc2BitPlot() {
+  if (els.bitPanel.hidden) return;
+
+  const ctx = bitAdc2Plot.ctx;
+  const width = bitAdc2Plot.width;
+  const height = bitAdc2Plot.height;
+  if (!width || !height) return;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  const margin = { left: 58, right: 14, top: 20, bottom: 28 };
+  const chartW = width - margin.left - margin.right;
+  const chartH = height - margin.top - margin.bottom;
+  if (chartW <= 0 || chartH <= 0) return;
+
+  const samples = getDisplaySamples("ADC2");
+  const values = samples.map((sample) => sample.value);
+  const { min, max } = getYRange(values);
+  drawGrid(ctx, margin, chartW, chartH, min, max);
+  drawZeroLine(ctx, margin, chartW, chartH, min, max);
+
+  if (els.bitAdc2Caption) {
+    els.bitAdc2Caption.textContent = samples.length
+      ? `${samples.length} samples | ${state.sampleRateHz} Hz | ${getValueDescription()} | ${getFilterDescription()}`
+      : `Waiting for ADC2 samples | ${state.sampleRateHz} Hz`;
+  }
+
+  if (values.length < 2) {
+    ctx.fillStyle = "#66746f";
+    ctx.font = "700 13px Segoe UI, sans-serif";
+    ctx.fillText("No ADC2 stream", margin.left + 12, margin.top + 28);
+    return;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(margin.left, margin.top, chartW, chartH);
+  ctx.clip();
+  const renderSamples = decimateSeriesForCanvas(
+    samples,
+    Math.max(256, Math.floor(chartW * 2)),
+    (sample) => sample.value,
+  );
+  drawSeries(ctx, renderSamples, "ADC2", margin, chartW, chartH, min, max, getTimeRange(samples));
+  ctx.restore();
+  drawLegend(ctx, ["ADC2"], margin, chartW);
+}
+
 function drawBitMap() {
   if (els.bitPanel.hidden) return;
 
@@ -3550,8 +3633,16 @@ function animationLoop() {
   const now = performance.now();
   if (state.needsDraw && now - state.lastDrawAt > getPlotRefreshIntervalMs()) {
     drawPlot();
+    drawAdc2BitPlot();
     state.lastDrawAt = now;
     state.needsDraw = false;
+    state.needsBitAdc2Draw = false;
+    state.lastBitAdc2DrawAt = now;
+  }
+  if (state.needsBitAdc2Draw && now - state.lastBitAdc2DrawAt > 33) {
+    drawAdc2BitPlot();
+    state.lastBitAdc2DrawAt = now;
+    state.needsBitAdc2Draw = false;
   }
   if (state.needsBitDraw && now - state.lastBitDrawAt > 33) {
     drawBitMap();
@@ -3764,6 +3855,7 @@ function init() {
   resizeCipherCanvas();
   new ResizeObserver(resizeCanvas).observe(els.canvasWrap || els.plotCanvas);
   new ResizeObserver(resizeBitCanvas).observe(els.bitCanvasWrap || els.bitCanvas);
+  new ResizeObserver(resizeBitAdc2Canvas).observe(els.bitAdc2CanvasWrap || els.bitAdc2Canvas);
   new ResizeObserver(resizeCipherCanvas).observe(els.cipherCanvasWrap || els.cipherCanvas);
   new ResizeObserver(resizeNoiseBitCanvas).observe(els.noiseBitCanvasWrap || els.noiseBitCanvas);
   updateStats();
