@@ -119,7 +119,7 @@ const els = {
 const DEFAULT_MAX_SAMPLES = 20000;
 const MIN_MAX_SAMPLES = 100;
 const MAX_MAX_SAMPLES = 1000000;
-const DEFAULT_SAMPLE_RATE_HZ = 1000;
+const DEFAULT_SAMPLE_RATE_HZ = 100;
 const MIN_SAMPLE_RATE_HZ = 1;
 const MAX_SAMPLE_RATE_HZ = 1000;
 const DEFAULT_ADC_BATCH_SIZE = 16;
@@ -220,11 +220,11 @@ const state = {
   writeQueue: Promise.resolve(),
   maxSamples: DEFAULT_MAX_SAMPLES,
   sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
-  sampleIntervalMs: 1,
-  adcGainCodes: { ADC0: 0, ADC2: 0, ADC3: 0 },
-  adcGainLabels: { ADC0: "1/6", ADC2: "1/6", ADC3: "1/6" },
+  sampleIntervalMs: 10,
+  adcGainCodes: { ADC0: 0, ADC2: 5, ADC3: 0 },
+  adcGainLabels: { ADC0: "1/6", ADC2: "1", ADC3: "1/6" },
   adcBatchSize: DEFAULT_ADC_BATCH_SIZE,
-  saadcBaseHz: 1000,
+  saadcBaseHz: 100,
   saadcOversample: 0,
   lastStatsAt: 0,
   lastLiveStatusAt: 0,
