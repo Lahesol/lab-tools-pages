@@ -143,6 +143,8 @@ const MAX_RATE_HISTORY = 10000;
 const MAX_PENDING_PPG = 512;
 const MAX_ENCRYPTED_PPG = MAX_MAX_SAMPLES;
 const LIVE_STATUS_REFRESH_MS = 100;
+const SERIAL_RECOVERY_LIMIT = 3;
+const SERIAL_RECOVERY_DELAY_MS = 250;
 
 const state = {
   transport: "none",
@@ -153,6 +155,8 @@ const state = {
   bleWriteCharacteristic: null,
   bleNotifyCharacteristic: null,
   writer: null,
+  serialOpenOptions: null,
+  serialRecoveryAttempts: 0,
   firmwareVersion: "",
   firmwareProtocol: "",
   perChannelGainSupported: false,
@@ -727,15 +731,18 @@ async function connectSerial() {
 
   try {
     const baudRate = Number.parseInt(els.baudRate.value, 10);
-    state.port = await navigator.serial.requestPort();
-    await state.port.open({
+    const openOptions = {
       baudRate,
       dataBits: 8,
       stopBits: 1,
       parity: "none",
       flowControl: "none",
-    });
+    };
+    state.port = await navigator.serial.requestPort();
+    await state.port.open(openOptions);
 
+    state.serialOpenOptions = openOptions;
+    state.serialRecoveryAttempts = 0;
     state.keepReading = true;
     state.transport = "serial";
     resetReceiveState();
@@ -752,6 +759,8 @@ async function connectSerial() {
     }
     state.transport = "none";
     state.port = null;
+    state.serialOpenOptions = null;
+    state.serialRecoveryAttempts = 0;
     setConnectedUi(false);
   }
 }
@@ -790,6 +799,8 @@ async function disconnectSerial() {
   } finally {
     state.transport = "none";
     state.port = null;
+    state.serialOpenOptions = null;
+    state.serialRecoveryAttempts = 0;
     setConnectedUi(false);
   }
 }
@@ -887,26 +898,103 @@ function handleBluetoothNotification(event) {
   ingestBytes(bytes, "bluetooth");
 }
 
+function waitForSerialRecovery() {
+  return new Promise((resolve) => window.setTimeout(resolve, SERIAL_RECOVERY_DELAY_MS));
+}
+
+async function recoverSerialPort(error) {
+  if (!state.port || !state.serialOpenOptions) return false;
+  if (state.serialRecoveryAttempts >= SERIAL_RECOVERY_LIMIT) return false;
+
+  state.serialRecoveryAttempts += 1;
+  const attempt = state.serialRecoveryAttempts;
+  const message = error?.message || String(error);
+  addLog("SYS", `Serial read error: ${message}; reopening ${attempt}/${SERIAL_RECOVERY_LIMIT}`);
+  await waitForSerialRecovery();
+
+  try {
+    await state.port.close();
+  } catch (closeError) {
+    addLog("ERR", `Serial close during recovery: ${closeError.message || closeError}`, true);
+  }
+
+  try {
+    await state.port.open(state.serialOpenOptions);
+    resetReceiveState();
+    addLog("SYS", `Serial reopened at ${state.serialOpenOptions.baudRate}`);
+    return true;
+  } catch (openError) {
+    addLog("ERR", `Serial reopen failed: ${openError.message || openError}`, true);
+    return false;
+  }
+}
+
+async function stopSerialAfterReadFailure(statusMessage) {
+  const port = state.port;
+  state.keepReading = false;
+  state.transport = "none";
+  state.port = null;
+  state.serialOpenOptions = null;
+  state.serialRecoveryAttempts = 0;
+
+  try {
+    if (port) await port.close();
+  } catch (error) {
+    addLog("ERR", `Serial close after read failure: ${error.message || error}`, true);
+  }
+
+  setConnectedUi(false);
+  setConnectionStatus(statusMessage, "bad");
+}
+
 async function readLoop() {
-  while (state.port?.readable && state.keepReading) {
+  while (state.port && state.keepReading) {
+    if (!state.port.readable) {
+      if (await recoverSerialPort(new Error("Serial stream is not readable"))) continue;
+      break;
+    }
+
     const reader = state.port.readable.getReader();
     state.reader = reader;
+    let readError = null;
+    let streamDone = false;
     try {
       while (state.keepReading) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          streamDone = true;
+          break;
+        }
         if (value) ingestBytes(value);
       }
     } catch (error) {
-      if (state.keepReading) addLog("ERR", error.message || error, true);
+      readError = error;
     } finally {
       if (state.reader === reader) state.reader = null;
       try {
         reader.releaseLock();
       } catch (error) {
-        if (state.keepReading) addLog("ERR", error.message || error, true);
+        if (!readError) readError = error;
       }
     }
+
+    if (!state.keepReading) break;
+    if (readError) {
+      if (await recoverSerialPort(readError)) continue;
+      await stopSerialAfterReadFailure("Serial read stopped");
+      addLog(
+        "ERR",
+        "Serial read stopped after recovery attempts; verify 115200 baud, UART pins, and GND",
+        true,
+      );
+      break;
+    }
+    if (streamDone) break;
+  }
+
+  if (state.keepReading && state.transport === "serial") {
+    await stopSerialAfterReadFailure("Serial stream closed");
+    addLog("ERR", "Serial stream closed; reconnect required", true);
   }
 }
 
@@ -933,6 +1021,7 @@ function ingestSynchronizedAdcFrame(frame) {
   setSampleRateUi(rateHz, intervalMs, { normalizeInput: false });
   state.saadcBaseHz = rateHz;
   state.adcBatchSize = frame.sampleCount;
+  state.serialRecoveryAttempts = 0;
 
   if (state.lastAdcFrameSequence !== null) {
     const expectedSequence = (state.lastAdcFrameSequence + 1) & 0xFFFF;
