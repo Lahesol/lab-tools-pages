@@ -901,6 +901,7 @@ canvas {
   display: grid;
   grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
   gap: 12px;
+  min-width: 0;
   padding: 12px 14px 14px;
   background: #fbfdfc;
 }
@@ -934,6 +935,15 @@ canvas {
   min-height: 60px;
   padding: 12px 12px 8px;
   border-bottom: 1px solid var(--line);
+}
+
+.bit-adc2-header > * {
+  min-width: 0;
+}
+
+.bit-adc2-header > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .bit-adc2-header h3 {
