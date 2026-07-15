@@ -706,6 +706,26 @@ function queryDeviceStateSoon() {
   }, 250);
 }
 
+function waitForFirmwareProtocol(timeoutMs = 600) {
+  return new Promise((resolve) => {
+    const deadline = performance.now() + timeoutMs;
+    const poll = () => {
+      if (state.firmwareProtocol || state.perChannelGainSupported || !isConnected() || performance.now() >= deadline) {
+        resolve();
+        return;
+      }
+      window.setTimeout(poll, 25);
+    };
+    poll();
+  });
+}
+
+async function ensureFirmwareProtocolKnown() {
+  if (state.firmwareProtocol || state.perChannelGainSupported || !isConnected()) return;
+  await sendCommand("VER?");
+  await waitForFirmwareProtocol();
+}
+
 async function connectSelectedTransport() {
   if (els.transportMode.value === "bluetooth") {
     await connectBluetooth();
@@ -922,6 +942,7 @@ async function recoverSerialPort(error) {
     await state.port.open(state.serialOpenOptions);
     resetReceiveState();
     addLog("SYS", `Serial reopened at ${state.serialOpenOptions.baudRate}`);
+    queryDeviceStateSoon();
     return true;
   } catch (openError) {
     addLog("ERR", `Serial reopen failed: ${openError.message || openError}`, true);
@@ -1207,8 +1228,8 @@ function parseFirmwareInfoSegment(segment) {
   }
   const protocolMatch = segment.match(/\bPROTO\s*,\s*([^,\s;]+)/i);
   state.perChannelGainSupported = false;
+  state.firmwareProtocol = protocolMatch?.[1] || "";
   if (protocolMatch) {
-    state.firmwareProtocol = protocolMatch[1];
     state.perChannelGainSupported = /gain-v4/i.test(state.firmwareProtocol);
   }
   addLog("RX", segment);
@@ -2177,6 +2198,7 @@ async function sendAdcGainCommand() {
   if (els.adcGainStatus) {
     els.adcGainStatus.textContent = `Applying ADC gains ${codes.join("/")}...`;
   }
+  await ensureFirmwareProtocolKnown();
   if (!supportsPerChannelGain()) {
     if (new Set(codes).size !== 1) {
       const protocol = state.firmwareProtocol || "unknown";
