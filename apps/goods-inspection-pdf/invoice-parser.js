@@ -27,7 +27,6 @@
     /^\s*(?:https?:\/\/|www\.|[\w.+-]+@[\w.-]+)/i,
     /\b\d{1,6}\s+[A-Za-z0-9 .'-]+\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|lane|ln\.?)\b/i,
     /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b.*\bUSA\b/i,
-    /^\s*\+?\d[\d\s()-]{7,}\s*$/,
     /^(?:date|invoice\s*date|receipt\s*date|송장\s*일자|거래\s*일시|승인\s*일시)\b/i,
     /(?:credit\s*card|신용카드|카드\s*번호|승인\s*번호|마스터\s*트래커)/i,
   ];
@@ -60,8 +59,15 @@
     return text.length <= 100 && TABLE_END.test(text);
   }
 
+  function looksLikePhoneNumber(text) {
+    const compact = String(text || "").trim();
+    if (!/^\+?\d[\d\s()/-]{7,}$/.test(compact)) return false;
+    const groups = compact.split(/[\s()/-]+/).filter(Boolean);
+    return groups.length >= 2 && groups.every((group) => group.length <= 4);
+  }
+
   function isMetadataLine(text) {
-    return METADATA_PATTERNS.some((pattern) => pattern.test(text));
+    return looksLikePhoneNumber(text) || METADATA_PATTERNS.some((pattern) => pattern.test(text));
   }
 
   function stripTrailingColumns(text, inTable) {
@@ -107,7 +113,10 @@
       .trim();
 
     if (!working || working.length < 3 || working.length > 110) return null;
-    if (!MEANINGFUL_TEXT.test(working) || isMetadataLine(working)) return null;
+    const codeLike = /^[A-Za-z0-9][A-Za-z0-9._\/-]{4,}$/.test(working)
+      && /\d/.test(working)
+      && /[._\/-]/.test(working);
+    if ((!MEANINGFUL_TEXT.test(working) && !codeLike) || isMetadataLine(working)) return null;
     if (/^[A-Za-z가-힣 ]{1,3}$/.test(working)) return null;
     if (/^(?:of|page|no|item)\s*\d*$/i.test(working)) return null;
     if (/^[^:：]{1,24}[:：]\s*/.test(working) && trailing.numericColumnCount === 0) return null;
