@@ -784,6 +784,7 @@ async function startFirmwareConcurrentEncryption() {
   state.encryptionEnabled = false;
   if (els.encryptionToggle) els.encryptionToggle.checked = false;
   resetBitAndEncryptionBuffers();
+  state.firmwareEncryptionMode = "concurrent";
   updateBitStats();
   updateEncryptionUi();
   state.needsBitDraw = true;
@@ -797,6 +798,7 @@ async function startFirmwareSwitchingEncryption() {
   state.encryptionEnabled = false;
   if (els.encryptionToggle) els.encryptionToggle.checked = false;
   resetBitAndEncryptionBuffers();
+  state.firmwareEncryptionMode = "switching";
   updateBitStats();
   updateEncryptionUi();
   state.needsBitDraw = true;
@@ -4626,8 +4628,11 @@ function bindEvents() {
   els.encryptionToggle?.addEventListener("change", () => {
     setEncryptionEnabled(els.encryptionToggle.checked);
   });
+  els.firmwareConcurrentEncryptionStartButton?.addEventListener("click", () => {
+    startFirmwareConcurrentEncryption().catch((error) => addLog("ERR", error.message || error, true));
+  });
   els.firmwareEncryptionStartButton?.addEventListener("click", () => {
-    startFirmwareEncryption().catch((error) => addLog("ERR", error.message || error, true));
+    startFirmwareSwitchingEncryption().catch((error) => addLog("ERR", error.message || error, true));
   });
   els.firmwareEncryptionStopButton?.addEventListener("click", () => {
     stopFirmwareEncryption().catch((error) => addLog("ERR", error.message || error, true));

@@ -15,6 +15,10 @@ SMKang_Light/web_gui/DEPLOYMENT.md
 The static frontend can control UART directly through browser Web Serial when
 served from GitHub Pages over HTTPS. This path requires a Chromium-based browser
 and an explicit user-selected serial port.
+
+The current static GUI release is `smkang-light-web-gui-0.4.0`. The first screen
+is organized for connection, ADC measurement, DAC output, and PC sweep. The
+advanced section contains zero-code calibration and legacy firmware commands.
 The DAPLink request is filtered for USB VID:PID `C251:F001`; users should select
 the board as USB Serial Device, DAPLink, or COM6 in the browser prompt.
 The UI also exposes an unfiltered `any serial port` chooser for fallback.

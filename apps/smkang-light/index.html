@@ -1,52 +1,65 @@
 ﻿<!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SMKang Light DAC/ADC Control</title>
-    <link rel="stylesheet" href="styles.css?v=15e357f437a3" />
+    <title>SMKang Light 계측 제어</title>
+    <link rel="stylesheet" href="styles.css?v=01f03908e360" />
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
         <div>
-          <h1>SMKang Light DAC/ADC Control</h1>
-          <p id="runInfo">Local UART web GUI</p>
+          <h1>SMKang Light 계측 제어</h1>
+          <p id="runInfo">브라우저 Web Serial을 사용한 DAC/ADC 제어</p>
         </div>
         <div class="status-stack">
-          <span id="connectionBadge" class="badge badge-idle">Disconnected</span>
-          <span id="adcBadge" class="badge">ADC idle</span>
-          <span id="sweepBadge" class="badge">Sweep idle</span>
+          <span id="connectionBadge" class="badge badge-idle">연결 안 됨</span>
+          <span id="adcBadge" class="badge">ADC 대기</span>
+          <span id="sweepBadge" class="badge">스윕 대기</span>
         </div>
       </header>
 
-      <section class="toolbar panel">
-        <label>
-          Port
+      <section class="toolbar panel connection-panel">
+        <div class="toolbar-group">
+          <label>
+          포트
           <select id="portSelect"></select>
-        </label>
-        <button id="refreshPortsBtn" type="button">Refresh</button>
-        <label>
-          Baud
-          <input id="baudInput" type="number" min="1" step="1" value="230400" />
-        </label>
-        <button id="connectBtn" type="button">Connect</button>
-        <button id="disconnectBtn" type="button">Disconnect</button>
-        <button id="adcToggleBtn" type="button" class="primary">Start ADC</button>
-        <button id="zeroVoltageBtn" type="button">All DAC 0 V</button>
-        <button id="clearBtn" type="button">Clear Current</button>
+          </label>
+          <button id="refreshPortsBtn" type="button">새로 고침</button>
+          <label>
+            Baud
+            <input id="baudInput" type="number" min="1" step="1" value="230400" />
+          </label>
+        </div>
+        <div class="toolbar-actions">
+          <button id="connectBtn" type="button" class="primary">연결</button>
+          <button id="disconnectBtn" type="button">해제</button>
+          <button id="clearBtn" type="button">현재 데이터 지우기</button>
+        </div>
+        <p id="actionStatus" class="action-status" role="status" aria-live="polite">보드가 연결되지 않았습니다.</p>
       </section>
 
       <section class="main-grid">
         <div class="left-stack">
           <section class="panel">
             <div class="section-head">
-              <h2>ADC Setup</h2>
-              <button id="applyAdcConfigBtn" type="button">Apply ADC</button>
+              <div class="section-title">
+                <span class="step-index">1</span>
+                <div>
+                  <h2>ADC 측정</h2>
+                  <p class="section-note">보드 평균은 UART 출력 전에 적용되고, 화면 평균은 plot 데이터에만 적용됩니다.</p>
+                </div>
+              </div>
+              <div class="button-row">
+                <span id="adcConfigStatus" class="status-text">저장됨</span>
+                <button id="applyAdcConfigBtn" type="button">설정 적용</button>
+                <button id="adcToggleBtn" type="button" class="primary">ADC 시작</button>
+              </div>
             </div>
             <div class="form-grid three-col">
               <label>
-                ADC input
+                입력 채널
                 <select id="adcInputSelect">
                   <option value="0">AIN0</option>
                   <option value="1" selected>AIN1</option>
@@ -59,107 +72,167 @@
                 </select>
               </label>
               <label>
-                Sampling rate (Hz)
+                보드 샘플링 (Hz)
                 <input id="adcRateInput" type="number" min="1" max="1000" step="1" value="250" />
+                <span class="field-note">펌웨어 트리거 속도</span>
               </label>
               <label>
-                Firmware average
+                보드 평균
                 <input id="adcFirmwareAverageInput" type="number" min="1" max="256" step="1" value="4" />
+                <span class="field-note">AA: UART 전 평균</span>
               </label>
               <label>
-                Settle discard
+                변경 후 버림
                 <input id="adcSettleDiscardInput" type="number" min="0" max="1000" step="1" value="2" />
+                <span class="field-note">AS: DAC 변경 직후</span>
               </label>
               <label>
-                Oversampling (samples)
+                화면 평균
                 <input id="adcOversampleInput" type="number" min="1" max="1000" step="1" value="4" />
+                <span class="field-note">plot/CSV용 후처리</span>
               </label>
             </div>
           </section>
 
           <section class="panel">
             <div class="section-head">
-              <h2>DAC Channel Modes</h2>
-              <button id="applyFixedBtn" type="button">Apply Fixed D</button>
+              <div class="section-title">
+                <span class="step-index">2</span>
+                <div>
+                  <h2>DAC 출력</h2>
+                  <p class="section-note">D는 즉시 출력하고, F는 펌웨어의 고정값을 저장합니다.</p>
+                </div>
+              </div>
+              <div class="button-row">
+                <button id="zeroVoltageBtn" type="button" class="danger-outline">모든 채널 0 V</button>
+                <button id="applyFixedBtn" type="button">전체 출력 적용</button>
+              </div>
             </div>
             <div class="channel-table" id="channelTable">
               <div class="channel-table-head">
                 <span>Ch</span>
+                <span>현재</span>
                 <span>Mode</span>
-                <span>Fixed mV</span>
-                <span>Start mV</span>
-                <span>Stop mV</span>
-                <span>Set F</span>
-                <span>Apply D</span>
+                <span>고정값 (mV)</span>
+                <span>시작 (mV)</span>
+                <span>정지 (mV)</span>
+                <span>F 저장</span>
+                <span>D 적용</span>
               </div>
             </div>
           </section>
 
           <section class="panel">
             <div class="section-head">
-              <h2>PC-Controlled Sweep</h2>
+              <div class="section-title">
+                <span class="step-index">3</span>
+                <div>
+                  <h2>PC 스윕</h2>
+                  <p class="section-note">값이 바뀌는 DAC만 전송하며, ADC가 켜져 있으면 안정화 시간을 자동 반영합니다.</p>
+                </div>
+              </div>
               <div class="button-row">
-                <button id="startSweepBtn" type="button" class="primary">Start Sweep</button>
-                <button id="stopSweepBtn" type="button">Stop</button>
+                <button id="startSweepBtn" type="button" class="primary">스윕 시작</button>
+                <button id="stopSweepBtn" type="button">중지</button>
               </div>
             </div>
             <div class="form-grid sweep-options">
               <label>
-                Direction
+                방향
                 <select id="sweepDirectionSelect">
-                  <option value="forward">Forward</option>
-                  <option value="reverse">Reverse</option>
-                  <option value="roundtrip">Round-trip</option>
+                  <option value="forward">정방향</option>
+                  <option value="reverse">역방향</option>
+                  <option value="roundtrip">왕복</option>
                 </select>
               </label>
               <label>
-                Step (mV)
+                스텝 (mV)
                 <input id="sweepStepInput" type="number" min="1" step="1" value="100" />
               </label>
               <label>
-                Delay (ms)
+                지연 (ms)
                 <input id="sweepDelayInput" type="number" min="0" step="1" value="80" />
               </label>
               <label>
-                Cycles
+                반복 횟수
                 <input id="sweepCyclesInput" type="number" min="1" step="1" value="1" />
               </label>
               <label class="checkbox-label">
                 <input id="autoAdcCheckbox" type="checkbox" checked />
-                Run ADC during sweep
+                스윕 중 ADC 측정
               </label>
             </div>
-            <p id="sweepProgress" class="muted">No sweep running</p>
-          </section>
-
-          <section class="panel">
-            <h2>Zero Codes</h2>
-            <div class="section-subhead">
-              <span class="muted">Optional zero-code calibration. Use All DAC 0 V for normal output reset.</span>
-              <button id="zeroCodeBtn" type="button">Set Z + D0</button>
+            <div class="progress-wrap">
+              <progress id="sweepProgressBar" max="1" value="0"></progress>
+              <p id="sweepProgress" class="muted">스윕 대기 중</p>
             </div>
-            <div id="zeroGrid" class="zero-grid"></div>
           </section>
 
-          <section class="panel">
-            <h2>Manual Command</h2>
-            <form id="manualForm" class="manual-form">
-              <input id="manualInput" type="text" autocomplete="off" placeholder="ADC, AD1, AR100, DA0, SC..." />
-              <button type="submit">Send</button>
-            </form>
-          </section>
+          <details class="advanced-panel">
+            <summary>보정 및 펌웨어 고급 제어</summary>
+            <div class="advanced-content">
+              <div class="advanced-block">
+                <div class="section-subhead">
+                  <div>
+                    <h3>Zero code 보정</h3>
+                    <p class="muted">Z 명령으로 채널별 0 V 기준 코드를 저장한 뒤 각 채널을 0 V로 출력합니다.</p>
+                  </div>
+                  <button id="zeroCodeBtn" type="button">보정 저장 + 0 V</button>
+                </div>
+                <div id="zeroGrid" class="zero-grid"></div>
+              </div>
+              <div class="advanced-block">
+                <div class="section-subhead">
+                  <div>
+                    <h3>펌웨어 내장 스윕</h3>
+                    <p class="muted">기존 SF/SR/SC/SD 명령을 직접 실행합니다. 일반 측정은 PC 스윕을 권장합니다.</p>
+                  </div>
+                </div>
+                <div class="form-grid legacy-options">
+                  <label>
+                    Cycle (C)
+                    <input id="legacyCycleInput" type="number" min="0" step="1" value="10" />
+                  </label>
+                  <button id="legacySetCycleBtn" type="button">Cycle 저장</button>
+                  <label>
+                    Delay (T, ms)
+                    <input id="legacyDelayInput" type="number" min="0" step="1" value="3" />
+                  </label>
+                  <button id="legacySetDelayBtn" type="button">Delay 저장</button>
+                </div>
+                <div class="button-row legacy-buttons">
+                  <button id="legacyForwardBtn" type="button">정방향 SF</button>
+                  <button id="legacyReverseBtn" type="button">역방향 SR</button>
+                  <button id="legacyCycleBtn" type="button">Cycle SC</button>
+                  <button id="legacyDetectBtn" type="button">Detect SD</button>
+                </div>
+              </div>
+              <div class="advanced-block">
+                <div class="section-subhead">
+                  <div>
+                    <h3>수동 UART 명령</h3>
+                    <p class="muted">펌웨어 명령을 알고 있을 때만 사용합니다.</p>
+                  </div>
+                </div>
+                <form id="manualForm" class="manual-form">
+                  <input id="manualInput" type="text" autocomplete="off" placeholder="ADC, AD1, AR100, DA0, SC..." />
+                  <button type="submit">전송</button>
+                </form>
+              </div>
+            </div>
+          </details>
         </div>
 
         <div class="right-stack">
           <section class="panel plot-panel">
             <div class="section-head">
               <div>
-                <h2 id="plotTitle">Current ADC</h2>
-                <p id="statsLine">Samples: 0 | Last: - | Min: - | Max: -</p>
+                <h2 id="plotTitle">현재 ADC</h2>
+                <p id="statsLine">샘플: 0 | 최근: - | 최소: - | 최대: -</p>
               </div>
               <div class="button-row">
                 <label class="inline-label">
-                  X axis
+                  X 축
                   <select id="plotAxisSelect">
                     <option value="time">Time</option>
                     <option value="A">DAC A</option>
@@ -168,10 +241,10 @@
                     <option value="D">DAC D</option>
                   </select>
                 </label>
-                <button id="showCurrentBtn" type="button">Show Current</button>
-                <button id="exportCurrentBtn" type="button">Current CSV</button>
-                <button id="exportCurvesBtn" type="button">Curves CSV</button>
-                <button id="exportRawLogBtn" type="button">Raw Log</button>
+                <button id="showCurrentBtn" type="button">현재 데이터</button>
+                <button id="exportCurrentBtn" type="button">현재 CSV</button>
+                <button id="exportCurvesBtn" type="button">커브 CSV</button>
+                <button id="exportRawLogBtn" type="button">원시 로그</button>
               </div>
             </div>
             <canvas id="adcCanvas" width="960" height="430"></canvas>
@@ -180,14 +253,14 @@
           <section class="panel split-panel">
             <div>
               <div class="section-head">
-                <h2>Stored Curves</h2>
-                <span id="curveCount" class="muted">0 curves</span>
+                <h2>저장된 커브</h2>
+                <span id="curveCount" class="muted">0개</span>
               </div>
               <div id="curveList" class="curve-list"></div>
             </div>
             <div>
               <div class="section-head">
-                <h2>TX/RX Log</h2>
+                <h2>TX/RX 로그</h2>
                 <span id="lastLogId" class="muted">log 0</span>
               </div>
               <pre id="logBox" class="log-box"></pre>
@@ -200,15 +273,16 @@
     <template id="channelRowTemplate">
       <div class="channel-row">
         <span class="channel-name"></span>
+        <span class="channel-current">-</span>
         <select class="channel-mode">
-          <option value="fixed">Fixed</option>
-          <option value="sweep">Sweep</option>
+          <option value="fixed">고정</option>
+          <option value="sweep">스윕</option>
         </select>
         <input class="channel-fixed" type="number" step="1" />
         <input class="channel-start" type="number" step="1" />
         <input class="channel-stop" type="number" step="1" />
-        <button class="fixed-btn" type="button">F</button>
-        <button class="direct-btn" type="button">D</button>
+        <button class="fixed-btn" type="button" title="펌웨어 고정값 저장">F 저장</button>
+        <button class="direct-btn primary" type="button" title="현재 값을 즉시 DAC에 출력">D 적용</button>
       </div>
     </template>
 
@@ -222,6 +296,6 @@
       </div>
     </template>
 
-    <script src="app.js?v=80b3053f8815"></script>
+    <script src="app.js?v=36d8927a5f82"></script>
   </body>
 </html>

@@ -1,7 +1,7 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
-const APP_VERSION = "smkang-light-web-gui-0.3.6";
+const APP_VERSION = "smkang-light-web-gui-0.4.0";
 const POLL_MS = 250;
 const ADC_BITS = 14;
 const ADC_VREF = 3.3;
@@ -10,6 +10,8 @@ const DEFAULT_ADC_RATE_HZ = 250;
 const DEFAULT_ADC_OVERSAMPLE_N = 4;
 const DEFAULT_ADC_FIRMWARE_AVERAGE_N = 4;
 const DEFAULT_ADC_SETTLE_DISCARD_N = 2;
+const DAC_MIN_MV = -30000;
+const DAC_MAX_MV = 32000;
 const MAX_LOG_ROWS = 1200;
 const DAPLINK_FILTERS = [{ usbVendorId: 0xc251, usbProductId: 0xf001 }];
 
@@ -24,7 +26,7 @@ const state = {
   curveRecords: [],
   activeCurveIndex: null,
   activeSamples: null,
-  activeTitle: "Current ADC",
+  activeTitle: "현재 ADC",
   polling: false,
   portLabel: null,
   baud: 230400,
@@ -84,6 +86,7 @@ function bindElements() {
     "baudInput",
     "connectBtn",
     "disconnectBtn",
+    "actionStatus",
     "adcToggleBtn",
     "zeroVoltageBtn",
     "clearBtn",
@@ -92,6 +95,7 @@ function bindElements() {
     "adcOversampleInput",
     "adcFirmwareAverageInput",
     "adcSettleDiscardInput",
+    "adcConfigStatus",
     "applyAdcConfigBtn",
     "channelTable",
     "applyFixedBtn",
@@ -102,9 +106,18 @@ function bindElements() {
     "sweepDelayInput",
     "sweepCyclesInput",
     "autoAdcCheckbox",
+    "sweepProgressBar",
     "sweepProgress",
     "zeroGrid",
     "zeroCodeBtn",
+    "legacyCycleInput",
+    "legacySetCycleBtn",
+    "legacyDelayInput",
+    "legacySetDelayBtn",
+    "legacyForwardBtn",
+    "legacyReverseBtn",
+    "legacyCycleBtn",
+    "legacyDetectBtn",
     "manualForm",
     "manualInput",
     "plotTitle",
@@ -136,19 +149,37 @@ function renderChannelRows() {
     const fixed = row.querySelector(".channel-fixed");
     const start = row.querySelector(".channel-start");
     const stop = row.querySelector(".channel-stop");
+    [fixed, start, stop].forEach((input) => {
+      input.min = String(DAC_MIN_MV);
+      input.max = String(DAC_MAX_MV);
+      input.inputMode = "numeric";
+    });
     fixed.value = FIXED_DEFAULTS[channel];
     start.value = channel === "B" ? -15000 : FIXED_DEFAULTS[channel];
     stop.value = channel === "B" ? 0 : FIXED_DEFAULTS[channel];
     if (channel === "B") mode.value = "sweep";
 
     row.querySelector(".fixed-btn").addEventListener("click", () =>
-      postAction("/api/fixed", { channel, value: readInt(fixed) })
+      postAction("/api/fixed", { channel, value: readDacMv(fixed, `고정값 ${channel}`) })
     );
     row.querySelector(".direct-btn").addEventListener("click", () =>
-      postAction("/api/direct", { channel, value: readInt(fixed) }, { showCurrent: true })
+      postAction(
+        "/api/direct",
+        { channel, value: readDacMv(fixed, `출력값 ${channel}`) },
+        { showCurrent: true }
+      )
     );
+    mode.addEventListener("change", () => updateChannelRowUi(row));
     els.channelTable.appendChild(node);
+    updateChannelRowUi(row);
   });
+}
+
+function updateChannelRowUi(row) {
+  const mode = row.querySelector(".channel-mode").value;
+  row.querySelector(".channel-fixed").disabled = mode === "sweep";
+  row.querySelector(".channel-start").disabled = mode !== "sweep";
+  row.querySelector(".channel-stop").disabled = mode !== "sweep";
 }
 
 function renderZeroControls() {
@@ -175,9 +206,14 @@ function bindAdcConfigDirtyTracking() {
   ADC_CONFIG_FIELDS.forEach(([key, elementId]) => {
     const element = els[elementId];
     if (!element) return;
-    element.addEventListener("input", () => state.adcConfigDirty.add(key));
-    element.addEventListener("change", () => state.adcConfigDirty.add(key));
+    const markDirty = () => {
+      state.adcConfigDirty.add(key);
+      updateAdcConfigStatus();
+    };
+    element.addEventListener("input", markDirty);
+    element.addEventListener("change", markDirty);
   });
+  updateAdcConfigStatus();
 }
 
 function shouldSyncAdcConfigField(key, element) {
@@ -202,6 +238,14 @@ function syncAdcConfigInputsFromState(options = {}) {
 function clearAdcConfigDirty() {
   state.adcConfigDirty.clear();
   syncAdcConfigInputsFromState({ force: true });
+  updateAdcConfigStatus();
+}
+
+function updateAdcConfigStatus() {
+  if (!els.adcConfigStatus) return;
+  const pending = state.adcConfigDirty.size > 0;
+  els.adcConfigStatus.textContent = pending ? "적용되지 않은 변경" : "저장됨";
+  els.adcConfigStatus.className = `status-text ${pending ? "pending" : ""}`.trim();
 }
 
 function bindActions() {
@@ -243,6 +287,25 @@ function bindActions() {
   });
   els.stopSweepBtn.addEventListener("click", () => postAction("/api/sweep/stop", {}));
 
+  els.legacySetCycleBtn.addEventListener("click", () =>
+    postAction("/api/cycle", { value: readInt(els.legacyCycleInput) })
+  );
+  els.legacySetDelayBtn.addEventListener("click", () =>
+    postAction("/api/delay", { value: readInt(els.legacyDelayInput) })
+  );
+  els.legacyForwardBtn.addEventListener("click", () =>
+    postAction("/api/sweep/run", { mode: "SF" }, { showCurrent: true })
+  );
+  els.legacyReverseBtn.addEventListener("click", () =>
+    postAction("/api/sweep/run", { mode: "SR" }, { showCurrent: true })
+  );
+  els.legacyCycleBtn.addEventListener("click", () =>
+    postAction("/api/sweep/run", { mode: "SC" }, { showCurrent: true })
+  );
+  els.legacyDetectBtn.addEventListener("click", () =>
+    postAction("/api/sweep/run", { mode: "SD" }, { showCurrent: true })
+  );
+
   els.zeroCodeBtn.addEventListener("click", () => {
     const codes = {};
     CHANNELS.forEach((channel) => {
@@ -262,7 +325,7 @@ function bindActions() {
   els.showCurrentBtn.addEventListener("click", () => {
     state.activeCurveIndex = null;
     state.activeSamples = null;
-    state.activeTitle = "Current ADC";
+    state.activeTitle = "현재 ADC";
     drawActivePlot();
     renderCurves();
   });
@@ -290,9 +353,9 @@ function buildSweepConfig() {
     const row = getChannelRow(channel);
     channels[channel] = {
       mode: row.querySelector(".channel-mode").value,
-      fixed: readInt(row.querySelector(".channel-fixed")),
-      start: readInt(row.querySelector(".channel-start")),
-      stop: readInt(row.querySelector(".channel-stop")),
+      fixed: readDacMv(row.querySelector(".channel-fixed"), `고정값 ${channel}`),
+      start: readDacMv(row.querySelector(".channel-start"), `시작값 ${channel}`),
+      stop: readDacMv(row.querySelector(".channel-stop"), `정지값 ${channel}`),
     };
   });
   return {
@@ -332,9 +395,9 @@ async function ensureTransport() {
 function setTransportMode(mode) {
   state.transportMode = mode;
   if (mode === "backend") {
-    els.runInfo.textContent = "Local backend UART web GUI";
+    els.runInfo.textContent = "로컬 백엔드 UART 제어";
   } else {
-    els.runInfo.textContent = "Browser Web Serial UART web GUI";
+    els.runInfo.textContent = "브라우저 Web Serial UART 제어";
   }
 }
 
@@ -359,7 +422,7 @@ async function refreshBackendPorts() {
   if (!data.ports.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = data.pyserial_available ? "No serial ports found" : "pyserial not installed";
+    option.textContent = data.pyserial_available ? "검색된 포트가 없습니다" : "pyserial이 설치되지 않았습니다";
     els.portSelect.appendChild(option);
   } else {
     data.ports.forEach((port) => {
@@ -379,9 +442,9 @@ async function refreshWebSerialPorts() {
   if (!("serial" in navigator)) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "Web Serial unsupported";
+    option.textContent = "이 브라우저는 Web Serial을 지원하지 않습니다";
     els.portSelect.appendChild(option);
-    els.runInfo.textContent = "Web Serial unavailable in this browser";
+    els.runInfo.textContent = "이 브라우저에서는 Web Serial을 사용할 수 없습니다";
     updateControlState();
     return;
   }
@@ -396,16 +459,16 @@ async function refreshWebSerialPorts() {
 
   const requestOption = document.createElement("option");
   requestOption.value = "request-daplink";
-  requestOption.textContent = "Click Connect to select DAPLink (C251:F001)...";
+  requestOption.textContent = "연결 버튼을 눌러 DAPLink 선택 (C251:F001)...";
   els.portSelect.appendChild(requestOption);
   const anyOption = document.createElement("option");
   anyOption.value = "request-any";
-  anyOption.textContent = "Click Connect to select any serial port...";
+  anyOption.textContent = "연결 버튼을 눌러 포트 직접 선택...";
   els.portSelect.appendChild(anyOption);
   els.portSelect.value = state.webSerialPorts.length ? "granted:0" : "request-daplink";
   els.runInfo.textContent = state.webSerialPorts.length
-    ? "Browser Web Serial UART web GUI"
-    : "Click Connect, then choose USB Serial Device / DAPLink / COM6 in the browser prompt";
+    ? "브라우저 Web Serial UART 제어"
+    : "연결을 누른 뒤 USB Serial Device / DAPLink / COM6를 선택하세요";
   updateControlState();
 }
 
@@ -448,7 +511,7 @@ async function postAction(path, body, options = {}) {
       if (options.showCurrent) {
         state.activeCurveIndex = null;
         state.activeSamples = null;
-        state.activeTitle = "Current ADC";
+        state.activeTitle = "현재 ADC";
       }
       applySnapshot(data);
       const full = await fetchJson(`/api/data?after_log=${state.lastLogId}`);
@@ -459,17 +522,40 @@ async function postAction(path, body, options = {}) {
       if (options.showCurrent) {
         state.activeCurveIndex = null;
         state.activeSamples = null;
-        state.activeTitle = "Current ADC";
+        state.activeTitle = "현재 ADC";
       }
       applySnapshot(data);
       state.samples = data.samples || state.samples || [];
     }
     drawActivePlot();
+    setActionStatus(`${actionLabel(path)} 적용됨`, "ok");
     return true;
   } catch (error) {
     appendLocalLog("ERROR", error.message);
+    setActionStatus(error.message, "error");
     return false;
   }
+}
+
+function actionLabel(path) {
+  const labels = {
+    "/api/connect": "연결",
+    "/api/disconnect": "연결 해제",
+    "/api/adc/toggle": "ADC 상태",
+    "/api/adc/config": "ADC 설정",
+    "/api/direct": "DAC 출력",
+    "/api/direct-all": "전체 DAC 출력",
+    "/api/dac/zero-all": "DAC 0 V",
+    "/api/fixed": "펌웨어 고정값",
+    "/api/sweep/start": "PC 스윕",
+    "/api/sweep/stop": "스윕 중지",
+    "/api/sweep/run": "펌웨어 스윕",
+    "/api/cycle": "Cycle 설정",
+    "/api/delay": "Delay 설정",
+    "/api/zero-all": "Zero code",
+    "/api/clear": "현재 데이터",
+  };
+  return labels[path] || "명령";
 }
 
 async function fetchJson(path, options = {}) {
@@ -532,6 +618,15 @@ async function handleLocalAction(path, body, afterLogId = null) {
     case "/api/sweep/stop":
       state.sweepStopRequested = true;
       appendLogRow("INFO", "Sweep stop requested");
+      break;
+    case "/api/sweep/run":
+      await sendSerialCommand(String(body.mode || "").toUpperCase());
+      break;
+    case "/api/cycle":
+      await sendSerialCommand(`C${Math.max(0, Number.parseInt(body.value, 10) || 0)}`);
+      break;
+    case "/api/delay":
+      await sendSerialCommand(`T${Math.max(0, Number.parseInt(body.value, 10) || 0)}`);
       break;
     case "/api/clear":
       state.samples = [];
@@ -790,13 +885,14 @@ async function setLocalAdcConfig(input, rateHz, oversampleN, firmwareAverageN, s
 
 async function setLocalFixed(channel, valueMv) {
   const ch = validateChannel(channel);
-  state.fixedMv[ch] = valueMv;
-  await sendSerialCommand(`F${ch}${valueMv}`);
+  const value = validateDacMv(valueMv, `고정값 ${ch}`);
+  state.fixedMv[ch] = value;
+  await sendSerialCommand(`F${ch}${value}`);
 }
 
 async function sendDirect(channel, valueMv, startNewBlock = true) {
   const ch = validateChannel(channel);
-  const value = Number.parseInt(valueMv, 10);
+  const value = validateDacMv(valueMv, `출력값 ${ch}`);
   if (startNewBlock) prepareNewCommandBlock(`D${ch}${value}`);
   else if (state.currentDacMv[ch] !== value) {
     flushOversample();
@@ -917,9 +1013,9 @@ function buildSweepPoints(config) {
   CHANNELS.forEach((channel) => {
     const item = channelsCfg[channel] || {};
     const mode = String(item.mode || "fixed").toLowerCase();
-    const fixed = Number.parseInt(item.fixed ?? state.fixedMv[channel], 10);
-    let start = Number.parseInt(item.start ?? fixed, 10);
-    let stop = Number.parseInt(item.stop ?? fixed, 10);
+    const fixed = validateDacMv(Number.parseInt(item.fixed ?? state.fixedMv[channel], 10), `고정값 ${channel}`);
+    let start = validateDacMv(Number.parseInt(item.start ?? fixed, 10), `시작값 ${channel}`);
+    let stop = validateDacMv(Number.parseInt(item.stop ?? fixed, 10), `정지값 ${channel}`);
     if (mode !== "sweep") {
       start = fixed;
       stop = fixed;
@@ -968,7 +1064,7 @@ function resetLocalRun(baud, portLabel) {
   state.curveRecords = [];
   state.activeCurveIndex = null;
   state.activeSamples = null;
-  state.activeTitle = "Current ADC";
+  state.activeTitle = "현재 ADC";
   state.currentCommand = null;
   state.currentCommandTime = null;
   state.currentSampleT0 = null;
@@ -1170,6 +1266,23 @@ function applySnapshot(data) {
   state.adcRunning = Boolean(data.adc_running);
   state.sweepRunning = Boolean(data.sweep?.running);
   state.curves = Array.isArray(data.curves) ? data.curves : [];
+  if (data.current_dac_mv && typeof data.current_dac_mv === "object") {
+    CHANNELS.forEach((channel) => {
+      if (data.current_dac_mv[channel] !== undefined) {
+        state.currentDacMv[channel] = Number.parseInt(data.current_dac_mv[channel], 10) || 0;
+      }
+    });
+  }
+  if (data.fixed_mv && typeof data.fixed_mv === "object") {
+    CHANNELS.forEach((channel) => {
+      if (data.fixed_mv[channel] !== undefined) state.fixedMv[channel] = Number.parseInt(data.fixed_mv[channel], 10) || 0;
+    });
+  }
+  if (data.zero_codes && typeof data.zero_codes === "object") {
+    CHANNELS.forEach((channel) => {
+      if (data.zero_codes[channel] !== undefined) state.zeroCodes[channel] = Number.parseInt(data.zero_codes[channel], 10) || 0;
+    });
+  }
   if (data.last_log_id !== undefined) state.lastLogId = data.last_log_id;
   if (data.adc_input !== undefined) {
     state.adcInput = Number.parseInt(data.adc_input, 10);
@@ -1194,6 +1307,7 @@ function applySnapshot(data) {
     setAdcConfigField("settle_discard_n", els.adcSettleDiscardInput, state.adcSettleDiscardN);
   }
   updateBadges(data);
+  updateChannelStatuses();
   updateSweepProgress(data.sweep || {});
   updateControlState();
   appendLogs(data.logs || []);
@@ -1202,12 +1316,12 @@ function applySnapshot(data) {
     const prefix = state.transportMode === "webserial" ? "Browser Web Serial" : "Run";
     els.runInfo.textContent = data.run_dir ? `${prefix} ${data.run_id} | ${data.run_dir}` : `${prefix} ${data.run_id}`;
   } else {
-    els.runInfo.textContent = state.transportMode === "webserial" ? "Browser Web Serial UART web GUI" : "Local UART web GUI";
+    els.runInfo.textContent = state.transportMode === "webserial" ? "브라우저 Web Serial UART 제어" : "로컬 UART 제어";
   }
 }
 
 function updateBadges(data) {
-  els.connectionBadge.textContent = state.connected ? `Connected ${data.port || ""} @ ${data.baud || ""}` : "Disconnected";
+  els.connectionBadge.textContent = state.connected ? `연결됨 ${data.port || ""} @ ${data.baud || ""}` : "연결 안 됨";
   els.connectionBadge.className = `badge ${state.connected ? "badge-ok" : "badge-idle"}`;
   const adcInput = data.adc_input ?? state.adcInput ?? "";
   const adcRate = data.adc_rate_hz ?? state.adcRateHz ?? "";
@@ -1216,23 +1330,36 @@ function updateBadges(data) {
     data.adc_firmware_average_n ?? state.adcFirmwareAverageN ?? DEFAULT_ADC_FIRMWARE_AVERAGE_N;
   const settleDiscard = data.adc_settle_discard_n ?? state.adcSettleDiscardN ?? DEFAULT_ADC_SETTLE_DISCARD_N;
   els.adcBadge.textContent = state.adcRunning
-    ? `ADC ${adcInput} @ ${adcRate} Hz | FW x${firmwareAverage} | plot x${adcOversample} | settle ${settleDiscard}`
-    : "ADC idle";
+    ? `ADC AIN${adcInput} @ ${adcRate} Hz | 보드 x${firmwareAverage} | 화면 x${adcOversample} | 버림 ${settleDiscard}`
+    : "ADC 대기";
   els.adcBadge.className = `badge ${state.adcRunning ? "badge-warn" : "badge-idle"}`;
-  els.sweepBadge.textContent = state.sweepRunning ? "Sweep running" : "Sweep idle";
+  els.sweepBadge.textContent = state.sweepRunning ? "스윕 실행 중" : "스윕 대기";
   els.sweepBadge.className = `badge ${state.sweepRunning ? "badge-warn" : "badge-idle"}`;
-  els.adcToggleBtn.textContent = state.adcRunning ? "Stop ADC" : "Start ADC";
+  els.adcToggleBtn.textContent = state.adcRunning ? "ADC 중지" : "ADC 시작";
 }
 
 function updateSweepProgress(sweep) {
   if (!sweep.running && !sweep.points_total) {
-    els.sweepProgress.textContent = "No sweep running";
+    els.sweepProgress.textContent = "스윕 대기 중";
+    els.sweepProgressBar.value = 0;
+    els.sweepProgressBar.max = 1;
     return;
   }
   const done = sweep.points_done || 0;
   const total = sweep.points_total || 0;
   const suffix = sweep.error ? ` | ${sweep.error}` : "";
-  els.sweepProgress.textContent = `${sweep.label || "Sweep"}: ${done}/${total}${suffix}`;
+  els.sweepProgress.textContent = `${sweep.running ? "스윕 실행 중" : "스윕 완료"}: ${done}/${total}${suffix}`;
+  els.sweepProgressBar.max = Math.max(1, total);
+  els.sweepProgressBar.value = Math.min(done, total || 1);
+}
+
+function updateChannelStatuses() {
+  CHANNELS.forEach((channel) => {
+    const row = getChannelRow(channel);
+    if (!row) return;
+    const value = Number(state.currentDacMv[channel]);
+    row.querySelector(".channel-current").textContent = Number.isFinite(value) ? `${value} mV` : "-";
+  });
 }
 
 function updateControlState() {
@@ -1248,6 +1375,12 @@ function updateControlState() {
     els.startSweepBtn,
     els.stopSweepBtn,
     els.zeroCodeBtn,
+    els.legacySetCycleBtn,
+    els.legacySetDelayBtn,
+    els.legacyForwardBtn,
+    els.legacyReverseBtn,
+    els.legacyCycleBtn,
+    els.legacyDetectBtn,
     els.manualForm.querySelector("button"),
   ].forEach((button) => {
     button.disabled = !connected;
@@ -1264,6 +1397,7 @@ function setDisconnectedUi() {
   state.adcRunning = false;
   state.sweepRunning = false;
   updateBadges({});
+  setActionStatus("보드가 연결되지 않았습니다.", "");
   updateControlState();
 }
 
@@ -1283,13 +1417,13 @@ function appendLocalLog(direction, text) {
 }
 
 function renderCurves() {
-  els.curveCount.textContent = `${state.curves.length} curves`;
+  els.curveCount.textContent = `${state.curves.length}개`;
   els.curveList.textContent = "";
   if (!state.curves.length) {
     const empty = document.createElement("div");
     empty.className = "muted";
     empty.style.padding = "10px";
-    empty.textContent = "No stored curves";
+    empty.textContent = "저장된 커브가 없습니다";
     els.curveList.appendChild(empty);
     return;
   }
@@ -1325,7 +1459,7 @@ async function loadCurve(index) {
 
 function drawActivePlot() {
   const samples = state.activeCurveIndex === null ? state.samples : state.activeSamples || [];
-  const title = state.activeCurveIndex === null ? "Current ADC" : state.activeTitle;
+  const title = state.activeCurveIndex === null ? "현재 ADC" : state.activeTitle;
   drawPlot(samples, title, els.plotAxisSelect.value);
 }
 
@@ -1566,17 +1700,17 @@ function formatAxisValue(value, axis) {
 }
 
 function formatStats(samples) {
-  if (!samples.length) return "Samples: 0 | Last: - | Min: - | Max: -";
+  if (!samples.length) return "샘플: 0 | 최근: - | 최소: - | 최대: -";
   const values = samples.map((record) => Number(record.adc)).filter(Number.isFinite);
-  if (!values.length) return "Samples: 0 | Last: - | Min: - | Max: -";
+  if (!values.length) return "샘플: 0 | 최근: - | 최소: - | 최대: -";
   const last = values[values.length - 1];
   const min = Math.min(...values);
   const max = Math.max(...values);
   return [
-    `Samples: ${values.length}`,
-    `Last: ${formatAdcCount(last)} (${adcToVoltage(last).toFixed(3)} V)`,
-    `Min: ${formatAdcCount(min)} (${adcToVoltage(min).toFixed(3)} V)`,
-    `Max: ${formatAdcCount(max)} (${adcToVoltage(max).toFixed(3)} V)`,
+    `샘플: ${values.length}`,
+    `최근: ${formatAdcCount(last)} (${adcToVoltage(last).toFixed(3)} V)`,
+    `최소: ${formatAdcCount(min)} (${adcToVoltage(min).toFixed(3)} V)`,
+    `최대: ${formatAdcCount(max)} (${adcToVoltage(max).toFixed(3)} V)`,
   ].join(" | ");
 }
 
@@ -1615,6 +1749,19 @@ function readInt(input) {
   return value;
 }
 
+function readDacMv(input, label) {
+  return validateDacMv(readInt(input), label);
+}
+
+function validateDacMv(value, label = "DAC voltage") {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) throw new Error(`${label}은 정수 mV여야 합니다.`);
+  if (parsed < DAC_MIN_MV || parsed > DAC_MAX_MV) {
+    throw new Error(`${label}은 ${DAC_MIN_MV} ~ ${DAC_MAX_MV} mV 범위여야 합니다.`);
+  }
+  return parsed;
+}
+
 function getChannelRow(channel) {
   return document.querySelector(`.channel-row[data-channel="${channel}"]`);
 }
@@ -1626,7 +1773,16 @@ function validateChannel(channel) {
 }
 
 function setBackendMessage(message) {
-  if (message) els.runInfo.textContent = message;
+  if (message) {
+    els.runInfo.textContent = message;
+    setActionStatus(message, "error");
+  }
+}
+
+function setActionStatus(message, tone = "") {
+  if (!els.actionStatus) return;
+  els.actionStatus.textContent = String(message || "");
+  els.actionStatus.className = `action-status ${tone}`.trim();
 }
 
 function describeSerialPort(port, fallback) {

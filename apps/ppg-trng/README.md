@@ -30,8 +30,10 @@ app sends `RATE50` automatically after notifications are enabled.
 The GUI reads the effective value from `RATE?` and from each binary frame. Sixteen
 scans are grouped per frame, so a 1000 Hz stream normally arrives as 62.5 frames/s.
 
-The GUI also decodes the firmware's CRC-checked `ENCF v1` frames. `Start FW ENCF`
-sends `SWENC1`; `Stop FW ENCF` sends `SWENC0`. The firmware remains the source of
+The GUI also decodes the firmware's CRC-checked `ENCF v1` frames. `Start concurrent
+ENCF` sends `ENC1` for simultaneous ADC2 PPG and ADC3 MV+VN processing. `Start
+switching ENCF` sends `SWENC1`; `Stop FW ENCF` sends the matching stop command.
+The firmware remains the source of
 the key and cipher. The GUI does not run a second key extractor after an ENCF
 record arrives. For switching records, the GUI reconstructs only the transmitted
 PPG low-byte field as `cipher XOR key` and keeps the received ADC signal field for

@@ -4,6 +4,11 @@ This web GUI controls the `Neuro -KHKim_multipurpose` firmware through UART.
 It supports two transports: browser Web Serial for GitHub Pages/static hosting,
 and the local Python backend for localhost experiments.
 
+The user-facing workflow is organized as connection -> ADC measurement -> DAC
+output -> PC sweep. Normal DAC inputs are validated to the nominal firmware
+range of `-30000..32000 mV`; zero-code calibration and legacy firmware sweep
+commands remain available under the advanced section.
+
 ## Run Locally
 
 From `C:\Users\mecha\GPT_home\SMKang_Light`:
