@@ -2414,6 +2414,51 @@ function getDeltaSeconds(samples, index) {
   return Number.isFinite(dt) && dt > 0 ? dt : 0.001;
 }
 
+function buildWideAdcCsvRows(selectedSources, settings, currentMode) {
+  const series = new Map();
+  const timeKeys = new Set();
+  const start = state.samples[0]?.t || performance.now();
+
+  selectedSources.forEach((source) => {
+    const samplesByTime = new Map();
+    getDisplaySamples(source).forEach((sample) => {
+      const time = sample.t - start;
+      const timeKey = time.toFixed(3);
+      samplesByTime.set(timeKey, sample);
+      timeKeys.add(timeKey);
+    });
+    series.set(source, samplesByTime);
+  });
+
+  const filtered = settings.mode !== "raw";
+  const header = ["time_ms"];
+  selectedSources.forEach((source) => {
+    const base = currentMode ? `${source}_current` : source;
+    header.push(base);
+    if (filtered) header.push(`${base}_filtered`);
+  });
+
+  const rows = [header.join(",")];
+  [...timeKeys]
+    .sort((left, right) => Number(left) - Number(right))
+    .forEach((timeKey) => {
+      const row = [timeKey];
+      selectedSources.forEach((source) => {
+        const sample = series.get(source)?.get(timeKey);
+        const rawValue = sample && Number.isFinite(sample.rawValue)
+          ? sample.rawValue
+          : sample?.value;
+        row.push(Number.isFinite(rawValue) ? rawValue : "");
+        if (filtered) {
+          row.push(sample && Number.isFinite(sample.value) ? sample.value : "");
+        }
+      });
+      rows.push(row.join(","));
+    });
+
+  return { rows, sampleCount: rows.length - 1 };
+}
+
 async function sendCommand(value) {
   const command = String(value).trim();
   if (!command) return;
@@ -2520,37 +2565,10 @@ function exportCsv() {
     return;
   }
 
-  const start = state.samples[0].t;
   const settings = getFilterSettings();
   const selectedSources = getSelectedAdcPlotSources();
-  const displaySamples = selectedSources
-    .flatMap((source) => getDisplaySamples(source))
-    .sort((left, right) => left.t - right.t);
   const currentMode = getValueMode() === "current";
-  const rows = currentMode
-    ? (settings.mode === "raw"
-      ? ["time_ms,channel,adc_input,adc_code,bias_code,current_value"]
-      : ["time_ms,channel,adc_input,adc_code,bias_code,raw_current,filtered_current"])
-    : (settings.mode === "raw"
-      ? ["time_ms,channel,adc_input,value"]
-      : ["time_ms,channel,adc_input,raw_value,filtered_value"]);
-  displaySamples.forEach((sample) => {
-    const time = (sample.t - start).toFixed(3);
-    const adcSource = sample.adcSource || state.adcSource;
-    if (currentMode) {
-      const adcCode = Number.isFinite(sample.adcCode) ? sample.adcCode : "";
-      const biasCode = Number.isFinite(sample.biasCode) ? sample.biasCode : "";
-      if (settings.mode === "raw") {
-        rows.push(`${time},${sample.channel || "ADC"},${adcSource},${adcCode},${biasCode},${sample.value}`);
-      } else {
-        rows.push(`${time},${sample.channel || "ADC"},${adcSource},${adcCode},${biasCode},${sample.rawValue},${sample.value}`);
-      }
-    } else if (settings.mode === "raw") {
-      rows.push(`${time},${sample.channel || "ADC"},${adcSource},${sample.value}`);
-    } else {
-      rows.push(`${time},${sample.channel || "ADC"},${adcSource},${sample.rawValue},${sample.value}`);
-    }
-  });
+  const { rows, sampleCount } = buildWideAdcCsvRows(selectedSources, settings, currentMode);
 
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -2559,7 +2577,7 @@ function exportCsv() {
   link.download = `adc_signal_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  addLog("SYS", `Exported ${displaySamples.length} samples from ${selectedSources.join(" + ")}`);
+  addLog("SYS", `Exported ${sampleCount} time rows from ${selectedSources.join(" + ")}`);
 }
 
 function exportCipherCsv() {
