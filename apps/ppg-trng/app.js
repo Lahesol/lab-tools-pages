@@ -34,6 +34,7 @@ const els = {
   adcGainStatus: document.querySelector("#adcGainStatus"),
   plotAdcSource: document.querySelector("#plotAdcSource"),
   bitMethod: document.querySelector("#bitMethod"),
+  encryptionSource: document.querySelector("#encryptionSource"),
   cipherWidth: document.querySelector("#cipherWidth"),
   liveMaWindow: document.querySelector("#liveMaWindow"),
   liveMaOffset: document.querySelector("#liveMaOffset"),
@@ -92,6 +93,27 @@ const els = {
   viewTabs: document.querySelectorAll("[data-view-target]"),
   liveView: document.querySelector("#liveView"),
   noiseView: document.querySelector("#noiseView"),
+  switchView: document.querySelector("#switchView"),
+  switchPpgSeconds: document.querySelector("#switchPpgSeconds"),
+  switchTrngSeconds: document.querySelector("#switchTrngSeconds"),
+  switchSettleMs: document.querySelector("#switchSettleMs"),
+  switchDacTrng: document.querySelector("#switchDacTrng"),
+  switchDacPpg: document.querySelector("#switchDacPpg"),
+  switchStartButton: document.querySelector("#switchStartButton"),
+  switchClearButton: document.querySelector("#switchClearButton"),
+  switchStatus: document.querySelector("#switchStatus"),
+  switchAdc0PpgCaption: document.querySelector("#switchAdc0PpgCaption"),
+  switchAdc0TrngCaption: document.querySelector("#switchAdc0TrngCaption"),
+  switchAdc2PpgCaption: document.querySelector("#switchAdc2PpgCaption"),
+  switchAdc2TrngCaption: document.querySelector("#switchAdc2TrngCaption"),
+  switchAdc0PpgCanvas: document.querySelector("#switchAdc0PpgCanvas"),
+  switchAdc0TrngCanvas: document.querySelector("#switchAdc0TrngCanvas"),
+  switchAdc2PpgCanvas: document.querySelector("#switchAdc2PpgCanvas"),
+  switchAdc2TrngCanvas: document.querySelector("#switchAdc2TrngCanvas"),
+  switchAdc0PpgWrap: document.querySelector("#switchAdc0PpgWrap"),
+  switchAdc0TrngWrap: document.querySelector("#switchAdc0TrngWrap"),
+  switchAdc2PpgWrap: document.querySelector("#switchAdc2PpgWrap"),
+  switchAdc2TrngWrap: document.querySelector("#switchAdc2TrngWrap"),
   noiseCaption: document.querySelector("#noiseCaption"),
   noiseCsvFile: document.querySelector("#noiseCsvFile"),
   noiseDelimiter: document.querySelector("#noiseDelimiter"),
@@ -176,6 +198,7 @@ const state = {
   dacValues: { A: 2048, B: 2056 },
   bitMode: false,
   encryptionEnabled: false,
+  encryptionSource: "ADC2",
   bits: [],
   totalBits: 0,
   maxBits: 32768,
@@ -213,6 +236,25 @@ const state = {
   noisePairBit: null,
   noiseExtractors: {},
   liveBitExtractors: {},
+  switching: {
+    active: false,
+    phase: "idle",
+    phaseStartedAt: 0,
+    phaseDurationMs: 0,
+    ppgMs: 5000,
+    trngMs: 5000,
+    settleMs: 200,
+    dacTrng: 2048,
+    dacPpg: 4095,
+    timer: null,
+    cycles: 0,
+    samples: {
+      ADC0: { ppg: [], trng: [] },
+      ADC2: { ppg: [], trng: [] },
+    },
+    bits: { ADC0: [], ADC2: [] },
+    extractors: {},
+  },
   paused: false,
   demoTimer: null,
   demoPhase: 0,
@@ -236,6 +278,8 @@ const state = {
   lastBitAdc2DrawAt: 0,
   needsCipherDraw: true,
   lastCipherDrawAt: 0,
+  needsSwitchDraw: true,
+  lastSwitchDrawAt: 0,
   noiseTable: null,
   noiseFileName: "",
   noiseResults: [],
@@ -327,6 +371,17 @@ const noiseBitMap = {
   width: 0,
   height: 0,
   dpr: 1,
+};
+
+const switchingPlots = {
+  ADC0: {
+    ppg: { canvas: els.switchAdc0PpgCanvas, wrap: els.switchAdc0PpgWrap, ctx: els.switchAdc0PpgCanvas?.getContext("2d"), width: 0, height: 0, dpr: 1 },
+    trng: { canvas: els.switchAdc0TrngCanvas, wrap: els.switchAdc0TrngWrap, ctx: els.switchAdc0TrngCanvas?.getContext("2d"), width: 0, height: 0, dpr: 1 },
+  },
+  ADC2: {
+    ppg: { canvas: els.switchAdc2PpgCanvas, wrap: els.switchAdc2PpgWrap, ctx: els.switchAdc2PpgCanvas?.getContext("2d"), width: 0, height: 0, dpr: 1 },
+    trng: { canvas: els.switchAdc2TrngCanvas, wrap: els.switchAdc2TrngWrap, ctx: els.switchAdc2TrngCanvas?.getContext("2d"), width: 0, height: 0, dpr: 1 },
+  },
 };
 
 const NOISE_METHODS = [
@@ -663,6 +718,19 @@ function updateAdcSourceUi(options = {}) {
     button.classList.toggle("is-active", active);
   });
   updateValueUi();
+}
+
+function setEncryptionSource(source, options = {}) {
+  const normalized = normalizeAdcSource(source);
+  if (!normalized) return;
+  const changed = state.encryptionSource !== normalized;
+  state.encryptionSource = normalized;
+  if (els.encryptionSource && els.encryptionSource.value !== normalized) {
+    els.encryptionSource.value = normalized;
+  }
+  if (changed && options.reset !== false) resetLiveEncryption();
+  updateEncryptionUi();
+  state.needsCipherDraw = true;
 }
 
 function setEncryptionEnabled(enabled, options = {}) {
@@ -1293,12 +1361,252 @@ function parseTaggedBitSegment(segment) {
   return true;
 }
 
+function getSwitchingExtractor(method, adcSource) {
+  const key = `${method}:${adcSource}`;
+  if (!state.switching.extractors[key]) {
+    state.switching.extractors[key] = {
+      baseline: null,
+      warmup: 0,
+      previous: null,
+      pairBit: null,
+      window: [],
+      sum: 0,
+    };
+  }
+  return state.switching.extractors[key];
+}
+
+function collectSwitchingBitsForMethod(value, adcSource, method) {
+  const rounded = Math.round(value);
+  if (method === "lsb") return [rounded & 1];
+  if (method === "lsb2" || method === "lsb4") {
+    const bitCount = method === "lsb4" ? 4 : 2;
+    const bits = [];
+    for (let bitIndex = bitCount - 1; bitIndex >= 0; bitIndex -= 1) {
+      bits.push((rounded >> bitIndex) & 1);
+    }
+    return bits;
+  }
+
+  const extractor = getSwitchingExtractor(method, adcSource);
+  if (method === "ma-threshold" || method === "ma-threshold-vn") {
+    let bits = [];
+    if (extractor.window.length >= state.liveMaWindow) {
+      const threshold = (extractor.sum / extractor.window.length) + state.liveMaOffset;
+      const rawBit = value > threshold ? 1 : 0;
+      bits = method === "ma-threshold-vn"
+        ? collectVonNeumannBit(rawBit, extractor)
+        : [rawBit];
+    }
+    extractor.window.push(value);
+    extractor.sum += value;
+    if (extractor.window.length > state.liveMaWindow) {
+      extractor.sum -= extractor.window.shift();
+    }
+    return bits;
+  }
+
+  if (method === "delta" || method === "delta-vn") {
+    if (extractor.previous === null) {
+      extractor.previous = value;
+      return [];
+    }
+    const delta = value - extractor.previous;
+    extractor.previous = value;
+    if (delta === 0) return [];
+    const rawBit = delta > 0 ? 1 : 0;
+    return method === "delta-vn" ? collectVonNeumannBit(rawBit, extractor) : [rawBit];
+  }
+
+  if (method === "residual" || method === "residual-vn") {
+    if (extractor.baseline === null) {
+      extractor.baseline = value;
+      extractor.warmup = 1;
+      return [];
+    }
+    const residual = value - extractor.baseline;
+    extractor.baseline += NOISE_BASELINE_ALPHA * residual;
+    extractor.warmup += 1;
+    if (extractor.warmup < NOISE_WARMUP_SAMPLES || residual === 0) return [];
+    const rawBit = residual > 0 ? 1 : 0;
+    return method === "residual-vn" ? collectVonNeumannBit(rawBit, extractor) : [rawBit];
+  }
+
+  return [];
+}
+
+function collectSwitchingBits(value, adcSource) {
+  const method = state.bitGenerationMethod;
+  const methods = method === "throughput-all"
+    ? getThroughputBitMethods()
+    : [method];
+  return methods.flatMap((candidate) => collectSwitchingBitsForMethod(value, adcSource, candidate));
+}
+
+function appendSwitchingEncryptionBits(bits, adcSource) {
+  if (!state.encryptionEnabled || adcSource !== state.encryptionSource || !bits.length) return;
+  state.keyBits.push(...bits);
+  if (state.keyBits.length > MAX_KEY_BITS) {
+    state.keyBits.splice(0, state.keyBits.length - MAX_KEY_BITS);
+  }
+  state.bitSource = `${adcSource} switching TRNG`;
+  processEncryptionQueue();
+  updateEncryptionUi();
+  state.needsCipherDraw = true;
+}
+
+function resetSwitchingData() {
+  state.switching.samples = {
+    ADC0: { ppg: [], trng: [] },
+    ADC2: { ppg: [], trng: [] },
+  };
+  state.switching.bits = { ADC0: [], ADC2: [] };
+  state.switching.extractors = {};
+  state.switching.cycles = 0;
+  state.switching.phase = state.switching.active ? state.switching.phase : "idle";
+  state.needsSwitchDraw = true;
+}
+
+function getSwitchingNumber(control, fallback, min, max) {
+  const value = Number.parseInt(control?.value, 10);
+  return Number.isFinite(value) ? clampInteger(value, min, max, fallback) : fallback;
+}
+
+function updateSwitchingSettings() {
+  state.switching.ppgMs = getSwitchingNumber(els.switchPpgSeconds, 5, 1, 3600) * 1000;
+  state.switching.trngMs = getSwitchingNumber(els.switchTrngSeconds, 5, 1, 3600) * 1000;
+  state.switching.settleMs = getSwitchingNumber(els.switchSettleMs, 200, 0, 10000);
+  state.switching.dacTrng = clampDac(els.switchDacTrng?.value || 2048);
+  state.switching.dacPpg = clampDac(els.switchDacPpg?.value || 4095);
+  if (els.switchPpgSeconds) els.switchPpgSeconds.value = String(state.switching.ppgMs / 1000);
+  if (els.switchTrngSeconds) els.switchTrngSeconds.value = String(state.switching.trngMs / 1000);
+  if (els.switchSettleMs) els.switchSettleMs.value = String(state.switching.settleMs);
+  if (els.switchDacTrng) els.switchDacTrng.value = String(state.switching.dacTrng);
+  if (els.switchDacPpg) els.switchDacPpg.value = String(state.switching.dacPpg);
+}
+
+function updateSwitchingUi() {
+  const switching = state.switching;
+  if (els.switchStartButton) els.switchStartButton.textContent = switching.active ? "Stop switching" : "Start switching";
+  if (els.switchStatus) {
+    if (!switching.active) {
+      els.switchStatus.textContent = switching.cycles ? `Stopped after ${switching.cycles} cycle${switching.cycles === 1 ? "" : "s"}` : "Ready. PPG and TRNG phases use the same ADC input.";
+    } else {
+      const elapsed = Math.max(0, performance.now() - switching.phaseStartedAt);
+      const remaining = Math.max(0, switching.phaseDurationMs - elapsed);
+      const dac = switching.phase === "ppg" ? switching.dacPpg : switching.dacTrng;
+      els.switchStatus.textContent = `${switching.phase.toUpperCase()} phase | DACB ${dac} | ${Math.ceil(remaining / 1000)} s remaining | cycles ${switching.cycles}`;
+    }
+  }
+  const phaseLabels = { ppg: "PPG", trng: "TRNG", idle: "idle" };
+  const captionKeys = {
+    ADC0: { ppg: "switchAdc0PpgCaption", trng: "switchAdc0TrngCaption" },
+    ADC2: { ppg: "switchAdc2PpgCaption", trng: "switchAdc2TrngCaption" },
+  };
+  ["ADC0", "ADC2"].forEach((source) => {
+    const ppgCount = switching.samples[source].ppg.length;
+    const bitCount = switching.bits[source].length;
+    const ppgCaption = els[captionKeys[source].ppg];
+    const trngCaption = els[captionKeys[source].trng];
+    if (ppgCaption) ppgCaption.textContent = `${ppgCount} samples | ${phaseLabels.ppg} DACB ${switching.dacPpg}`;
+    if (trngCaption) trngCaption.textContent = `${bitCount} bits | ${phaseLabels.trng} DACB ${switching.dacTrng} | ${getBitMethodLabel()}`;
+  });
+}
+
+function setSwitchingPhase(phase) {
+  const switching = state.switching;
+  switching.phase = phase;
+  switching.phaseStartedAt = performance.now();
+  switching.phaseDurationMs = phase === "ppg" ? switching.ppgMs : switching.trngMs;
+  const dac = phase === "ppg" ? switching.dacPpg : switching.dacTrng;
+  state.dacValues.B = dac;
+  if (getSelectedDacTarget() === "B") setDacValue(dac, "switching");
+  sendCommand(`B${dac}`).catch((error) => addLog("ERR", `Switching DACB: ${error.message || error}`, true));
+  updateSwitchingUi();
+  state.needsSwitchDraw = true;
+}
+
+function checkSwitchingPhase() {
+  const switching = state.switching;
+  if (!switching.active) return;
+  if (performance.now() - switching.phaseStartedAt < switching.phaseDurationMs) {
+    updateSwitchingUi();
+    return;
+  }
+  const nextPhase = switching.phase === "ppg" ? "trng" : "ppg";
+  if (nextPhase === "ppg") switching.cycles += 1;
+  setSwitchingPhase(nextPhase);
+}
+
+function stopSwitchingMode() {
+  const wasActive = state.switching.active;
+  if (state.switching.timer !== null) {
+    window.clearInterval(state.switching.timer);
+    state.switching.timer = null;
+  }
+  state.switching.active = false;
+  state.switching.phase = "idle";
+  state.switching.phaseDurationMs = 0;
+  if (wasActive && state.encryptionEnabled) resetLiveEncryption();
+  updateSwitchingUi();
+  updateEncryptionUi();
+  state.needsSwitchDraw = true;
+}
+
+function startSwitchingMode() {
+  if (state.switching.active) {
+    stopSwitchingMode();
+    addLog("SYS", "Single-sensor DAC switching stopped");
+    return;
+  }
+  updateSwitchingSettings();
+  resetSwitchingData();
+  if (state.encryptionEnabled) resetLiveEncryption();
+  state.switching.active = true;
+  setSwitchingPhase("ppg");
+  state.switching.timer = window.setInterval(checkSwitchingPhase, 25);
+  updateSwitchingUi();
+  addLog("SYS", `Single-sensor switching started: PPG ${state.switching.ppgMs / 1000}s / TRNG ${state.switching.trngMs / 1000}s`);
+}
+
+function clearSwitchingMode() {
+  const active = state.switching.active;
+  if (active) stopSwitchingMode();
+  resetSwitchingData();
+  updateSwitchingUi();
+  drawSwitchingComparison();
+  addLog("SYS", "Cleared ADC0/ADC2 switching comparison");
+}
+
+function recordSwitchingSample(value, adcSource, sampleTime) {
+  const switching = state.switching;
+  if (!switching.active || !["ADC0", "ADC2"].includes(adcSource) || !Number.isFinite(value)) return;
+  const t = Number.isFinite(sampleTime) ? sampleTime : performance.now();
+  const phaseAge = t - switching.phaseStartedAt;
+  if (phaseAge < switching.settleMs || phaseAge > switching.phaseDurationMs) return;
+
+  if (switching.phase === "ppg") {
+    switching.samples[adcSource].ppg.push({ t, value });
+  } else if (switching.phase === "trng") {
+    const bits = collectSwitchingBits(value, adcSource);
+    switching.bits[adcSource].push(...bits);
+    if (switching.bits[adcSource].length > state.maxBits) {
+      switching.bits[adcSource].splice(0, switching.bits[adcSource].length - state.maxBits);
+    }
+    appendSwitchingEncryptionBits(bits, adcSource);
+  }
+  state.needsSwitchDraw = true;
+}
+
 function addSample(value, channel = "ADC", options = {}) {
   if (state.paused) return;
 
   const normalizedChannel = normalizeChannel(channel) || "ADC";
   const adcSource = normalizeAdcSource(options.adcSource) || state.adcSource;
-  if (normalizedChannel === "ADC" && adcSource === state.bitAdcSource) {
+  recordSwitchingSample(value, adcSource, options.t);
+  if (normalizedChannel === "ADC"
+    && adcSource === state.bitAdcSource
+    && !(state.switching.active && state.encryptionEnabled)) {
     extractLiveBitsFromNoiseSample(value, adcSource, options.t);
   }
   const valueKind = options.valueKind || "raw";
@@ -1381,14 +1689,14 @@ function getSelectedBitMethod() {
 }
 
 function getBitMethodLabel(method = state.bitGenerationMethod) {
-  if (method === "throughput-all") return "ADC3 throughput mix";
-  if (method === "ma-threshold") return "ADC3 MA threshold";
-  if (method === "ma-threshold-vn") return "ADC3 MA threshold VN";
-  if (method === "residual-vn") return "ADC3 residual VN";
-  if (method === "delta-vn") return "ADC3 delta VN";
-  if (method === "lsb") return "ADC3 LSB";
-  if (method === "lsb2") return "ADC3 LSB x2";
-  if (method === "lsb4") return "ADC3 LSB x4";
+  if (method === "throughput-all") return "Throughput mix";
+  if (method === "ma-threshold") return "MA threshold";
+  if (method === "ma-threshold-vn") return "MA threshold VN";
+  if (method === "residual-vn") return "Residual VN";
+  if (method === "delta-vn") return "Delta VN";
+  if (method === "lsb") return "LSB";
+  if (method === "lsb2") return "LSB x2";
+  if (method === "lsb4") return "LSB x4";
   return method || "--";
 }
 
@@ -1591,7 +1899,7 @@ function extractLiveBitsFromNoiseSample(value, adcSource = state.bitAdcSource, s
   if (method === "throughput-all") {
     const bits = getThroughputBitMethods()
       .flatMap((candidate) => collectLiveBitsForMethod(value, source, candidate));
-    addBits(bits, source, "ADC3 throughput mix");
+    addBits(bits, source, `${source} throughput mix`);
     return;
   }
 
@@ -1704,7 +2012,13 @@ function enqueuePpgEncryption(sample) {
   if (!state.encryptionEnabled) return;
   if (!Number.isFinite(sample.value)) return;
   const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
-  if (adcSource !== state.adcSource) return;
+  if (adcSource !== state.encryptionSource) return;
+  if (state.switching.active) {
+    const phaseAge = sample.t - state.switching.phaseStartedAt;
+    if (state.switching.phase !== "ppg"
+      || phaseAge < state.switching.settleMs
+      || phaseAge > state.switching.phaseDurationMs) return;
+  }
   const cipherPlain = getCipherPlainAdcCode(sample.value, adcSource, sample.channel);
   state.pendingPpg.push({
     t: sample.t,
@@ -1763,6 +2077,7 @@ function updateEncryptionUi() {
   if (els.encryptionToggle) {
     els.encryptionToggle.checked = state.encryptionEnabled;
   }
+  if (els.encryptionSource) els.encryptionSource.value = state.encryptionSource;
   if (els.keyBitCount) els.keyBitCount.textContent = String(state.keyBits.length);
   if (els.encryptionPending) els.encryptionPending.textContent = String(state.pendingPpg.length);
   if (els.encryptionCount) els.encryptionCount.textContent = String(state.encryptedCount);
@@ -1786,7 +2101,8 @@ function updateEncryptionUi() {
       : "";
     const batchText = state.bitMode ? ` | ${getAdcBatchStatusText()}` : "";
     const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
-    els.encryptionStatus.textContent = `${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
+    const keySource = state.switching.active ? `${state.encryptionSource} switching TRNG` : `${state.bitAdcSource} live`;
+    els.encryptionStatus.textContent = `${state.encryptionSource} signal | ${keySource} key | ${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
 
   const latest = state.lastEncrypted;
@@ -2545,6 +2861,8 @@ function clearSamples() {
   state.lastAdcFrameSequence = null;
   resetNoiseExtractor();
   resetBitAndEncryptionBuffers();
+  resetSwitchingData();
+  updateSwitchingUi();
   updateStats();
   updateBitStats();
   updateEncryptionUi();
@@ -2674,8 +2992,8 @@ function exportBitsCsv() {
 }
 
 function setActiveView(viewId) {
-  const target = viewId === "noiseView" ? "noiseView" : "liveView";
-  [els.liveView, els.noiseView].forEach((view) => {
+  const target = ["noiseView", "switchView"].includes(viewId) ? viewId : "liveView";
+  [els.liveView, els.noiseView, els.switchView].forEach((view) => {
     if (view) view.hidden = view.id !== target;
   });
   els.viewTabs.forEach((button) => {
@@ -2685,6 +3003,7 @@ function setActiveView(viewId) {
     resizeCanvas();
     resizeBitCanvas();
     resizeNoiseBitCanvas();
+    resizeSwitchingComparison();
   });
 }
 
@@ -3432,6 +3751,27 @@ function resizeCipherCanvas() {
   drawCipherPlot();
 }
 
+function resizeSwitchingPlot(plotState) {
+  if (!plotState?.canvas || !plotState.ctx) return;
+  const rect = plotState.canvas.getBoundingClientRect();
+  plotState.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  plotState.width = Math.floor(rect.width);
+  plotState.height = Math.floor(rect.height);
+  plotState.canvas.width = Math.floor(plotState.width * plotState.dpr);
+  plotState.canvas.height = Math.floor(plotState.height * plotState.dpr);
+  plotState.ctx.setTransform(plotState.dpr, 0, 0, plotState.dpr, 0, 0);
+}
+
+function resizeSwitchingComparison() {
+  if (els.switchView?.hidden) return;
+  ["ADC0", "ADC2"].forEach((source) => {
+    resizeSwitchingPlot(switchingPlots[source].ppg);
+    resizeSwitchingPlot(switchingPlots[source].trng);
+  });
+  state.needsSwitchDraw = true;
+  drawSwitchingComparison();
+}
+
 function getYRange(values) {
   if (!values.length) return { min: 0, max: 16384 };
 
@@ -3843,6 +4183,93 @@ function drawBitMap() {
   });
 }
 
+function drawSwitchingPpgPlot(plotState, source) {
+  const ctx = plotState.ctx;
+  const width = plotState.width;
+  const height = plotState.height;
+  if (!ctx || !width || !height) return;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  const margin = { left: 48, right: 12, top: 18, bottom: 24 };
+  const chartW = width - margin.left - margin.right;
+  const chartH = height - margin.top - margin.bottom;
+  if (chartW <= 0 || chartH <= 0) return;
+
+  const samples = state.switching.samples[source].ppg;
+  const { min, max } = getYRange(samples.map((sample) => sample.value));
+  drawGrid(ctx, margin, chartW, chartH, min, max);
+  drawZeroLine(ctx, margin, chartW, chartH, min, max);
+  if (samples.length < 2) {
+    ctx.fillStyle = "#66746f";
+    ctx.font = "700 12px Segoe UI, sans-serif";
+    ctx.fillText("Waiting for PPG samples", margin.left + 10, margin.top + 24);
+    return;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(margin.left, margin.top, chartW, chartH);
+  ctx.clip();
+  const visible = decimateSeriesForCanvas(samples, Math.max(256, Math.floor(chartW * 2)), (sample) => sample.value);
+  drawSeries(ctx, visible, source, margin, chartW, chartH, min, max, getTimeRange(samples));
+  ctx.restore();
+  drawLegend(ctx, [source], margin, chartW);
+}
+
+function drawSwitchingBitmap(plotState, source) {
+  const ctx = plotState.ctx;
+  const width = plotState.width;
+  const height = plotState.height;
+  if (!ctx || !width || !height) return;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  const bits = state.switching.bits[source];
+  const columns = clampInteger(state.bitColumns, 8, 2048, 128);
+  const labelHeight = 21;
+  const cell = Math.max(1, Math.floor(Math.min(width / columns, (height - labelHeight) / Math.max(1, Math.ceil(bits.length / columns)))));
+  const visibleColumns = Math.max(1, Math.min(columns, Math.floor(width / cell)));
+  const visibleRows = Math.max(1, Math.floor((height - labelHeight) / cell));
+  const capacity = visibleColumns * visibleRows;
+  const visibleBits = bits.slice(-capacity);
+  const ones = visibleBits.reduce((sum, bit) => sum + bit, 0);
+  const ratio = visibleBits.length ? (ones / visibleBits.length).toFixed(3) : "--";
+
+  ctx.fillStyle = "#30423d";
+  ctx.font = "800 11px Segoe UI, sans-serif";
+  ctx.fillText(`${source} TRNG | ${visibleBits.length} bits | 1=${ratio}`, 8, 14);
+  if (!visibleBits.length) {
+    ctx.fillStyle = "#66746f";
+    ctx.font = "700 12px Segoe UI, sans-serif";
+    ctx.fillText("Waiting for TRNG bits", 8, labelHeight + 22);
+    return;
+  }
+
+  visibleBits.forEach((bit, index) => {
+    const x = (index % visibleColumns) * cell;
+    const y = labelHeight + Math.floor(index / visibleColumns) * cell;
+    ctx.fillStyle = bit ? "#17201d" : "#ffffff";
+    ctx.fillRect(x, y, cell, cell);
+    if (cell >= 4) {
+      ctx.strokeStyle = "rgba(216, 224, 220, 0.7)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, cell - 1), Math.max(1, cell - 1));
+    }
+  });
+}
+
+function drawSwitchingComparison() {
+  if (els.switchView?.hidden) return;
+  ["ADC0", "ADC2"].forEach((source) => {
+    drawSwitchingPpgPlot(switchingPlots[source].ppg, source);
+    drawSwitchingBitmap(switchingPlots[source].trng, source);
+  });
+  updateSwitchingUi();
+}
+
 function animationLoop() {
   const now = performance.now();
   if (state.needsDraw && now - state.lastDrawAt > getPlotRefreshIntervalMs()) {
@@ -3867,6 +4294,11 @@ function animationLoop() {
     drawCipherPlot();
     state.lastCipherDrawAt = now;
     state.needsCipherDraw = false;
+  }
+  if (state.needsSwitchDraw && now - state.lastSwitchDrawAt > 33) {
+    drawSwitchingComparison();
+    state.lastSwitchDrawAt = now;
+    state.needsSwitchDraw = false;
   }
   requestAnimationFrame(animationLoop);
 }
@@ -3935,6 +4367,9 @@ function bindEvents() {
   });
   els.encryptionToggle?.addEventListener("change", () => {
     setEncryptionEnabled(els.encryptionToggle.checked);
+  });
+  els.encryptionSource?.addEventListener("change", () => {
+    setEncryptionSource(els.encryptionSource.value);
   });
   els.cipherWidth?.addEventListener("change", () => {
     setCipherWidthBits(els.cipherWidth.value);
@@ -4021,6 +4456,10 @@ function bindEvents() {
   });
   els.clearBitsButton.addEventListener("click", clearBits);
   els.exportBitsButton.addEventListener("click", exportBitsCsv);
+  els.switchStartButton?.addEventListener("click", startSwitchingMode);
+  els.switchClearButton?.addEventListener("click", clearSwitchingMode);
+  [els.switchPpgSeconds, els.switchTrngSeconds, els.switchSettleMs, els.switchDacTrng, els.switchDacPpg]
+    .forEach((control) => control?.addEventListener("change", updateSwitchingSettings));
   els.noiseCsvFile.addEventListener("change", () => {
     loadNoiseCsvFile(els.noiseCsvFile.files?.[0]).catch((error) => {
       addLog("ERR", error.message || error, true);
@@ -4044,6 +4483,7 @@ function bindEvents() {
   });
   window.addEventListener("beforeunload", () => {
     state.keepReading = false;
+    stopSwitchingMode();
     if (state.bleDevice?.gatt?.connected) {
       state.bleDevice.gatt.disconnect();
     }
@@ -4058,6 +4498,8 @@ function init() {
   setDacValue(2056, "init");
   applyLiveMaSettings();
   setBitGenerationMethod(getSelectedBitMethod());
+  setEncryptionSource(els.encryptionSource?.value || "ADC2", { reset: false });
+  updateSwitchingSettings();
   setCipherWidthBits(DEFAULT_CIPHER_WIDTH_BITS, { reset: false });
   applyBitMapSettings();
   updateTransportControls();
@@ -4074,6 +4516,10 @@ function init() {
   new ResizeObserver(resizeBitAdc2Canvas).observe(els.bitAdc2CanvasWrap || els.bitAdc2Canvas);
   new ResizeObserver(resizeCipherCanvas).observe(els.cipherCanvasWrap || els.cipherCanvas);
   new ResizeObserver(resizeNoiseBitCanvas).observe(els.noiseBitCanvasWrap || els.noiseBitCanvas);
+  ["ADC0", "ADC2"].forEach((source) => {
+    new ResizeObserver(resizeSwitchingComparison).observe(switchingPlots[source].ppg.wrap || switchingPlots[source].ppg.canvas);
+    new ResizeObserver(resizeSwitchingComparison).observe(switchingPlots[source].trng.wrap || switchingPlots[source].trng.canvas);
+  });
   setupDynamicTextFitting();
   updateStats();
   animationLoop();

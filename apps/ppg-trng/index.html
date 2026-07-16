@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=9e188058c24a" />
+    <link rel="stylesheet" href="./styles.css?v=d5a647e9c4fd" />
   </head>
   <body>
     <div class="app-shell">
@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-16 adc0-2-3-gain-v20</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-16 adc0-2-3-gain-v22-switch</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -38,8 +38,8 @@
             <label class="field-label" for="transportMode">Transport</label>
             <div class="connect-row">
               <select id="transportMode">
-                <option value="serial" selected>USB Serial</option>
-                <option value="bluetooth">Bluetooth LE</option>
+                <option value="serial">USB Serial</option>
+                <option value="bluetooth" selected>Bluetooth LE</option>
               </select>
               <button id="connectButton" class="button primary" type="button">Connect</button>
             </div>
@@ -159,6 +159,7 @@
           <div class="view-tabs" role="tablist" aria-label="Main views">
             <button class="view-tab is-active" data-view-target="liveView" type="button">Live monitor</button>
             <button class="view-tab" data-view-target="noiseView" type="button">Noise extractor</button>
+            <button class="view-tab" data-view-target="switchView" type="button">DAC switch compare</button>
           </div>
 
           <div id="liveView" class="view-panel">
@@ -353,24 +354,31 @@
             <div class="plot-toolbar">
               <div>
                 <h2>ADC Encryption</h2>
-                <p id="encryptionStatus">ADC3 throughput mix | plain MA22 | encryption off | extraction off | key 0 bits | pending 0</p>
+                <p id="encryptionStatus">ADC2 signal | ADC3 key | Throughput mix | plain MA22 | encryption off | extraction off | key 0 bits | pending 0</p>
               </div>
               <div class="toolbar-actions">
                 <label class="switch" title="Encrypt incoming signal samples with ADC3-derived key bits">
                   <input id="encryptionToggle" type="checkbox" />
                   <span>Encryption</span>
                 </label>
+                <label class="compact-field" for="encryptionSource">
+                  <span>Signal source</span>
+                  <select id="encryptionSource">
+                    <option value="ADC0">ADC0 commercial PPG</option>
+                    <option value="ADC2" selected>ADC2 BPTT PPG</option>
+                  </select>
+                </label>
                 <label class="compact-field" for="bitMethod">
                   <span>Bit method</span>
                   <select id="bitMethod">
-                    <option value="throughput-all" selected>ADC3 throughput mix</option>
-                    <option value="ma-threshold">ADC3 MA threshold</option>
-                    <option value="ma-threshold-vn">ADC3 MA threshold VN</option>
-                    <option value="residual-vn">ADC3 residual VN</option>
-                    <option value="delta-vn">ADC3 delta VN</option>
-                    <option value="lsb">ADC3 LSB</option>
-                    <option value="lsb2">ADC3 LSB x2 fast</option>
-                    <option value="lsb4">ADC3 LSB x4 fast</option>
+                    <option value="throughput-all" selected>Throughput mix</option>
+                    <option value="ma-threshold">MA threshold</option>
+                    <option value="ma-threshold-vn">MA threshold VN</option>
+                    <option value="residual-vn">Residual VN</option>
+                    <option value="delta-vn">Delta VN</option>
+                    <option value="lsb">LSB</option>
+                    <option value="lsb2">LSB x2 fast</option>
+                    <option value="lsb4">LSB x4 fast</option>
                   </select>
                 </label>
                 <label class="compact-field" for="cipherWidth">
@@ -717,12 +725,64 @@
               <canvas id="noiseBitCanvas" aria-label="Extracted random bit bitmap"></canvas>
             </div>
           </section>
+
+          <section id="switchView" class="switch-panel view-panel" hidden>
+          <div class="plot-toolbar">
+            <div>
+              <h2>Single-sensor DAC switch comparison</h2>
+              <p id="switchStatus">Ready. PPG and TRNG phases use the same ADC input.</p>
+            </div>
+            <div class="toolbar-actions switch-controls">
+              <label class="compact-field" for="switchPpgSeconds">
+                <span>PPG seconds</span>
+                <input id="switchPpgSeconds" type="number" min="1" max="3600" step="1" value="5" />
+              </label>
+              <label class="compact-field" for="switchTrngSeconds">
+                <span>TRNG seconds</span>
+                <input id="switchTrngSeconds" type="number" min="1" max="3600" step="1" value="5" />
+              </label>
+              <label class="compact-field" for="switchSettleMs" title="Samples during this time after a DAC change are excluded from the comparison.">
+                <span>Settle ms</span>
+                <input id="switchSettleMs" type="number" min="0" max="10000" step="10" value="200" />
+              </label>
+              <label class="compact-field" for="switchDacTrng">
+                <span>TRNG DACB</span>
+                <input id="switchDacTrng" type="number" min="0" max="4095" step="1" value="2048" />
+              </label>
+              <label class="compact-field" for="switchDacPpg" title="The hardware DAC is 12-bit, so the 4096 request is sent as full-scale 4095.">
+                <span>PPG DACB</span>
+                <input id="switchDacPpg" type="number" min="0" max="4095" step="1" value="4095" />
+              </label>
+              <button id="switchStartButton" class="button primary" type="button">Start switching</button>
+              <button id="switchClearButton" class="button secondary" type="button">Clear</button>
+            </div>
+          </div>
+          <p class="switch-help">PPG uses DACB full-scale 4095 (12-bit hardware; requested 4096 is clamped), TRNG uses DACB 2048. ADC0 and ADC2 are classified independently from the synchronized stream.</p>
+          <div class="switch-compare-grid">
+            <section class="switch-compare-card">
+              <div class="switch-card-heading"><h3>ADC0 PPG</h3><p id="switchAdc0PpgCaption">0 samples</p></div>
+              <div id="switchAdc0PpgWrap" class="switch-canvas-wrap"><canvas id="switchAdc0PpgCanvas" aria-label="ADC0 PPG switching plot"></canvas></div>
+            </section>
+            <section class="switch-compare-card">
+              <div class="switch-card-heading"><h3>ADC0 TRNG bitmap</h3><p id="switchAdc0TrngCaption">0 bits</p></div>
+              <div id="switchAdc0TrngWrap" class="switch-canvas-wrap"><canvas id="switchAdc0TrngCanvas" aria-label="ADC0 TRNG switching bitmap"></canvas></div>
+            </section>
+            <section class="switch-compare-card">
+              <div class="switch-card-heading"><h3>ADC2 PPG</h3><p id="switchAdc2PpgCaption">0 samples</p></div>
+              <div id="switchAdc2PpgWrap" class="switch-canvas-wrap"><canvas id="switchAdc2PpgCanvas" aria-label="ADC2 PPG switching plot"></canvas></div>
+            </section>
+            <section class="switch-compare-card">
+              <div class="switch-card-heading"><h3>ADC2 TRNG bitmap</h3><p id="switchAdc2TrngCaption">0 bits</p></div>
+              <div id="switchAdc2TrngWrap" class="switch-canvas-wrap"><canvas id="switchAdc2TrngCanvas" aria-label="ADC2 TRNG switching bitmap"></canvas></div>
+            </section>
+          </div>
+          </section>
         </section>
       </main>
     </div>
 
-    <script src="./protocol.js?v=20260716-adc0-2-3-gain-v20" defer></script>
-    <script src="./app.js?v=16e491ca77e2" defer></script>
-    <script src="./dfu.js?v=20260716-adc0-2-3-gain-v20" defer></script>
+    <script src="./protocol.js?v=20260716-adc0-2-3-gain-v22" defer></script>
+    <script src="./app.js?v=388706a70a0d" defer></script>
+    <script src="./dfu.js?v=20260716-adc0-2-3-gain-v22" defer></script>
   </body>
 </html>
