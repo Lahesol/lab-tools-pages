@@ -215,6 +215,7 @@
                   <datalist id="sampleRatePresets">
                     <option value="1"></option>
                     <option value="25"></option>
+                    <option value="50"></option>
                     <option value="100"></option>
                     <option value="250"></option>
                     <option value="500"></option>
@@ -361,8 +362,9 @@
                   <input id="encryptionToggle" type="checkbox" />
                   <span>Encryption</span>
                 </label>
-                <button id="firmwareEncryptionStartButton" class="button secondary" type="button" title="Start firmware-generated ENCF switching frames">Start FW ENCF</button>
-                <button id="firmwareEncryptionStopButton" class="button secondary" type="button" title="Stop firmware-generated ENCF switching frames">Stop FW ENCF</button>
+                <button id="firmwareConcurrentEncryptionStartButton" class="button secondary" type="button" title="Start concurrent ADC2 PPG and ADC3 key extraction">Start concurrent ENCF</button>
+                <button id="firmwareEncryptionStartButton" class="button secondary" type="button" title="Start firmware-generated switching ENCF frames">Start switching ENCF</button>
+                <button id="firmwareEncryptionStopButton" class="button secondary" type="button" title="Stop the active firmware encryption mode">Stop FW ENCF</button>
                 <label class="compact-field" for="encryptionSource">
                   <span>Signal source</span>
                   <select id="encryptionSource">
@@ -806,7 +808,7 @@
     </div>
 
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v25-encf" defer></script>
-    <script src="./app.js?v=d35bcd3212b5" defer></script>
+    <script src="./app.js?v=a15eccf5a5b6" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v25-encf" defer></script>
   </body>
 </html>

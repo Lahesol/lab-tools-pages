@@ -150,6 +150,8 @@
   let ocrRunToken = 0;
   let ocrPageIndex = 0;
   let ocrPageTotal = 1;
+  let ocrVariantIndex = 0;
+  let ocrVariantTotal = 1;
   let cropImage = null;
   let cropRenderToken = 0;
   let cropResizeTimer = null;
@@ -871,10 +873,13 @@
     if (!state.ocrRunning || !message) return;
     const progress = Math.min(1, Math.max(0, Number(message.progress) || 0));
     const recognizing = message.status === "recognizing text";
+    const variantProgress = (ocrVariantIndex + progress) / Math.max(1, ocrVariantTotal);
     state.ocrProgress = recognizing
-      ? Math.min(1, (ocrPageIndex + progress) / Math.max(1, ocrPageTotal))
+      ? Math.min(1, (ocrPageIndex + variantProgress) / Math.max(1, ocrPageTotal))
       : Math.max(state.ocrProgress, progress * 0.16);
-    const pageLabel = ocrPageTotal > 1 && recognizing ? ` · ${ocrPageIndex + 1}/${ocrPageTotal}영역` : "";
+    const pageLabel = recognizing
+      ? ` · 영역 ${ocrPageIndex + 1}/${ocrPageTotal} · 판독 ${ocrVariantIndex + 1}/${ocrVariantTotal}`
+      : "";
     state.ocrStatus = `${translateOcrStatus(message.status)}${pageLabel} · ${Math.round(state.ocrProgress * 100)}%`;
     renderOcrControls();
   }
@@ -895,6 +900,7 @@
         await worker.setParameters({
           tessedit_pageseg_mode: window.Tesseract.PSM?.SINGLE_BLOCK || "6",
           preserve_interword_spaces: "1",
+          tessedit_char_whitelist: "",
         });
         return worker;
       })();
@@ -933,7 +939,7 @@
     const sourceY = Math.max(0, Math.floor(roi.y * source.height));
     const sourceWidth = Math.max(1, Math.min(source.width - sourceX, Math.ceil(roi.width * source.width)));
     const sourceHeight = Math.max(1, Math.min(source.height - sourceY, Math.ceil(roi.height * source.height)));
-    const padding = 18;
+    const padding = 28;
     const crop = document.createElement("canvas");
     crop.width = sourceWidth + padding * 2;
     crop.height = sourceHeight + padding * 2;
@@ -947,7 +953,138 @@
     cropContext.filter = "none";
     source.width = 1;
     source.height = 1;
+
+    // 품번처럼 ROI 안의 글자가 작은 경우에는 OCR 입력 자체를 확대합니다.
+    // 지나친 확대는 메모리를 키우므로 가로 3,200px을 상한으로 둡니다.
+    const minimumTextCanvasHeight = 240;
+    const enlargeScale = Math.min(
+      4,
+      Math.max(1, minimumTextCanvasHeight / Math.max(1, crop.height)),
+      3200 / Math.max(1, crop.width),
+    );
+    if (enlargeScale > 1.01) {
+      const enlarged = document.createElement("canvas");
+      enlarged.width = Math.max(1, Math.round(crop.width * enlargeScale));
+      enlarged.height = Math.max(1, Math.round(crop.height * enlargeScale));
+      const enlargedContext = enlarged.getContext("2d", { alpha: false });
+      enlargedContext.fillStyle = "#ffffff";
+      enlargedContext.fillRect(0, 0, enlarged.width, enlarged.height);
+      enlargedContext.imageSmoothingEnabled = true;
+      enlargedContext.imageSmoothingQuality = "high";
+      enlargedContext.drawImage(crop, 0, 0, enlarged.width, enlarged.height);
+      crop.width = 1;
+      crop.height = 1;
+      return enlarged;
+    }
     return crop;
+  }
+
+  function createBinaryOcrCanvas(sourceCanvas) {
+    const binary = document.createElement("canvas");
+    binary.width = sourceCanvas.width;
+    binary.height = sourceCanvas.height;
+    const context = binary.getContext("2d", { alpha: false, willReadFrequently: true });
+    context.drawImage(sourceCanvas, 0, 0);
+    const image = context.getImageData(0, 0, binary.width, binary.height);
+    const histogram = new Uint32Array(256);
+    const grayValues = new Uint8Array(binary.width * binary.height);
+    let total = 0;
+    for (let offset = 0; offset < image.data.length; offset += 4) {
+      const gray = Math.max(0, Math.min(255, Math.round(
+        image.data[offset] * 0.299 + image.data[offset + 1] * 0.587 + image.data[offset + 2] * 0.114,
+      )));
+      grayValues[offset / 4] = gray;
+      histogram[gray] += 1;
+      total += gray;
+    }
+    let sumBackground = 0;
+    let weightBackground = 0;
+    let bestThreshold = 160;
+    let bestVariance = -1;
+    for (let threshold = 0; threshold < 256; threshold += 1) {
+      weightBackground += histogram[threshold];
+      if (!weightBackground) continue;
+      const weightForeground = grayValues.length - weightBackground;
+      if (!weightForeground) break;
+      sumBackground += threshold * histogram[threshold];
+      const meanBackground = sumBackground / weightBackground;
+      const meanForeground = (total - sumBackground) / weightForeground;
+      const variance = weightBackground * weightForeground
+        * (meanBackground - meanForeground) * (meanBackground - meanForeground);
+      if (variance > bestVariance) {
+        bestVariance = variance;
+        bestThreshold = threshold;
+      }
+    }
+    // 회색 배경이 많은 캡처에서는 Otsu 값이 너무 낮아질 수 있어 안전 범위를 둡니다.
+    const threshold = Math.max(100, Math.min(220, bestThreshold));
+    for (let pixel = 0; pixel < grayValues.length; pixel += 1) {
+      const value = grayValues[pixel] < threshold ? 0 : 255;
+      const offset = pixel * 4;
+      image.data[offset] = value;
+      image.data[offset + 1] = value;
+      image.data[offset + 2] = value;
+      image.data[offset + 3] = 255;
+    }
+    context.putImageData(image, 0, 0);
+    return binary;
+  }
+
+  function normalizeOcrText(text) {
+    return String(text || "")
+      .normalize("NFKC")
+      .replace(/[‐‑‒–—―−]/g, "-")
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  function looksLikeOcrCode(text) {
+    const compact = String(text || "").replace(/\s+/g, "");
+    return compact.length >= 5
+      && compact.length <= 80
+      && /^[A-Za-z0-9._\/-]+$/.test(compact)
+      && /\d/.test(compact)
+      && (/[._\/-]/.test(compact) || /^[A-Za-z]*\d{5,}$/.test(compact));
+  }
+
+  function scoreOcrResult(result, method) {
+    const text = normalizeOcrText(result.text);
+    if (!text) return { ...result, text, score: -Infinity, code: false };
+    const compact = text.replace(/\s+/g, "");
+    const allowed = compact.match(/[A-Za-z0-9._\/-]/g)?.length || 0;
+    const confidence = Math.max(0, Math.min(100, Number(result.confidence) || 0));
+    const code = looksLikeOcrCode(text);
+    let score = confidence + (allowed / Math.max(1, compact.length)) * 8;
+    if (code) score += 28;
+    if (method === "code") score += code ? 22 : -18;
+    if (method === "binary") score += 3;
+    if (method === "code" && /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text)) score -= 35;
+    if ((text.match(/\s/g) || []).length > 3) score -= 4;
+    return { ...result, text: code ? compact : text, score, code };
+  }
+
+  function selectBestOcrResult(results) {
+    return results
+      .map((result) => scoreOcrResult(result, result.method))
+      .sort((left, right) => right.score - left.score)[0] || { text: "", method: "", confidence: 0 };
+  }
+
+  function buildOcrVariants(crop) {
+    const lineLike = crop.width / Math.max(1, crop.height) >= 2.1;
+    const variants = [
+      { label: "명암 보정", method: "enhanced", canvas: crop },
+      { label: "이진화", method: "binary", canvas: createBinaryOcrCanvas(crop) },
+    ];
+    if (lineLike) {
+      variants.push({ label: "품번 문자 보정", method: "code", canvas: createBinaryOcrCanvas(crop) });
+    }
+    return variants.map((variant) => ({ ...variant, lineLike }));
   }
 
   async function runRoiOcr() {
@@ -962,6 +1099,8 @@
     const runToken = ++ocrRunToken;
     ocrPageIndex = 0;
     ocrPageTotal = tasks.length;
+    ocrVariantIndex = 0;
+    ocrVariantTotal = 1;
     state.ocrRunning = true;
     state.ocrCancelRequested = false;
     state.ocrProgress = 0;
@@ -989,10 +1128,42 @@
           crop.height = 1;
           return;
         }
-        const result = await worker.recognize(crop);
+        const variants = buildOcrVariants(crop);
+        ocrVariantTotal = variants.length;
+        const results = [];
+        for (let variantIndex = 0; variantIndex < variants.length; variantIndex += 1) {
+          if (runToken !== ocrRunToken) {
+            crop.width = 1;
+            crop.height = 1;
+            return;
+          }
+          const variant = variants[variantIndex];
+          ocrVariantIndex = variantIndex;
+          await worker.setParameters({
+            tessedit_pageseg_mode: variant.lineLike
+              ? (window.Tesseract.PSM?.SINGLE_LINE || "7")
+              : (window.Tesseract.PSM?.SINGLE_BLOCK || "6"),
+            preserve_interword_spaces: "1",
+            tessedit_char_whitelist: variant.method === "code"
+              ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._/"
+              : "",
+          });
+          const result = await worker.recognize(variant.canvas);
+          results.push({
+            method: variant.method,
+            label: variant.label,
+            text: result.data?.text || "",
+            confidence: result.data?.confidence,
+          });
+          if (variant.canvas !== crop) {
+            variant.canvas.width = 1;
+            variant.canvas.height = 1;
+          }
+        }
+        const selected = selectBestOcrResult(results);
         crop.width = 1;
         crop.height = 1;
-        taskTexts.push({ ...task, text: String(result.data?.text || "").trim() });
+        taskTexts.push({ ...task, ...selected });
       }
 
       if (runToken !== ocrRunToken) return;
@@ -1001,7 +1172,10 @@
           const label = state.invoiceSourceType === "image"
             ? `영역 ${task.roiIndex + 1}`
             : `${task.pageNumber}페이지 · 영역 ${task.roiIndex + 1}`;
-          return `[${label}]\n${task.text}`;
+          const confidence = Number.isFinite(Number(task.confidence))
+            ? ` · ${Math.round(Number(task.confidence))}%`
+            : "";
+          return `[${label} · ${task.label || "선택 결과"}${confidence}]\n${task.text}`;
         })
         .filter(Boolean)
         .join("\n\n");

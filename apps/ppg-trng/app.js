@@ -41,6 +41,7 @@ const els = {
   liveMaWindowField: document.querySelector("#liveMaWindowField"),
   liveMaOffsetField: document.querySelector("#liveMaOffsetField"),
   encryptionToggle: document.querySelector("#encryptionToggle"),
+  firmwareConcurrentEncryptionStartButton: document.querySelector("#firmwareConcurrentEncryptionStartButton"),
   firmwareEncryptionStartButton: document.querySelector("#firmwareEncryptionStartButton"),
   firmwareEncryptionStopButton: document.querySelector("#firmwareEncryptionStopButton"),
   keyBitCount: document.querySelector("#keyBitCount"),
@@ -205,6 +206,7 @@ const state = {
   encryptionEnabled: false,
   encryptionSource: "ADC2",
   firmwareEncryptionActive: false,
+  firmwareEncryptionMode: "off",
   firmwareEncryptionFrameCount: 0,
   firmwareEncryptionPending: 0,
   firmwareEncryptionDropped: 0,
@@ -573,6 +575,7 @@ function resetReceiveState() {
 
 function resetFirmwareEncryptionState() {
   state.firmwareEncryptionActive = false;
+  state.firmwareEncryptionMode = "off";
   state.firmwareEncryptionFrameCount = 0;
   state.firmwareEncryptionPending = 0;
   state.firmwareEncryptionDropped = 0;
@@ -776,7 +779,20 @@ function setEncryptionEnabled(enabled, options = {}) {
   addLog("SYS", `ADC encryption ${nextEnabled ? "enabled" : "disabled"}`);
 }
 
-async function startFirmwareEncryption() {
+async function startFirmwareConcurrentEncryption() {
+  setBitMode(false);
+  state.encryptionEnabled = false;
+  if (els.encryptionToggle) els.encryptionToggle.checked = false;
+  resetBitAndEncryptionBuffers();
+  updateBitStats();
+  updateEncryptionUi();
+  state.needsBitDraw = true;
+  state.needsCipherDraw = true;
+  await sendCommand("ENC1");
+  addLog("SYS", "Firmware concurrent ENCF started: ADC2 PPG + ADC3 MV+VN");
+}
+
+async function startFirmwareSwitchingEncryption() {
   setBitMode(false);
   state.encryptionEnabled = false;
   if (els.encryptionToggle) els.encryptionToggle.checked = false;
@@ -786,12 +802,15 @@ async function startFirmwareEncryption() {
   state.needsBitDraw = true;
   state.needsCipherDraw = true;
   await sendCommand("SWENC1");
-  addLog("SYS", "Firmware ENCF switching started: 15 s PPG + 10 s key generation");
+  addLog("SYS", "Firmware switching ENCF started: 15 s PPG + 10 s key generation");
 }
 
 async function stopFirmwareEncryption() {
-  await sendCommand("SWENC0");
-  addLog("SYS", "Firmware ENCF switching stop requested");
+  const command = state.firmwareEncryptionMode === "concurrent" ? "ENC0" : "SWENC0";
+  await sendCommand(command);
+  addLog("SYS", `Firmware ${state.firmwareEncryptionMode} ENCF stop requested`);
+  resetFirmwareEncryptionState();
+  updateEncryptionUi();
 }
 
 function setConnectedUi(connected) {
@@ -1207,6 +1226,9 @@ function ingestFirmwareEncryptionFrame(frame) {
   if (!frame || state.paused) return;
 
   state.firmwareEncryptionActive = true;
+  state.firmwareEncryptionMode = frame.switchPpgPhase || frame.switchBitPhase
+    ? "switching"
+    : "concurrent";
   state.firmwareEncryptionFrameCount += 1;
   state.firmwarePartialKeyBits = frame.partialKeyBits;
 
@@ -2271,7 +2293,9 @@ function updateEncryptionUi() {
       const signalChannel = latest?.adcSource || "ADC2";
       const keyChannel = latest?.bitSource || "ADC3";
       const width = latest?.cipherWidthBits || 8;
-      const phase = latest?.firmwareFlags & 0x10 ? "BIT" : "FIXED";
+      const phase = state.firmwareEncryptionMode === "concurrent"
+        ? "CONCURRENT"
+        : (latest?.firmwareFlags & 0x10 ? "SWITCH BIT" : "SWITCH PPG");
       const dropped = state.firmwareEncryptionDropped ? ` | dropped ${state.firmwareEncryptionDropped}` : "";
       els.encryptionStatus.textContent = `Firmware ENCF | ${signalChannel} signal | ${keyChannel} key | ${phase} | ${latest?.method || "firmware"} | ${width}-bit cipher | valid ${state.encryptedCount} | pending ${state.firmwareEncryptionPending} | frames ${state.firmwareEncryptionFrameCount}${dropped}`;
     } else {

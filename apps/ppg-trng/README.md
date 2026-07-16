@@ -22,6 +22,11 @@ even when ADC0 or ADC2 is the primary display channel.
 1-1000 Hz. The rate controls the actual TIMER3/PPI SAADC trigger period shared by
 all three channels. It is not a display throttle or UART buffer decimation.
 
+If the GUI shows 25 Hz, the device is currently configured to 25 Hz by a
+previous `RATE25` command; it is not a display-only value. Enter `50` and
+press `Set` (or send `RATE50`) to use the 50 Hz PPG setting. The Android BLE
+app sends `RATE50` automatically after notifications are enabled.
+
 The GUI reads the effective value from `RATE?` and from each binary frame. Sixteen
 scans are grouped per frame, so a 1000 Hz stream normally arrives as 62.5 frames/s.
 

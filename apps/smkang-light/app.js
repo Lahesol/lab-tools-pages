@@ -1,7 +1,7 @@
 const CHANNELS = ["A", "B", "C", "D"];
 const FIXED_DEFAULTS = { A: 0, B: 0, C: 0, D: -10000 };
 const ZERO_DEFAULTS = { A: 1986, B: 1990, C: 2004, D: 1988 };
-const APP_VERSION = "smkang-light-web-gui-0.3.5";
+const APP_VERSION = "smkang-light-web-gui-0.3.6";
 const POLL_MS = 250;
 const ADC_BITS = 14;
 const ADC_VREF = 3.3;
@@ -33,6 +33,7 @@ const state = {
   adcOversampleN: DEFAULT_ADC_OVERSAMPLE_N,
   adcFirmwareAverageN: DEFAULT_ADC_FIRMWARE_AVERAGE_N,
   adcSettleDiscardN: DEFAULT_ADC_SETTLE_DISCARD_N,
+  adcConfigDirty: new Set(),
   adcOsBuffer: newOversampleBuffer(),
   currentDacMv: { A: 0, B: 0, C: 0, D: 0 },
   fixedMv: { ...FIXED_DEFAULTS },
@@ -162,7 +163,49 @@ function renderZeroControls() {
   });
 }
 
+const ADC_CONFIG_FIELDS = [
+  ["input", "adcInputSelect"],
+  ["rate_hz", "adcRateInput"],
+  ["oversample_n", "adcOversampleInput"],
+  ["firmware_average_n", "adcFirmwareAverageInput"],
+  ["settle_discard_n", "adcSettleDiscardInput"],
+];
+
+function bindAdcConfigDirtyTracking() {
+  ADC_CONFIG_FIELDS.forEach(([key, elementId]) => {
+    const element = els[elementId];
+    if (!element) return;
+    element.addEventListener("input", () => state.adcConfigDirty.add(key));
+    element.addEventListener("change", () => state.adcConfigDirty.add(key));
+  });
+}
+
+function shouldSyncAdcConfigField(key, element) {
+  return !state.adcConfigDirty.has(key) && document.activeElement !== element;
+}
+
+function setAdcConfigField(key, element, value, options = {}) {
+  if (!element) return;
+  if (options.force || shouldSyncAdcConfigField(key, element)) {
+    element.value = String(value);
+  }
+}
+
+function syncAdcConfigInputsFromState(options = {}) {
+  setAdcConfigField("input", els.adcInputSelect, state.adcInput, options);
+  setAdcConfigField("rate_hz", els.adcRateInput, state.adcRateHz, options);
+  setAdcConfigField("oversample_n", els.adcOversampleInput, state.adcOversampleN, options);
+  setAdcConfigField("firmware_average_n", els.adcFirmwareAverageInput, state.adcFirmwareAverageN, options);
+  setAdcConfigField("settle_discard_n", els.adcSettleDiscardInput, state.adcSettleDiscardN, options);
+}
+
+function clearAdcConfigDirty() {
+  state.adcConfigDirty.clear();
+  syncAdcConfigInputsFromState({ force: true });
+}
+
 function bindActions() {
+  bindAdcConfigDirtyTracking();
   els.refreshPortsBtn.addEventListener("click", refreshPorts);
   els.connectBtn.addEventListener("click", async () => {
     state.lastLogId = 0;
@@ -176,15 +219,16 @@ function bindActions() {
   els.adcToggleBtn.addEventListener("click", () => postAction("/api/adc/toggle", {}, { showCurrent: true }));
   els.zeroVoltageBtn.addEventListener("click", () => postAction("/api/dac/zero-all", {}, { showCurrent: true }));
   els.clearBtn.addEventListener("click", () => postAction("/api/clear", {}, { showCurrent: true }));
-  els.applyAdcConfigBtn.addEventListener("click", () =>
-    postAction("/api/adc/config", {
+  els.applyAdcConfigBtn.addEventListener("click", async () => {
+    const ok = await postAction("/api/adc/config", {
       input: readInt(els.adcInputSelect),
       rate_hz: readInt(els.adcRateInput),
       oversample_n: readInt(els.adcOversampleInput),
       firmware_average_n: readInt(els.adcFirmwareAverageInput),
       settle_discard_n: readInt(els.adcSettleDiscardInput),
-    })
-  );
+    });
+    if (ok) clearAdcConfigDirty();
+  });
 
   els.applyFixedBtn.addEventListener("click", () => {
     const values = {};
@@ -421,8 +465,10 @@ async function postAction(path, body, options = {}) {
       state.samples = data.samples || state.samples || [];
     }
     drawActivePlot();
+    return true;
   } catch (error) {
     appendLocalLog("ERROR", error.message);
+    return false;
   }
 }
 
@@ -1127,25 +1173,25 @@ function applySnapshot(data) {
   if (data.last_log_id !== undefined) state.lastLogId = data.last_log_id;
   if (data.adc_input !== undefined) {
     state.adcInput = Number.parseInt(data.adc_input, 10);
-    els.adcInputSelect.value = String(data.adc_input);
+    setAdcConfigField("input", els.adcInputSelect, state.adcInput);
   }
   if (data.adc_rate_hz !== undefined) {
     state.adcRateHz = Number.parseInt(data.adc_rate_hz, 10);
-    els.adcRateInput.value = String(data.adc_rate_hz);
+    setAdcConfigField("rate_hz", els.adcRateInput, state.adcRateHz);
   }
   if (data.adc_oversample_n !== undefined) {
     state.adcOversampleN = Number.parseInt(data.adc_oversample_n, 10) || DEFAULT_ADC_OVERSAMPLE_N;
-    els.adcOversampleInput.value = String(state.adcOversampleN);
+    setAdcConfigField("oversample_n", els.adcOversampleInput, state.adcOversampleN);
   }
   if (data.adc_firmware_average_n !== undefined) {
     state.adcFirmwareAverageN =
       Number.parseInt(data.adc_firmware_average_n, 10) || DEFAULT_ADC_FIRMWARE_AVERAGE_N;
-    els.adcFirmwareAverageInput.value = String(state.adcFirmwareAverageN);
+    setAdcConfigField("firmware_average_n", els.adcFirmwareAverageInput, state.adcFirmwareAverageN);
   }
   if (data.adc_settle_discard_n !== undefined) {
     const settleDiscard = Number.parseInt(data.adc_settle_discard_n, 10);
     state.adcSettleDiscardN = Number.isFinite(settleDiscard) ? settleDiscard : DEFAULT_ADC_SETTLE_DISCARD_N;
-    els.adcSettleDiscardInput.value = String(state.adcSettleDiscardN);
+    setAdcConfigField("settle_discard_n", els.adcSettleDiscardInput, state.adcSettleDiscardN);
   }
   updateBadges(data);
   updateSweepProgress(data.sweep || {});
