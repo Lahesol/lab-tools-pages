@@ -1455,6 +1455,10 @@ function appendSwitchingEncryptionBits(bits, adcSource) {
   state.needsCipherDraw = true;
 }
 
+function usesSwitchingEncryptionSource() {
+  return state.switching.active && ["ADC0", "ADC2"].includes(state.encryptionSource);
+}
+
 function resetSwitchingData() {
   state.switching.samples = {
     ADC0: { ppg: [], trng: [] },
@@ -1606,7 +1610,7 @@ function addSample(value, channel = "ADC", options = {}) {
   recordSwitchingSample(value, adcSource, options.t);
   if (normalizedChannel === "ADC"
     && adcSource === state.bitAdcSource
-    && !(state.switching.active && state.encryptionEnabled)) {
+    && !(state.encryptionEnabled && usesSwitchingEncryptionSource())) {
     extractLiveBitsFromNoiseSample(value, adcSource, options.t);
   }
   const valueKind = options.valueKind || "raw";
@@ -2013,7 +2017,7 @@ function enqueuePpgEncryption(sample) {
   if (!Number.isFinite(sample.value)) return;
   const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
   if (adcSource !== state.encryptionSource) return;
-  if (state.switching.active) {
+  if (usesSwitchingEncryptionSource()) {
     const phaseAge = sample.t - state.switching.phaseStartedAt;
     if (state.switching.phase !== "ppg"
       || phaseAge < state.switching.settleMs
@@ -2101,7 +2105,7 @@ function updateEncryptionUi() {
       : "";
     const batchText = state.bitMode ? ` | ${getAdcBatchStatusText()}` : "";
     const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
-    const keySource = state.switching.active ? `${state.encryptionSource} switching TRNG` : `${state.bitAdcSource} live`;
+    const keySource = usesSwitchingEncryptionSource() ? `${state.encryptionSource} switching TRNG` : `${state.bitAdcSource} live`;
     els.encryptionStatus.textContent = `${state.encryptionSource} signal | ${keySource} key | ${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
 
