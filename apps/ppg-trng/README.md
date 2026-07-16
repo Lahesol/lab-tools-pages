@@ -18,19 +18,28 @@ even when ADC0 or ADC2 is the primary display channel.
 
 ## Sampling Rate
 
-`ADC scan Hz` sends `RATE<hz>`. The default is 1000 Hz and the valid range is
+`ADC scan Hz` sends `RATE<hz>`. The default is 100 Hz and the valid range is
 1-1000 Hz. The rate controls the actual TIMER3/PPI SAADC trigger period shared by
 all three channels. It is not a display throttle or UART buffer decimation.
 
 The GUI reads the effective value from `RATE?` and from each binary frame. Sixteen
 scans are grouped per frame, so a 1000 Hz stream normally arrives as 62.5 frames/s.
 
+The GUI also decodes the firmware's CRC-checked `ENCF v1` frames. `Start FW ENCF`
+sends `SWENC1`; `Stop FW ENCF` sends `SWENC0`. The firmware remains the source of
+the key and cipher. The GUI does not run a second key extractor after an ENCF
+record arrives. For switching records, the GUI reconstructs only the transmitted
+PPG low-byte field as `cipher XOR key` and keeps the received ADC signal field for
+the high bits. The same ENCF stream can be observed by this USB-connected GUI
+while a mobile app is connected to the firmware over BLE.
+
 ## Stream Decoder
 
 `protocol.js` decodes `ADCF v2` frames containing synchronized ADC0/2/3 uint16
-values and CRC-16/CCITT-FALSE. The decoder supports arbitrary serial/BLE chunk
-boundaries and text command responses mixed with binary frames. CRC failures are
-counted in the encryption status line as frame errors.
+values and `ENCF v1` firmware encryption records, all with CRC-16/CCITT-FALSE.
+The decoder supports arbitrary serial/BLE chunk boundaries and text command
+responses mixed with binary frames. CRC failures are counted in the encryption
+status line as frame errors.
 
 The 16-scan binary batch uses about 6.8 kB/s at 1000 Hz, which fits 115200-baud
 USB UART. BLE uses the same frames split to the negotiated NUS MTU; practical BLE
@@ -83,6 +92,11 @@ ADC3 browser-side bit extraction remains available. The bit-count-first throughp
 mix, moving-average threshold variants, residual/delta variants, and LSB variants
 feed the bitmap and encryption key queue. This is a GUI operation; the firmware
 streams raw ADC3 samples.
+
+When firmware ENCF records are present, the encryption panel reports `Firmware
+ENCF`, uses the received key/cipher fields, and the bitmap shows the completed
+firmware key bytes. This prevents browser-side encryption from being mistaken for
+the data transmitted by the device.
 
 Encryption can be enabled for whichever ADC input is selected. The selected
 signal is filtered by a channel-specific 22-sample moving average before its low

@@ -11,6 +11,10 @@
   const CHANNEL_COUNT = 3;
   const HEADER_SIZE = 10;
   const CRC_SIZE = 2;
+  const ENCRYPT_MAGIC_0 = 0xC3;
+  const ENCRYPT_MAGIC_1 = 0x3C;
+  const ENCRYPT_VERSION = 1;
+  const ENCRYPT_FRAME_SIZE = 26;
 
   function asBytes(value) {
     return value instanceof Uint8Array ? value : Uint8Array.from(value || []);
@@ -104,6 +108,57 @@
     return frame;
   }
 
+  function decodeEncryptionFrame(value) {
+    const bytes = asBytes(value);
+    if (bytes.length !== ENCRYPT_FRAME_SIZE) throw new Error("ENCF frame length mismatch");
+    if (bytes[0] !== ENCRYPT_MAGIC_0 || bytes[1] !== ENCRYPT_MAGIC_1) {
+      throw new Error("ENCF frame magic mismatch");
+    }
+    if (bytes[2] !== ENCRYPT_VERSION) {
+      throw new Error(`Unsupported ENCF frame version ${bytes[2]}`);
+    }
+
+    const crcOffset = ENCRYPT_FRAME_SIZE - CRC_SIZE;
+    const expectedCrc = bytes[crcOffset] | (bytes[crcOffset + 1] << 8);
+    const actualCrc = crc16Ccitt(bytes, crcOffset);
+    if (actualCrc !== expectedCrc) {
+      throw new Error(`ENCF frame CRC mismatch ${actualCrc.toString(16)}/${expectedCrc.toString(16)}`);
+    }
+
+    const u16 = (offset) => bytes[offset] | (bytes[offset + 1] << 8);
+    const u32 = (offset) => (
+      (bytes[offset])
+      | (bytes[offset + 1] << 8)
+      | (bytes[offset + 2] << 16)
+      | (bytes[offset + 3] * 0x1000000)
+    ) >>> 0;
+    const flags = bytes[3];
+
+    return {
+      version: bytes[2],
+      flags,
+      signalChannel: bytes[4],
+      keyChannel: bytes[5],
+      movingAverageWindow: bytes[6],
+      cipherWidthBits: bytes[7],
+      sequence: u16(8),
+      sampleIndex: u32(10),
+      signalAdc: u16(14),
+      noiseAdc: u16(16),
+      noiseMovingAverage: u16(18),
+      partialKeyBits: bytes[20],
+      keyByte: bytes[21],
+      plainByte: bytes[22],
+      cipherByte: bytes[23],
+      cipherValid: Boolean(flags & 0x01),
+      rawBitValid: Boolean(flags & 0x02),
+      keyCompleted: Boolean(flags & 0x04),
+      switchPpgPhase: Boolean(flags & 0x08),
+      switchBitPhase: Boolean(flags & 0x10),
+      plainValid: Boolean(flags & 0x20),
+    };
+  }
+
   class StreamDecoder {
     constructor() {
       this.buffer = [];
@@ -115,12 +170,14 @@
 
     push(value) {
       this.buffer.push(...asBytes(value));
-      const result = { textChunks: [], frames: [], errors: [] };
+      const result = { textChunks: [], frames: [], encryptionFrames: [], errors: [] };
 
       while (this.buffer.length) {
         let magicIndex = -1;
         for (let index = 0; index < this.buffer.length - 1; index += 1) {
-          if (this.buffer[index] === MAGIC_0 && this.buffer[index + 1] === MAGIC_1) {
+          const isAdcMagic = this.buffer[index] === MAGIC_0 && this.buffer[index + 1] === MAGIC_1;
+          const isEncryptionMagic = this.buffer[index] === ENCRYPT_MAGIC_0 && this.buffer[index + 1] === ENCRYPT_MAGIC_1;
+          if (isAdcMagic || isEncryptionMagic) {
             magicIndex = index;
             break;
           }
@@ -135,6 +192,19 @@
 
         if (magicIndex > 0) {
           result.textChunks.push(Uint8Array.from(this.buffer.splice(0, magicIndex)));
+          continue;
+        }
+
+        if (this.buffer.length < 3) break;
+
+        if (this.buffer[0] === ENCRYPT_MAGIC_0 && this.buffer[1] === ENCRYPT_MAGIC_1) {
+          if (this.buffer.length < ENCRYPT_FRAME_SIZE) break;
+          const candidate = Uint8Array.from(this.buffer.splice(0, ENCRYPT_FRAME_SIZE));
+          try {
+            result.encryptionFrames.push(decodeEncryptionFrame(candidate));
+          } catch (error) {
+            result.errors.push(error.message || String(error));
+          }
           continue;
         }
 
@@ -167,9 +237,14 @@
     MAGIC_1,
     VERSION,
     CHANNEL_COUNT,
+    ENCRYPT_MAGIC_0,
+    ENCRYPT_MAGIC_1,
+    ENCRYPT_VERSION,
+    ENCRYPT_FRAME_SIZE,
     crc16Ccitt,
     decodeAdcFrame,
     encodeAdcFrame,
+    decodeEncryptionFrame,
     StreamDecoder,
   };
 }));

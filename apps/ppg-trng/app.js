@@ -41,6 +41,8 @@ const els = {
   liveMaWindowField: document.querySelector("#liveMaWindowField"),
   liveMaOffsetField: document.querySelector("#liveMaOffsetField"),
   encryptionToggle: document.querySelector("#encryptionToggle"),
+  firmwareEncryptionStartButton: document.querySelector("#firmwareEncryptionStartButton"),
+  firmwareEncryptionStopButton: document.querySelector("#firmwareEncryptionStopButton"),
   keyBitCount: document.querySelector("#keyBitCount"),
   encryptionPending: document.querySelector("#encryptionPending"),
   encryptionCount: document.querySelector("#encryptionCount"),
@@ -202,6 +204,12 @@ const state = {
   bitMode: false,
   encryptionEnabled: false,
   encryptionSource: "ADC2",
+  firmwareEncryptionActive: false,
+  firmwareEncryptionFrameCount: 0,
+  firmwareEncryptionPending: 0,
+  firmwareEncryptionDropped: 0,
+  firmwareEncryptionSequence: null,
+  firmwarePartialKeyBits: 0,
   bits: [],
   totalBits: 0,
   maxBits: 32768,
@@ -563,6 +571,15 @@ function resetReceiveState() {
   state.lastAdcFrameSequence = null;
 }
 
+function resetFirmwareEncryptionState() {
+  state.firmwareEncryptionActive = false;
+  state.firmwareEncryptionFrameCount = 0;
+  state.firmwareEncryptionPending = 0;
+  state.firmwareEncryptionDropped = 0;
+  state.firmwareEncryptionSequence = null;
+  state.firmwarePartialKeyBits = 0;
+}
+
 function normalizeAdcSource(value) {
   const match = String(value || "").toUpperCase().match(/(?:ADC|AIN)?\s*([023])\b/);
   return match ? `ADC${match[1]}` : null;
@@ -757,6 +774,24 @@ function setEncryptionEnabled(enabled, options = {}) {
   updateEncryptionUi();
   state.needsCipherDraw = true;
   addLog("SYS", `ADC encryption ${nextEnabled ? "enabled" : "disabled"}`);
+}
+
+async function startFirmwareEncryption() {
+  setBitMode(false);
+  state.encryptionEnabled = false;
+  if (els.encryptionToggle) els.encryptionToggle.checked = false;
+  resetBitAndEncryptionBuffers();
+  updateBitStats();
+  updateEncryptionUi();
+  state.needsBitDraw = true;
+  state.needsCipherDraw = true;
+  await sendCommand("SWENC1");
+  addLog("SYS", "Firmware ENCF switching started: 15 s PPG + 10 s key generation");
+}
+
+async function stopFirmwareEncryption() {
+  await sendCommand("SWENC0");
+  addLog("SYS", "Firmware ENCF switching stop requested");
 }
 
 function setConnectedUi(connected) {
@@ -1099,6 +1134,7 @@ function ingestBytes(bytes) {
     ingestText(text);
   });
   result.frames.forEach(ingestSynchronizedAdcFrame);
+  result.encryptionFrames?.forEach(ingestFirmwareEncryptionFrame);
   if (result.errors.length) {
     state.adcBatchErrors += result.errors.length;
     if (state.adcBatchErrors <= 3 || state.adcBatchErrors % 100 === 0) {
@@ -1137,6 +1173,105 @@ function ingestSynchronizedAdcFrame(frame) {
   state.lastAdcBatchCount = frame.sampleCount;
   state.totalAdcBatchSamples += frame.sampleCount;
   refreshLiveStatusIfDue();
+}
+
+function appendFirmwareKeyBits(record) {
+  if (!record.cipherValid || state.paused) return;
+
+  const width = clampInteger(record.cipherWidthBits, 1, 14, 8);
+  const key = record.keyByte & getCipherMask(width);
+  const bits = [];
+  for (let bitIndex = width - 1; bitIndex >= 0; bitIndex -= 1) {
+    bits.push((key >> bitIndex) & 1);
+  }
+
+  const now = performance.now();
+  const source = `Firmware ENCF key ADC${record.keyChannel}`;
+  state.bits.push(...bits.map((bit) => ({
+    t: now,
+    bit,
+    adcSource: `ADC${record.keyChannel}`,
+    source,
+  })));
+  state.totalBits += bits.length;
+  state.bitSource = source;
+  if (state.bits.length > state.maxBits) {
+    state.bits.splice(0, state.bits.length - state.maxBits);
+  }
+  if (!state.bitPlaneCapacity) ensureBitPlaneCapacity();
+  bits.forEach((bit) => writeBitToPlane(bit, `ADC${record.keyChannel}`));
+  state.needsBitDraw = true;
+}
+
+function ingestFirmwareEncryptionFrame(frame) {
+  if (!frame || state.paused) return;
+
+  state.firmwareEncryptionActive = true;
+  state.firmwareEncryptionFrameCount += 1;
+  state.firmwarePartialKeyBits = frame.partialKeyBits;
+
+  if (state.firmwareEncryptionSequence !== null) {
+    const expectedSequence = (state.firmwareEncryptionSequence + 1) & 0xFFFF;
+    const missingFrames = (frame.sequence - expectedSequence) & 0xFFFF;
+    if (missingFrames > 0 && missingFrames < 0x8000) {
+      state.firmwareEncryptionDropped += missingFrames;
+    }
+  }
+  state.firmwareEncryptionSequence = frame.sequence;
+
+  if (!frame.cipherValid) {
+    state.firmwareEncryptionPending += 1;
+    updateEncryptionUi();
+    return;
+  }
+
+  const width = clampInteger(frame.cipherWidthBits, 1, 14, 8);
+  const mask = getCipherMask(width);
+  const signalAdc = clampInteger(frame.signalAdc, 0, 16383, 0);
+  const key = frame.keyByte & mask;
+  const cipherMasked = frame.cipherByte & mask;
+  const recoveredMasked = (cipherMasked ^ key) & mask;
+  const plainMasked = frame.plainValid
+    ? frame.plainByte & mask
+    : recoveredMasked;
+  const highBits = signalAdc & ~mask;
+  const plainAdc = highBits | plainMasked;
+  const cipherAdc = highBits | cipherMasked;
+  const t = performance.now();
+  const keyBits = Array.from({ length: width }, (_, index) => (
+    (key >> (width - 1 - index)) & 1
+  )).join("");
+  const record = {
+    t,
+    channel: "ADC",
+    adcSource: `ADC${frame.signalChannel}`,
+    rawAdcCode: signalAdc,
+    adcCode: plainAdc,
+    plainFilter: frame.plainValid ? "firmware ENCF" : "firmware recovered",
+    cipherWidthBits: width,
+    plainMasked,
+    key,
+    keyBits,
+    cipherMasked,
+    cipher: cipherAdc,
+    method: frame.switchBitPhase ? "firmware throughput mix" : "firmware MV+VN",
+    bitSource: `ADC${frame.keyChannel}`,
+    firmwareFrame: true,
+    firmwareFlags: frame.flags,
+    firmwareSequence: frame.sequence,
+    firmwareSampleIndex: frame.sampleIndex,
+    firmwarePlainAvailable: frame.plainValid,
+    firmwareRecoveredMasked: recoveredMasked,
+  };
+
+  state.encryptedPpg.push(record);
+  state.encryptedCount += 1;
+  state.lastEncrypted = record;
+  trimEncryptedHistory();
+  appendFirmwareKeyBits(frame);
+  state.needsCipherDraw = true;
+  state.needsBitDraw = true;
+  refreshLiveStatusIfDue(true);
 }
 
 function ingestText(text) {
@@ -1648,6 +1783,7 @@ function addSample(value, channel = "ADC", options = {}) {
   recordSwitchingSample(value, adcSource, options.t);
   if (normalizedChannel === "ADC"
     && adcSource === state.bitAdcSource
+    && !state.firmwareEncryptionActive
     && !(state.encryptionEnabled && usesSwitchingEncryptionSource())) {
     extractLiveBitsFromNoiseSample(value, adcSource, options.t);
   }
@@ -2052,6 +2188,7 @@ function getCipherPlainAdcCode(rawValue, adcSource, channel) {
 
 function enqueuePpgEncryption(sample) {
   if (!state.encryptionEnabled) return;
+  if (state.firmwareEncryptionActive) return;
   if (!Number.isFinite(sample.value)) return;
   const adcSource = normalizeAdcSource(sample.adcSource) || state.adcSource;
   if (adcSource !== state.encryptionSource) return;
@@ -2116,41 +2253,55 @@ function refreshLiveStatusIfDue(force = false) {
 }
 
 function updateEncryptionUi() {
+  const latest = state.lastEncrypted;
+  const firmwareActive = state.firmwareEncryptionActive;
   if (els.encryptionToggle) {
     els.encryptionToggle.checked = state.encryptionEnabled;
   }
   if (els.encryptionSource) els.encryptionSource.value = state.encryptionSource;
-  if (els.keyBitCount) els.keyBitCount.textContent = String(state.keyBits.length);
-  if (els.encryptionPending) els.encryptionPending.textContent = String(state.pendingPpg.length);
+  if (els.keyBitCount) {
+    els.keyBitCount.textContent = String(firmwareActive ? state.firmwarePartialKeyBits : state.keyBits.length);
+  }
+  if (els.encryptionPending) {
+    els.encryptionPending.textContent = String(firmwareActive ? state.firmwareEncryptionPending : state.pendingPpg.length);
+  }
   if (els.encryptionCount) els.encryptionCount.textContent = String(state.encryptedCount);
   if (els.encryptionStatus) {
-    const dropped = state.droppedPpg ? ` | dropped ${state.droppedPpg}` : "";
-    const encryptionText = state.encryptionEnabled ? "encryption on" : "encryption off";
-    const modeText = state.bitMode ? "extracting" : "extraction off";
-    const signalRate = getRecentSignalRateHz();
-    const requiredKeyRate = signalRate * state.cipherWidthBits;
-    const keyRate = getRecentKeyBitRate();
-    const bitInputRate = getRecentBitInputRate();
-    const rateText = state.encryptionEnabled
-      ? ` | key ${keyRate.toFixed(0)}/${requiredKeyRate.toFixed(0)} bps`
-      : "";
-    const inputText = state.bitMode ? ` | input ${bitInputRate.toFixed(0)} sps` : "";
-    const pendingReason = state.encryptionEnabled && state.pendingPpg.length && requiredKeyRate > 0 && keyRate < requiredKeyRate
-      ? " | key slow"
-      : "";
-    const methodParams = isMovingAverageBitMethod()
-      ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
-      : "";
-    const batchText = state.bitMode ? ` | ${getAdcBatchStatusText()}` : "";
-    const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
-    const switchingKeySource = usesSwitchingEncryptionSource()
-      ? `${state.encryptionSource} switching TRNG (${getSwitchingTrngInputSource(state.encryptionSource)})`
-      : `${state.bitAdcSource} live`;
-    const keySource = switchingKeySource;
-    els.encryptionStatus.textContent = `${state.encryptionSource} signal | ${keySource} key | ${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
+    if (firmwareActive) {
+      const signalChannel = latest?.adcSource || "ADC2";
+      const keyChannel = latest?.bitSource || "ADC3";
+      const width = latest?.cipherWidthBits || 8;
+      const phase = latest?.firmwareFlags & 0x10 ? "BIT" : "FIXED";
+      const dropped = state.firmwareEncryptionDropped ? ` | dropped ${state.firmwareEncryptionDropped}` : "";
+      els.encryptionStatus.textContent = `Firmware ENCF | ${signalChannel} signal | ${keyChannel} key | ${phase} | ${latest?.method || "firmware"} | ${width}-bit cipher | valid ${state.encryptedCount} | pending ${state.firmwareEncryptionPending} | frames ${state.firmwareEncryptionFrameCount}${dropped}`;
+    } else {
+      const dropped = state.droppedPpg ? ` | dropped ${state.droppedPpg}` : "";
+      const encryptionText = state.encryptionEnabled ? "encryption on" : "encryption off";
+      const modeText = state.bitMode ? "extracting" : "extraction off";
+      const signalRate = getRecentSignalRateHz();
+      const requiredKeyRate = signalRate * state.cipherWidthBits;
+      const keyRate = getRecentKeyBitRate();
+      const bitInputRate = getRecentBitInputRate();
+      const rateText = state.encryptionEnabled
+        ? ` | key ${keyRate.toFixed(0)}/${requiredKeyRate.toFixed(0)} bps`
+        : "";
+      const inputText = state.bitMode ? ` | input ${bitInputRate.toFixed(0)} sps` : "";
+      const pendingReason = state.encryptionEnabled && state.pendingPpg.length && requiredKeyRate > 0 && keyRate < requiredKeyRate
+        ? " | key slow"
+        : "";
+      const methodParams = isMovingAverageBitMethod()
+        ? ` | window ${state.liveMaWindow}, offset ${state.liveMaOffset}`
+        : "";
+      const batchText = state.bitMode ? ` | ${getAdcBatchStatusText()}` : "";
+      const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
+      const switchingKeySource = usesSwitchingEncryptionSource()
+        ? `${state.encryptionSource} switching TRNG (${getSwitchingTrngInputSource(state.encryptionSource)})`
+        : `${state.bitAdcSource} live`;
+      const keySource = switchingKeySource;
+      els.encryptionStatus.textContent = `${state.encryptionSource} signal | ${keySource} key | ${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
+    }
   }
 
-  const latest = state.lastEncrypted;
   if (els.encryptionPlain) els.encryptionPlain.textContent = latest ? String(latest.adcCode) : "--";
   if (els.encryptionKey) {
     const keyHexWidth = latest ? Math.ceil((latest.cipherWidthBits || state.cipherWidthBits) / 4) : 4;
@@ -2909,6 +3060,7 @@ function clearSamples() {
   state.lastAdcFrameSequence = null;
   resetNoiseExtractor();
   resetBitAndEncryptionBuffers();
+  resetFirmwareEncryptionState();
   resetSwitchingData();
   updateSwitchingUi();
   updateStats();
@@ -3003,11 +3155,13 @@ function resetBitAndEncryptionBuffers() {
   state.droppedPpg = 0;
   state.lastEncrypted = null;
   state.cipherPlainFilters = {};
+  resetFirmwareEncryptionState();
   ensureBitPlaneCapacity();
 }
 
 function clearBits() {
   resetBitAndEncryptionBuffers();
+  resetFirmwareEncryptionState();
   updateBitStats();
   updateEncryptionUi();
   state.needsBitDraw = true;
@@ -4447,6 +4601,12 @@ function bindEvents() {
   });
   els.encryptionToggle?.addEventListener("change", () => {
     setEncryptionEnabled(els.encryptionToggle.checked);
+  });
+  els.firmwareEncryptionStartButton?.addEventListener("click", () => {
+    startFirmwareEncryption().catch((error) => addLog("ERR", error.message || error, true));
+  });
+  els.firmwareEncryptionStopButton?.addEventListener("click", () => {
+    stopFirmwareEncryption().catch((error) => addLog("ERR", error.message || error, true));
   });
   els.encryptionSource?.addEventListener("change", () => {
     setEncryptionSource(els.encryptionSource.value);
