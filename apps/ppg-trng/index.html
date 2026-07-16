@@ -23,7 +23,7 @@
               <option value="touch">Touch</option>
             </select>
           </label>
-          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-16 adc0-2-3-gain-v22-switch</span>
+          <span id="guiVersion" class="status-dot is-muted">GUI 2026-07-16 adc0-2-3-gain-v24-switch-modes</span>
           <span id="serialSupport" class="status-dot">Checking</span>
           <span id="connectionStatus" class="status-dot is-muted">Disconnected</span>
         </div>
@@ -746,6 +746,27 @@
                 <span>Settle ms</span>
                 <input id="switchSettleMs" type="number" min="0" max="10000" step="10" value="200" />
               </label>
+              <label class="compact-field" for="switchMode" title="Select whether TRNG uses the same ADC with DAC switching or ADC3 while ADC2 remains at PPG bias.">
+                <span>Switch mode</span>
+                <select id="switchMode">
+                  <option value="dac" selected>DACB 4095 / 2048</option>
+                  <option value="adc2-adc3">ADC2 4095 / ADC3</option>
+                </select>
+              </label>
+              <label class="compact-field" for="switchWindowSize" title="Linked to the Live monitor window size.">
+                <span>Window</span>
+                <input id="switchWindowSize" type="number" min="100" max="1000000" step="100" value="20000" />
+              </label>
+              <label class="compact-field" for="switchFilterMode" title="Linked to the Live monitor digital filter mode. Filter window and cutoff values are shared.">
+                <span>Filter</span>
+                <select id="switchFilterMode">
+                  <option value="raw" selected>Raw ADC</option>
+                  <option value="moving-average">Moving average</option>
+                  <option value="low-pass">Low-pass</option>
+                  <option value="high-pass">High-pass</option>
+                  <option value="band-pass">Band-pass</option>
+                </select>
+              </label>
               <label class="compact-field" for="switchDacTrng">
                 <span>TRNG DACB</span>
                 <input id="switchDacTrng" type="number" min="0" max="4095" step="1" value="2048" />
@@ -758,7 +779,7 @@
               <button id="switchClearButton" class="button secondary" type="button">Clear</button>
             </div>
           </div>
-          <p class="switch-help">PPG uses DACB full-scale 4095 (12-bit hardware; requested 4096 is clamped), TRNG uses DACB 2048. ADC0 and ADC2 are classified independently from the synchronized stream.</p>
+          <p class="switch-help">DACB 4095 / 2048 alternates DAC bias and uses ADC0/ADC2 for each panel. ADC2 4095 / ADC3 holds DACB at 4095, uses ADC2 for PPG and ADC3 for the ADC2 TRNG panel. Window and filter mode are linked to Live monitor.</p>
           <div class="switch-compare-grid">
             <section class="switch-compare-card">
               <div class="switch-card-heading"><h3>ADC0 PPG</h3><p id="switchAdc0PpgCaption">0 samples</p></div>
@@ -782,8 +803,8 @@
       </main>
     </div>
 
-    <script src="./protocol.js?v=20260716-adc0-2-3-gain-v22" defer></script>
-    <script src="./app.js?v=4f684f436d21" defer></script>
-    <script src="./dfu.js?v=20260716-adc0-2-3-gain-v22" defer></script>
+    <script src="./protocol.js?v=20260716-adc0-2-3-gain-v24" defer></script>
+    <script src="./app.js?v=54843d1d584f" defer></script>
+    <script src="./dfu.js?v=20260716-adc0-2-3-gain-v24" defer></script>
   </body>
 </html>

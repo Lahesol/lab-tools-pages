@@ -97,6 +97,9 @@ const els = {
   switchPpgSeconds: document.querySelector("#switchPpgSeconds"),
   switchTrngSeconds: document.querySelector("#switchTrngSeconds"),
   switchSettleMs: document.querySelector("#switchSettleMs"),
+  switchMode: document.querySelector("#switchMode"),
+  switchWindowSize: document.querySelector("#switchWindowSize"),
+  switchFilterMode: document.querySelector("#switchFilterMode"),
   switchDacTrng: document.querySelector("#switchDacTrng"),
   switchDacPpg: document.querySelector("#switchDacPpg"),
   switchStartButton: document.querySelector("#switchStartButton"),
@@ -238,6 +241,7 @@ const state = {
   liveBitExtractors: {},
   switching: {
     active: false,
+    mode: "dac",
     phase: "idle",
     phaseStartedAt: 0,
     phaseDurationMs: 0,
@@ -1459,6 +1463,26 @@ function usesSwitchingEncryptionSource() {
   return state.switching.active && ["ADC0", "ADC2"].includes(state.encryptionSource);
 }
 
+function getSwitchingModeLabel(mode = state.switching.mode) {
+  return mode === "adc2-adc3" ? "ADC2 4095 / ADC3" : "DACB 4095 / 2048";
+}
+
+function getSwitchingTrngInputMap() {
+  return state.switching.mode === "adc2-adc3"
+    ? { ADC0: "ADC0", ADC2: "ADC3" }
+    : { ADC0: "ADC0", ADC2: "ADC2" };
+}
+
+function getSwitchingTrngInputSource(panelSource) {
+  return getSwitchingTrngInputMap()[panelSource] || panelSource;
+}
+
+function getSwitchingPhaseDac(phase) {
+  return state.switching.mode === "adc2-adc3"
+    ? state.switching.dacPpg
+    : (phase === "ppg" ? state.switching.dacPpg : state.switching.dacTrng);
+}
+
 function resetSwitchingData() {
   state.switching.samples = {
     ADC0: { ppg: [], trng: [] },
@@ -1477,6 +1501,7 @@ function getSwitchingNumber(control, fallback, min, max) {
 }
 
 function updateSwitchingSettings() {
+  state.switching.mode = els.switchMode?.value === "adc2-adc3" ? "adc2-adc3" : "dac";
   state.switching.ppgMs = getSwitchingNumber(els.switchPpgSeconds, 5, 1, 3600) * 1000;
   state.switching.trngMs = getSwitchingNumber(els.switchTrngSeconds, 5, 1, 3600) * 1000;
   state.switching.settleMs = getSwitchingNumber(els.switchSettleMs, 200, 0, 10000);
@@ -1485,21 +1510,30 @@ function updateSwitchingSettings() {
   if (els.switchPpgSeconds) els.switchPpgSeconds.value = String(state.switching.ppgMs / 1000);
   if (els.switchTrngSeconds) els.switchTrngSeconds.value = String(state.switching.trngMs / 1000);
   if (els.switchSettleMs) els.switchSettleMs.value = String(state.switching.settleMs);
+  if (els.switchMode) els.switchMode.value = state.switching.mode;
   if (els.switchDacTrng) els.switchDacTrng.value = String(state.switching.dacTrng);
   if (els.switchDacPpg) els.switchDacPpg.value = String(state.switching.dacPpg);
+}
+
+function updateSwitchingFilterControls() {
+  if (els.switchWindowSize) els.switchWindowSize.value = String(state.maxSamples);
+  if (els.switchFilterMode && els.filterMode) els.switchFilterMode.value = els.filterMode.value;
 }
 
 function updateSwitchingUi() {
   const switching = state.switching;
   if (els.switchStartButton) els.switchStartButton.textContent = switching.active ? "Stop switching" : "Start switching";
+  if (els.switchMode) els.switchMode.disabled = switching.active;
   if (els.switchStatus) {
     if (!switching.active) {
-      els.switchStatus.textContent = switching.cycles ? `Stopped after ${switching.cycles} cycle${switching.cycles === 1 ? "" : "s"}` : "Ready. PPG and TRNG phases use the same ADC input.";
+      els.switchStatus.textContent = switching.cycles
+        ? `Stopped after ${switching.cycles} cycle${switching.cycles === 1 ? "" : "s"} | ${getSwitchingModeLabel()}`
+        : `Ready | ${getSwitchingModeLabel()}`;
     } else {
       const elapsed = Math.max(0, performance.now() - switching.phaseStartedAt);
       const remaining = Math.max(0, switching.phaseDurationMs - elapsed);
-      const dac = switching.phase === "ppg" ? switching.dacPpg : switching.dacTrng;
-      els.switchStatus.textContent = `${switching.phase.toUpperCase()} phase | DACB ${dac} | ${Math.ceil(remaining / 1000)} s remaining | cycles ${switching.cycles}`;
+      const dac = getSwitchingPhaseDac(switching.phase);
+      els.switchStatus.textContent = `${switching.phase.toUpperCase()} phase | ${getSwitchingModeLabel()} | DACB ${dac} | ${Math.ceil(remaining / 1000)} s remaining | cycles ${switching.cycles}`;
     }
   }
   const phaseLabels = { ppg: "PPG", trng: "TRNG", idle: "idle" };
@@ -1512,8 +1546,8 @@ function updateSwitchingUi() {
     const bitCount = switching.bits[source].length;
     const ppgCaption = els[captionKeys[source].ppg];
     const trngCaption = els[captionKeys[source].trng];
-    if (ppgCaption) ppgCaption.textContent = `${ppgCount} samples | ${phaseLabels.ppg} DACB ${switching.dacPpg}`;
-    if (trngCaption) trngCaption.textContent = `${bitCount} bits | ${phaseLabels.trng} DACB ${switching.dacTrng} | ${getBitMethodLabel()}`;
+    if (ppgCaption) ppgCaption.textContent = `${ppgCount} samples | ${phaseLabels.ppg} DACB ${switching.dacPpg} | ${getFilterDescription()} | window ${state.maxSamples}`;
+    if (trngCaption) trngCaption.textContent = `${bitCount} bits | ${phaseLabels.trng} input ${getSwitchingTrngInputSource(source)} | ${getBitMethodLabel()}`;
   });
 }
 
@@ -1522,7 +1556,7 @@ function setSwitchingPhase(phase) {
   switching.phase = phase;
   switching.phaseStartedAt = performance.now();
   switching.phaseDurationMs = phase === "ppg" ? switching.ppgMs : switching.trngMs;
-  const dac = phase === "ppg" ? switching.dacPpg : switching.dacTrng;
+  const dac = getSwitchingPhaseDac(phase);
   state.dacValues.B = dac;
   if (getSelectedDacTarget() === "B") setDacValue(dac, "switching");
   sendCommand(`B${dac}`).catch((error) => addLog("ERR", `Switching DACB: ${error.message || error}`, true));
@@ -1560,7 +1594,7 @@ function stopSwitchingMode() {
 function startSwitchingMode() {
   if (state.switching.active) {
     stopSwitchingMode();
-    addLog("SYS", "Single-sensor DAC switching stopped");
+    addLog("SYS", "Single-sensor switching stopped");
     return;
   }
   updateSwitchingSettings();
@@ -1570,7 +1604,7 @@ function startSwitchingMode() {
   setSwitchingPhase("ppg");
   state.switching.timer = window.setInterval(checkSwitchingPhase, 25);
   updateSwitchingUi();
-  addLog("SYS", `Single-sensor switching started: PPG ${state.switching.ppgMs / 1000}s / TRNG ${state.switching.trngMs / 1000}s`);
+  addLog("SYS", `Single-sensor switching started (${getSwitchingModeLabel()}): PPG ${state.switching.ppgMs / 1000}s / TRNG ${state.switching.trngMs / 1000}s`);
 }
 
 function clearSwitchingMode() {
@@ -1584,20 +1618,24 @@ function clearSwitchingMode() {
 
 function recordSwitchingSample(value, adcSource, sampleTime) {
   const switching = state.switching;
-  if (!switching.active || !["ADC0", "ADC2"].includes(adcSource) || !Number.isFinite(value)) return;
+  if (!switching.active || !Number.isFinite(value)) return;
   const t = Number.isFinite(sampleTime) ? sampleTime : performance.now();
   const phaseAge = t - switching.phaseStartedAt;
   if (phaseAge < switching.settleMs || phaseAge > switching.phaseDurationMs) return;
 
   if (switching.phase === "ppg") {
+    if (!["ADC0", "ADC2"].includes(adcSource)) return;
     switching.samples[adcSource].ppg.push({ t, value });
   } else if (switching.phase === "trng") {
+    const panelSource = Object.entries(getSwitchingTrngInputMap())
+      .find(([, inputSource]) => inputSource === adcSource)?.[0];
+    if (!panelSource) return;
     const bits = collectSwitchingBits(value, adcSource);
-    switching.bits[adcSource].push(...bits);
-    if (switching.bits[adcSource].length > state.maxBits) {
-      switching.bits[adcSource].splice(0, switching.bits[adcSource].length - state.maxBits);
+    switching.bits[panelSource].push(...bits);
+    if (switching.bits[panelSource].length > state.maxBits) {
+      switching.bits[panelSource].splice(0, switching.bits[panelSource].length - state.maxBits);
     }
-    appendSwitchingEncryptionBits(bits, adcSource);
+    appendSwitchingEncryptionBits(bits, panelSource);
   }
   state.needsSwitchDraw = true;
 }
@@ -2105,7 +2143,10 @@ function updateEncryptionUi() {
       : "";
     const batchText = state.bitMode ? ` | ${getAdcBatchStatusText()}` : "";
     const cipherWindowText = ` | cipher window ${state.encryptedPpg.length}/${getCipherWindowSize()}`;
-    const keySource = usesSwitchingEncryptionSource() ? `${state.encryptionSource} switching TRNG` : `${state.bitAdcSource} live`;
+    const switchingKeySource = usesSwitchingEncryptionSource()
+      ? `${state.encryptionSource} switching TRNG (${getSwitchingTrngInputSource(state.encryptionSource)})`
+      : `${state.bitAdcSource} live`;
+    const keySource = switchingKeySource;
     els.encryptionStatus.textContent = `${state.encryptionSource} signal | ${keySource} key | ${getBitMethodLabel()}${methodParams} | plain MA${CIPHER_SIGNAL_MA_WINDOW} | ${state.cipherWidthBits}-bit cipher | ${encryptionText} | ${modeText}${batchText}${inputText}${rateText}${cipherWindowText} | queue ${state.keyBits.length} bits | pending ${state.pendingPpg.length}${pendingReason}${dropped}`;
   }
 
@@ -2439,8 +2480,10 @@ function applyWindowSizeInput(normalize = true) {
   trimEncryptedHistory();
   updateStats();
   updateEncryptionUi();
+  updateSwitchingFilterControls();
   state.needsDraw = true;
   state.needsCipherDraw = true;
+  state.needsSwitchDraw = true;
 }
 
 function clampSampleRateHz(value) {
@@ -2638,6 +2681,7 @@ function updateFilterUi() {
   els.lowCutoffField.hidden = mode !== "low-pass" && mode !== "band-pass";
   updateValueUi();
   els.filterSummary.textContent = getFilterDescription();
+  updateSwitchingFilterControls();
 }
 
 function getDisplaySamples(source = state.adcSource) {
@@ -4187,6 +4231,28 @@ function drawBitMap() {
   });
 }
 
+function getSwitchingDisplaySamples(source) {
+  const settings = getFilterSettings();
+  const samples = state.switching.samples[source].ppg
+    .map((sample) => createViewSample({
+      ...sample,
+      channel: "ADC",
+      adcSource: source,
+      valueKind: "raw",
+    }))
+    .filter((sample) => Number.isFinite(sample.value));
+  const visibleStart = Math.max(0, samples.length - state.maxSamples);
+  const visibleSamples = samples.slice(visibleStart);
+  if (settings.mode === "raw") return visibleSamples;
+
+  const filteredValues = applyFilter(samples, settings);
+  return visibleSamples.map((sample, index) => ({
+    ...sample,
+    rawValue: sample.value,
+    value: filteredValues[visibleStart + index],
+  }));
+}
+
 function drawSwitchingPpgPlot(plotState, source) {
   const ctx = plotState.ctx;
   const width = plotState.width;
@@ -4201,14 +4267,14 @@ function drawSwitchingPpgPlot(plotState, source) {
   const chartH = height - margin.top - margin.bottom;
   if (chartW <= 0 || chartH <= 0) return;
 
-  const samples = state.switching.samples[source].ppg;
+  const samples = getSwitchingDisplaySamples(source);
   const { min, max } = getYRange(samples.map((sample) => sample.value));
   drawGrid(ctx, margin, chartW, chartH, min, max);
   drawZeroLine(ctx, margin, chartW, chartH, min, max);
   if (samples.length < 2) {
     ctx.fillStyle = "#66746f";
     ctx.font = "700 12px Segoe UI, sans-serif";
-    ctx.fillText("Waiting for PPG samples", margin.left + 10, margin.top + 24);
+    ctx.fillText(`Waiting for PPG samples | ${getFilterDescription()}`, margin.left + 10, margin.top + 24);
     return;
   }
 
@@ -4358,6 +4424,16 @@ function bindEvents() {
 
   els.windowSize.addEventListener("input", () => applyWindowSizeInput(false));
   els.windowSize.addEventListener("change", () => applyWindowSizeInput(true));
+  els.switchWindowSize?.addEventListener("input", () => {
+    if (!els.switchWindowSize.value) return;
+    els.windowSize.value = els.switchWindowSize.value;
+    applyWindowSizeInput(false);
+  });
+  els.switchWindowSize?.addEventListener("change", () => {
+    if (!els.switchWindowSize.value) return;
+    els.windowSize.value = els.switchWindowSize.value;
+    applyWindowSizeInput(true);
+  });
   els.sampleRate.addEventListener("input", () => applySampleRateInput(false));
   els.sampleRate.addEventListener("change", () => applySampleRateInput(true));
   els.sendRateButton.addEventListener("click", () => {
@@ -4435,12 +4511,25 @@ function bindEvents() {
       trimSampleHistory();
       updateStats();
       state.needsDraw = true;
+      state.needsSwitchDraw = true;
     });
     control.addEventListener("change", () => {
       updateFilterUi();
       trimSampleHistory();
       updateStats();
       state.needsDraw = true;
+      state.needsSwitchDraw = true;
+    });
+  });
+  [els.switchFilterMode].forEach((control) => {
+    control?.addEventListener("change", () => {
+      if (!control.value) return;
+      els.filterMode.value = control.value;
+      updateFilterUi();
+      trimSampleHistory();
+      updateStats();
+      state.needsDraw = true;
+      state.needsSwitchDraw = true;
     });
   });
 
@@ -4462,6 +4551,12 @@ function bindEvents() {
   els.exportBitsButton.addEventListener("click", exportBitsCsv);
   els.switchStartButton?.addEventListener("click", startSwitchingMode);
   els.switchClearButton?.addEventListener("click", clearSwitchingMode);
+  els.switchMode?.addEventListener("change", () => {
+    updateSwitchingSettings();
+    resetSwitchingData();
+    updateSwitchingUi();
+    state.needsSwitchDraw = true;
+  });
   [els.switchPpgSeconds, els.switchTrngSeconds, els.switchSettleMs, els.switchDacTrng, els.switchDacPpg]
     .forEach((control) => control?.addEventListener("change", updateSwitchingSettings));
   els.noiseCsvFile.addEventListener("change", () => {
