@@ -96,6 +96,12 @@ Implemented in `web_gui/`:
   - Model and measurement traces are overlaid under the current UV pulse program.
   - A browser-side first-pass auto-fit adjusts gain, dark current, rise tau, decay tau, and retention.
   - Device parameter packages can be exported/imported as JSON, including STM/LTM compact parameters, route multipliers, fit target mode/route, current UV program, and pasted measured transient text.
+- Neuron Model tab:
+  - Adds a single-device adaptive-threshold optoelectronic IF primitive.
+  - STM compact photocurrent is used as the fast membrane/TIA path.
+  - LTM state is written by spike events and shifts comparator threshold as either adaptation, sensitization, or fixed-threshold control.
+  - The plot shows UV input, STM current, post-reset TIA voltage, dynamic Vth, LTM state, emitted spike pulse, and reset suppression.
+  - CSV export now includes the neuron STM current, V_TIA, Vth, LTM state, and spike columns.
 - Architecture Optimizer tab:
   - Browser-side heuristic search generates candidate block architectures under the current device and O/E/O parameters.
   - Candidate variables include hidden device count, STM/LTM mode mix, switching route, fan-out connection topology, and optional O/E/O soft parameters.
@@ -113,6 +119,7 @@ Current limitation:
 - The LTM.xlsx baseline importer subtracts the late dark/negative offset before fitting; the abrupt late erase/drop segment is not yet represented by the compact retention model.
 - The Architecture Optimizer is a compact proxy optimizer. It screens structures quickly but does not replace trained ANN/SNN accuracy evaluation.
 - The integrate-fire emitter and LTM latch are compact system-level transfer models. Their parameters still need extraction from measured TIA/emitter circuit behavior or a circuit-level SPICE/Python backend.
+- The Neuron Model tab is a compact hardware primitive model, not a measured closed-loop circuit yet. The next validation target is measured `I_STM -> V_TIA -> comparator fire -> LTM Vth shift -> reset` timing.
 - Public dataset download commands exist, but decoded real samples are not yet streamed into the browser-side simulation.
 - No Python training/inference backend is connected yet.
 

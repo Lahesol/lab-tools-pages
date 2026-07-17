@@ -39,6 +39,21 @@ const references = [
     url: "https://arxiv.org/abs/2005.02183",
     note: "Baseline reference for comparing ANN/RNN/SNN on N-MNIST and DVS Gesture under controlled temporal settings.",
   },
+  {
+    title: "NEST adaptive-threshold LIF model",
+    url: "https://nest-simulator.readthedocs.io/en/stable/models/mat2_psc_exp.html",
+    note: "Reference software model where the spike threshold is lifted after firing and relaxes over short/long time constants.",
+  },
+  {
+    title: "Reconfigurable artificial neuron and synapse in a single memristor",
+    url: "https://www.nature.com/articles/s41598-025-15251-x",
+    note: "Experimental example of switching one device between volatile neuron-like IF operation and nonvolatile synaptic operation.",
+  },
+  {
+    title: "Leaky integrate-and-fire neuron by charge-discharge dynamics in MOSFET",
+    url: "https://www.nature.com/articles/s41598-017-07418-y",
+    note: "Device-level LIF example using current threshold, reset circuit, refractory period, and input-dependent firing frequency.",
+  },
 ];
 
 const DATASETS = window.DATASET_REGISTRY || {};
@@ -106,6 +121,14 @@ const defaults = {
   ltmWriteThreshold: 0.28,
   ltmReadoutGain: 0.55,
   ltmRetentionMs: 850,
+  neuronSwitchMethod: "vds",
+  neuronThresholdRule: "raise",
+  neuronBaseThresholdMv: 120,
+  neuronAdaptGainMv: 80,
+  neuronLtmUpdate: 0.22,
+  neuronLtmTauMs: 2600,
+  neuronRefractoryMs: 90,
+  neuronResetStrength: 0.65,
   checkedDeviceTraces: ["L0D0", "L1D0"],
   paramMode: "STM",
   paramSwitchMethod: "vds",
@@ -128,6 +151,7 @@ let latestTimeline = [];
 let latestBlock = null;
 let latestAnn = null;
 let latestSnn = null;
+let latestNeuron = null;
 let latestOptimizer = { candidates: [], best: null, target: "ann" };
 
 function $(id) {
@@ -342,6 +366,14 @@ function readControls() {
   state.ltmWriteThreshold = Number($("ltmWriteThreshold").value);
   state.ltmReadoutGain = Number($("ltmReadoutGain").value);
   state.ltmRetentionMs = Number($("ltmRetentionMs").value);
+  state.neuronSwitchMethod = $("neuronSwitchMethod").value;
+  state.neuronThresholdRule = $("neuronThresholdRule").value;
+  state.neuronBaseThresholdMv = Number($("neuronBaseThresholdMv").value);
+  state.neuronAdaptGainMv = Number($("neuronAdaptGainMv").value);
+  state.neuronLtmUpdate = Number($("neuronLtmUpdate").value);
+  state.neuronLtmTauMs = Number($("neuronLtmTauMs").value);
+  state.neuronRefractoryMs = Number($("neuronRefractoryMs").value);
+  state.neuronResetStrength = Number($("neuronResetStrength").value);
   state.paramMode = $("paramModeSelect").value;
   state.paramSwitchMethod = $("paramSwitchSelect").value;
   state.measurementText = $("measurementInput").value;
@@ -396,6 +428,14 @@ function writeControls() {
   $("ltmWriteThreshold").value = state.ltmWriteThreshold;
   $("ltmReadoutGain").value = state.ltmReadoutGain;
   $("ltmRetentionMs").value = state.ltmRetentionMs;
+  $("neuronSwitchMethod").value = state.neuronSwitchMethod;
+  $("neuronThresholdRule").value = state.neuronThresholdRule;
+  $("neuronBaseThresholdMv").value = state.neuronBaseThresholdMv;
+  $("neuronAdaptGainMv").value = state.neuronAdaptGainMv;
+  $("neuronLtmUpdate").value = state.neuronLtmUpdate;
+  $("neuronLtmTauMs").value = state.neuronLtmTauMs;
+  $("neuronRefractoryMs").value = state.neuronRefractoryMs;
+  $("neuronResetStrength").value = state.neuronResetStrength;
   $("paramModeSelect").value = state.paramMode;
   $("paramSwitchSelect").value = state.paramSwitchMethod;
   $("measurementInput").value = state.measurementText;
@@ -436,6 +476,12 @@ function updateReadouts() {
   $("ltmWriteThresholdOut").textContent = state.ltmWriteThreshold.toFixed(2);
   $("ltmReadoutGainOut").textContent = state.ltmReadoutGain.toFixed(2);
   $("ltmRetentionOut").textContent = `${state.ltmRetentionMs} ms`;
+  $("neuronBaseThresholdOut").textContent = `${state.neuronBaseThresholdMv} mV`;
+  $("neuronAdaptGainOut").textContent = `${state.neuronAdaptGainMv} mV`;
+  $("neuronLtmUpdateOut").textContent = state.neuronLtmUpdate.toFixed(2);
+  $("neuronLtmTauOut").textContent = `${state.neuronLtmTauMs} ms`;
+  $("neuronRefractoryOut").textContent = `${state.neuronRefractoryMs} ms`;
+  $("neuronResetOut").textContent = state.neuronResetStrength.toFixed(2);
   $("transferSummary").textContent = `${transferModeText()}, fanout loss ${state.splitterLossDb.toFixed(1)} dB`;
   $("traceSummary").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryLayer").textContent = traceLayer ? traceLayer.name : "Layer";
@@ -506,6 +552,14 @@ function buildTimingRows() {
 function deviceParams(mode, method, layerIndex, deviceIndex) {
   const variation = stableVariation(layerIndex, deviceIndex);
   return MODEL.params(state.deviceModel, mode, method, variation, layerIndex);
+}
+
+function sampleDt(timeline, index) {
+  if (index <= 0 || timeline.length < 2) {
+    const totalTime = (timeline[timeline.length - 1]?.t || 0) - (timeline[0]?.t || 0);
+    return Number.isFinite(totalTime) ? totalTime / Math.max(1, timeline.length - 1) : 0.001;
+  }
+  return Math.max(0.000001, timeline[index].t - timeline[index - 1].t);
 }
 
 function encodedInput(point, kind) {
@@ -718,6 +772,96 @@ function simulateArchitecture(kind) {
   else addAnnReadout(result);
 
   return result;
+}
+
+function simulateAdaptiveThresholdNeuron() {
+  const timeline = latestTimeline.length ? latestTimeline : generateTimeline();
+  const route = state.neuronSwitchMethod === "gate" ? "gate" : "vds";
+  const drive = parameterDrive(timeline);
+  const stmParams = deviceParams("STM", route, 0, 0);
+  const stmCurrent = MODEL.response(timeline, drive, stmParams, {
+    roleGain: 1,
+    presetGain: 1,
+    includeNoise: true,
+    noisePhase: 0.4,
+  });
+  const tiaVoltageMv = stmCurrent.map((currentNa) => Math.max(0, currentNa * state.tiaGain * 1e-3));
+  const effectiveVoltageMv = new Array(timeline.length).fill(0);
+  const ltmStateTrace = new Array(timeline.length).fill(0);
+  const thresholdTrace = new Array(timeline.length).fill(0);
+  const resetTrace = new Array(timeline.length).fill(0);
+  const spikeTrace = new Array(timeline.length).fill(0);
+  const emittedUv = new Array(timeline.length).fill(0);
+  const spikeTimes = [];
+
+  const ltmTau = Math.max(0.001, state.neuronLtmTauMs / 1000);
+  const refractorySec = Math.max(0, state.neuronRefractoryMs / 1000);
+  const pulseSec = Math.max(0.001, state.emitterPulseMs / 1000);
+  const base = Math.max(0.001, state.neuronBaseThresholdMv);
+  const adapt = Math.max(0, state.neuronAdaptGainMv);
+  const update = clamp(state.neuronLtmUpdate, 0, 1);
+  const resetStrength = clamp(state.neuronResetStrength, 0, 1);
+  let ltmState = 0;
+  let resetLevel = 0;
+  let refractoryUntil = -Infinity;
+  let emitUntil = -Infinity;
+
+  for (let index = 0; index < timeline.length; index += 1) {
+    const t = timeline[index].t;
+    const dt = sampleDt(timeline, index);
+    const ltmDecay = Math.exp(-dt / ltmTau);
+    const resetTau = Math.max(0.006, refractorySec * 0.45 || 0.035);
+
+    ltmState *= ltmDecay;
+    resetLevel *= Math.exp(-dt / resetTau);
+    const resetSuppression = clamp(resetLevel, 0, 0.98);
+    const effectiveMv = tiaVoltageMv[index] * (1 - resetSuppression);
+    let thresholdMv = base;
+    if (state.neuronThresholdRule === "raise") {
+      thresholdMv = base + adapt * ltmState;
+    } else if (state.neuronThresholdRule === "lower") {
+      thresholdMv = Math.max(1, base - adapt * ltmState);
+    }
+
+    if (t >= refractoryUntil && effectiveMv >= thresholdMv) {
+      spikeTimes.push(t);
+      spikeTrace[index] = 1;
+      ltmState = clamp(ltmState + update * (1 - ltmState), 0, 1.5);
+      resetLevel = Math.max(resetLevel, resetStrength);
+      refractoryUntil = t + refractorySec;
+      emitUntil = t + pulseSec;
+      thresholdMv = state.neuronThresholdRule === "raise"
+        ? base + adapt * ltmState
+        : state.neuronThresholdRule === "lower"
+          ? Math.max(1, base - adapt * ltmState)
+          : base;
+    }
+
+    if (t < emitUntil) emittedUv[index] = state.driverMax;
+    effectiveVoltageMv[index] = effectiveMv;
+    ltmStateTrace[index] = ltmState;
+    thresholdTrace[index] = thresholdMv;
+    resetTrace[index] = resetSuppression;
+  }
+
+  const totalTime = timeline[timeline.length - 1]?.t || 1;
+  return {
+    timeline,
+    route,
+    drive,
+    stmCurrent,
+    tiaVoltageMv,
+    effectiveVoltageMv,
+    ltmState: ltmStateTrace,
+    thresholdMv: thresholdTrace,
+    resetTrace,
+    spikeTrace,
+    emittedUv,
+    spikeTimes,
+    finalThresholdMv: thresholdTrace[thresholdTrace.length - 1] || base,
+    firstSpike: spikeTimes[0] ?? null,
+    rateHz: spikeTimes.length / Math.max(totalTime, 0.001),
+  };
 }
 
 function addAnnReadout(result) {
@@ -1766,6 +1910,97 @@ function drawSelectedDeviceCurrents() {
   drawAxis(ctx, timeline, currentPlot, maxCurrent, "I_photo (nA)");
 }
 
+function updateNeuronSummary() {
+  const result = latestNeuron;
+  if (!result) return;
+  const spikeCount = result.spikeTimes.length;
+  $("neuronStatus").textContent = `${state.neuronThresholdRule === "raise" ? "adaptation" : state.neuronThresholdRule === "lower" ? "sensitization" : "fixed"} / ${routeShort(result.route)}`;
+  $("neuronSpikeSummary").textContent = `${spikeCount} spike${spikeCount === 1 ? "" : "s"} / ${round(result.rateHz, 2)} Hz`;
+  $("neuronFireCondition").textContent = `V_TIA > Vth, R_TIA ${state.tiaGain} kOhm`;
+  $("neuronFirstSpike").textContent = result.firstSpike === null ? "none" : `${round(result.firstSpike, 4)} s`;
+  $("neuronFinalThreshold").textContent = `${round(result.finalThresholdMv, 2)} mV`;
+}
+
+function drawNeuronModel() {
+  const canvas = $("neuronCanvas");
+  if (!canvas) return;
+  if (!latestNeuron) latestNeuron = simulateAdaptiveThresholdNeuron();
+  const result = latestNeuron;
+  const { ctx, width, height } = setupCanvas(canvas);
+  const timeline = result.timeline;
+  const plot = { left: 100, right: width - 22, top: 64, bottom: height - 52 };
+  const uv = timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
+  const currentMax = Math.max(...result.stmCurrent, 1) * 1.12;
+  const voltageMax = Math.max(...result.tiaVoltageMv, ...result.thresholdMv, 1) * 1.08;
+  const ltmMax = Math.max(...result.ltmState, 1);
+  const spikeMax = Math.max(state.driverMax, 1);
+
+  ctx.fillStyle = "#fbfdff";
+  ctx.fillRect(0, 0, width, height);
+  drawPlotTitle(ctx, "AAT STM/LTM adaptive-threshold neuron", `${routeShort(result.route)}; STM = membrane path, LTM = Vth memory path`);
+  drawGrid(ctx, plot, 5, 6);
+
+  drawTimingLane(ctx, timeline, uv, plot, 0, 5, {
+    label: "UV in",
+    color: "#7b2ff2",
+    max: 1.1,
+    width: 2,
+  });
+  drawTimingLane(ctx, timeline, result.stmCurrent, plot, 1, 5, {
+    label: "I_STM",
+    color: "#0f9d91",
+    max: currentMax,
+    width: 2,
+  });
+
+  const voltageBounds = laneBounds(plot, 2, 5);
+  drawLaneBackground(ctx, plot, voltageBounds, 2, {
+    label: "V_TIA / Vth",
+    color: "#3d7fb8",
+    max: voltageMax,
+  });
+  drawLaneTrace(ctx, timeline, result.effectiveVoltageMv, plot, voltageBounds, 0, voltageMax, "#3d7fb8", 2.1, 0.95);
+  drawLaneTrace(ctx, timeline, result.thresholdMv, plot, voltageBounds, 0, voltageMax, "#c34c3c", 1.9, 0.9);
+  ctx.fillStyle = "#627381";
+  ctx.font = "10px Malgun Gothic, Segoe UI, sans-serif";
+  ctx.fillText("blue: post-reset V_TIA, red: adaptive Vth", plot.left + 6, voltageBounds.top + 12);
+
+  drawTimingLane(ctx, timeline, result.ltmState, plot, 3, 5, {
+    label: "S_LTM",
+    color: "#8a3ffc",
+    max: ltmMax,
+    width: 2,
+  });
+
+  const spikeBounds = laneBounds(plot, 4, 5);
+  drawLaneBackground(ctx, plot, spikeBounds, 4, {
+    label: "spike / reset",
+    color: "#d98612",
+    max: spikeMax,
+  });
+  drawLaneTrace(ctx, timeline, result.emittedUv, plot, spikeBounds, 0, spikeMax, "#d98612", 2.2, 0.95);
+  drawLaneTrace(ctx, timeline, result.resetTrace.map((value) => value * spikeMax), plot, spikeBounds, 0, spikeMax, "#243846", 1.5, 0.55);
+  if (result.spikeTimes.length) {
+    ctx.strokeStyle = "rgba(195,76,60,0.55)";
+    ctx.lineWidth = 1;
+    result.spikeTimes.forEach((time) => {
+      const x = timeToX(time, timeline, plot);
+      ctx.beginPath();
+      ctx.moveTo(x, plot.top + 3);
+      ctx.lineTo(x, plot.bottom - 3);
+      ctx.stroke();
+    });
+  }
+  drawTimeLabels(ctx, timeline, plot);
+
+  const statY = height - 24;
+  drawMiniStat(ctx, plot.left + 8, statY, "spikes", `${result.spikeTimes.length}`, "#d98612");
+  drawMiniStat(ctx, plot.left + 100, statY, "first", result.firstSpike === null ? "none" : `${round(result.firstSpike, 3)} s`, "#c34c3c");
+  drawMiniStat(ctx, plot.left + 205, statY, "final Vth", `${round(result.finalThresholdMv, 1)} mV`, "#3d7fb8");
+  drawMiniStat(ctx, plot.left + 325, statY, "peak I_STM", `${round(Math.max(...result.stmCurrent, 0), 1)} nA`, "#0f9d91");
+  updateNeuronSummary();
+}
+
 function parameterDrive(timeline) {
   return timeline.map((point) => state.intensity > 0 ? point.uv / state.intensity : 0);
 }
@@ -2570,6 +2805,9 @@ function drawAllActive() {
   if (state.activeTab === "params") {
     drawParameterFit();
   }
+  if (state.activeTab === "neuron") {
+    drawNeuronModel();
+  }
   if (state.activeTab === "optimizer") {
     renderOptimizerResults();
     drawOptimizerPlot();
@@ -2849,6 +3087,7 @@ function runAllSimulations() {
   latestBlock = simulateBlockGraph();
   latestAnn = simulateArchitecture("ann");
   latestSnn = simulateArchitecture("snn");
+  latestNeuron = simulateAdaptiveThresholdNeuron();
   updateMetrics(state.activeTab === "snn" ? latestSnn : latestAnn);
   renderDatasetPanels();
   renderRuntimeSummaries();
@@ -2912,8 +3151,9 @@ function removeLayer() {
 function exportCsv() {
   const selectedAnn = latestAnn.selected;
   const selectedSnn = latestSnn.selected;
+  const neuron = latestNeuron || simulateAdaptiveThresholdNeuron();
   const rows = [
-    "time_s,uv_intensity,ann_selected_mean_current_nA,ann_selected_tia_or_activation,snn_selected_mean_current_nA,snn_first_membrane",
+    "time_s,uv_intensity,ann_selected_mean_current_nA,ann_selected_tia_or_activation,snn_selected_mean_current_nA,snn_first_membrane,neuron_stm_current_nA,neuron_vtia_mv,neuron_vth_mv,neuron_ltm_state,neuron_spike",
   ];
   latestTimeline.forEach((point, index) => {
     if (index % 2 !== 0) return;
@@ -2926,6 +3166,11 @@ function exportCsv() {
       annOut.toFixed(7),
       selectedSnn.mean[index].toFixed(5),
       snnMem.toFixed(5),
+      (neuron.stmCurrent[index] || 0).toFixed(5),
+      (neuron.effectiveVoltageMv[index] || 0).toFixed(5),
+      (neuron.thresholdMv[index] || 0).toFixed(5),
+      (neuron.ltmState[index] || 0).toFixed(5),
+      (neuron.spikeTrace[index] || 0).toFixed(0),
     ].join(","));
   });
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
@@ -3011,6 +3256,12 @@ function bindEvents() {
     runAllSimulations();
     $("simStatus").textContent = "transient run";
   });
+  $("runNeuronBtn").addEventListener("click", () => {
+    readControls();
+    latestNeuron = simulateAdaptiveThresholdNeuron();
+    $("simStatus").textContent = "adaptive neuron";
+    drawNeuronModel();
+  });
   $("runAnnBtn").addEventListener("click", () => {
     readControls();
     state.activeTab = "ann";
@@ -3081,6 +3332,14 @@ function restore() {
     state.ltmWriteThreshold = clamp(Number.isFinite(Number(state.ltmWriteThreshold)) ? Number(state.ltmWriteThreshold) : defaults.ltmWriteThreshold, 0.01, 1.2);
     state.ltmReadoutGain = clamp(Number.isFinite(Number(state.ltmReadoutGain)) ? Number(state.ltmReadoutGain) : defaults.ltmReadoutGain, 0, 1.2);
     state.ltmRetentionMs = clamp(Number.isFinite(Number(state.ltmRetentionMs)) ? Number(state.ltmRetentionMs) : defaults.ltmRetentionMs, 100, 5000);
+    state.neuronSwitchMethod = state.neuronSwitchMethod === "gate" ? "gate" : "vds";
+    if (!["raise", "lower", "fixed"].includes(state.neuronThresholdRule)) state.neuronThresholdRule = defaults.neuronThresholdRule;
+    state.neuronBaseThresholdMv = clamp(Number.isFinite(Number(state.neuronBaseThresholdMv)) ? Number(state.neuronBaseThresholdMv) : defaults.neuronBaseThresholdMv, 5, 800);
+    state.neuronAdaptGainMv = clamp(Number.isFinite(Number(state.neuronAdaptGainMv)) ? Number(state.neuronAdaptGainMv) : defaults.neuronAdaptGainMv, 0, 400);
+    state.neuronLtmUpdate = clamp(Number.isFinite(Number(state.neuronLtmUpdate)) ? Number(state.neuronLtmUpdate) : defaults.neuronLtmUpdate, 0, 0.8);
+    state.neuronLtmTauMs = clamp(Number.isFinite(Number(state.neuronLtmTauMs)) ? Number(state.neuronLtmTauMs) : defaults.neuronLtmTauMs, 200, 12000);
+    state.neuronRefractoryMs = clamp(Number.isFinite(Number(state.neuronRefractoryMs)) ? Number(state.neuronRefractoryMs) : defaults.neuronRefractoryMs, 0, 600);
+    state.neuronResetStrength = clamp(Number.isFinite(Number(state.neuronResetStrength)) ? Number(state.neuronResetStrength) : defaults.neuronResetStrength, 0, 1);
     if (savedTransferModelVersion < defaults.transferModelVersion) {
       state.transferModelVersion = defaults.transferModelVersion;
       state.transferMode = defaults.transferMode;

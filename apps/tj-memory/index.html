@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=51010687cd87" />
+    <link rel="stylesheet" href="styles.css?v=be0d61ee77be" />
   </head>
   <body>
     <div class="app-shell">
@@ -24,6 +24,7 @@
         <button class="active" type="button" data-tab="uv">UV Input</button>
         <button type="button" data-tab="blocks">Device Blocks</button>
         <button type="button" data-tab="params">Device Parameters</button>
+        <button type="button" data-tab="neuron">Neuron Model</button>
         <button type="button" data-tab="optimizer">Optimizer</button>
         <button type="button" data-tab="ann">ANN Transient</button>
         <button type="button" data-tab="snn">SNN Spiking</button>
@@ -660,6 +661,107 @@ Edge UV: UV_target(t) = UV_external residual + delayed emitted UV * coupling * s
             </div>
           </section>
 
+          <section class="tab-panel" id="tab-neuron">
+            <div class="section-header">
+              <div>
+                <h2>Adaptive Threshold Neuron</h2>
+                <p>Single-device hardware primitive: STM photocurrent acts as the leaky membrane input, while LTM state shifts the comparator threshold after firing.</p>
+              </div>
+              <button id="runNeuronBtn" type="button" class="primary-button">Run neuron model</button>
+            </div>
+            <div class="neuron-workbench">
+              <div class="panel neuron-panel">
+                <div class="panel-title"><span>Neuron circuit setup</span><output id="neuronStatus">ready</output></div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Switching route</span>
+                    <select id="neuronSwitchMethod">
+                      <option value="vds">Gate 0 V, VDS +/-30 V</option>
+                      <option value="gate">VDS +30 V, Gate 10/40 V</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Threshold rule</span>
+                    <select id="neuronThresholdRule">
+                      <option value="raise">LTM raises Vth / adaptation</option>
+                      <option value="lower">LTM lowers Vth / sensitization</option>
+                      <option value="fixed">Fixed Vth reference</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Base Vth <output id="neuronBaseThresholdOut">120 mV</output></span>
+                    <input id="neuronBaseThresholdMv" type="range" min="5" max="800" step="5" value="120" />
+                  </label>
+                  <label class="field">
+                    <span>LTM-to-Vth gain <output id="neuronAdaptGainOut">80 mV</output></span>
+                    <input id="neuronAdaptGainMv" type="range" min="0" max="400" step="5" value="80" />
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>LTM update / spike <output id="neuronLtmUpdateOut">0.22</output></span>
+                    <input id="neuronLtmUpdate" type="range" min="0" max="0.8" step="0.01" value="0.22" />
+                  </label>
+                  <label class="field">
+                    <span>LTM retention <output id="neuronLtmTauOut">2600 ms</output></span>
+                    <input id="neuronLtmTauMs" type="range" min="200" max="12000" step="100" value="2600" />
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Refractory <output id="neuronRefractoryOut">90 ms</output></span>
+                    <input id="neuronRefractoryMs" type="range" min="0" max="600" step="5" value="90" />
+                  </label>
+                  <label class="field">
+                    <span>Reset strength <output id="neuronResetOut">0.65</output></span>
+                    <input id="neuronResetStrength" type="range" min="0" max="1" step="0.01" value="0.65" />
+                  </label>
+                </div>
+              </div>
+              <div class="panel neuron-panel">
+                <div class="panel-title"><span>Hardware mapping</span><output id="neuronSpikeSummary">0 spikes</output></div>
+                <dl class="summary-list">
+                  <div><dt>STM path</dt><dd>UV -> I_STM -> V_TIA</dd></div>
+                  <div><dt>LTM path</dt><dd>spike history -> Vth shift</dd></div>
+                  <div><dt>Fire condition</dt><dd id="neuronFireCondition">V_TIA > Vth</dd></div>
+                  <div><dt>First spike</dt><dd id="neuronFirstSpike">none</dd></div>
+                  <div><dt>Final Vth</dt><dd id="neuronFinalThreshold">-</dd></div>
+                </dl>
+                <pre class="equation">I_STM(t+dt) = device_STM(UV, route)
+V_TIA(t) = I_STM(t) * R_TIA
+S_LTM(t+dt) = decay(S_LTM) + eta * spike(t)
+V_th(t) = V_th0 +/- alpha * S_LTM(t)
+spike(t) = 1 when V_TIA(t) > V_th(t)</pre>
+              </div>
+            </div>
+            <details class="term-note" open>
+              <summary>Neuron model terms</summary>
+              <dl class="term-list compact-term-list">
+                <div><dt>STM membrane</dt><dd>The fitted STM photocurrent transient is used as the leaky integration signal before the comparator.</dd></div>
+                <div><dt>LTM threshold memory</dt><dd>Each fire event writes a slow LTM state that shifts the firing threshold over later pulses.</dd></div>
+                <div><dt>Adaptation</dt><dd>Positive LTM-to-Vth gain raises the threshold and reduces firing under repeated input.</dd></div>
+                <div><dt>Sensitization</dt><dd>Negative effective threshold shift lowers Vth so prior activity makes later firing easier.</dd></div>
+                <div><dt>Reset strength</dt><dd>Fractional discharge applied to the STM/TIA path after a comparator fire event.</dd></div>
+                <div><dt>Refractory</dt><dd>Time after firing where the neuron suppresses new spikes while reset is active.</dd></div>
+              </dl>
+            </details>
+            <div class="plot-frame wide">
+              <div class="plot-toolbar">
+                <span>STM/LTM adaptive neuron traces</span>
+                <div class="legend-row">
+                  <i class="legend uv"></i>UV input
+                  <i class="legend current"></i>STM current
+                  <i class="legend voltage"></i>TIA / Vth
+                  <i class="legend membrane"></i>LTM state
+                  <i class="legend tia"></i>output spike
+                </div>
+              </div>
+              <canvas id="neuronCanvas" class="plot-canvas neuron-plot" width="980" height="620" aria-label="Adaptive threshold neuron traces"></canvas>
+            </div>
+          </section>
+
           <section class="tab-panel" id="tab-optimizer">
             <div class="section-header">
               <div>
@@ -973,6 +1075,9 @@ Edge UV: UV_target(t) = UV_external residual + delayed emitted UV * coupling * s
                 <article class="reference-item"><h3>Device block</h3><p>One optical STM/LTM synaptic device. Its input is UV drive and its output is photocurrent.</p></article>
                 <article class="reference-item"><h3>STM</h3><p>Short-term memory mode with fast transient decay. In the O/E/O hybrid model it drives an integrate-fire emitter.</p></article>
                 <article class="reference-item"><h3>LTM</h3><p>Long-term memory mode with slower retention. In the O/E/O hybrid model it behaves as a latch/readout state.</p></article>
+                <article class="reference-item"><h3>Adaptive threshold neuron</h3><p>Hardware primitive where STM current produces the fast membrane-like signal and LTM state shifts the comparator threshold after firing.</p></article>
+                <article class="reference-item"><h3>Threshold adaptation</h3><p>Repeated spikes write LTM state that raises Vth, reducing later firing under the same UV pulse train.</p></article>
+                <article class="reference-item"><h3>Threshold sensitization</h3><p>LTM state lowers Vth so previous firing history makes later weak inputs easier to detect.</p></article>
                 <article class="reference-item"><h3>Switching route</h3><p>Bias method used to select STM/LTM behavior: VDS route or gate route.</p></article>
                 <article class="reference-item"><h3>VDS route</h3><p>Gate fixed at 0 V while VDS is changed between -30 V and +30 V.</p></article>
                 <article class="reference-item"><h3>Gate route</h3><p>VDS fixed at +30 V while gate voltage is changed between 10 V and 40 V.</p></article>
@@ -1086,6 +1191,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-baseline-curves.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=f4556176562b"></script>
+    <script src="app.js?v=8ce72c07679c"></script>
   </body>
 </html>

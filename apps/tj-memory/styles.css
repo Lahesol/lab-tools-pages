@@ -1340,8 +1340,23 @@ th {
   margin-bottom: 12px;
 }
 
+.neuron-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .param-panel {
   box-shadow: none;
+}
+
+.neuron-panel {
+  box-shadow: none;
+}
+
+.plot-canvas.neuron-plot {
+  height: 620px;
 }
 
 .parameter-sliders {
@@ -1606,6 +1621,7 @@ th {
   .optimizer-grid,
   .optimizer-results,
   .param-workbench,
+  .neuron-workbench,
   .network-grid,
   .analysis-grid,
   .if-material-grid {
