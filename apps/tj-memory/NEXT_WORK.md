@@ -100,7 +100,8 @@ Implemented in `web_gui/`:
   - Adds a single-device adaptive-threshold optoelectronic IF primitive.
   - STM compact photocurrent is used as the fast membrane/TIA path.
   - LTM state is written by spike events and shifts comparator threshold as either adaptation, sensitization, or fixed-threshold control.
-  - The plot shows UV input, STM current, post-reset TIA voltage, dynamic Vth, LTM state, emitted spike pulse, and reset suppression.
+  - The plot shows UV input, STM current, post-reset effective TIA voltage, dynamic Vth, LTM state, emitted spike pulse, and reset suppression.
+  - Reset is now modeled as post-fire suppression of `V_TIA,eff`, with independent reset strength and reset-recovery time so it affects subsequent spike timing/count rather than only the visual trace.
   - CSV export now includes the neuron STM current, V_TIA, Vth, LTM state, and spike columns.
 - Architecture Optimizer tab:
   - Browser-side heuristic search generates candidate block architectures under the current device and O/E/O parameters.

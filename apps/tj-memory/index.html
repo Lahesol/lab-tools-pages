@@ -718,6 +718,10 @@ Edge UV: UV_target(t) = UV_external residual + delayed emitted UV * coupling * s
                     <span>Reset strength <output id="neuronResetOut">0.65</output></span>
                     <input id="neuronResetStrength" type="range" min="0" max="1" step="0.01" value="0.65" />
                   </label>
+                  <label class="field">
+                    <span>Reset recovery <output id="neuronResetTauOut">260 ms</output></span>
+                    <input id="neuronResetTauMs" type="range" min="10" max="3000" step="10" value="260" />
+                  </label>
                 </div>
               </div>
               <div class="panel neuron-panel">
@@ -725,15 +729,16 @@ Edge UV: UV_target(t) = UV_external residual + delayed emitted UV * coupling * s
                 <dl class="summary-list">
                   <div><dt>STM path</dt><dd>UV -> I_STM -> V_TIA</dd></div>
                   <div><dt>LTM path</dt><dd>spike history -> Vth shift</dd></div>
-                  <div><dt>Fire condition</dt><dd id="neuronFireCondition">V_TIA > Vth</dd></div>
+                  <div><dt>Fire condition</dt><dd id="neuronFireCondition">V_TIA,eff > Vth</dd></div>
                   <div><dt>First spike</dt><dd id="neuronFirstSpike">none</dd></div>
                   <div><dt>Final Vth</dt><dd id="neuronFinalThreshold">-</dd></div>
                 </dl>
                 <pre class="equation">I_STM(t+dt) = device_STM(UV, route)
 V_TIA(t) = I_STM(t) * R_TIA
+V_TIA,eff(t) = V_TIA(t) * (1 - reset_state)
 S_LTM(t+dt) = decay(S_LTM) + eta * spike(t)
 V_th(t) = V_th0 +/- alpha * S_LTM(t)
-spike(t) = 1 when V_TIA(t) > V_th(t)</pre>
+spike(t) = 1 when V_TIA,eff(t) > V_th(t)</pre>
               </div>
             </div>
             <details class="term-note" open>
@@ -743,7 +748,8 @@ spike(t) = 1 when V_TIA(t) > V_th(t)</pre>
                 <div><dt>LTM threshold memory</dt><dd>Each fire event writes a slow LTM state that shifts the firing threshold over later pulses.</dd></div>
                 <div><dt>Adaptation</dt><dd>Positive LTM-to-Vth gain raises the threshold and reduces firing under repeated input.</dd></div>
                 <div><dt>Sensitization</dt><dd>Negative effective threshold shift lowers Vth so prior activity makes later firing easier.</dd></div>
-                <div><dt>Reset strength</dt><dd>Fractional discharge applied to the STM/TIA path after a comparator fire event.</dd></div>
+                <div><dt>Reset strength</dt><dd>Fractional post-fire discharge applied to the effective STM/TIA membrane path.</dd></div>
+                <div><dt>Reset recovery</dt><dd>Decay time of the reset suppression. Longer recovery makes reset strength affect later pulses and spike count more strongly.</dd></div>
                 <div><dt>Refractory</dt><dd>Time after firing where the neuron suppresses new spikes while reset is active.</dd></div>
               </dl>
             </details>
@@ -1191,6 +1197,6 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-baseline-curves.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=8ce72c07679c"></script>
+    <script src="app.js?v=8e36164cac35"></script>
   </body>
 </html>

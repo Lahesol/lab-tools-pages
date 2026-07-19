@@ -129,6 +129,7 @@ const defaults = {
   neuronLtmTauMs: 2600,
   neuronRefractoryMs: 90,
   neuronResetStrength: 0.65,
+  neuronResetTauMs: 260,
   checkedDeviceTraces: ["L0D0", "L1D0"],
   paramMode: "STM",
   paramSwitchMethod: "vds",
@@ -374,6 +375,7 @@ function readControls() {
   state.neuronLtmTauMs = Number($("neuronLtmTauMs").value);
   state.neuronRefractoryMs = Number($("neuronRefractoryMs").value);
   state.neuronResetStrength = Number($("neuronResetStrength").value);
+  state.neuronResetTauMs = Number($("neuronResetTauMs").value);
   state.paramMode = $("paramModeSelect").value;
   state.paramSwitchMethod = $("paramSwitchSelect").value;
   state.measurementText = $("measurementInput").value;
@@ -436,6 +438,7 @@ function writeControls() {
   $("neuronLtmTauMs").value = state.neuronLtmTauMs;
   $("neuronRefractoryMs").value = state.neuronRefractoryMs;
   $("neuronResetStrength").value = state.neuronResetStrength;
+  $("neuronResetTauMs").value = state.neuronResetTauMs;
   $("paramModeSelect").value = state.paramMode;
   $("paramSwitchSelect").value = state.paramSwitchMethod;
   $("measurementInput").value = state.measurementText;
@@ -482,6 +485,7 @@ function updateReadouts() {
   $("neuronLtmTauOut").textContent = `${state.neuronLtmTauMs} ms`;
   $("neuronRefractoryOut").textContent = `${state.neuronRefractoryMs} ms`;
   $("neuronResetOut").textContent = state.neuronResetStrength.toFixed(2);
+  $("neuronResetTauOut").textContent = `${state.neuronResetTauMs} ms`;
   $("transferSummary").textContent = `${transferModeText()}, fanout loss ${state.splitterLossDb.toFixed(1)} dB`;
   $("traceSummary").textContent = traceLayer ? traceLayer.name : "Layer";
   $("summaryLayer").textContent = traceLayer ? traceLayer.name : "Layer";
@@ -801,6 +805,7 @@ function simulateAdaptiveThresholdNeuron() {
   const adapt = Math.max(0, state.neuronAdaptGainMv);
   const update = clamp(state.neuronLtmUpdate, 0, 1);
   const resetStrength = clamp(state.neuronResetStrength, 0, 1);
+  const resetTau = Math.max(0.001, state.neuronResetTauMs / 1000);
   let ltmState = 0;
   let resetLevel = 0;
   let refractoryUntil = -Infinity;
@@ -810,7 +815,6 @@ function simulateAdaptiveThresholdNeuron() {
     const t = timeline[index].t;
     const dt = sampleDt(timeline, index);
     const ltmDecay = Math.exp(-dt / ltmTau);
-    const resetTau = Math.max(0.006, refractorySec * 0.45 || 0.035);
 
     ltmState *= ltmDecay;
     resetLevel *= Math.exp(-dt / resetTau);
@@ -1916,7 +1920,7 @@ function updateNeuronSummary() {
   const spikeCount = result.spikeTimes.length;
   $("neuronStatus").textContent = `${state.neuronThresholdRule === "raise" ? "adaptation" : state.neuronThresholdRule === "lower" ? "sensitization" : "fixed"} / ${routeShort(result.route)}`;
   $("neuronSpikeSummary").textContent = `${spikeCount} spike${spikeCount === 1 ? "" : "s"} / ${round(result.rateHz, 2)} Hz`;
-  $("neuronFireCondition").textContent = `V_TIA > Vth, R_TIA ${state.tiaGain} kOhm`;
+  $("neuronFireCondition").textContent = `V_TIA,eff > Vth, reset tau ${state.neuronResetTauMs} ms`;
   $("neuronFirstSpike").textContent = result.firstSpike === null ? "none" : `${round(result.firstSpike, 4)} s`;
   $("neuronFinalThreshold").textContent = `${round(result.finalThresholdMv, 2)} mV`;
 }
@@ -3153,7 +3157,7 @@ function exportCsv() {
   const selectedSnn = latestSnn.selected;
   const neuron = latestNeuron || simulateAdaptiveThresholdNeuron();
   const rows = [
-    "time_s,uv_intensity,ann_selected_mean_current_nA,ann_selected_tia_or_activation,snn_selected_mean_current_nA,snn_first_membrane,neuron_stm_current_nA,neuron_vtia_mv,neuron_vth_mv,neuron_ltm_state,neuron_spike",
+    "time_s,uv_intensity,ann_selected_mean_current_nA,ann_selected_tia_or_activation,snn_selected_mean_current_nA,snn_first_membrane,neuron_stm_current_nA,neuron_effective_vtia_mv,neuron_vth_mv,neuron_ltm_state,neuron_spike",
   ];
   latestTimeline.forEach((point, index) => {
     if (index % 2 !== 0) return;
@@ -3340,6 +3344,7 @@ function restore() {
     state.neuronLtmTauMs = clamp(Number.isFinite(Number(state.neuronLtmTauMs)) ? Number(state.neuronLtmTauMs) : defaults.neuronLtmTauMs, 200, 12000);
     state.neuronRefractoryMs = clamp(Number.isFinite(Number(state.neuronRefractoryMs)) ? Number(state.neuronRefractoryMs) : defaults.neuronRefractoryMs, 0, 600);
     state.neuronResetStrength = clamp(Number.isFinite(Number(state.neuronResetStrength)) ? Number(state.neuronResetStrength) : defaults.neuronResetStrength, 0, 1);
+    state.neuronResetTauMs = clamp(Number.isFinite(Number(state.neuronResetTauMs)) ? Number(state.neuronResetTauMs) : defaults.neuronResetTauMs, 10, 3000);
     if (savedTransferModelVersion < defaults.transferModelVersion) {
       state.transferModelVersion = defaults.transferModelVersion;
       state.transferMode = defaults.transferMode;

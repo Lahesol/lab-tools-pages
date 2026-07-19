@@ -634,6 +634,32 @@ input[type="file"] {
   margin-top: 10px;
 }
 
+.course-material-downloads {
+  margin-top: 10px;
+}
+
+.download-row-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.course-material-download-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.course-material-download-button {
+  width: 100%;
+  min-height: 36px;
+  border-color: var(--border-strong);
+  background: #ffffff;
+  color: var(--text);
+}
+
 .library-download-row {
   display: flex;
   flex-wrap: wrap;
@@ -1600,6 +1626,10 @@ th:first-child {
 }
 
 @media (max-width: 600px) {
+  .course-material-download-row {
+    grid-template-columns: 1fr;
+  }
+
   .app-shell {
     padding: 10px;
   }
