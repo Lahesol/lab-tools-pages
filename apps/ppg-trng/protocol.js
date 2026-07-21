@@ -199,11 +199,15 @@
 
         if (this.buffer[0] === ENCRYPT_MAGIC_0 && this.buffer[1] === ENCRYPT_MAGIC_1) {
           if (this.buffer.length < ENCRYPT_FRAME_SIZE) break;
-          const candidate = Uint8Array.from(this.buffer.splice(0, ENCRYPT_FRAME_SIZE));
+          const candidate = Uint8Array.from(this.buffer.slice(0, ENCRYPT_FRAME_SIZE));
           try {
             result.encryptionFrames.push(decodeEncryptionFrame(candidate));
+            this.buffer.splice(0, ENCRYPT_FRAME_SIZE);
           } catch (error) {
             result.errors.push(error.message || String(error));
+            // Keep possible following ADCF/ENCF magic bytes available for
+            // resynchronization after a truncated or dropped frame.
+            this.buffer.splice(0, 1);
           }
           continue;
         }
@@ -220,11 +224,15 @@
 
         const frameLength = getFrameLength(sampleCount, channelCount);
         if (this.buffer.length < frameLength) break;
-        const candidate = Uint8Array.from(this.buffer.splice(0, frameLength));
+        const candidate = Uint8Array.from(this.buffer.slice(0, frameLength));
         try {
           result.frames.push(decodeAdcFrame(candidate));
+          this.buffer.splice(0, frameLength);
         } catch (error) {
           result.errors.push(error.message || String(error));
+          // Retry from the next byte so a valid frame after a partial frame
+          // is not consumed as part of the failed candidate.
+          this.buffer.splice(0, 1);
         }
       }
 

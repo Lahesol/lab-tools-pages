@@ -240,7 +240,9 @@ const state = {
   lastAdcBatchCount: 0,
   totalAdcBatchSamples: 0,
   adcBatchErrors: 0,
+  firmwareAdcBlockDrops: 0,
   adcSequenceDrops: 0,
+  adcZeroCounts: { ADC0: 0, ADC2: 0, ADC3: 0 },
   lastAdcFrameSequence: null,
   liveMaWindow: 33,
   liveMaOffset: 0,
@@ -780,6 +782,10 @@ function setEncryptionEnabled(enabled, options = {}) {
 }
 
 async function startFirmwareConcurrentEncryption() {
+  if (state.switching.active) {
+    stopSwitchingMode();
+    addLog("SYS", "Stopped local DAC switching before concurrent ENCF");
+  }
   setBitMode(false);
   state.encryptionEnabled = false;
   if (els.encryptionToggle) els.encryptionToggle.checked = false;
@@ -790,10 +796,14 @@ async function startFirmwareConcurrentEncryption() {
   state.needsBitDraw = true;
   state.needsCipherDraw = true;
   await sendCommand("ENC1");
-  addLog("SYS", "Firmware concurrent ENCF started: ADC2 PPG + ADC3 MV+VN");
+  addLog("SYS", "Firmware concurrent ENCF started: ADC2 PPG + ADC3 throughput mix MA11");
 }
 
 async function startFirmwareSwitchingEncryption() {
+  if (state.switching.active) {
+    stopSwitchingMode();
+    addLog("SYS", "Stopped local DAC switching before firmware switching ENCF");
+  }
   setBitMode(false);
   state.encryptionEnabled = false;
   if (els.encryptionToggle) els.encryptionToggle.checked = false;
@@ -1183,6 +1193,9 @@ function ingestSynchronizedAdcFrame(frame) {
   state.lastAdcFrameSequence = frame.sequence;
 
   frame.samples.forEach((scan, index) => {
+    ["ADC0", "ADC2", "ADC3"].forEach((source) => {
+      if (scan[source] === 0) state.adcZeroCounts[source] += 1;
+    });
     const t = frameEnd - (frame.samples.length - 1 - index) * intervalMs;
     addSample(scan.ADC0, "ADC", { adcSource: "ADC0", valueKind: "raw", t });
     addSample(scan.ADC2, "ADC", { adcSource: "ADC2", valueKind: "raw", t });
@@ -1278,7 +1291,7 @@ function ingestFirmwareEncryptionFrame(frame) {
     keyBits,
     cipherMasked,
     cipher: cipherAdc,
-    method: frame.switchBitPhase ? "firmware throughput mix" : "firmware MV+VN",
+    method: "firmware throughput mix",
     bitSource: `ADC${frame.keyChannel}`,
     firmwareFrame: true,
     firmwareFlags: frame.flags,
@@ -1287,6 +1300,16 @@ function ingestFirmwareEncryptionFrame(frame) {
     firmwarePlainAvailable: frame.plainValid,
     firmwareRecoveredMasked: recoveredMasked,
   };
+
+  // Concurrent firmware suppresses duplicate ADCF traffic and carries the
+  // raw ADC2 sample in each valid ENCF record.
+  if (frame.plainValid && !frame.switchPpgPhase && !frame.switchBitPhase) {
+    addSample(signalAdc, "ADC", {
+      adcSource: `ADC${frame.signalChannel}`,
+      valueKind: "raw",
+      t,
+    });
+  }
 
   state.encryptedPpg.push(record);
   state.encryptedCount += 1;
@@ -1404,6 +1427,7 @@ function parseStatusSegment(segment) {
   if (parseAdcStatusSegment(segment)) return true;
   if (parseRateStatusSegment(segment)) return true;
   if (parseAdcGainStatusSegment(segment)) return true;
+  if (parsePingStatusSegment(segment)) return true;
 
   if (/^(DFU|PONG|GPIO)\b/i.test(segment)) {
     addLog("RX", segment);
@@ -1411,6 +1435,17 @@ function parseStatusSegment(segment) {
   }
 
   return false;
+}
+
+function parsePingStatusSegment(segment) {
+  if (!/^PONG\b/i.test(segment)) return false;
+
+  const blockDrop = segment.match(/\bADC_BLOCK_DROP\s*[,=:]\s*(\d+)\b/i);
+  if (blockDrop) {
+    state.firmwareAdcBlockDrops = Number.parseInt(blockDrop[1], 10);
+  }
+  addLog("RX", segment);
+  return true;
 }
 
 function parseAdcGainStatusSegment(segment) {
@@ -2171,7 +2206,15 @@ function getAdcBatchStatusText() {
   const staleText = ageMs > 3000 ? " stale" : "";
   const errors = state.adcBatchErrors ? ` err ${state.adcBatchErrors}` : "";
   const drops = state.adcSequenceDrops ? ` drop ${state.adcSequenceDrops}` : "";
-  return `ADCF ${state.lastAdcBatchCount}/${state.totalAdcBatchSamples}${errors}${drops}${staleText}`;
+  const zeros = Object.entries(state.adcZeroCounts)
+    .filter(([, count]) => count > 0)
+    .map(([source, count]) => `${source}=0:${count}`)
+    .join(",");
+  const zeroText = zeros ? ` zero ${zeros}` : "";
+  const firmwareDrops = state.firmwareAdcBlockDrops
+    ? ` fw-block-drop:${state.firmwareAdcBlockDrops}`
+    : "";
+  return `ADCF ${state.lastAdcBatchCount}/${state.totalAdcBatchSamples}${errors}${drops}${zeroText}${firmwareDrops}${staleText}`;
 }
 
 function getCipherWindowSize() {
@@ -3083,6 +3126,7 @@ function clearSamples() {
   state.totalAdcBatchSamples = 0;
   state.adcBatchErrors = 0;
   state.adcSequenceDrops = 0;
+  state.adcZeroCounts = { ADC0: 0, ADC2: 0, ADC3: 0 };
   state.lastAdcFrameSequence = null;
   resetNoiseExtractor();
   resetBitAndEncryptionBuffers();
