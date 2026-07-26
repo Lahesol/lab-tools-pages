@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=2e08edd1d736" />
+    <link rel="stylesheet" href="styles.css?v=0166fa7752db" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v1.1</span></h1>
+        <h1>AD5940 Lab Console <span>v1.2</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -164,24 +164,23 @@
         <section class="dfu-section">
           <p class="eyebrow">SECURE BLE DFU</p>
           <h2>Application-only signed ZIP</h2>
-          <ol class="dfu-steps">
-            <li><span>1</span><div><strong>Select signed ZIP</strong><input id="dfuFile" type="file" accept=".zip,application/zip" disabled /><small id="dfuPackageState">No package selected.</small></div></li>
-            <li><span>2</span><div><strong>Enter DFU through NUS</strong><button id="enterDfuButton" class="button compact secondary" disabled>Enter DFU</button><small>Expected: app disconnects and bootloader advertises <code>DfuTarg</code>.</small></div></li>
-            <li><span>3</span><div><strong>Select DfuTarg and transfer</strong><button id="transferDfuButton" class="button compact primary" disabled>Select DfuTarg &amp; transfer</button><small>Each action needs an explicit browser permission gesture.</small></div></li>
+          <ol class="dfu-steps" aria-label="Secure DFU stages">
+            <li id="dfuStagePackage" class="dfu-step is-current"><span>1</span><div><strong>Select signed ZIP</strong><input id="dfuFile" type="file" accept=".zip,application/zip" disabled /><small id="dfuPackageState">No package selected.</small></div></li>
+            <li id="dfuStageEntry" class="dfu-step"><span>2</span><div><strong>Enter DFU through NUS</strong><button id="enterDfuButton" class="button compact secondary" disabled>Enter DFU</button><small>Expected: app disconnects and bootloader advertises <code>DfuTarg</code>.</small></div></li>
+            <li id="dfuStageTransfer" class="dfu-step"><span>3</span><div><strong>Select DfuTarg and transfer</strong><button id="transferDfuButton" class="button compact primary" disabled>Select DfuTarg &amp; transfer</button><small>The browser chooser requires an explicit selection; transfer starts only after a second confirmation.</small></div></li>
+            <li id="dfuStageVerify" class="dfu-step"><span>4</span><div><strong>Verify rebooted application</strong><button id="verifyAppButton" class="button compact ghost" disabled>Reconnect application to verify</button><small>Confirm V26 and <code>AMPX</code> in the returned <code>@INFO</code> response.</small></div></li>
           </ol>
-          <div class="progress-wrap"><div class="progress-bar"><span id="dfuProgress"></span></div><p id="dfuProgressText">Transfer not started.</p></div>
+          <div class="progress-wrap" aria-live="polite">
+            <div id="dfuProgressBar" class="progress-bar" role="progressbar" aria-label="Secure DFU CRC-verified transfer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="dfuProgress"></span></div>
+            <p><strong id="dfuProgressPercent">0.0%</strong><span id="dfuProgressText">Transfer not started.</span></p>
+          </div>
           <div class="warning"><strong>Recovery boundary</strong><p>웹 DFU는 서명 검증을 대체하지 않습니다. ZIP 구조만 먼저 확인하며 실제 서명 수락은 보드의 Secure DFU bootloader가 결정합니다. SoftDevice/bootloader 패키지는 이 UI에서 거부합니다.</p></div>
         </section>
 
-        <section class="verification-section">
-          <h2>After update</h2>
-          <button id="verifyAppButton" class="button compact ghost" disabled>Reconnect application to verify</button>
-          <p>전송 완료는 새 애플리케이션의 광고·NUS 연결 확인과 별개입니다. 이 단계를 완료해야 업데이트 성공으로 기록합니다.</p>
-        </section>
       </aside>
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=2a74248ac55e"></script>
+    <script type="module" src="app.js?v=38f612ad6058"></script>
   </body>
 </html>

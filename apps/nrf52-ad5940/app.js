@@ -29,7 +29,8 @@ const state = {
   running: false,
   ampxSupported: false,
   expectDfuDisconnect: false,
-  dfu: { file: null, pkg: null, device: null, server: null, control: null, packet: null, waiter: null, transferring: false },
+  plotDrawPending: false,
+  dfu: { file: null, pkg: null, device: null, server: null, control: null, packet: null, waiter: null, transferring: false, completed: false, progress: 0, stage: "package" },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -45,7 +46,8 @@ const elements = {
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
   clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
   dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
-  dfuProgress: $("dfuProgress"), dfuProgressText: $("dfuProgressText"), verifyApp: $("verifyAppButton"),
+  dfuProgress: $("dfuProgress"), dfuProgressBar: $("dfuProgressBar"), dfuProgressPercent: $("dfuProgressPercent"), dfuProgressText: $("dfuProgressText"), verifyApp: $("verifyAppButton"),
+  dfuStages: { package: $("dfuStagePackage"), entry: $("dfuStageEntry"), transfer: $("dfuStageTransfer"), verify: $("dfuStageVerify") },
 };
 
 function log(message, level = "INFO") {
@@ -85,7 +87,7 @@ function setConnection(connected, text = "Instrument disconnected") {
   elements.connect.disabled = connected || !navigator.bluetooth;
   elements.disconnect.disabled = !connected;
   refreshControlAvailability();
-  elements.enterDfu.disabled = !connected || !state.dfu.pkg || state.dfu.transferring;
+  elements.enterDfu.disabled = !connected || !state.dfu.pkg || state.dfu.transferring || state.dfu.completed;
 }
 
 function browserReady() {
@@ -198,7 +200,9 @@ function onInstrumentDisconnected() {
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
     state.expectDfuDisconnect = false;
-    elements.transferDfu.disabled = !state.dfu.pkg;
+    elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed;
+    setDfuStage("transfer");
+    setDfuProgress(0, "Application disconnect observed. Select DfuTarg in the browser chooser.");
   }
 }
 
@@ -292,7 +296,13 @@ function addSample(sample) {
   state.samples.push(sample);
   elements.sampleCount.textContent = `${state.samples.length} samples`;
   elements.downloadCsv.disabled = state.samples.length === 0;
-  renderRows(); drawPlot();
+  renderRows(); schedulePlot();
+}
+
+function schedulePlot() {
+  if (state.plotDrawPending) return;
+  state.plotDrawPending = true;
+  window.requestAnimationFrame(() => { state.plotDrawPending = false; drawPlot(); });
 }
 
 function renderRows() {
@@ -376,22 +386,42 @@ async function inspectDfuPackage(file) {
   return { manifest, binary, dat, binaryName: app.bin_file, datName: app.dat_file };
 }
 
+function setDfuStage(stage) {
+  const order = ["package", "entry", "transfer", "verify"];
+  const current = order.indexOf(stage);
+  if (current < 0) throw new Error(`Unknown DFU stage: ${stage}`);
+  state.dfu.stage = stage;
+  order.forEach((name, index) => {
+    const element = elements.dfuStages[name];
+    element.classList.toggle("is-complete", index < current);
+    element.classList.toggle("is-current", index === current);
+    if (index === current) element.setAttribute("aria-current", "step");
+    else element.removeAttribute("aria-current");
+  });
+}
+
 function setDfuProgress(value, text) {
-  elements.dfuProgress.style.width = `${Math.max(0, Math.min(100, value)).toFixed(1)}%`;
+  const percent = Math.max(0, Math.min(100, value));
+  state.dfu.progress = percent;
+  elements.dfuProgress.style.width = `${percent.toFixed(1)}%`;
+  elements.dfuProgressBar.setAttribute("aria-valuenow", percent.toFixed(1));
+  elements.dfuProgressPercent.textContent = `${percent.toFixed(1)}%`;
   elements.dfuProgressText.textContent = text;
 }
 
 async function onDfuFile() {
-  const file = elements.dfuFile.files?.[0]; state.dfu.file = file || null; state.dfu.pkg = null; elements.enterDfu.disabled = true; elements.transferDfu.disabled = true;
+  const file = elements.dfuFile.files?.[0]; state.dfu.file = file || null; state.dfu.pkg = null; state.dfu.completed = false; elements.enterDfu.disabled = true; elements.transferDfu.disabled = true; elements.verifyApp.disabled = true;
+  setDfuStage("package"); setDfuProgress(0, "Transfer not started.");
   if (!file) { elements.dfuPackageState.textContent = "No package selected."; return; }
   try {
-    elements.dfuPackageState.textContent = "Checking ZIP structure…";
+    elements.dfuPackageState.textContent = "Checking ZIP structure…"; setDfuProgress(0, "Inspecting application-only DFU ZIP locally.");
     state.dfu.pkg = await inspectDfuPackage(file);
     elements.dfuPackageState.textContent = `Structure valid: ${state.dfu.pkg.binaryName} (${state.dfu.pkg.binary.length.toLocaleString()} B), ${state.dfu.pkg.datName} (${state.dfu.pkg.dat.length.toLocaleString()} B). Bootloader signature validation is still pending.`;
     elements.enterDfu.disabled = !state.device?.gatt?.connected;
+    setDfuStage("entry"); setDfuProgress(0, "ZIP structure verified. Connect the NUS application, then request DFU.");
     log(`DFU ZIP structure checked locally: ${file.name}. The browser did not verify its signature.`);
   } catch (error) {
-    elements.dfuPackageState.textContent = `Rejected: ${error.message}`; log(`DFU ZIP rejected: ${error.message}`, "ERROR");
+    elements.dfuPackageState.textContent = `Rejected: ${error.message}`; setDfuStage("package"); setDfuProgress(0, "ZIP rejected before any device write."); log(`DFU ZIP rejected: ${error.message}`, "ERROR");
   }
 }
 
@@ -399,9 +429,9 @@ async function enterDfu() {
   if (!state.dfu.pkg || !state.nusRx) return;
   if (!window.confirm("Enter Secure DFU bootloader now? Measurement will stop and the current BLE connection will disconnect.")) return;
   try {
-    state.expectDfuDisconnect = true; elements.enterDfu.disabled = true; elements.transferDfu.disabled = true;
+    state.expectDfuDisconnect = true; elements.enterDfu.disabled = true; elements.transferDfu.disabled = true; setDfuStage("entry");
     await sendNusCommand("DFU"); setDfuProgress(0, "DFU command sent. Wait for application disconnect, then select DfuTarg.");
-  } catch (error) { state.expectDfuDisconnect = false; log(`Could not enter DFU: ${error.message}`, "ERROR"); }
+  } catch (error) { state.expectDfuDisconnect = false; setDfuProgress(0, `DFU entry request failed: ${error.message}`); log(`Could not enter DFU: ${error.message}`, "ERROR"); }
 }
 
 function waitDfuResponse(expectedOpcode, timeoutMs = 10000) {
@@ -461,17 +491,19 @@ async function transferObject(type, payload, startPercent, endPercent, label) {
 }
 
 async function selectDfuAndTransfer() {
-  if (!state.dfu.pkg || state.dfu.transferring) return;
+  if (!state.dfu.pkg || state.dfu.transferring || state.dfu.completed) return;
+  if (!window.confirm("The browser will ask you to select DfuTarg. After selection, this application-only signed ZIP will be transferred with CRC verification. Continue?")) return;
   try {
+    setDfuStage("transfer"); setDfuProgress(0, "Choose the intended DfuTarg in the browser device picker.");
     const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [UUID.dfuService] }] });
-    state.dfu.device = device; device.addEventListener("gattserverdisconnected", () => log("DFU peripheral disconnected (expected after final execute).")); state.dfu.server = await device.gatt.connect();
+    state.dfu.device = device; log(`DfuTarg selected in browser chooser: ${device.name || "unnamed DFU peripheral"}.`); device.addEventListener("gattserverdisconnected", () => log("DFU peripheral disconnected (expected after final execute).")); state.dfu.server = await device.gatt.connect();
     const service = await state.dfu.server.getPrimaryService(UUID.dfuService); state.dfu.control = await service.getCharacteristic(UUID.dfuControl); state.dfu.packet = await service.getCharacteristic(UUID.dfuPacket); await state.dfu.control.startNotifications(); state.dfu.control.addEventListener("characteristicvaluechanged", onDfuControlNotification);
     state.dfu.transferring = true; elements.transferDfu.disabled = true; elements.enterDfu.disabled = true; setDfuProgress(0, "DfuTarg connected. Setting packet receipt notification interval to 1.");
     const prn = new Uint8Array([1, 0]); assertDfuSuccess(await dfuControl(DFU.setPrn, prn), DFU.setPrn);
     await transferObject(DFU.commandObject, state.dfu.pkg.dat, 0, 10, "Init packet"); await transferObject(DFU.dataObject, state.dfu.pkg.binary, 10, 100, "Application");
-    setDfuProgress(100, "Secure DFU transfer protocol completed. Reconnect the application to verify advertising and NUS."); elements.verifyApp.disabled = false; log("DFU protocol complete. Signature acceptance and reboot were decided by the target bootloader; application verification remains required.");
-  } catch (error) { setDfuProgress(0, `DFU stopped: ${error.message}`); log(`DFU failed safely: ${error.message}`, "ERROR"); }
-  finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg; }
+    state.dfu.completed = true; setDfuStage("verify"); setDfuProgress(100, "Secure DFU transfer protocol completed. Reconnect the application to verify advertising and NUS."); elements.verifyApp.disabled = false; log("DFU protocol complete. Signature acceptance and reboot were decided by the target bootloader; application verification remains required.");
+  } catch (error) { setDfuProgress(state.dfu.progress, `DFU stopped after ${state.dfu.progress.toFixed(1)}% CRC-verified transfer: ${error.message}`); log(`DFU failed safely: ${error.message}`, "ERROR"); }
+  finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg || state.dfu.completed; }
 }
 
 elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", drawPlot);

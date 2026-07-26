@@ -39,12 +39,22 @@ The original ADI example hard-coded its RTIA calibration to SINC3=4 and SINC2=22
 
 CSV is an export of received binary frame values. The UI does not smooth, average, interpolate, or rescale them. The CV x-axis deliberately remains **sequence sample index**, not a browser-inferred potential waveform.
 
+## Live plot behavior
+
+The browser decodes each received 9-byte `0xA1` (AMP) or `0xC1` (CV) frame immediately and appends its original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The downloadable CSV contains the unchanged received values and timestamps.
+
 ## Secure DFU boundary
 
 1. The UI accepts only an `nrfutil` **application-only signed ZIP** that has one `manifest.application` object with a `.dat` init packet and `.bin` file.
 2. ZIP parsing is local and checks structure only. It does **not** validate a cryptographic signature; the secure bootloader does that when it receives the init packet.
 3. The application is asked to enter the already-qualified NUS `DFU` command. The browser then asks the user to choose `DfuTarg` and uses Secure DFU service `0xFE59` with 20-byte packets, PRN=1, and CRC/offset checks after each packet.
 4. A successful transfer protocol is not a successful deployment claim until the user reconnects the restarted application and confirms advertising/NUS.
+
+### Web UI workflow and progress
+
+The V1.2 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer V26/`AMPX` reconnect check. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
+
+The transfer bar reports the percentage of bytes whose CRC/offset receipt was confirmed by the bootloader (PRN=1). It keeps the last confirmed percentage if a transfer stops instead of resetting it to zero. A `100%` transfer still requires the final NUS reconnect and `@INFO` capability check before it is treated as a deployed application.
 
 This design intentionally rejects SoftDevice, bootloader, and combined packages. Browser DFU cannot repair a board that no longer advertises or has lost debug access; use the documented SWD recovery path for that condition.
 
