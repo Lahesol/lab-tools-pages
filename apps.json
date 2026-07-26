@@ -24,6 +24,14 @@
         "accent":  "#087f72"
     },
     {
+        "name":  "AD5940 Lab Console",
+        "description":  "Web Bluetooth NUS console for nRF52-controlled AD5940 amperometry, cyclic voltammetry, and Secure DFU.",
+        "url":  "apps/nrf52-ad5940/",
+        "group":  "Electrochemistry",
+        "status":  "Ready",
+        "accent":  "#255f85"
+    },
+    {
         "name":  "KETI Lab Console",
         "description":  "Web Serial ADC acquisition, filtering, plotting, recording, and helper-based flashing console for Arduino Nano 33 BLE Rev2.",
         "url":  "apps/keti-platform/",

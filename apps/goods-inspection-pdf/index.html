@@ -10,11 +10,11 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=4c8cd7ae6291" />
+    <link rel="stylesheet" href="./styles.css?v=652f3b9c82c3" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
     <script defer src="./vendor/tesseract/tesseract.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=c262c29ebf1d"></script>
+    <script defer src="./app.js?v=71d364eda91a"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -196,11 +196,13 @@
                 <span id="reviewerSignatureStatus">검수자 이름을 먼저 입력하세요</span>
               </div>
               <div class="signature-editor__actions">
-                <button class="button button--secondary button--small" id="reviewerSignatureUploadButton" type="button">서명 등록</button>
+                <button class="button button--secondary button--small" id="reviewerSignatureUploadButton" type="button">서명 파일 업로드</button>
                 <button class="button button--ghost button--small" id="reviewerSignatureRemoveButton" type="button" hidden>서명 삭제</button>
+                <button class="button button--ghost button--small" id="reviewerSignatureResetPositionButton" type="button" disabled>위치 초기화</button>
                 <input id="reviewerSignatureInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
               </div>
-              <small>서명은 입력한 이름별로 현재 브라우저에만 저장됩니다.</small>
+              <small class="signature-editor__hint">오른쪽 미리보기의 서명을 드래그해 위치를 조정할 수 있습니다.</small>
+              <small>서명 파일은 배포 소스에 포함되지 않습니다. 직접 선택한 서명만 현재 브라우저에 저장되며, 보안 업데이트로 이전 저장 서명은 자동 정리될 수 있습니다.</small>
             </div>
           </div>
         </section>

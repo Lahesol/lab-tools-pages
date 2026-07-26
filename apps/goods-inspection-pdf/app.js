@@ -10,7 +10,13 @@
   const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
   const MAX_CROP_OUTPUT_DIMENSION = 4096;
   const PHOTO_CROP_ASPECT = 2.23;
-  const SIGNATURE_STORAGE_PREFIX = "goods-inspection.signature.v2.";
+  // Rotate the browser-only key after removing previously supplied signature
+  // files. Legacy entries are cleared once at startup.
+  const SIGNATURE_STORAGE_PREFIX = "goods-inspection.signature.v3.";
+  const LEGACY_SIGNATURE_STORAGE_PREFIXES = [
+    "goods-inspection.signature.v1.",
+    "goods-inspection.signature.v2.",
+  ];
 
   const state = {
     invoiceFile: null,
@@ -26,6 +32,8 @@
     previewPage: 0,
     draggedPhotoId: null,
     reviewerName: "",
+    signaturePosition: null,
+    signatureDrag: null,
     inspectionDate: todayIso(),
     exporting: false,
     roiPageNumber: 1,
@@ -120,6 +128,7 @@
     reviewerSignatureStatus: document.querySelector("#reviewerSignatureStatus"),
     reviewerSignatureUploadButton: document.querySelector("#reviewerSignatureUploadButton"),
     reviewerSignatureRemoveButton: document.querySelector("#reviewerSignatureRemoveButton"),
+    reviewerSignatureResetPositionButton: document.querySelector("#reviewerSignatureResetPositionButton"),
     reviewerSignatureInput: document.querySelector("#reviewerSignatureInput"),
     inspectionDate: document.querySelector("#inspectionDate"),
     documentPreview: document.querySelector("#documentPreview"),
@@ -159,6 +168,7 @@
   initialize();
 
   function initialize() {
+    clearLegacySignatureStorage();
     elements.inspectionDate.value = state.inspectionDate;
     bindEvents();
     renderAll();
@@ -243,6 +253,7 @@
       state.countMode = "auto";
       state.manualCount = BASE_ITEM_SLOTS;
       state.previewPage = 0;
+      state.signaturePosition = null;
       resetRoiState();
       if (elements.roiDialog.open) elements.roiDialog.close();
       elements.invoiceResult.hidden = true;
@@ -257,7 +268,10 @@
     });
 
     elements.reviewerName.addEventListener("input", (event) => {
+      const previousReviewer = getSelectedReviewer();
       state.reviewerName = event.target.value;
+      const nextReviewer = getSelectedReviewer();
+      if (previousReviewer?.id !== nextReviewer?.id) state.signaturePosition = null;
       renderReviewerEntry();
       renderPreview();
       updateValidation();
@@ -279,6 +293,11 @@
     });
 
     elements.reviewerSignatureRemoveButton.addEventListener("click", removeReviewerSignature);
+    elements.reviewerSignatureResetPositionButton.addEventListener("click", resetSignaturePosition);
+    elements.previewSignature.addEventListener("pointerdown", startSignatureDrag);
+    elements.previewSignature.addEventListener("pointermove", updateSignatureDrag);
+    elements.previewSignature.addEventListener("pointerup", finishSignatureDrag);
+    elements.previewSignature.addEventListener("pointercancel", finishSignatureDrag);
 
     elements.refreshPreviewButton.addEventListener("click", () => {
       renderPreview();
@@ -2073,8 +2092,9 @@
     const reviewer = getSelectedReviewer();
     const signature = reviewer ? readStoredSignature(reviewer.id) : "";
     elements.reviewerSignatureUploadButton.disabled = !reviewer;
-    elements.reviewerSignatureUploadButton.textContent = signature ? "서명 교체" : "서명 등록";
+    elements.reviewerSignatureUploadButton.textContent = signature ? "서명 파일 교체" : "서명 파일 업로드";
     elements.reviewerSignatureRemoveButton.hidden = !signature;
+    elements.reviewerSignatureResetPositionButton.disabled = !reviewer || !signature;
     elements.reviewerSignaturePreview.dataset.state = signature ? "registered" : reviewer ? "missing" : "empty";
 
     if (signature) {
@@ -2088,6 +2108,7 @@
       elements.reviewerSignatureStatus.hidden = false;
       elements.reviewerSignatureStatus.textContent = reviewer ? `${reviewer.name} 서명을 등록해 주세요` : "검수자 이름을 먼저 입력하세요";
     }
+    applySignaturePreviewPosition();
   }
 
   async function storeReviewerSignature(file) {
@@ -2123,6 +2144,7 @@
   function removeReviewerSignature() {
     const reviewer = getSelectedReviewer();
     if (!reviewer) return;
+    state.signaturePosition = null;
     try {
       localStorage.removeItem(signatureStorageKey(reviewer.id));
     } catch (error) {
@@ -2132,6 +2154,95 @@
     renderPreview();
     updateValidation();
     showToast(`${reviewer.name} 서명을 이 브라우저에서 삭제했습니다.`);
+  }
+
+  function getDefaultSignaturePosition() {
+    const rowCount = getItemRowCount();
+    const blockHeight = 10.5 + 42.7;
+    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * blockHeight;
+    return {
+      x: 187 / DOCUMENT_WIDTH_MM,
+      y: (236 + extraHeight) / getDocumentHeightMm(),
+    };
+  }
+
+  function clampSignaturePosition(position) {
+    const fallback = getDefaultSignaturePosition();
+    return {
+      x: Math.min(0.92, Math.max(0.08, Number(position?.x) || fallback.x)),
+      y: Math.min(0.94, Math.max(0.08, Number(position?.y) || fallback.y)),
+    };
+  }
+
+  function getSignaturePosition() {
+    return clampSignaturePosition(state.signaturePosition || getDefaultSignaturePosition());
+  }
+
+  function applySignaturePreviewPosition() {
+    const position = getSignaturePosition();
+    elements.previewSignature.style.left = `${position.x * 100}%`;
+    elements.previewSignature.style.top = `${position.y * 100}%`;
+    elements.previewSignature.dataset.position = `${position.x.toFixed(3)},${position.y.toFixed(3)}`;
+  }
+
+  function getSignaturePreviewPoint(event) {
+    const bounds = elements.documentPreview.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return null;
+    return {
+      x: (event.clientX - bounds.left) / bounds.width,
+      y: (event.clientY - bounds.top) / bounds.height,
+    };
+  }
+
+  function startSignatureDrag(event) {
+    if (elements.previewSignature.hidden || !elements.previewSignature.src) return;
+    const point = getSignaturePreviewPoint(event);
+    if (!point) return;
+    const position = getSignaturePosition();
+    event.preventDefault();
+    state.signatureDrag = {
+      pointerId: event.pointerId,
+      offsetX: point.x - position.x,
+      offsetY: point.y - position.y,
+      moved: false,
+    };
+    elements.previewSignature.setPointerCapture?.(event.pointerId);
+    elements.previewSignature.classList.add("is-dragging");
+  }
+
+  function updateSignatureDrag(event) {
+    const drag = state.signatureDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const point = getSignaturePreviewPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    state.signaturePosition = clampSignaturePosition({
+      x: point.x - drag.offsetX,
+      y: point.y - drag.offsetY,
+    });
+    drag.moved = true;
+    applySignaturePreviewPosition();
+  }
+
+  function finishSignatureDrag(event) {
+    const drag = state.signatureDrag;
+    if (!drag || (event.pointerId != null && drag.pointerId !== event.pointerId)) return;
+    if (elements.previewSignature.hasPointerCapture?.(drag.pointerId)) {
+      elements.previewSignature.releasePointerCapture(drag.pointerId);
+    }
+    state.signatureDrag = null;
+    elements.previewSignature.classList.remove("is-dragging");
+    if (drag.moved) {
+      elements.reviewerSignatureResetPositionButton.disabled = false;
+      showToast("미리보기에서 전자서명 위치를 조정했습니다.");
+    }
+  }
+
+  function resetSignaturePosition() {
+    state.signaturePosition = null;
+    applySignaturePreviewPosition();
+    elements.reviewerSignatureResetPositionButton.disabled = !getSelectedReviewer();
+    showToast("전자서명을 기본 위치로 되돌렸습니다.");
   }
 
   function renderPreview() {
@@ -2193,6 +2304,7 @@
       elements.previewSignature.hidden = true;
     }
 
+    applySignaturePreviewPosition();
     elements.previewThumbnails.replaceChildren();
   }
 
@@ -2352,7 +2464,20 @@
     drawText(context, "물품 검수자:", mm(127), mm(236 + extraHeight), 11, "700", "left", scale);
     drawText(context, reviewer?.name || "", mm(164), mm(236 + extraHeight), 11, "700", "center", scale);
     drawText(context, "(인)", mm(187), mm(236 + extraHeight), 11, "700", "center", scale);
-    if (signature) drawImageContain(context, signature, mm(176), mm(230 + extraHeight), mm(22), mm(12), 0.92);
+    if (signature) {
+      const signaturePosition = getSignaturePosition();
+      const signatureWidthMm = 22;
+      const signatureHeightMm = 12;
+      drawImageContain(
+        context,
+        signature,
+        mm(signaturePosition.x * DOCUMENT_WIDTH_MM - signatureWidthMm / 2),
+        mm(signaturePosition.y * documentHeightMm - signatureHeightMm / 2),
+        mm(signatureWidthMm),
+        mm(signatureHeightMm),
+        0.92,
+      );
+    }
 
     drawText(context, "가천대학교 총장 귀하", mm(18), mm(278 + extraHeight), 19, "700", "left", scale);
     return canvas;
@@ -2462,6 +2587,22 @@
 
   function signatureStorageKey(reviewerId) {
     return `${SIGNATURE_STORAGE_PREFIX}${reviewerId}`;
+  }
+
+  function clearLegacySignatureStorage() {
+    try {
+      const legacyKeys = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key && LEGACY_SIGNATURE_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+          legacyKeys.push(key);
+        }
+      }
+      legacyKeys.forEach((key) => localStorage.removeItem(key));
+    } catch (error) {
+      // A restricted storage context should not prevent the app from loading.
+      console.warn("Legacy signature cleanup was unavailable.", error);
+    }
   }
 
   function readStoredSignature(reviewerId) {

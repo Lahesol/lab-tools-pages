@@ -1,0 +1,187 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#071525" />
+    <title>AD5940 Lab Console</title>
+    <link rel="stylesheet" href="styles.css?v=2e08edd1d736" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
+        <h1>AD5940 Lab Console <span>v1.1</span></h1>
+      </div>
+      <div class="top-status">
+        <span id="connectionDot" class="status-dot"></span>
+        <span id="connectionLabel">Instrument disconnected</span>
+        <button id="connectButton" class="button primary">Connect instrument</button>
+        <button id="disconnectButton" class="button ghost" disabled>Disconnect</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="panel controls-panel">
+        <section>
+          <p class="eyebrow">EXPERIMENT</p>
+          <div class="mode-switch" role="tablist" aria-label="Experiment type">
+            <button id="ampTab" class="mode-tab active" role="tab" aria-selected="true">Amperometry</button>
+            <button id="cvTab" class="mode-tab" role="tab" aria-selected="false">Cyclic voltammetry</button>
+          </div>
+        </section>
+
+        <form id="experimentForm" novalidate>
+          <div id="ampParameters" class="parameter-set">
+            <section class="parameter-group">
+              <h2>Amperometry — bias &amp; timing</h2>
+              <label>Vzero <span>mV</span><input id="ampVzero" type="number" min="200" max="2200" step="1" value="200" required /></label>
+              <label>Sensor bias <span>mV</span><input id="ampBias" type="number" min="-750" max="750" step="1" value="0" required /></label>
+              <label>Acquisition period <span>ms</span><input id="ampPeriod" type="number" min="100" max="10000" step="1" value="1000" required /></label>
+              <label>Internal RTIA <span>Ω</span>
+                <select id="ampRtia">
+                  <option value="1000">1 kΩ</option><option value="4000" selected>4 kΩ</option>
+                  <option value="10000">10 kΩ</option><option value="20000">20 kΩ</option>
+                  <option value="40000">40 kΩ</option><option value="100000">100 kΩ</option>
+                  <option value="160000">160 kΩ</option>
+                </select>
+              </label>
+            </section>
+            <details class="advanced-parameters" open>
+              <summary>Acquisition &amp; calibration parameters</summary>
+              <section class="parameter-group advanced-group">
+                <label>LP TIA Rf <span>Ω</span>
+                  <select id="ampRf">
+                    <option value="20000">20 kΩ</option><option value="100000">100 kΩ</option>
+                    <option value="200000">200 kΩ</option><option value="400000">400 kΩ</option>
+                    <option value="600000">600 kΩ</option><option value="1000000" selected>1 MΩ</option>
+                  </select>
+                </label>
+                <label>ADC PGA gain <span>×</span>
+                  <select id="ampPga">
+                    <option value="10">1</option><option value="15" selected>1.5</option><option value="20">2</option>
+                    <option value="40">4</option><option value="90">9</option>
+                  </select>
+                </label>
+                <label>SINC3 OSR <span>ratio</span>
+                  <select id="ampSinc3"><option value="2">2</option><option value="4" selected>4</option><option value="5">5</option></select>
+                </label>
+                <label>SINC2 OSR <span>ratio</span>
+                  <select id="ampSinc2">
+                    <option value="22" selected>22</option><option value="44">44</option><option value="89">89</option><option value="178">178</option>
+                    <option value="267">267</option><option value="533">533</option><option value="640">640</option><option value="667">667</option>
+                    <option value="800">800</option><option value="889">889</option><option value="1067">1067</option><option value="1333">1333</option>
+                  </select>
+                </label>
+                <label>FIFO threshold <span>words</span><input id="ampFifo" type="number" min="4" max="512" step="4" value="4" required /></label>
+                <label>RCAL resistor <span>Ω</span><input id="ampRcal" type="number" min="100" max="100000" step="1" value="200" required /></label>
+                <label>ADC reference <span>mV</span><input id="ampAdcRef" type="number" min="1500" max="2100" step="1" value="1816" required /></label>
+              </section>
+            </details>
+            <p id="ampTimingHint" class="hint"></p>
+            <p id="ampCapabilityHint" class="hint capability-hint">AMPX-capable controller firmware is checked after connection.</p>
+            <p class="hint">RLOAD is fixed at 100 Ω because the ADI RTIA calibration routine uses that path. RCAL defaults to the 200 Ω resistor populated on this schematic; enter a measured value only after confirming the resistor.</p>
+          </div>
+
+          <div id="cvParameters" class="parameter-set hidden">
+            <section class="parameter-group">
+              <h2>Cyclic voltammetry</h2>
+              <label>Start potential <span>mV</span><input id="cvStart" type="number" min="-1000" max="1000" step="1" value="-500" required /></label>
+              <label>Vertex potential <span>mV</span><input id="cvVertex" type="number" min="-1000" max="1000" step="1" value="500" required /></label>
+              <label>Vzero <span>mV</span><input id="cvVzero" type="number" min="200" max="2200" step="1" value="1200" required /></label>
+              <label>Points <span>count</span><input id="cvSteps" type="number" min="2" max="4095" step="1" value="200" required /></label>
+              <label>Scan duration <span>ms</span><input id="cvDuration" type="number" min="10" max="600000" step="1" value="10000" required /></label>
+              <label>Settling time <span>ms</span><input id="cvSettle" type="number" min="2" max="1000" step="1" value="5" required /></label>
+              <label>Internal RTIA <span>Ω</span>
+                <select id="cvRtia">
+                  <option value="1000">1 kΩ</option><option value="4000">4 kΩ</option>
+                  <option value="10000">10 kΩ</option><option value="20000" selected>20 kΩ</option>
+                  <option value="40000">40 kΩ</option><option value="100000">100 kΩ</option>
+                  <option value="160000">160 kΩ</option>
+                </select>
+              </label>
+            </section>
+            <p class="hint">펌웨어는 Vzero + start/vertex가 200–2200 mV를 넘는 설정을 거부합니다.</p>
+          </div>
+
+          <div class="control-actions">
+            <button id="applyButton" class="button secondary" type="submit" disabled>Apply configuration</button>
+            <button id="runButton" class="button primary" type="button" disabled>Start measurement</button>
+            <button id="stopButton" class="button danger" type="button" disabled>Stop</button>
+          </div>
+        </form>
+
+        <section class="safety-note">
+          <h2>Hardware gate</h2>
+          <p>RUN 명령 전 ADIID를 확인합니다. AFE_ID 또는 AFE_SPI 오류가 오면 측정은 시작되지 않으며 BLE/DFU는 유지됩니다.</p>
+          <button id="probeButton" class="button compact ghost" type="button" disabled>Run AFE SPI probe</button>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <section class="panel plot-panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">LIVE RESULT</p><h2 id="plotTitle">Amperometry — current vs sample index</h2></div>
+            <div class="plot-actions">
+              <button id="clearDataButton" class="button compact ghost">Clear trace</button>
+              <button id="downloadCsvButton" class="button compact ghost" disabled>Download CSV</button>
+            </div>
+          </div>
+          <canvas id="plotCanvas" aria-label="Measurement plot"></canvas>
+          <p id="plotCaption" class="plot-caption">No device data. The plot will display each received ADI example current value without smoothing.</p>
+        </section>
+
+        <section class="panel data-panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">RAW RECEIVED FRAMES</p><h2>Latest samples</h2></div>
+            <div id="sampleCount" class="metric">0 samples</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Mode</th><th>Index</th><th>Current (µA)</th><th>Received at</th></tr></thead>
+              <tbody id="sampleRows"><tr><td colspan="4" class="empty">No binary measurement frames received.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="panel-heading"><div><p class="eyebrow">EVENT LOG</p><h2>Protocol and safety events</h2></div><button id="clearLogButton" class="button compact ghost">Clear</button></div>
+          <pre id="eventLog" aria-live="polite"></pre>
+        </section>
+      </section>
+
+      <aside class="panel dfu-panel">
+        <section>
+          <p class="eyebrow">CONNECTION</p>
+          <dl class="connection-grid">
+            <dt>Browser</dt><dd id="browserState">Checking Web Bluetooth…</dd>
+            <dt>Device</dt><dd id="deviceState">—</dd>
+            <dt>Firmware protocol</dt><dd>NUS / AD5940_CTRL / AMPX</dd>
+            <dt>Last status</dt><dd id="lastStatus">—</dd>
+          </dl>
+        </section>
+
+        <section class="dfu-section">
+          <p class="eyebrow">SECURE BLE DFU</p>
+          <h2>Application-only signed ZIP</h2>
+          <ol class="dfu-steps">
+            <li><span>1</span><div><strong>Select signed ZIP</strong><input id="dfuFile" type="file" accept=".zip,application/zip" disabled /><small id="dfuPackageState">No package selected.</small></div></li>
+            <li><span>2</span><div><strong>Enter DFU through NUS</strong><button id="enterDfuButton" class="button compact secondary" disabled>Enter DFU</button><small>Expected: app disconnects and bootloader advertises <code>DfuTarg</code>.</small></div></li>
+            <li><span>3</span><div><strong>Select DfuTarg and transfer</strong><button id="transferDfuButton" class="button compact primary" disabled>Select DfuTarg &amp; transfer</button><small>Each action needs an explicit browser permission gesture.</small></div></li>
+          </ol>
+          <div class="progress-wrap"><div class="progress-bar"><span id="dfuProgress"></span></div><p id="dfuProgressText">Transfer not started.</p></div>
+          <div class="warning"><strong>Recovery boundary</strong><p>웹 DFU는 서명 검증을 대체하지 않습니다. ZIP 구조만 먼저 확인하며 실제 서명 수락은 보드의 Secure DFU bootloader가 결정합니다. SoftDevice/bootloader 패키지는 이 UI에서 거부합니다.</p></div>
+        </section>
+
+        <section class="verification-section">
+          <h2>After update</h2>
+          <button id="verifyAppButton" class="button compact ghost" disabled>Reconnect application to verify</button>
+          <p>전송 완료는 새 애플리케이션의 광고·NUS 연결 확인과 별개입니다. 이 단계를 완료해야 업데이트 성공으로 기록합니다.</p>
+        </section>
+      </aside>
+    </main>
+
+    <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
+    <script type="module" src="app.js?v=2a74248ac55e"></script>
+  </body>
+</html>

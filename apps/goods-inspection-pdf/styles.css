@@ -993,6 +993,7 @@ summary:focus-visible,
 
 .signature-editor__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
 }
 
@@ -1000,6 +1001,13 @@ summary:focus-visible,
   min-height: 32px;
   padding: 7px 12px;
   font-size: 10px;
+}
+
+.signature-editor__hint {
+  color: var(--teal);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .preview-panel {
@@ -1220,7 +1228,7 @@ summary:focus-visible,
 }
 
 .template-inspector {
-  position: relative;
+  position: static;
   display: flex;
   width: 56%;
   align-items: center;
@@ -1233,13 +1241,23 @@ summary:focus-visible,
 
 .template-inspector img {
   position: absolute;
-  top: 50%;
-  right: -2%;
-  width: 22%;
-  max-height: 40px;
-  transform: translateY(-50%);
+  z-index: 4;
+  left: 89.05%;
+  top: 79.46%;
+  width: 10.48%;
+  max-height: 5.05%;
+  transform: translate(-50%, -50%);
   object-fit: contain;
   opacity: 0.92;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.template-inspector img.is-dragging {
+  cursor: grabbing;
+  opacity: 1;
+  filter: drop-shadow(0 3px 5px rgba(13, 52, 85, 0.25));
 }
 
 .template-recipient {

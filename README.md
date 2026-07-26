@@ -9,6 +9,7 @@ Open index.html through GitHub Pages, not directly from the filesystem.
 - 6 Color Light Control: pps/6color/
 - PCB Gaussian Web Control: pps/pcb-gaussian/
 - PPG TRNG Control Console: pps/ppg-trng/
+- AD5940 Lab Console: pps/nrf52-ad5940/
 - KETI Lab Console: pps/keti-platform/
 - SISU Baejeong Scheduling Tool: pps/sisu-baejeong/
 - Goods Inspection PDF Generator: pps/goods-inspection-pdf/
