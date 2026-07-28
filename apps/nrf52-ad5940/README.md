@@ -11,11 +11,27 @@
 | GUI → board | `CFG,AMPX,<vzero_mV>,<sensor_bias_mV>,<period_ms>,<rtia_ohm>,<rf_ohm>,<pga_x10>,<sinc3_osr>,<sinc2_osr>,<fifo_words>,<rcal_ohm>,<adc_ref_mV>` |
 | legacy host → board | `CFG,AMP,<vzero_mV>,<sensor_bias_mV>,<period_ms>,<rtia_ohm>` (keeps the current advanced AMP values) |
 | GUI → board | `CFG,CV,<start_mV>,<vertex_mV>,<vzero_mV>,<steps>,<duration_ms>,<settle_ms>,<rtia_ohm>` |
-| GUI → board | `RUN,AMP`, `RUN,CV`, `STOP`, `INFO?`, `STATUS?`, exact `DFU` |
+| GUI → board | `CFG,PT3,<vds_mV>,<vgs_mV>,<period_ms>,<gate_settle_ms>` |
+| GUI → board | `RUN,AMP`, `RUN,CV`, `RUN,PT3`, `STOP`, `INFO?`, `STATUS?`, exact `DFU` |
 | board → GUI | `@ACK`, `@ERR`, `@EVT`, `@STATUS` ASCII status lines |
-| board → GUI | `0xA1` (AMP) / `0xC1` (CV), `uint32 LE index`, `float32 LE calculated current in uA` |
+| board → GUI | `0xA1` (AMP) / `0xB1` (PT3) / `0xC1` (CV), `uint32 LE index`, `float32 LE calculated current in uA` |
 
 Expanded AMP control requires controller firmware **V26 or later**, which advertises `AMPX` in its `@INFO` response. The GUI leaves CV available but disables AMP apply/run on an older controller, avoiding a partial configuration silently reaching the device.
+
+PT3 requires controller firmware **V29 or later**, which advertises `PT3`. The PT3 panel accepts only the firmware-guarded `VDS`, `VGS`, output-period, and gate-settling values. Its HSTIA 160 kOhm RTIA calibration, 1.100 V source reference, and 200 samples/s raw ADC path are intentionally shown as fixed conditions because the current firmware does not expose them as runtime controls.
+
+## PT3 settings trace and fixture boundary
+
+The PT3 settings panel is not a voltage measurement instrument. It plots **acknowledged configuration-derived setpoints** using the same DAC-code quantization as the firmware:
+
+- VBIAS0 6-bit DAC / CE0 target: `1.100 V + VDS`, quantized at about 34.38 mV per code.
+- VZERO0 12-bit DAC / direct gate-fixture target: `1.100 V + VGS`, quantized at about 0.537 mV per code.
+- SE0 target: the fixed 1.100 V HSTIA internal reference.
+- RE0/PAD4: deliberately unplotted and labelled `OPEN`; it is not a programmable gate output in PT3.
+
+The `0xB1` current samples remain raw received current values in uA. The CSV keeps them unchanged and adds separate `pt3_*_set_mV` columns only when a PT3 configuration ACK was seen. Those columns are configuration metadata, not ADC observations.
+
+For PT3 wiring, connect VZERO0 directly to a separate DUT gate/base fixture contact. Keep PAD4/RE0 open. Do not jumper VZERO0 to PAD4 while the PT3 firmware uses the CE0 buffer path.
 
 ## Amperometry variables and guardrails
 
@@ -37,11 +53,11 @@ All AMP parameters are applied as one `CFG,AMPX` transaction, then the firmware 
 
 The original ADI example hard-coded its RTIA calibration to SINC3=4 and SINC2=22. This project updates the calibration excitation frequency to use the active OSR selections, and propagates an RTIA-calibration failure as `AMP_INIT` instead of continuing with a stale result.
 
-CSV is an export of received binary frame values. The UI does not smooth, average, interpolate, or rescale them. The CV x-axis deliberately remains **sequence sample index**, not a browser-inferred potential waveform.
+CSV is an export of received binary frame values. The UI does not smooth, average, interpolate, or rescale them. The CV x-axis deliberately remains **sequence sample index**, not a browser-inferred potential waveform. PT3 configuration metadata is clearly separate from the received current value.
 
 ## Live plot behavior
 
-The browser decodes each received 9-byte `0xA1` (AMP) or `0xC1` (CV) frame immediately and appends its original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The downloadable CSV contains the unchanged received values and timestamps.
+The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (CV) frame immediately and appends its original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The downloadable CSV contains the unchanged received values and timestamps.
 
 ## Secure DFU boundary
 

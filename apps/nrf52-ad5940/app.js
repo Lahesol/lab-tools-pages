@@ -1,7 +1,8 @@
 /* AD5940 Lab Console — static Web Bluetooth client.
  *
- * The app never synthesizes measurement values. Binary A1/C1 frames are kept
- * exactly as received and exported separately from UI state/log messages.
+ * The app never synthesizes measurement values. Binary A1/B1/C1 frames are
+ * kept exactly as received. PT3 DAC/pad traces are explicitly configuration-
+ * derived setpoints and remain separate from received current data.
  */
 const UUID = {
   nusService: "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
@@ -17,6 +18,13 @@ const DFU = {
   success: 0x01, commandObject: 0x01, dataObject: 0x02, packetBytes: 20,
 };
 
+const PT3 = {
+  sourceMv: 1100,
+  dac12LsbMv: 2200 / 4095,
+  dac6LsbMv: (2200 / 4095) * 64,
+  rawSampleRate: 200,
+};
+
 const state = {
   mode: "AMP",
   device: null,
@@ -28,6 +36,10 @@ const state = {
   textCarry: "",
   running: false,
   ampxSupported: false,
+  pt3Supported: false,
+  pendingPt3: null,
+  pt3Applied: null,
+  pt3History: [],
   expectDfuDisconnect: false,
   plotDrawPending: false,
   dfu: { file: null, pkg: null, device: null, server: null, control: null, packet: null, waiter: null, transferring: false, completed: false, progress: 0, stage: "package" },
@@ -39,8 +51,9 @@ const dec = new TextDecoder();
 const elements = {
   connectionDot: $("connectionDot"), connectionLabel: $("connectionLabel"), connect: $("connectButton"), disconnect: $("disconnectButton"),
   browserState: $("browserState"), deviceState: $("deviceState"), lastStatus: $("lastStatus"),
-  ampTab: $("ampTab"), cvTab: $("cvTab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"),
-  ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"),
+  ampTab: $("ampTab"), cvTab: $("cvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), pt3Parameters: $("pt3Parameters"),
+  ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
+  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
@@ -61,8 +74,8 @@ function isInstrumentConnected() { return Boolean(state.device?.gatt?.connected)
 
 function refreshControlAvailability() {
   const connected = isInstrumentConnected();
-  const ampReady = state.mode !== "AMP" || state.ampxSupported;
-  const canConfigure = connected && !state.running && ampReady;
+  const modeReady = state.mode === "AMP" ? state.ampxSupported : state.mode === "PT3" ? state.pt3Supported : true;
+  const canConfigure = connected && !state.running && modeReady;
   elements.apply.disabled = !canConfigure;
   elements.run.disabled = !canConfigure;
   elements.stop.disabled = !connected || !state.running;
@@ -77,6 +90,17 @@ function refreshControlAvailability() {
     elements.ampCapabilityHint.textContent = "This controller does not advertise AMPX. Update to firmware V26 or later before AMP configuration.";
   } else {
     elements.ampCapabilityHint.textContent = "CV remains available; AMPX capability is required only for the expanded AMP controls.";
+  }
+
+  elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
+  if (!connected) {
+    elements.pt3CapabilityHint.textContent = "Connect to check PT3 firmware capability before applying phototransistor parameters.";
+  } else if (state.pt3Supported) {
+    elements.pt3CapabilityHint.textContent = "PT3 capability detected. VDS, VGS, output period, and gate settling are sent together before RUN.";
+  } else if (state.mode === "PT3") {
+    elements.pt3CapabilityHint.textContent = "This controller does not advertise PT3. Install controller firmware V29 or later before using this mode.";
+  } else {
+    elements.pt3CapabilityHint.textContent = "PT3 capability is required only for the phototransistor controls.";
   }
 }
 
@@ -141,11 +165,22 @@ function handleTextLine(line) {
   log(`NUS RX: ${line}`);
   elements.lastStatus.textContent = line;
   if (line.startsWith("@EVT,RUNNING")) state.running = true;
+  if (line.startsWith("@EVT,PT3_SETTLING")) state.running = true;
   if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@ERR,")) state.running = false;
   if (line.startsWith("@INFO,")) {
     state.ampxSupported = line.includes("AMPX");
+    state.pt3Supported = line.includes("PT3");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
+    log(state.pt3Supported ? "PT3 capability detected." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
   }
+  if (line.startsWith("@ACK,CFG,PT3") && state.pendingPt3) {
+    state.pt3Applied = { ...state.pendingPt3, acknowledgedAt: new Date().toISOString() };
+    state.pt3History.push(state.pt3Applied);
+    elements.pt3RouteState.textContent = `ACK: CE0 ${formatMv(state.pt3Applied.ceMv)}, gate ${formatMv(state.pt3Applied.gateMv)}`;
+    log("PT3 configuration acknowledged; calculated DAC/pad setpoint trace updated.");
+    schedulePlot();
+  }
+  if (line.startsWith("@ERR,PT3_")) state.pendingPt3 = null;
   refreshControlAvailability();
   if (line.startsWith("@ERR,AFE_")) {
     log("AFE preflight rejected RUN; BLE and DFU remain available.", "WARN");
@@ -154,11 +189,12 @@ function handleTextLine(line) {
 
 function handleNusNotification(event) {
   const bytes = new Uint8Array(event.target.value.buffer.slice(0));
-  if (bytes.length === 9 && (bytes[0] === 0xa1 || bytes[0] === 0xc1)) {
+  if (bytes.length === 9 && (bytes[0] === 0xa1 || bytes[0] === 0xb1 || bytes[0] === 0xc1)) {
     const view = new DataView(bytes.buffer);
     const index = view.getUint32(1, true);
     const currentUa = view.getFloat32(5, true);
-    addSample({ mode: bytes[0] === 0xa1 ? "AMP" : "CV", index, currentUa, receivedAt: new Date().toISOString() });
+    const mode = bytes[0] === 0xa1 ? "AMP" : bytes[0] === 0xb1 ? "PT3" : "CV";
+    addSample({ mode, index, currentUa, receivedAt: new Date().toISOString(), pt3: mode === "PT3" && state.pt3Applied ? { ...state.pt3Applied } : null });
   } else {
     appendText(bytes);
   }
@@ -195,7 +231,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -213,15 +249,25 @@ async function disconnectInstrument() {
 function switchMode(mode) {
   state.mode = mode;
   const amp = mode === "AMP";
+  const cv = mode === "CV";
   elements.ampTab.classList.toggle("active", amp); elements.ampTab.setAttribute("aria-selected", String(amp));
-  elements.cvTab.classList.toggle("active", !amp); elements.cvTab.setAttribute("aria-selected", String(!amp));
-  elements.ampParameters.classList.toggle("hidden", !amp); elements.cvParameters.classList.toggle("hidden", amp);
-  elements.plotTitle.textContent = amp ? "Amperometry — current vs sample index" : "Cyclic voltammetry — current vs sequence sample index";
-  elements.plotCaption.textContent = amp
-    ? "Each received A1 current value is drawn without smoothing or rescaling."
-    : "Each received C1 current value is drawn against the sequence sample index. Voltage mapping is intentionally not inferred in the browser.";
+  elements.cvTab.classList.toggle("active", cv); elements.cvTab.setAttribute("aria-selected", String(cv));
+  elements.pt3Tab.classList.toggle("active", mode === "PT3"); elements.pt3Tab.setAttribute("aria-selected", String(mode === "PT3"));
+  elements.ampParameters.classList.toggle("hidden", !amp); elements.cvParameters.classList.toggle("hidden", !cv); elements.pt3Parameters.classList.toggle("hidden", mode !== "PT3");
+  elements.pt3SettingsPanel.classList.toggle("hidden", mode !== "PT3");
+  if (amp) {
+    elements.plotTitle.textContent = "Amperometry — current vs sample index";
+    elements.plotCaption.textContent = "Each received A1 current value is drawn without smoothing or rescaling.";
+  } else if (cv) {
+    elements.plotTitle.textContent = "Cyclic voltammetry — current vs sequence sample index";
+    elements.plotCaption.textContent = "Each received C1 current value is drawn against the sequence sample index. Voltage mapping is intentionally not inferred in the browser.";
+  } else {
+    elements.plotTitle.textContent = "Phototransistor (PT3) — current vs sample index";
+    elements.plotCaption.textContent = "Each received B1 current value is drawn without smoothing or rescaling. DAC and PAD traces below are acknowledged configuration-derived setpoints, not measured voltages.";
+    updatePt3Preview();
+  }
   refreshControlAvailability();
-  drawPlot();
+  schedulePlot();
 }
 
 function integer(id) { return Math.trunc(Number($(id).value)); }
@@ -236,6 +282,56 @@ function updateAmpTimingHint() {
   const samples = fifoWords / 4;
   const latencyMs = period * samples;
   elements.ampTimingHint.textContent = `FIFO interrupt batch: ${fifoWords} words = ${samples} sample(s); nominal batch interval ≈ ${latencyMs.toLocaleString()} ms.`;
+}
+
+function formatMv(value) {
+  return `${(value / 1000).toFixed(3)} V`;
+}
+
+function calculatePt3Setpoints(config) {
+  const gateRequestedMv = PT3.sourceMv + config.vgs;
+  const drainRequestedMv = PT3.sourceMv + config.vds;
+  const gateCode = Math.round((gateRequestedMv - 200) / PT3.dac12LsbMv);
+  const drainCode = Math.round((drainRequestedMv - 200) / PT3.dac6LsbMv);
+  const gateMv = 200 + gateCode * PT3.dac12LsbMv;
+  const ceMv = 200 + drainCode * PT3.dac6LsbMv;
+  return {
+    ...config,
+    gateCode,
+    drainCode,
+    gateMv,
+    ceMv,
+    seMv: PT3.sourceMv,
+    vbiasMv: ceMv,
+    vzeroMv: gateMv,
+    actualVdsMv: ceMv - PT3.sourceMv,
+    actualVgsMv: gateMv - PT3.sourceMv,
+    outputSps: 1000 / config.period,
+    rawDecimation: PT3.rawSampleRate / (1000 / config.period),
+  };
+}
+
+function updatePt3Preview() {
+  try {
+    const setpoints = calculatePt3Setpoints(readPt3Config());
+    elements.pt3VbiasSet.textContent = `${formatMv(setpoints.vbiasMv)} (6-bit code ${setpoints.drainCode})`;
+    elements.pt3VzeroSet.textContent = `${formatMv(setpoints.vzeroMv)} (12-bit code ${setpoints.gateCode})`;
+    elements.pt3CeSet.textContent = `${formatMv(setpoints.ceMv)}; VDS ${setpoints.actualVdsMv.toFixed(1)} mV`;
+    elements.pt3SeSet.textContent = `${formatMv(setpoints.seMv)} fixed`;
+    elements.pt3TimingHint.textContent = `ADC raw rate is fixed at ${PT3.rawSampleRate} samples/s; output is ${setpoints.outputSps} samples/s (every ${setpoints.rawDecimation} raw conversion). Default 90 s settling applies after RUN.`;
+  } catch {
+    elements.pt3VbiasSet.textContent = "Invalid PT3 input";
+    elements.pt3VzeroSet.textContent = "Invalid PT3 input";
+    elements.pt3CeSet.textContent = "—";
+    elements.pt3TimingHint.textContent = "Enter a PT3 configuration within the firmware guard range.";
+  }
+}
+
+function readPt3Config() {
+  const config = { vds: integer("pt3Vds"), vgs: integer("pt3Vgs"), period: integer("pt3Period"), settle: integer("pt3Settle") };
+  const sps = 1000 / config.period;
+  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < 10 || config.period > 1000 || 1000 % config.period || config.settle < 1000 || config.settle > 120000 || PT3.rawSampleRate % sps) throw new Error("PT3 parameters are outside the firmware guard range.");
+  return config;
 }
 
 function readConfig() {
@@ -255,6 +351,7 @@ function readConfig() {
     if (!finite || config.vzero < 200 || config.vzero > 2200 || config.bias < -750 || config.bias > 750 || config.vzero + config.bias < 200 || config.vzero + config.bias > 2200 || config.period < 100 || config.period > 10000 || !supportedRtia.includes(config.rtia) || !supportedRf.includes(config.rf) || !supportedPga.includes(config.pgaX10) || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || config.fifoWords < 4 || config.fifoWords > 512 || config.fifoWords % 4 || config.rcal < 100 || config.rcal > 100000 || config.adcRefMv < 1500 || config.adcRefMv > 2100) throw new Error("Amperometry parameters are outside the firmware guard range.");
     return config;
   }
+  if (state.mode === "PT3") return readPt3Config();
   const config = { start: integer("cvStart"), vertex: integer("cvVertex"), vzero: integer("cvVzero"), steps: integer("cvSteps"), duration: integer("cvDuration"), settle: integer("cvSettle"), rtia: integer("cvRtia") };
   const pointPeriod = config.duration / config.steps;
   if (config.start === config.vertex || config.start < -1000 || config.start > 1000 || config.vertex < -1000 || config.vertex > 1000 || config.vzero < 200 || config.vzero > 2200 || config.vzero + config.start < 200 || config.vzero + config.start > 2200 || config.vzero + config.vertex < 200 || config.vzero + config.vertex > 2200 || config.steps < 2 || config.steps > 4095 || config.duration < 10 || config.duration > 600000 || config.settle < 2 || config.settle > 1000 || pointPeriod < config.settle + 1 || pointPeriod < 3) throw new Error("CV parameters violate the firmware guard range or timing relation.");
@@ -263,9 +360,12 @@ function readConfig() {
 
 function configCommand() {
   const config = readConfig();
-  return state.mode === "AMP"
-    ? `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`
-    : `CFG,CV,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia}`;
+  if (state.mode === "AMP") return `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`;
+  if (state.mode === "PT3") {
+    state.pendingPt3 = calculatePt3Setpoints(config);
+    return `CFG,PT3,${config.vds},${config.vgs},${config.period},${config.settle}`;
+  }
+  return `CFG,CV,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia}`;
 }
 
 async function applyConfig(event) {
@@ -307,7 +407,10 @@ function schedulePlot() {
 
 function renderRows() {
   const recent = state.samples.slice(-40).reverse();
-  elements.sampleRows.innerHTML = recent.length ? recent.map((s) => `<tr><td>${s.mode}</td><td>${s.index}</td><td>${s.currentUa}</td><td>${new Date(s.receivedAt).toLocaleTimeString()}</td></tr>`).join("") : '<tr><td colspan="4" class="empty">No binary measurement frames received.</td></tr>';
+  elements.sampleRows.innerHTML = recent.length ? recent.map((s) => {
+    const pt3 = s.pt3 ? `CE ${formatMv(s.pt3.ceMv)}, gate ${formatMv(s.pt3.gateMv)}` : "—";
+    return `<tr><td>${s.mode}</td><td>${s.index}</td><td>${s.currentUa}</td><td>${pt3}</td><td>${new Date(s.receivedAt).toLocaleTimeString()}</td></tr>`;
+  }).join("") : '<tr><td colspan="5" class="empty">No binary measurement frames received.</td></tr>';
 }
 
 function clearSamples() {
@@ -316,8 +419,8 @@ function clearSamples() {
 
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);
@@ -334,14 +437,45 @@ function drawPlot() {
   for (let i = 0; i <= 5; i += 1) { const y = margin.top + chartH * i / 5; ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(width - margin.right, y); ctx.stroke(); }
   for (let i = 0; i <= 6; i += 1) { const x = margin.left + chartW * i / 6; ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, height - margin.bottom); ctx.stroke(); }
   const points = state.samples.filter((s) => s.mode === state.mode);
-  if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText("Awaiting received device data", width / 2, height / 2); return; }
+  if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText("Awaiting received device data", width / 2, height / 2); if (state.mode === "PT3") drawPt3SettingsPlot(); return; }
   let minX = Math.min(...points.map((p) => p.index)); let maxX = Math.max(...points.map((p) => p.index)); let minY = Math.min(...points.map((p) => p.currentUa)); let maxY = Math.max(...points.map((p) => p.currentUa));
   if (minX === maxX) { minX -= 1; maxX += 1; } if (minY === maxY) { minY -= 1; maxY += 1; } const padding = (maxY - minY) * .12; minY -= padding; maxY += padding;
   const px = (x) => margin.left + (x - minX) / (maxX - minX) * chartW; const py = (y) => margin.top + (maxY - y) / (maxY - minY) * chartH;
   ctx.textAlign = "right"; for (let i = 0; i <= 5; i += 1) { const value = maxY - (maxY - minY) * i / 5; ctx.fillText(value.toPrecision(4), margin.left - 7, margin.top + chartH * i / 5 + 4); }
   ctx.textAlign = "center"; for (let i = 0; i <= 6; i += 1) { const value = minX + (maxX - minX) * i / 6; ctx.fillText(Math.round(value), margin.left + chartW * i / 6, height - 12); }
-  ctx.strokeStyle = "#3fd0e6"; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => { if (index) ctx.lineTo(px(p.index), py(p.currentUa)); else ctx.moveTo(px(p.index), py(p.currentUa)); }); ctx.stroke();
+  ctx.strokeStyle = state.mode === "PT3" ? "#63d67d" : "#3fd0e6"; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => { if (index) ctx.lineTo(px(p.index), py(p.currentUa)); else ctx.moveTo(px(p.index), py(p.currentUa)); }); ctx.stroke();
   ctx.fillStyle = "#c9dce9"; ctx.textAlign = "left"; ctx.fillText("Current (µA)", margin.left, 12); ctx.textAlign = "right"; ctx.fillText("sample index", width - margin.right, height - 12);
+  if (state.mode === "PT3") drawPt3SettingsPlot();
+}
+
+function drawPt3SettingsPlot() {
+  const canvas = elements.pt3SettingsPlot;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * ratio); canvas.height = Math.round(rect.height * ratio);
+  const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio);
+  const width = rect.width; const height = rect.height;
+  const margin = { left: 58, right: 18, top: 27, bottom: 31 }; const chartW = width - margin.left - margin.right; const chartH = height - margin.top - margin.bottom;
+  ctx.fillStyle = "#061321"; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = "#1d3d59"; ctx.lineWidth = 1; ctx.font = "11px system-ui"; ctx.fillStyle = "#8da9bd";
+  for (let i = 0; i <= 5; i += 1) { const y = margin.top + chartH * i / 5; ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(width - margin.right, y); ctx.stroke(); const mv = 2400 - 2200 * i / 5; ctx.textAlign = "right"; ctx.fillText((mv / 1000).toFixed(2), margin.left - 7, y + 4); }
+  const points = state.pt3History;
+  if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText("Awaiting @ACK,CFG,PT3 before drawing calculated setpoints", width / 2, height / 2); return; }
+  let minX = Math.min(...points.map((p) => Date.parse(p.acknowledgedAt))); let maxX = Math.max(...points.map((p) => Date.parse(p.acknowledgedAt)));
+  if (minX === maxX) { minX -= 1000; maxX += 1000; }
+  const px = (x) => margin.left + (x - minX) / (maxX - minX) * chartW; const py = (mv) => margin.top + (2400 - mv) / 2200 * chartH;
+  const traces = [
+    { key: "ceMv", label: "CE0 / VBIAS", color: "#3fd0e6" },
+    { key: "seMv", label: "SE0", color: "#3182f6" },
+    { key: "gateMv", label: "Gate / VZERO", color: "#63d67d" },
+  ];
+  traces.forEach((trace) => {
+    ctx.strokeStyle = trace.color; ctx.lineWidth = 1.7; ctx.beginPath();
+    points.forEach((point, index) => { const x = px(Date.parse(point.acknowledgedAt)); if (index) { ctx.lineTo(x, py(points[index - 1][trace.key])); ctx.lineTo(x, py(point[trace.key])); } else ctx.moveTo(x, py(point[trace.key])); }); ctx.lineTo(width - margin.right, py(points.at(-1)[trace.key])); ctx.stroke();
+  });
+  ctx.textAlign = "left"; ctx.font = "11px system-ui"; let legendX = margin.left;
+  traces.forEach((trace) => { ctx.fillStyle = trace.color; ctx.fillRect(legendX, 9, 9, 3); ctx.fillStyle = "#c9dce9"; ctx.fillText(trace.label, legendX + 14, 13); legendX += ctx.measureText(trace.label).width + 32; });
+  ctx.fillStyle = "#c9dce9"; ctx.textAlign = "left"; ctx.fillText("Calculated setpoint (V)", margin.left, height - 10); ctx.textAlign = "right"; ctx.fillText("configuration time", width - margin.right, height - 10);
 }
 
 function crc32(bytes) {
@@ -506,7 +640,8 @@ async function selectDfuAndTransfer() {
   finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg || state.dfu.completed; }
 }
 
-elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", drawPlot);
+elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
+document.querySelectorAll("#pt3Parameters input").forEach((control) => control.addEventListener("input", updatePt3Preview));
 
-browserReady(); switchMode("AMP"); updateAmpTimingHint(); drawPlot();
+browserReady(); switchMode("AMP"); updateAmpTimingHint(); updatePt3Preview(); drawPlot();

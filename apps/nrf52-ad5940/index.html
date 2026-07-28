@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=0166fa7752db" />
+    <link rel="stylesheet" href="styles.css?v=3bece3a4e5ed" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v1.2</span></h1>
+        <h1>AD5940 Lab Console <span>v1.3</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -28,6 +28,7 @@
           <div class="mode-switch" role="tablist" aria-label="Experiment type">
             <button id="ampTab" class="mode-tab active" role="tab" aria-selected="true">Amperometry</button>
             <button id="cvTab" class="mode-tab" role="tab" aria-selected="false">Cyclic voltammetry</button>
+            <button id="pt3Tab" class="mode-tab" role="tab" aria-selected="false">Phototransistor (PT3)</button>
           </div>
         </section>
 
@@ -104,6 +105,29 @@
             <p class="hint">펌웨어는 Vzero + start/vertex가 200–2200 mV를 넘는 설정을 거부합니다.</p>
           </div>
 
+          <div id="pt3Parameters" class="parameter-set hidden">
+            <section class="parameter-group">
+              <h2>PT3 — drain, gate &amp; timing</h2>
+              <label>VDS <span>mV</span><input id="pt3Vds" type="number" min="100" max="1100" step="1" value="1000" required /></label>
+              <label>VGS <span>mV</span><input id="pt3Vgs" type="number" min="-800" max="1000" step="1" value="0" required /></label>
+              <label>Output period <span>ms</span><input id="pt3Period" type="number" min="10" max="1000" step="1" value="10" required /></label>
+              <label>Gate settling <span>ms</span><input id="pt3Settle" type="number" min="1000" max="120000" step="1000" value="90000" required /></label>
+            </section>
+            <section class="pt3-setpoint-summary" aria-labelledby="pt3SetpointTitle">
+              <h2 id="pt3SetpointTitle">PT3 calculated settings</h2>
+              <dl class="setpoint-grid">
+                <dt>VBIAS0 DAC → CE0</dt><dd id="pt3VbiasSet">—</dd>
+                <dt>VZERO0 DAC → gate fixture</dt><dd id="pt3VzeroSet">—</dd>
+                <dt>CE0/PAD3 target</dt><dd id="pt3CeSet">—</dd>
+                <dt>SE0/PAD5 target</dt><dd id="pt3SeSet">1.100 V fixed</dd>
+                <dt>RE0/PAD4</dt><dd>OPEN — not a gate output</dd>
+              </dl>
+            </section>
+            <p id="pt3TimingHint" class="hint"></p>
+            <p id="pt3CapabilityHint" class="hint capability-hint">PT3-capable controller firmware is checked after connection.</p>
+            <p class="hint">VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. HSTIA RTIA is calibrated at 160 kΩ before every RUN; source reference and raw ADC rate are fixed at 1.100 V and 200 samples/s.</p>
+          </div>
+
           <div class="control-actions">
             <button id="applyButton" class="button secondary" type="submit" disabled>Apply configuration</button>
             <button id="runButton" class="button primary" type="button" disabled>Start measurement</button>
@@ -113,7 +137,7 @@
 
         <section class="safety-note">
           <h2>Hardware gate</h2>
-          <p>RUN 명령 전 ADIID를 확인합니다. AFE_ID 또는 AFE_SPI 오류가 오면 측정은 시작되지 않으며 BLE/DFU는 유지됩니다.</p>
+          <p>PT3에서는 VZERO0를 DUT gate/base 전용 fixture contact로 직접 연결하고 PAD4/RE0는 개방합니다. RUN 명령 전 ADIID를 확인합니다. AFE_ID 또는 AFE_SPI 오류가 오면 측정은 시작되지 않으며 BLE/DFU는 유지됩니다.</p>
           <button id="probeButton" class="button compact ghost" type="button" disabled>Run AFE SPI probe</button>
         </section>
       </aside>
@@ -131,6 +155,15 @@
           <p id="plotCaption" class="plot-caption">No device data. The plot will display each received ADI example current value without smoothing.</p>
         </section>
 
+        <section id="pt3SettingsPanel" class="panel plot-panel pt3-settings-panel hidden">
+          <div class="panel-heading">
+            <div><p class="eyebrow">PT3 CONFIGURATION TRACE</p><h2>DAC and PAD setpoints</h2></div>
+            <div id="pt3RouteState" class="metric">Awaiting PT3 configuration ACK</div>
+          </div>
+          <canvas id="pt3SettingsCanvas" aria-label="PT3 calculated DAC and pad-voltage setpoint plot"></canvas>
+          <p class="plot-caption">CE0, SE0, and gate-fixture values are calculated from the acknowledged PT3 DAC codes. RE0/PAD4 remains open and has no plotted voltage.</p>
+        </section>
+
         <section class="panel data-panel">
           <div class="panel-heading">
             <div><p class="eyebrow">RAW RECEIVED FRAMES</p><h2>Latest samples</h2></div>
@@ -138,8 +171,8 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Mode</th><th>Index</th><th>Current (µA)</th><th>Received at</th></tr></thead>
-              <tbody id="sampleRows"><tr><td colspan="4" class="empty">No binary measurement frames received.</td></tr></tbody>
+              <thead><tr><th>Mode</th><th>Index</th><th>Current (µA)</th><th>PT3 setpoint</th><th>Received at</th></tr></thead>
+              <tbody id="sampleRows"><tr><td colspan="5" class="empty">No binary measurement frames received.</td></tr></tbody>
             </table>
           </div>
         </section>
@@ -156,7 +189,7 @@
           <dl class="connection-grid">
             <dt>Browser</dt><dd id="browserState">Checking Web Bluetooth…</dd>
             <dt>Device</dt><dd id="deviceState">—</dd>
-            <dt>Firmware protocol</dt><dd>NUS / AD5940_CTRL / AMPX</dd>
+            <dt>Firmware protocol</dt><dd>NUS / AD5940_CTRL / AMPX + PT3</dd>
             <dt>Last status</dt><dd id="lastStatus">—</dd>
           </dl>
         </section>
@@ -181,6 +214,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=38f612ad6058"></script>
+    <script type="module" src="app.js?v=b50cf47df6ec"></script>
   </body>
 </html>
