@@ -272,6 +272,19 @@ function onInstrumentDisconnected() {
   }
 }
 
+function allowDfuTargetSelection(message) {
+  /*
+   * Buttonless DFU can reset the application before Windows reports completion
+   * of the NUS write-with-response. The service-filtered DfuTarg chooser is
+   * still the hardware boundary, so this does not start a transfer against
+   * the application peripheral.
+   */
+  state.expectDfuDisconnect = false;
+  elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed;
+  setDfuStage("transfer");
+  setDfuProgress(0, message);
+}
+
 async function disconnectInstrument() {
   if (state.device?.gatt?.connected) state.device.gatt.disconnect();
 }
@@ -612,7 +625,15 @@ async function enterDfu() {
   try {
     state.expectDfuDisconnect = true; elements.enterDfu.disabled = true; elements.transferDfu.disabled = true; setDfuStage("entry");
     await sendNusCommand("DFU"); setDfuProgress(0, "DFU command sent. Wait for application disconnect, then select DfuTarg.");
-  } catch (error) { state.expectDfuDisconnect = false; setDfuProgress(0, `DFU entry request failed: ${error.message}`); log(`Could not enter DFU: ${error.message}`, "ERROR"); }
+  } catch (error) {
+    if (state.expectDfuDisconnect) {
+      allowDfuTargetSelection("Application link ended during DFU entry. If DfuTarg is visible, select it to start the CRC-verified transfer.");
+      log(`NUS write completed with a disconnect during DFU entry: ${error.message}. DfuTarg selection is now enabled; do not continue unless the chooser shows DfuTarg.`, "WARN");
+      return;
+    }
+    setDfuProgress(0, `DFU entry request failed: ${error.message}`);
+    log(`Could not enter DFU: ${error.message}`, "ERROR");
+  }
 }
 
 function waitDfuResponse(expectedOpcode, timeoutMs = 10000) {

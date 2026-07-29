@@ -85,7 +85,7 @@ The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (
 
 ### Web UI workflow and progress
 
-The V1.2 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer V26/`AMPX` reconnect check. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
+The V1.4 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer V34/`PT3_DSP` reconnect check. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
 
 The transfer bar reports the percentage of bytes whose CRC/offset receipt was confirmed by the bootloader (PRN=1). It keeps the last confirmed percentage if a transfer stops instead of resetting it to zero. A `100%` transfer still requires the final NUS reconnect and `@INFO` capability check before it is treated as a deployed application.
 
