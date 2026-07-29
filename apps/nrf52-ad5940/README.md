@@ -94,6 +94,38 @@ CSV is an export of received binary frame values. The UI does not smooth, averag
 
 The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (CV) frame immediately and appends its original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The selectable plot window changes only which recent raw points are drawn. It neither limits memory/CSV capture nor performs a moving average. The downloadable CSV contains the unchanged received values and timestamps.
 
+## Controller release and update catalogue
+
+On every NUS connection the GUI requests `INFO?` and parses the controller
+release only from the firmware-owned line
+`@INFO,AD5940_CTRL,V<release>,...`. It compares that release with the static
+catalogue at `web_gui/firmware/latest.json`:
+
+- lower controller release: **Update available** with the listed controller
+  release and Secure DFU application version;
+- equal release: **Current**, with no newer listed package;
+- higher release: **Do not downgrade**, because the connected board is newer
+  than the static catalogue.
+
+The catalogue contains no ZIP payload, signing key, or automatic-download URL.
+It contains only the intended application-only ZIP filename, byte size, and
+SHA-256. When a user chooses a ZIP, the browser calculates that file's
+SHA-256 locally and reports whether it matches the listed release. A mismatch
+is an advisory warning rather than an override of the target: the Secure DFU
+bootloader remains the authority for signature, compatibility, and rollback
+checks.
+
+`V<release>` is the running controller release, not the stored Secure DFU
+application version. Normal NUS firmware cannot read the bootloader's internal
+version record; this project therefore does not claim that comparison as a
+live bootloader query. The catalogue's `secure_dfu_application_version` is
+release metadata for the selected signed package.
+
+The catalogue is fetched from the static deployment origin, so comparison is
+available on the required HTTPS GitHub Pages deployment. A local `file://`
+preview can fail that fetch and falls back to manual ZIP selection without
+inventing an update state.
+
 ## Secure DFU boundary
 
 1. The UI accepts only an `nrfutil` **application-only signed ZIP** that has one `manifest.application` object with a `.dat` init packet and `.bin` file.
@@ -103,7 +135,7 @@ The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (
 
 ### Web UI workflow and progress
 
-The V1.6 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`; V36 additionally returns `PT3_LIVE_DAC`. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
+The V1.7 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`; V36 additionally returns `PT3_LIVE_DAC`. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
 
 The transfer bar reports the percentage of bytes whose CRC/offset receipt was confirmed by the bootloader (PRN=1). It keeps the last confirmed percentage if a transfer stops instead of resetting it to zero. A `100%` transfer still requires the final NUS reconnect and `@INFO` capability check before it is treated as a deployed application.
 
@@ -118,7 +150,7 @@ This design intentionally rejects SoftDevice, bootloader, and combined packages.
 
 ## Deployment handoff
 
-- Source to deploy: `C:\Users\mecha\GPT_home\nRF52_AD5940\web_gui`
+- Source to deploy: `C:\Users\mecha\GPT_home\nRF52_AD5940\web_gui` (including `firmware/latest.json`)
 - Entrypoint: `index.html`
-- Exclude: test captures, raw measurement CSV files, credentials, certificates, local logs, and any future `node_modules` directory.
+- Exclude: signed DFU ZIPs, signing keys, test captures, raw measurement CSV files, credentials, certificates, local logs, and any future `node_modules` directory.
 - This project does not publish or alter GitHub Pages. Use the separate `server-ops` workflow when deployment is requested.

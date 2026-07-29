@@ -1,4 +1,4 @@
-/* AD5940 Lab Console — static Web Bluetooth client.
+﻿/* AD5940 Lab Console — static Web Bluetooth client.
  *
  * The app never synthesizes measurement values. Binary A1/B1/C1 frames are
  * kept exactly as received. PT3 DAC/pad traces are explicitly configuration-
@@ -44,6 +44,9 @@ const state = {
   pt3CalibrationDftSupported: false,
   pt3LiveDacSupported: false,
   pt3LiveReady: false,
+  controllerVersion: null,
+  releaseManifest: null,
+  releaseManifestError: null,
   pendingPt3: null,
   pendingPt3Live: null,
   pt3Applied: null,
@@ -59,7 +62,7 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 const elements = {
   connectionDot: $("connectionDot"), connectionLabel: $("connectionLabel"), connect: $("connectButton"), disconnect: $("disconnectButton"),
-  browserState: $("browserState"), deviceState: $("deviceState"), lastStatus: $("lastStatus"),
+  browserState: $("browserState"), deviceState: $("deviceState"), controllerVersion: $("controllerVersion"), dfuUpdateState: $("dfuUpdateState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), pt3Parameters: $("pt3Parameters"),
   ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
   pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"),
@@ -80,6 +83,56 @@ function log(message, level = "INFO") {
 }
 
 function isInstrumentConnected() { return Boolean(state.device?.gatt?.connected); }
+
+function validateReleaseManifest(value) {
+  const release = value?.release;
+  if (!Number.isInteger(release?.controller_version) || release.controller_version < 1) throw new Error("controller_version is invalid.");
+  if (!Number.isInteger(release?.secure_dfu_application_version) || release.secure_dfu_application_version < 1) throw new Error("secure_dfu_application_version is invalid.");
+  if (typeof release.package_filename !== "string" || !release.package_filename.endsWith(".zip")) throw new Error("package_filename is invalid.");
+  if (typeof release.package_sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(release.package_sha256)) throw new Error("package_sha256 is invalid.");
+  return {
+    controllerVersion: release.controller_version,
+    secureDfuApplicationVersion: release.secure_dfu_application_version,
+    packageFilename: release.package_filename,
+    packageSha256: release.package_sha256.toUpperCase(),
+    packageSizeBytes: Number.isInteger(release.package_size_bytes) ? release.package_size_bytes : null,
+    capability: typeof release.capability === "string" ? release.capability : "unspecified",
+  };
+}
+
+function refreshReleaseState() {
+  elements.controllerVersion.textContent = state.controllerVersion === null ? "Awaiting @INFO" : `V${state.controllerVersion}`;
+  const release = state.releaseManifest;
+  if (!release) {
+    elements.dfuUpdateState.textContent = state.releaseManifestError ? "Signed-release catalogue unavailable; DFU selection remains manual." : "Loading signed-release catalogue…";
+    return;
+  }
+  const listed = `V${release.controllerVersion} / Secure DFU app ${release.secureDfuApplicationVersion}`;
+  if (state.controllerVersion === null) {
+    elements.dfuUpdateState.textContent = `Latest listed: ${listed}. Connect to compare.`;
+  } else if (state.controllerVersion < release.controllerVersion) {
+    elements.dfuUpdateState.textContent = `Update available: ${listed}. Select the listed signed ZIP.`;
+  } else if (state.controllerVersion === release.controllerVersion) {
+    elements.dfuUpdateState.textContent = `Current: ${listed}. No newer listed package.`;
+  } else {
+    elements.dfuUpdateState.textContent = `Board V${state.controllerVersion} is newer than listed ${listed}; do not downgrade.`;
+  }
+}
+
+async function loadReleaseManifest() {
+  try {
+    const response = await fetch("./firmware/latest.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.releaseManifest = validateReleaseManifest(await response.json());
+    state.releaseManifestError = null;
+    log(`Signed-release catalogue loaded: V${state.releaseManifest.controllerVersion}, Secure DFU app ${state.releaseManifest.secureDfuApplicationVersion}.`);
+  } catch (error) {
+    state.releaseManifest = null;
+    state.releaseManifestError = error.message;
+    log(`Signed-release catalogue unavailable: ${error.message}.`, "WARN");
+  }
+  refreshReleaseState();
+}
 
 function refreshControlAvailability() {
   const connected = isInstrumentConnected();
@@ -134,6 +187,7 @@ function setConnection(connected, text = "Instrument disconnected") {
   elements.connect.disabled = connected || !navigator.bluetooth;
   elements.disconnect.disabled = !connected;
   refreshControlAvailability();
+  refreshReleaseState();
   elements.enterDfu.disabled = !connected || !state.dfu.pkg || state.dfu.transferring || state.dfu.completed;
 }
 
@@ -214,11 +268,16 @@ function handleTextLine(line) {
   if (line.startsWith("@EVT,PT3_SETTLING")) { state.running = true; state.pt3LiveReady = false; }
   if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@ERR,")) { state.running = false; state.pt3LiveReady = false; state.pendingPt3Live = null; }
   if (line.startsWith("@INFO,")) {
+    const versionMatch = line.match(/^@INFO,AD5940_CTRL,V(\d+)(?:,|$)/);
+    if (versionMatch) state.controllerVersion = Number(versionMatch[1]);
+    else if (line.startsWith("@INFO,AD5940_CTRL")) state.controllerVersion = null;
     state.ampxSupported = line.includes("AMPX");
     state.pt3Supported = line.includes("PT3");
     state.pt3DspSupported = line.includes("PT3_DSP");
     state.pt3CalibrationDftSupported = line.includes("PT3_CAL_DFT");
     state.pt3LiveDacSupported = line.includes("PT3_LIVE_DAC");
+    refreshReleaseState();
+    if (line.startsWith("@INFO,AD5940_CTRL") && state.controllerVersion === null) log("Controller @INFO did not include a parseable AD5940_CTRL release.", "WARN");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
     log(state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
   }
@@ -268,7 +327,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false;
+    state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -289,7 +348,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPt3Live = null;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPt3Live = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -637,7 +696,7 @@ async function unzipEntry(zip, entry) {
 }
 
 async function inspectDfuPackage(file) {
-  const zip = zipEntries(await file.arrayBuffer()); const manifestEntry = zip.entries.get("manifest.json");
+  const archive = await file.arrayBuffer(); const zip = zipEntries(archive); const manifestEntry = zip.entries.get("manifest.json");
   if (!manifestEntry) throw new Error("manifest.json is missing from the ZIP.");
   const manifest = JSON.parse(dec.decode(await unzipEntry(zip, manifestEntry))); const root = manifest.manifest;
   if (!root || !root.application || Object.keys(root).length !== 1) throw new Error("Only an application-only nrfutil Secure DFU ZIP is accepted here.");
@@ -647,7 +706,18 @@ async function inspectDfuPackage(file) {
   if (!binaryEntry || !datEntry) throw new Error("Manifest file reference is absent from the ZIP.");
   const binary = await unzipEntry(zip, binaryEntry); const dat = await unzipEntry(zip, datEntry);
   if (!binary.length || !dat.length) throw new Error("The application binary or init packet is empty.");
-  return { manifest, binary, dat, binaryName: app.bin_file, datName: app.dat_file };
+  const archiveSha256 = globalThis.crypto?.subtle ? Array.from(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", archive))).map((byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase() : null;
+  return { manifest, binary, dat, binaryName: app.bin_file, datName: app.dat_file, archiveSha256 };
+}
+
+function describeDfuPackageCatalogueMatch(file, pkg) {
+  const release = state.releaseManifest;
+  if (!release) return " Signed-release catalogue is unavailable; the board bootloader will still validate the signature.";
+  const nameMatches = file.name === release.packageFilename;
+  const hashMatches = pkg.archiveSha256 === release.packageSha256;
+  if (nameMatches && hashMatches) return ` Matches listed V${release.controllerVersion} (${release.capability}) signed ZIP by filename and SHA-256.`;
+  const hashText = pkg.archiveSha256 ? "SHA-256 does not match" : "SHA-256 could not be calculated";
+  return ` Does not match listed V${release.controllerVersion} package (${nameMatches ? "filename matches but" : "filename differs and"} ${hashText}); confirm the intended signed release before transfer.`;
 }
 
 function setDfuStage(stage) {
@@ -680,10 +750,11 @@ async function onDfuFile() {
   try {
     elements.dfuPackageState.textContent = "Checking ZIP structure…"; setDfuProgress(0, "Inspecting application-only DFU ZIP locally.");
     state.dfu.pkg = await inspectDfuPackage(file);
-    elements.dfuPackageState.textContent = `Structure valid: ${state.dfu.pkg.binaryName} (${state.dfu.pkg.binary.length.toLocaleString()} B), ${state.dfu.pkg.datName} (${state.dfu.pkg.dat.length.toLocaleString()} B). Bootloader signature validation is still pending.`;
+    const catalogueStatus = describeDfuPackageCatalogueMatch(file, state.dfu.pkg);
+    elements.dfuPackageState.textContent = `Structure valid: ${state.dfu.pkg.binaryName} (${state.dfu.pkg.binary.length.toLocaleString()} B), ${state.dfu.pkg.datName} (${state.dfu.pkg.dat.length.toLocaleString()} B).${catalogueStatus} Bootloader signature validation is still pending.`;
     elements.enterDfu.disabled = !state.device?.gatt?.connected;
     setDfuStage("entry"); setDfuProgress(0, "ZIP structure verified. Connect the NUS application, then request DFU.");
-    log(`DFU ZIP structure checked locally: ${file.name}. The browser did not verify its signature.`);
+    log(`DFU ZIP structure checked locally: ${file.name}${state.dfu.pkg.archiveSha256 ? `; SHA-256 ${state.dfu.pkg.archiveSha256}` : ""}. The browser did not verify its signature.`);
   } catch (error) {
     elements.dfuPackageState.textContent = `Rejected: ${error.message}`; setDfuStage("package"); setDfuProgress(0, "ZIP rejected before any device write."); log(`DFU ZIP rejected: ${error.message}`, "ERROR");
   }
@@ -782,4 +853,4 @@ elements.connect.addEventListener("click", connectInstrument); elements.disconne
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
 document.querySelectorAll("#pt3Parameters input, #pt3Parameters select").forEach((control) => { control.addEventListener("input", updatePt3Preview); control.addEventListener("change", updatePt3Preview); });
 
-browserReady(); switchMode("AMP"); updateAmpTimingHint(); updatePt3Preview(); drawPlot();
+browserReady(); void loadReleaseManifest(); switchMode("AMP"); updateAmpTimingHint(); updatePt3Preview(); drawPlot();
