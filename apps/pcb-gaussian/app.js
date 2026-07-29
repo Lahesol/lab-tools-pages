@@ -24,7 +24,7 @@ const EXPORT_DOWNLOAD_DELAY_MS = 250;
 const PLOT_POINT_RENDER_LIMIT = 20000;
 const SWEEP_RENDER_INTERVAL_MS = 150;
 const SWEEP_STATUS_INTERVAL_MS = 250;
-const WEB_VERSION = "2026-07-06-adc014-zero-bias";
+const WEB_VERSION = "2026-07-29-circuit-sync-safety";
 const EXPECTED_FIRMWARE_VERSION = "2026-06-15-dacramp-noise";
 const EXPECTED_FIRMWARE_PROTOCOL = "sx-b32-avg-settle-pair-gate-device-dac-time-dfu-adc1v2-v1";
 const APP_VERSION = WEB_VERSION;
@@ -71,9 +71,10 @@ const DEFAULT_DAC_CAL = {
 };
 const PARAM_CAL_STORAGE_KEY = "pcbGaussian.parameterCalibration.inverted.v2";
 const DEVICE_PARAM_CAL_STORAGE_KEY = "pcbGaussian.deviceParameterCalibration.d15d16.v1";
-const ADC_BASELINE_STORAGE_KEY = "pcbGaussian.adcBaseline.adc014zero.v1";
+const ADC_BASELINE_STORAGE_KEY = "pcbGaussian.adcBaseline.adc0147current.v1";
 const PARAM_CAL_CODES = [0, 30, 60, 90, 120, 150, 180, 210, 255];
 const DEFAULT_ADC_ZERO_CURRENT_V = 1.03;
+const SAFE_DEVICE_OFF_VSTART_V = 1.0;
 const ADC_ZERO_CURRENT_DEFAULTS = [0.0, 0.0, 1.03, 1.03, 0.0, 1.03, 1.03, 1.03];
 const PROGRAM_REPLY_TIMEOUT_MS = 1500;
 const PLOT_COLORS = ["#2a9d8f", "#d1495b", "#457b9d", "#f4a261", "#7b2cbf", "#2f6f4e", "#e76f51", "#264653"];
@@ -660,7 +661,7 @@ async function connectSerial() {
     return;
   }
   if (!("serial" in navigator)) {
-    alert("??브라?��???Web Serial API�?지?�하지 ?�습?�다. Chrome ?�는 Edge�??�용?�세??");
+    alert("??釉뚮씪?곗???Web Serial API瑜?吏?먰븯吏 ?딆뒿?덈떎. Chrome ?먮뒗 Edge瑜??ъ슜?섏꽭??");
     return;
   }
   try {
@@ -778,6 +779,31 @@ async function sendCommand(command, options = {}) {
     if (!reply) logLine(`[timeout] ${cmd}`);
     return reply;
   }
+}
+
+function blockedManualCommandReason(command) {
+  const cmd = String(command || "").trim();
+  const upper = cmd.toUpperCase();
+  const simple = upper.replace(/[;\s]+$/g, "");
+  if (!simple) return "";
+  if (simple === "INIT" || simple === "RST") {
+    return "Blocked firmware INIT/RST. Current hardware uses GUI safe init because firmware INIT drives DAC code 0, not 0 V.";
+  }
+  if (/^(AV|MV)\d+\s*,/.test(simple)) {
+    return "Blocked manual AV/MV voltage command. It bypasses GUI per-device calibration; use MAX5488 code controls or P/A/M code commands instead.";
+  }
+  return "";
+}
+
+async function sendManualCommand(command) {
+  const cmd = String(command || "").trim();
+  if (!cmd) return;
+  const blocked = blockedManualCommandReason(cmd);
+  if (blocked) {
+    logLine(`[blocked] ${blocked}`);
+    return;
+  }
+  return sendCommand(cmd);
 }
 
 function updateDacReadout() {
@@ -2261,10 +2287,24 @@ async function applyPotAllDevices() {
 }
 
 async function initializeAll() {
-  for (let device = 1; device <= 16; device++) state.deviceStates[device] = { a: 0, mu: 0 };
-  renderDeviceTable();
-  loadDeviceState();
-  await sendCommand("INIT");
+  const button = $("initButton");
+  if (button) button.disabled = true;
+  try {
+    logLine(`Safe init: returning D1/D2 to 0 V and quieting devices at Vmu 0 V, Vstart off ${SAFE_DEVICE_OFF_VSTART_V.toFixed(3)} V.`);
+    await sendCommand("V1,0", { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+    await sendCommand("V2,0", { waitForReply: true, timeoutMs: PROGRAM_REPLY_TIMEOUT_MS });
+    for (let device = 1; device <= 16; device++) {
+      const muCode = muVoltageToCode(0, device);
+      const vstartCode = vstartVoltageToCode(SAFE_DEVICE_OFF_VSTART_V, device);
+      state.deviceStates[device] = { a: muCode, mu: vstartCode };
+      await programLogicalDevice(device, muCode, vstartCode);
+    }
+    logLine("Safe init complete. Firmware INIT/RST is not used because it drives DAC code 0.");
+  } finally {
+    if (button) button.disabled = false;
+    renderDeviceTable();
+    loadDeviceState();
+  }
 }
 
 function renderDeviceTable() {
@@ -2398,7 +2438,7 @@ function resetAdcBaseline() {
   try { localStorage.removeItem(ADC_BASELINE_STORAGE_KEY); } catch {}
   renderAdcBaselineControls();
   refreshCurrentDependentViews();
-  setAdcBaselineStatus("ADC baseline reset to per-ADC defaults: ADC0/ADC1/ADC4 0.000 V non-inverted, other ADCs 1.030 V unless edited.", "ok");
+  setAdcBaselineStatus("ADC baseline reset to per-ADC defaults: ADC0/ADC1/ADC4 0.000 V non-inverted; ADC7 1.030 V non-inverted; other ADCs 1.030 V inverted unless edited.", "ok");
 }
 
 async function captureAdcBaselineFromCurrentRead() {
@@ -2465,7 +2505,7 @@ function deviceDetectNumber(id, fallback, { min = -Infinity, max = Infinity, int
 function deviceDetectConfig() {
   const vmuV = deviceDetectNumber("deviceDetectVmu", 0);
   const vstartOnV = deviceDetectNumber("deviceDetectVstart", 4);
-  const vstartOffV = deviceDetectNumber("deviceDetectVstartOff", 0);
+  const vstartOffV = deviceDetectNumber("deviceDetectVstartOff", SAFE_DEVICE_OFF_VSTART_V);
   const thresholdUa = deviceDetectNumber("deviceDetectThreshold", 0.001, { min: 0 });
   const avg = deviceDetectNumber("deviceDetectAvg", 256, { min: 1, max: ADC_AVG_MAX, integer: true });
   const settleUs = deviceDetectNumber("deviceDetectSettleUs", 30000, { min: 0, max: 65000, integer: true });
@@ -7566,12 +7606,12 @@ function bindEvents() {
   document.querySelectorAll(".manual-send-control").forEach(button => {
     button.addEventListener("click", () => {
       const input = button.closest(".manual-send")?.querySelector(".manual-command");
-      sendCommand(input?.value || "");
+      sendManualCommand(input?.value || "");
     });
   });
   document.querySelectorAll(".manual-command").forEach(input => {
     input.addEventListener("keydown", event => {
-      if (event.key === "Enter") sendCommand(input.value);
+      if (event.key === "Enter") sendManualCommand(input.value);
     });
   });
   document.querySelectorAll(".clear-log-control").forEach(button => {

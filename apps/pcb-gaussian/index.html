@@ -76,7 +76,7 @@
                 <p class="eyebrow">fixed output</p>
                 <h2>DAC control</h2>
               </div>
-              <button id="initButton">INIT MAX5488</button>
+              <button id="initButton">Safe init</button>
             </div>
             <div class="form-grid">
               <label>
@@ -1147,7 +1147,7 @@
               <p class="eyebrow">ADC baseline</p>
               <h2>Zero-current reference</h2>
             </div>
-            <p class="hint" id="adcBaselineStatus">Per-ADC zero-current defaults: ADC0, ADC1, and ADC4 are 0.000 V; other ADCs are 1.030 V unless edited.</p>
+            <p class="hint" id="adcBaselineStatus">Per-ADC zero-current defaults: ADC0, ADC1, and ADC4 are 0.000 V non-inverted; ADC7 is 1.030 V non-inverted; other ADCs are 1.030 V inverted unless edited.</p>
           </div>
           <div class="button-row tune-row">
             <label class="inline-field">Default zero V <input id="adcBaselineDefault" type="number" value="1.030" min="0" max="1.2" step="0.001" /></label>
@@ -1175,7 +1175,7 @@
           <div class="button-row tune-row device-detect-controls">
             <label class="inline-field">Vmu V <input id="deviceDetectVmu" type="number" value="0" step="0.01" /></label>
             <label class="inline-field">Vstart ON V <input id="deviceDetectVstart" type="number" value="4" step="0.05" /></label>
-            <label class="inline-field">Vstart OFF V <input id="deviceDetectVstartOff" type="number" value="0" step="0.05" /></label>
+            <label class="inline-field">Vstart OFF V <input id="deviceDetectVstartOff" type="number" value="1.0" step="0.05" /></label>
             <label class="inline-field">Min delta uA <input id="deviceDetectThreshold" type="number" value="0.001" min="0" step="0.0005" /></label>
             <label class="inline-field">ADC avg <input id="deviceDetectAvg" type="number" value="256" min="1" max="4096" step="1" /></label>
             <label class="inline-field">Settle us <input id="deviceDetectSettleUs" type="number" value="30000" min="0" max="65000" step="1000" /></label>
@@ -1265,7 +1265,7 @@
 
     </main>
 
-  <script src="./app.js?v=8b79bff27ebb"></script>
+  <script src="./app.js?v=deebdefcd1c7"></script>
     <script src="./application_model_target_data.js?v=20260625-measured-bimodal-target"></script>
     <script src="./application_models.js?v=20260625-measured-bimodal-target"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>
