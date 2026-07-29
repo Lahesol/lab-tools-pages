@@ -22,7 +22,10 @@ const PT3 = {
   sourceMv: 1100,
   dac12LsbMv: 2200 / 4095,
   dac6LsbMv: (2200 / 4095) * 64,
-  rawSampleRate: 200,
+  adcClockHz: 800000,
+  minRawSps: 100,
+  maxRawSps: 800,
+  maxRequestedOutputSps: 100,
 };
 
 const state = {
@@ -37,6 +40,7 @@ const state = {
   running: false,
   ampxSupported: false,
   pt3Supported: false,
+  pt3DspSupported: false,
   pendingPt3: null,
   pt3Applied: null,
   pt3History: [],
@@ -53,7 +57,7 @@ const elements = {
   browserState: $("browserState"), deviceState: $("deviceState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), pt3Parameters: $("pt3Parameters"),
   ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
-  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"),
+  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
@@ -93,10 +97,13 @@ function refreshControlAvailability() {
   }
 
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
+  [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported; });
   if (!connected) {
     elements.pt3CapabilityHint.textContent = "Connect to check PT3 firmware capability before applying phototransistor parameters.";
+  } else if (state.pt3Supported && state.pt3DspSupported) {
+    elements.pt3CapabilityHint.textContent = "PT3_DSP detected. DAC, timing, SINC3/SINC2, and notch are applied together before RUN.";
   } else if (state.pt3Supported) {
-    elements.pt3CapabilityHint.textContent = "PT3 capability detected. VDS, VGS, output period, and gate settling are sent together before RUN.";
+    elements.pt3CapabilityHint.textContent = "Basic PT3 detected. The proven SINC3=5 / SINC2=800 / notch-bypass profile is used; install V34 for DSP controls.";
   } else if (state.mode === "PT3") {
     elements.pt3CapabilityHint.textContent = "This controller does not advertise PT3. Install controller firmware V29 or later before using this mode.";
   } else {
@@ -161,6 +168,28 @@ function appendText(bytes) {
   lines.filter(Boolean).forEach(handleTextLine);
 }
 
+function handlePt3Error(line) {
+  state.pendingPt3 = null;
+  if (line.startsWith("@ERR,PT3_CAL,")) {
+    const fields = Object.fromEntries(line.split(",").slice(2).map((field) => {
+      const [key, value = "?"] = field.split("=");
+      return [key, value];
+    }));
+    elements.pt3RouteState.textContent = `HSTIA calibration rejected: RTIA ${fields.RTIA || "?"} ohm, library ${fields.LIB || "?"}, SPI ${fields.SPI || "?"}`;
+    log("PT3 HSTIA calibration rejected before CE0/VZERO DUT setpoints were enabled. Check the RCAL0-RCAL1 200 ohm path and retain this diagnostic.", "WARN");
+    return;
+  }
+  if (line.startsWith("@ERR,PT3_RANGE")) {
+    elements.pt3RouteState.textContent = "PT3 range guard rejected the requested DAC setpoint.";
+    log("PT3 range guard rejected RUN; no measurement was started.", "WARN");
+    return;
+  }
+  if (line.startsWith("@ERR,PT3_INIT")) {
+    elements.pt3RouteState.textContent = "Legacy PT3 initialization error. Install V30 to obtain calibrated RTIA diagnostics.";
+    log("Legacy PT3_INIT is not specific enough to diagnose. Update to V30 before retrying.", "WARN");
+  }
+}
+
 function handleTextLine(line) {
   log(`NUS RX: ${line}`);
   elements.lastStatus.textContent = line;
@@ -170,17 +199,18 @@ function handleTextLine(line) {
   if (line.startsWith("@INFO,")) {
     state.ampxSupported = line.includes("AMPX");
     state.pt3Supported = line.includes("PT3");
+    state.pt3DspSupported = line.includes("PT3_DSP");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
-    log(state.pt3Supported ? "PT3 capability detected." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    log(state.pt3DspSupported ? "PT3 DSP capability detected." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
   }
   if (line.startsWith("@ACK,CFG,PT3") && state.pendingPt3) {
     state.pt3Applied = { ...state.pendingPt3, acknowledgedAt: new Date().toISOString() };
     state.pt3History.push(state.pt3Applied);
-    elements.pt3RouteState.textContent = `ACK: CE0 ${formatMv(state.pt3Applied.ceMv)}, gate ${formatMv(state.pt3Applied.gateMv)}`;
-    log("PT3 configuration acknowledged; calculated DAC/pad setpoint trace updated.");
+    elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} B1 SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}`;
+    log("PT3 configuration acknowledged; DAC/pad trace and DSP metadata updated.");
     schedulePlot();
   }
-  if (line.startsWith("@ERR,PT3_")) state.pendingPt3 = null;
+  if (line.startsWith("@ERR,PT3_")) handlePt3Error(line);
   refreshControlAvailability();
   if (line.startsWith("@ERR,AFE_")) {
     log("AFE preflight rejected RUN; BLE and DFU remain available.", "WARN");
@@ -210,7 +240,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false;
+    state.ampxSupported = false; state.pt3DspSupported = false;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -231,7 +261,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -288,6 +318,15 @@ function formatMv(value) {
   return `${(value / 1000).toFixed(3)} V`;
 }
 
+function calculatePt3Timing(config) {
+  const rawSps = PT3.adcClockHz / (config.sinc3 * config.sinc2);
+  const requestedOutputSps = 1000 / config.period;
+  const outputDecimation = Math.round(rawSps / requestedOutputSps);
+  if (!Number.isFinite(rawSps) || !Number.isFinite(outputDecimation) || outputDecimation < 1) throw new Error("PT3 DSP timing is invalid.");
+  const outputSps = rawSps / outputDecimation;
+  return { rawSps, requestedOutputSps, outputDecimation, outputSps, actualOutputPeriodMs: 1000 / outputSps };
+}
+
 function calculatePt3Setpoints(config) {
   const gateRequestedMv = PT3.sourceMv + config.vgs;
   const drainRequestedMv = PT3.sourceMv + config.vds;
@@ -297,6 +336,7 @@ function calculatePt3Setpoints(config) {
   const ceMv = 200 + drainCode * PT3.dac6LsbMv;
   return {
     ...config,
+    ...calculatePt3Timing(config),
     gateCode,
     drainCode,
     gateMv,
@@ -306,8 +346,6 @@ function calculatePt3Setpoints(config) {
     vzeroMv: gateMv,
     actualVdsMv: ceMv - PT3.sourceMv,
     actualVgsMv: gateMv - PT3.sourceMv,
-    outputSps: 1000 / config.period,
-    rawDecimation: PT3.rawSampleRate / (1000 / config.period),
   };
 }
 
@@ -318,7 +356,8 @@ function updatePt3Preview() {
     elements.pt3VzeroSet.textContent = `${formatMv(setpoints.vzeroMv)} (12-bit code ${setpoints.gateCode})`;
     elements.pt3CeSet.textContent = `${formatMv(setpoints.ceMv)}; VDS ${setpoints.actualVdsMv.toFixed(1)} mV`;
     elements.pt3SeSet.textContent = `${formatMv(setpoints.seMv)} fixed`;
-    elements.pt3TimingHint.textContent = `ADC raw rate is fixed at ${PT3.rawSampleRate} samples/s; output is ${setpoints.outputSps} samples/s (every ${setpoints.rawDecimation} raw conversion). Default 90 s settling applies after RUN.`;
+    const notch = setpoints.notch ? "SINC2 notch enabled" : "SINC2 notch bypassed";
+    elements.pt3TimingHint.textContent = `Raw time stream ≈ ${setpoints.rawSps.toFixed(2)} samples/s; B1 output ≈ ${setpoints.outputSps.toFixed(2)} samples/s (every ${setpoints.outputDecimation} raw conversion; requested ${setpoints.period} ms, actual ≈ ${setpoints.actualOutputPeriodMs.toFixed(2)} ms). ${notch}. Default 90 s settling applies after RUN.`;
   } catch {
     elements.pt3VbiasSet.textContent = "Invalid PT3 input";
     elements.pt3VzeroSet.textContent = "Invalid PT3 input";
@@ -328,9 +367,14 @@ function updatePt3Preview() {
 }
 
 function readPt3Config() {
-  const config = { vds: integer("pt3Vds"), vgs: integer("pt3Vgs"), period: integer("pt3Period"), settle: integer("pt3Settle") };
-  const sps = 1000 / config.period;
-  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < 10 || config.period > 1000 || 1000 % config.period || config.settle < 1000 || config.settle > 120000 || PT3.rawSampleRate % sps) throw new Error("PT3 parameters are outside the firmware guard range.");
+  const config = {
+    vds: integer("pt3Vds"), vgs: integer("pt3Vgs"), period: integer("pt3Period"), settle: integer("pt3Settle"),
+    sinc3: integer("pt3Sinc3"), sinc2: integer("pt3Sinc2"), notch: integer("pt3Notch"),
+  };
+  const supportedSinc3 = [2, 4, 5];
+  const supportedSinc2 = [533, 800, 1067, 1333];
+  const timing = calculatePt3Timing(config);
+  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < 10 || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > PT3.maxRequestedOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error("PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / 100 target-B1-SPS range.");
   return config;
 }
 
@@ -362,8 +406,11 @@ function configCommand() {
   const config = readConfig();
   if (state.mode === "AMP") return `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`;
   if (state.mode === "PT3") {
-    state.pendingPt3 = calculatePt3Setpoints(config);
-    return `CFG,PT3,${config.vds},${config.vgs},${config.period},${config.settle}`;
+    const applied = state.pt3DspSupported ? config : { ...config, sinc3: 5, sinc2: 800, notch: 0 };
+    state.pendingPt3 = calculatePt3Setpoints(applied);
+    return state.pt3DspSupported
+      ? `CFG,PT3,${applied.vds},${applied.vgs},${applied.period},${applied.settle},${applied.sinc3},${applied.sinc2},${applied.notch}`
+      : `CFG,PT3,${applied.vds},${applied.vgs},${applied.period},${applied.settle}`;
   }
   return `CFG,CV,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia}`;
 }
@@ -408,7 +455,7 @@ function schedulePlot() {
 function renderRows() {
   const recent = state.samples.slice(-40).reverse();
   elements.sampleRows.innerHTML = recent.length ? recent.map((s) => {
-    const pt3 = s.pt3 ? `CE ${formatMv(s.pt3.ceMv)}, gate ${formatMv(s.pt3.gateMv)}` : "—";
+    const pt3 = s.pt3 ? `CE ${formatMv(s.pt3.ceMv)}, gate ${formatMv(s.pt3.gateMv)}; S3/S2 ${s.pt3.sinc3}/${s.pt3.sinc2}` : "—";
     return `<tr><td>${s.mode}</td><td>${s.index}</td><td>${s.currentUa}</td><td>${pt3}</td><td>${new Date(s.receivedAt).toLocaleTimeString()}</td></tr>`;
   }).join("") : '<tr><td colspan="5" class="empty">No binary measurement frames received.</td></tr>';
 }
@@ -419,8 +466,8 @@ function clearSamples() {
 
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);
@@ -642,6 +689,6 @@ async function selectDfuAndTransfer() {
 
 elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
-document.querySelectorAll("#pt3Parameters input").forEach((control) => control.addEventListener("input", updatePt3Preview));
+document.querySelectorAll("#pt3Parameters input, #pt3Parameters select").forEach((control) => { control.addEventListener("input", updatePt3Preview); control.addEventListener("change", updatePt3Preview); });
 
 browserReady(); switchMode("AMP"); updateAmpTimingHint(); updatePt3Preview(); drawPlot();

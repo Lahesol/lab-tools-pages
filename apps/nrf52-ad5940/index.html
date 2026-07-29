@@ -110,9 +110,26 @@
               <h2>PT3 — drain, gate &amp; timing</h2>
               <label>VDS <span>mV</span><input id="pt3Vds" type="number" min="100" max="1100" step="1" value="1000" required /></label>
               <label>VGS <span>mV</span><input id="pt3Vgs" type="number" min="-800" max="1000" step="1" value="0" required /></label>
-              <label>Output period <span>ms</span><input id="pt3Period" type="number" min="10" max="1000" step="1" value="10" required /></label>
+              <label>Target output period <span>ms</span><input id="pt3Period" type="number" min="10" max="1000" step="1" value="10" required /></label>
               <label>Gate settling <span>ms</span><input id="pt3Settle" type="number" min="1000" max="120000" step="1000" value="90000" required /></label>
             </section>
+            <details class="advanced-parameters" open>
+              <summary>PT3 time-domain DSP / noise trade-off</summary>
+              <section class="parameter-group advanced-group">
+                <label>SINC3 OSR <span>ratio</span>
+                  <select id="pt3Sinc3"><option value="2">2</option><option value="4">4</option><option value="5" selected>5</option></select>
+                </label>
+                <label>SINC2 OSR <span>ratio</span>
+                  <select id="pt3Sinc2">
+                    <option value="533">533</option><option value="800" selected>800</option>
+                    <option value="1067">1067</option><option value="1333">1333</option>
+                  </select>
+                </label>
+                <label>SINC2 notch <span>optional</span>
+                  <select id="pt3Notch"><option value="0" selected>Bypass (default)</option><option value="1">Enable SINC2 notch</option></select>
+                </label>
+              </section>
+            </details>
             <section class="pt3-setpoint-summary" aria-labelledby="pt3SetpointTitle">
               <h2 id="pt3SetpointTitle">PT3 calculated settings</h2>
               <dl class="setpoint-grid">
@@ -125,7 +142,7 @@
             </section>
             <p id="pt3TimingHint" class="hint"></p>
             <p id="pt3CapabilityHint" class="hint capability-hint">PT3-capable controller firmware is checked after connection.</p>
-            <p class="hint">VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. HSTIA RTIA is calibrated at 160 kΩ before every RUN; source reference and raw ADC rate are fixed at 1.100 V and 200 samples/s.</p>
+            <p class="hint">VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. DFT is intentionally not used here because it would replace the pulse trace needed to fit τ. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
           </div>
 
           <div class="control-actions">
@@ -137,7 +154,7 @@
 
         <section class="safety-note">
           <h2>Hardware gate</h2>
-          <p>PT3에서는 VZERO0를 DUT gate/base 전용 fixture contact로 직접 연결하고 PAD4/RE0는 개방합니다. RUN 명령 전 ADIID를 확인합니다. AFE_ID 또는 AFE_SPI 오류가 오면 측정은 시작되지 않으며 BLE/DFU는 유지됩니다.</p>
+          <p>PT3에서는 VZERO0를 DUT gate/base 전용 fixture contact로 직접 연결하고 PAD4/RE0는 개방합니다. RUN 명령 전 ADIID와 HSTIA RTIA 교정을 확인합니다. AFE_ID, AFE_SPI, 또는 PT3_CAL 오류가 오면 측정과 DUT DAC setpoint 적용은 시작되지 않으며 BLE/DFU는 유지됩니다.</p>
           <button id="probeButton" class="button compact ghost" type="button" disabled>Run AFE SPI probe</button>
         </section>
       </aside>
@@ -214,6 +231,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=b50cf47df6ec"></script>
+    <script type="module" src="app.js?v=723ad99e032d"></script>
   </body>
 </html>

@@ -11,14 +11,14 @@
 | GUI → board | `CFG,AMPX,<vzero_mV>,<sensor_bias_mV>,<period_ms>,<rtia_ohm>,<rf_ohm>,<pga_x10>,<sinc3_osr>,<sinc2_osr>,<fifo_words>,<rcal_ohm>,<adc_ref_mV>` |
 | legacy host → board | `CFG,AMP,<vzero_mV>,<sensor_bias_mV>,<period_ms>,<rtia_ohm>` (keeps the current advanced AMP values) |
 | GUI → board | `CFG,CV,<start_mV>,<vertex_mV>,<vzero_mV>,<steps>,<duration_ms>,<settle_ms>,<rtia_ohm>` |
-| GUI → board | `CFG,PT3,<vds_mV>,<vgs_mV>,<period_ms>,<gate_settle_ms>` |
+| GUI → board | `CFG,PT3,<vds_mV>,<vgs_mV>,<period_ms>,<gate_settle_ms>,<sinc3_osr>,<sinc2_osr>,<sinc2_notch_0_or_1>` |
 | GUI → board | `RUN,AMP`, `RUN,CV`, `RUN,PT3`, `STOP`, `INFO?`, `STATUS?`, exact `DFU` |
 | board → GUI | `@ACK`, `@ERR`, `@EVT`, `@STATUS` ASCII status lines |
 | board → GUI | `0xA1` (AMP) / `0xB1` (PT3) / `0xC1` (CV), `uint32 LE index`, `float32 LE calculated current in uA` |
 
 Expanded AMP control requires controller firmware **V26 or later**, which advertises `AMPX` in its `@INFO` response. The GUI leaves CV available but disables AMP apply/run on an older controller, avoiding a partial configuration silently reaching the device.
 
-PT3 requires controller firmware **V29 or later**, which advertises `PT3`. The PT3 panel accepts only the firmware-guarded `VDS`, `VGS`, output-period, and gate-settling values. Its HSTIA 160 kOhm RTIA calibration, 1.100 V source reference, and 200 samples/s raw ADC path are intentionally shown as fixed conditions because the current firmware does not expose them as runtime controls.
+PT3 DSP control requires controller firmware **V34 or later**, which advertises `PT3_DSP`. The PT3 panel sends guarded `VDS`, `VGS`, target output period, gate settling, SINC3 OSR, SINC2 OSR, and optional SINC2-notch values together. Firmware reports the resulting raw rate, B1 rate, and integer decimation in `RAWmHz`, `OUTmHz`, and `DEC`; the GUI stores these configuration values beside unchanged B1 data in CSV. The 10 kOhm HSTIA RTIA and PGA ×9 remain fixed because they are tied to the validated 200 ohm RCAL calibration and 5 uA range. Controller V30 or later reports a rejected RTIA calibration as `@ERR,PT3_CAL,LIB=<error>,SPI=<status>,RTIA=<ohm>`; the GUI preserves that raw line and explains that the requested DUT DAC setpoints were not enabled.
 
 ## PT3 settings trace and fixture boundary
 
@@ -29,9 +29,26 @@ The PT3 settings panel is not a voltage measurement instrument. It plots **ackno
 - SE0 target: the fixed 1.100 V HSTIA internal reference.
 - RE0/PAD4: deliberately unplotted and labelled `OPEN`; it is not a programmable gate output in PT3.
 
-The `0xB1` current samples remain raw received current values in uA. The CSV keeps them unchanged and adds separate `pt3_*_set_mV` columns only when a PT3 configuration ACK was seen. Those columns are configuration metadata, not ADC observations.
+The `0xB1` current samples remain raw received current values in uA. The CSV keeps them unchanged and adds separate `pt3_*_set_mV`, SINC OSR, notch, raw-rate, decimation, and B1-rate columns only when a PT3 configuration ACK was seen. Those columns are configuration metadata, not ADC observations.
 
 For PT3 wiring, connect VZERO0 directly to a separate DUT gate/base fixture contact. Keep PAD4/RE0 open. Do not jumper VZERO0 to PAD4 while the PT3 firmware uses the CE0 buffer path.
+
+PT3 is a static step-control mode: it does not synthesize a continuous VBIAS/VZERO waveform while streaming. The V33 resistor-fixture test verified the CE0/HSTIA current path, but it also measured only about 15% of the ideal VZERO0 current step into a 200 kOhm load. Treat VZERO0 as a high-impedance gate/base bias source and verify the physical gate voltage before using a low-impedance or dynamic load.
+
+### PT3 DSP boundary
+
+SINC3/SINC2 settings control the time-domain noise-versus-bandwidth trade-off.
+The V34 guard exposes only SINC3 `2/4/5`, SINC2 `533/800/1067/1333`, nominal
+raw rates of 100–800 samples/s, and B1 output no higher than 100 samples/s.
+The requested output period can be quantized to an integer raw-sample
+decimation; use the acknowledged `OUTmHz` rate when preparing an Edge Impulse
+dataset. The SINC2 notch can be enabled for comparison, but it changes the
+signal path and must be treated as a separate acquisition condition.
+
+DFT is deliberately absent from PT3. DFT produces a periodic frequency-bin
+result and would destroy the time-domain rise/decay waveform needed to extract
+tau. A periodic optical lock-in feature, if required later, will be a separate
+mode and frame contract rather than a checkbox that silently changes tau data.
 
 ## Amperometry variables and guardrails
 
