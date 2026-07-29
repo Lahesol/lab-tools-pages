@@ -20,6 +20,15 @@ Expanded AMP control requires controller firmware **V26 or later**, which advert
 
 PT3 time-domain DSP control requires controller firmware **V34 or later**, which advertises `PT3_DSP`. Controller **V35 or later** additionally advertises `PT3_CAL_DFT` and accepts an RTIA-calibration `dft_num` of 256, 512, 1024, 2048, or 4096 points. The PT3 panel sends guarded `VDS`, `VGS`, target output period, gate settling, SINC3 OSR, SINC2 OSR, optional SINC2-notch values, and—on V35—the calibration DFT length together as the eighth `CFG,PT3` field. Firmware reports the resulting raw rate, B1 rate, and integer decimation in `RAWmHz`, `OUTmHz`, and `DEC`; the GUI stores these configuration values beside unchanged B1 data in CSV. The 10 kOhm HSTIA RTIA and PGA ×9 remain fixed because they are tied to the validated 200 ohm RCAL calibration and 5 uA range. Controller V30 or later reports a rejected RTIA calibration as `@ERR,PT3_CAL,LIB=<error>,SPI=<status>,RTIA=<ohm>`; the GUI preserves that raw line and explains that the requested DUT DAC setpoints were not enabled.
 
+Controller **V36 or later** advertises `PT3_LIVE_DAC`. After the firmware sends
+`@EVT,RUNNING,PT3`, the GUI can send `LIVE,PT3,<vds_mV>,<vgs_mV>`. That command
+writes only the LPDAC0 data register: it changes the 6-bit VBIAS0/CE0 and
+12-bit VZERO0/gate codes atomically, while leaving ADC conversion, SINC state,
+RTIA calibration, and BLE streaming intact. It is rejected during the initial
+gate-settling interval. A live gate step deliberately creates a physical
+transient; every following B1 sample is still raw and receives the new
+acknowledged setpoint snapshot plus `pt3_setpoint_update=LIVE` in CSV.
+
 ## PT3 settings trace and fixture boundary
 
 The PT3 settings panel is not a voltage measurement instrument. It plots **acknowledged configuration-derived setpoints** using the same DAC-code quantization as the firmware:
@@ -53,6 +62,12 @@ not B1 sample filtering. A periodic optical lock-in feature, if required later,
 will be a separate mode and frame contract rather than a checkbox that silently
 changes tau data.
 
+The SINC2 filter itself is active in PT3; the default GUI setting **SINC2
+notch: Bypass** only bypasses the optional notch branch. At the default 100
+SPS B1 rate, a 60 Hz pickup aliases to 40 Hz, so a jagged trace or a raw plot
+alone cannot prove that its source is mains. Retain raw B1 frames and use the
+acknowledged `OUTmHz` rate for a separate spectral check.
+
 ## Amperometry variables and guardrails
 
 All AMP parameters are applied as one `CFG,AMPX` transaction, then the firmware reinitializes and recalibrates the internal RTIA at the next `RUN,AMP`.
@@ -77,7 +92,7 @@ CSV is an export of received binary frame values. The UI does not smooth, averag
 
 ## Live plot behavior
 
-The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (CV) frame immediately and appends its original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The downloadable CSV contains the unchanged received values and timestamps.
+The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (CV) frame immediately and appends its original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The selectable plot window changes only which recent raw points are drawn. It neither limits memory/CSV capture nor performs a moving average. The downloadable CSV contains the unchanged received values and timestamps.
 
 ## Secure DFU boundary
 
@@ -88,7 +103,7 @@ The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (
 
 ### Web UI workflow and progress
 
-The V1.5 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
+The V1.6 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`; V36 additionally returns `PT3_LIVE_DAC`. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
 
 The transfer bar reports the percentage of bytes whose CRC/offset receipt was confirmed by the bootloader (PRN=1). It keeps the last confirmed percentage if a transfer stops instead of resetting it to zero. A `100%` transfer still requires the final NUS reconnect and `@INFO` capability check before it is treated as a deployed application.
 

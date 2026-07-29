@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=3bece3a4e5ed" />
+    <link rel="stylesheet" href="styles.css?v=ddb42c6090b5" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v1.5</span></h1>
+        <h1>AD5940 Lab Console <span>v1.6</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -149,12 +149,14 @@
             </section>
             <p id="pt3TimingHint" class="hint"></p>
             <p id="pt3CapabilityHint" class="hint capability-hint">PT3-capable controller firmware is checked after connection.</p>
+            <p class="hint">V36 writes VDS/VGS only after <code>@EVT,RUNNING,PT3</code>. It does not re-run RTIA calibration or the initial 90 s gate-settling interval; following B1 samples intentionally include the electrical step transient and retain its acknowledged setpoint metadata.</p>
             <p class="hint">VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the B1 pulse trace remains a SINC2 time stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
           </div>
 
           <div class="control-actions">
             <button id="applyButton" class="button secondary" type="submit" disabled>Apply configuration</button>
             <button id="runButton" class="button primary" type="button" disabled>Start measurement</button>
+            <button id="pt3LiveButton" class="button compact secondary" type="button" disabled>Live VDS / VGS update (V36+)</button>
             <button id="stopButton" class="button danger" type="button" disabled>Stop</button>
           </div>
         </form>
@@ -171,12 +173,19 @@
           <div class="panel-heading">
             <div><p class="eyebrow">LIVE RESULT</p><h2 id="plotTitle">Amperometry — current vs sample index</h2></div>
             <div class="plot-actions">
+              <label class="plot-window-control">View raw window
+                <select id="plotWindowSamples" aria-label="Displayed raw sample window">
+                  <option value="64">64 samples</option><option value="128">128 samples</option>
+                  <option value="256" selected>256 samples</option><option value="512">512 samples</option>
+                  <option value="1024">1024 samples</option><option value="all">All samples</option>
+                </select>
+              </label>
               <button id="clearDataButton" class="button compact ghost">Clear trace</button>
               <button id="downloadCsvButton" class="button compact ghost" disabled>Download CSV</button>
             </div>
           </div>
           <canvas id="plotCanvas" aria-label="Measurement plot"></canvas>
-          <p id="plotCaption" class="plot-caption">No device data. The plot will display each received ADI example current value without smoothing.</p>
+          <p id="plotCaption" class="plot-caption">No device data. The plot displays the selected recent raw-data window only; it does not smooth, filter, or limit the collected data/CSV.</p>
         </section>
 
         <section id="pt3SettingsPanel" class="panel plot-panel pt3-settings-panel hidden">
@@ -238,6 +247,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=5195462e83f1"></script>
+    <script type="module" src="app.js?v=377f0e314a73"></script>
   </body>
 </html>

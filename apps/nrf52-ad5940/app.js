@@ -42,9 +42,13 @@ const state = {
   pt3Supported: false,
   pt3DspSupported: false,
   pt3CalibrationDftSupported: false,
+  pt3LiveDacSupported: false,
+  pt3LiveReady: false,
   pendingPt3: null,
+  pendingPt3Live: null,
   pt3Applied: null,
   pt3History: [],
+  plotWindowSamples: 256,
   expectDfuDisconnect: false,
   plotDrawPending: false,
   dfu: { file: null, pkg: null, device: null, server: null, control: null, packet: null, waiter: null, transferring: false, completed: false, progress: 0, stage: "package" },
@@ -58,11 +62,11 @@ const elements = {
   browserState: $("browserState"), deviceState: $("deviceState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), pt3Parameters: $("pt3Parameters"),
   ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
-  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"),
+  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
-  clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
+  clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), plotWindow: $("plotWindowSamples"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
   dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
   dfuProgress: $("dfuProgress"), dfuProgressBar: $("dfuProgressBar"), dfuProgressPercent: $("dfuProgressPercent"), dfuProgressText: $("dfuProgressText"), verifyApp: $("verifyAppButton"),
   dfuStages: { package: $("dfuStagePackage"), entry: $("dfuStageEntry"), transfer: $("dfuStageTransfer"), verify: $("dfuStageVerify") },
@@ -81,10 +85,16 @@ function refreshControlAvailability() {
   const connected = isInstrumentConnected();
   const modeReady = state.mode === "AMP" ? state.ampxSupported : state.mode === "PT3" ? state.pt3Supported : true;
   const canConfigure = connected && !state.running && modeReady;
+  const pt3Running = connected && state.running && state.mode === "PT3";
+  const canLivePt3Dac = pt3Running && state.pt3LiveDacSupported && state.pt3LiveReady && Boolean(state.pt3Applied) && !state.pendingPt3Live;
   elements.apply.disabled = !canConfigure;
   elements.run.disabled = !canConfigure;
   elements.stop.disabled = !connected || !state.running;
   elements.probe.disabled = !connected || state.running;
+  elements.pt3Live.disabled = !canLivePt3Dac;
+  [elements.ampTab, elements.cvTab, elements.pt3Tab].forEach((tab) => { tab.disabled = connected && state.running; });
+  [elements.pt3Vds, elements.pt3Vgs].forEach((control) => { control.disabled = pt3Running && !canLivePt3Dac; });
+  [elements.pt3Period, elements.pt3Settle].forEach((control) => { control.disabled = pt3Running; });
 
   elements.ampCapabilityHint.classList.toggle("ready", connected && state.ampxSupported);
   if (!connected) {
@@ -98,12 +108,14 @@ function refreshControlAvailability() {
   }
 
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
-  [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported; });
-  elements.pt3CalDft.disabled = !connected || !state.pt3CalibrationDftSupported;
+  [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported || pt3Running; });
+  elements.pt3CalDft.disabled = !connected || !state.pt3CalibrationDftSupported || pt3Running;
   if (!connected) {
     elements.pt3CapabilityHint.textContent = "Connect to check PT3 firmware capability before applying phototransistor parameters.";
+  } else if (state.pt3Supported && state.pt3LiveDacSupported) {
+    elements.pt3CapabilityHint.textContent = "PT3_DSP + PT3_CAL_DFT + PT3_LIVE_DAC detected. After @EVT,RUNNING,PT3, VDS/VGS can be written live without re-running RTIA calibration.";
   } else if (state.pt3Supported && state.pt3CalibrationDftSupported) {
-    elements.pt3CapabilityHint.textContent = "PT3_DSP + PT3_CAL_DFT detected. DAC, timing, SINC, notch, and RTIA-calibration DFT points are applied together before RUN.";
+    elements.pt3CapabilityHint.textContent = "PT3_DSP + PT3_CAL_DFT detected. DAC, timing, SINC, notch, and RTIA-calibration DFT points are applied together before RUN; live VDS/VGS requires V36.";
   } else if (state.pt3Supported && state.pt3DspSupported) {
     elements.pt3CapabilityHint.textContent = "PT3_DSP detected. DAC, timing, SINC3/SINC2, and notch are applied together before RUN; RTIA-calibration DFT points remain at the safe 1024-point default.";
   } else if (state.pt3Supported) {
@@ -198,21 +210,32 @@ function handleTextLine(line) {
   log(`NUS RX: ${line}`);
   elements.lastStatus.textContent = line;
   if (line.startsWith("@EVT,RUNNING")) state.running = true;
-  if (line.startsWith("@EVT,PT3_SETTLING")) state.running = true;
-  if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@ERR,")) state.running = false;
+  if (line.startsWith("@EVT,RUNNING,PT3")) state.pt3LiveReady = true;
+  if (line.startsWith("@EVT,PT3_SETTLING")) { state.running = true; state.pt3LiveReady = false; }
+  if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@ERR,")) { state.running = false; state.pt3LiveReady = false; state.pendingPt3Live = null; }
   if (line.startsWith("@INFO,")) {
     state.ampxSupported = line.includes("AMPX");
     state.pt3Supported = line.includes("PT3");
     state.pt3DspSupported = line.includes("PT3_DSP");
     state.pt3CalibrationDftSupported = line.includes("PT3_CAL_DFT");
+    state.pt3LiveDacSupported = line.includes("PT3_LIVE_DAC");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
-    log(state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    log(state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
   }
   if (line.startsWith("@ACK,CFG,PT3") && state.pendingPt3) {
-    state.pt3Applied = { ...state.pendingPt3, acknowledgedAt: new Date().toISOString() };
+    state.pt3Applied = { ...state.pendingPt3, updateKind: "CONFIG", acknowledgedAt: new Date().toISOString() };
     state.pt3History.push(state.pt3Applied);
+    state.pendingPt3 = null;
     elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} B1 SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}, cal DFT ${state.pt3Applied.calDft}`;
     log("PT3 configuration acknowledged; DAC/pad trace and DSP metadata updated.");
+    schedulePlot();
+  }
+  if (line.startsWith("@ACK,LIVE,PT3") && state.pendingPt3Live) {
+    state.pt3Applied = { ...state.pendingPt3Live, updateKind: "LIVE", acknowledgedAt: new Date().toISOString() };
+    state.pt3History.push(state.pt3Applied);
+    state.pendingPt3Live = null;
+    elements.pt3RouteState.textContent = `LIVE ACK: VDS ${state.pt3Applied.actualVdsMv.toFixed(1)} mV; VGS ${state.pt3Applied.actualVgsMv.toFixed(1)} mV. Raw B1 data remains unfiltered.`;
+    log("Live PT3 DAC update acknowledged; subsequent raw B1 samples carry the new setpoint metadata.");
     schedulePlot();
   }
   if (line.startsWith("@ERR,PT3_")) handlePt3Error(line);
@@ -245,7 +268,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.pt3DspSupported = false;
+    state.ampxSupported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -266,7 +289,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPt3Live = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -295,6 +318,10 @@ async function disconnectInstrument() {
 }
 
 function switchMode(mode) {
+  if (state.running && mode !== state.mode) {
+    log("Stop the active acquisition before switching measurement modes.", "WARN");
+    return;
+  }
   state.mode = mode;
   const amp = mode === "AMP";
   const cv = mode === "CV";
@@ -453,6 +480,33 @@ async function stopMeasurement() {
   try { await sendNusCommand("STOP"); } catch (error) { log(error.message, "ERROR"); }
 }
 
+function readPt3LiveSetpoints() {
+  if (!state.pt3Applied) throw new Error("Apply PT3 configuration and wait for its ACK before a live DAC update.");
+  const vds = integer("pt3Vds");
+  const vgs = integer("pt3Vgs");
+  if (!Number.isFinite(vds) || !Number.isFinite(vgs) || vds < 100 || vds > 1100 || vgs < -800 || vgs > 1000) {
+    throw new Error("Live VDS/VGS values are outside the firmware guard range.");
+  }
+  return calculatePt3Setpoints({ ...state.pt3Applied, vds, vgs });
+}
+
+async function applyPt3LiveDac() {
+  try {
+    if (!state.pt3LiveDacSupported || !state.pt3LiveReady || !state.running || state.mode !== "PT3") {
+      throw new Error("Live DAC updates require V36 and @EVT,RUNNING,PT3.");
+    }
+    const setpoints = readPt3LiveSetpoints();
+    state.pendingPt3Live = setpoints;
+    refreshControlAvailability();
+    await sendNusCommand(`LIVE,PT3,${setpoints.vds},${setpoints.vgs}`);
+    log("Live VDS/VGS write queued. The following raw B1 samples will carry the new acknowledged setpoint metadata.");
+  } catch (error) {
+    state.pendingPt3Live = null;
+    refreshControlAvailability();
+    log(error.message, "ERROR");
+  }
+}
+
 async function runAfeProbe() {
   try {
     await sendNusCommand("PROBE?");
@@ -485,10 +539,17 @@ function clearSamples() {
   state.samples = []; elements.sampleCount.textContent = "0 samples"; elements.downloadCsv.disabled = true; renderRows(); drawPlot(); log("Displayed and exportable received sample list cleared.");
 }
 
+function updatePlotWindow() {
+  const value = elements.plotWindow.value;
+  state.plotWindowSamples = value === "all" ? null : Number(value);
+  schedulePlot();
+  log(`Plot view changed to ${state.plotWindowSamples === null ? "all" : state.plotWindowSamples} raw samples; collected data and CSV remain unchanged.`);
+}
+
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);
@@ -504,7 +565,8 @@ function drawPlot() {
   ctx.font = "11px system-ui"; ctx.fillStyle = "#8da9bd";
   for (let i = 0; i <= 5; i += 1) { const y = margin.top + chartH * i / 5; ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(width - margin.right, y); ctx.stroke(); }
   for (let i = 0; i <= 6; i += 1) { const x = margin.left + chartW * i / 6; ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, height - margin.bottom); ctx.stroke(); }
-  const points = state.samples.filter((s) => s.mode === state.mode);
+  const allPoints = state.samples.filter((s) => s.mode === state.mode);
+  const points = state.plotWindowSamples === null ? allPoints : allPoints.slice(-state.plotWindowSamples);
   if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText("Awaiting received device data", width / 2, height / 2); if (state.mode === "PT3") drawPt3SettingsPlot(); return; }
   let minX = Math.min(...points.map((p) => p.index)); let maxX = Math.max(...points.map((p) => p.index)); let minY = Math.min(...points.map((p) => p.currentUa)); let maxY = Math.max(...points.map((p) => p.currentUa));
   if (minX === maxX) { minX -= 1; maxX += 1; } if (minY === maxY) { minY -= 1; maxY += 1; } const padding = (maxY - minY) * .12; minY -= padding; maxY += padding;
@@ -716,7 +778,7 @@ async function selectDfuAndTransfer() {
   finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg || state.dfu.completed; }
 }
 
-elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
+elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
 document.querySelectorAll("#pt3Parameters input, #pt3Parameters select").forEach((control) => { control.addEventListener("input", updatePt3Preview); control.addEventListener("change", updatePt3Preview); });
 
