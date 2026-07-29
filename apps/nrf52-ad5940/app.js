@@ -41,6 +41,7 @@ const state = {
   ampxSupported: false,
   pt3Supported: false,
   pt3DspSupported: false,
+  pt3CalibrationDftSupported: false,
   pendingPt3: null,
   pt3Applied: null,
   pt3History: [],
@@ -57,7 +58,7 @@ const elements = {
   browserState: $("browserState"), deviceState: $("deviceState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), pt3Parameters: $("pt3Parameters"),
   ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
-  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"),
+  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
@@ -98,10 +99,13 @@ function refreshControlAvailability() {
 
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
   [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported; });
+  elements.pt3CalDft.disabled = !connected || !state.pt3CalibrationDftSupported;
   if (!connected) {
     elements.pt3CapabilityHint.textContent = "Connect to check PT3 firmware capability before applying phototransistor parameters.";
+  } else if (state.pt3Supported && state.pt3CalibrationDftSupported) {
+    elements.pt3CapabilityHint.textContent = "PT3_DSP + PT3_CAL_DFT detected. DAC, timing, SINC, notch, and RTIA-calibration DFT points are applied together before RUN.";
   } else if (state.pt3Supported && state.pt3DspSupported) {
-    elements.pt3CapabilityHint.textContent = "PT3_DSP detected. DAC, timing, SINC3/SINC2, and notch are applied together before RUN.";
+    elements.pt3CapabilityHint.textContent = "PT3_DSP detected. DAC, timing, SINC3/SINC2, and notch are applied together before RUN; RTIA-calibration DFT points remain at the safe 1024-point default.";
   } else if (state.pt3Supported) {
     elements.pt3CapabilityHint.textContent = "Basic PT3 detected. The proven SINC3=5 / SINC2=800 / notch-bypass profile is used; install V34 for DSP controls.";
   } else if (state.mode === "PT3") {
@@ -200,13 +204,14 @@ function handleTextLine(line) {
     state.ampxSupported = line.includes("AMPX");
     state.pt3Supported = line.includes("PT3");
     state.pt3DspSupported = line.includes("PT3_DSP");
+    state.pt3CalibrationDftSupported = line.includes("PT3_CAL_DFT");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
-    log(state.pt3DspSupported ? "PT3 DSP capability detected." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    log(state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
   }
   if (line.startsWith("@ACK,CFG,PT3") && state.pendingPt3) {
     state.pt3Applied = { ...state.pendingPt3, acknowledgedAt: new Date().toISOString() };
     state.pt3History.push(state.pt3Applied);
-    elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} B1 SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}`;
+    elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} B1 SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}, cal DFT ${state.pt3Applied.calDft}`;
     log("PT3 configuration acknowledged; DAC/pad trace and DSP metadata updated.");
     schedulePlot();
   }
@@ -261,7 +266,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -370,7 +375,7 @@ function updatePt3Preview() {
     elements.pt3CeSet.textContent = `${formatMv(setpoints.ceMv)}; VDS ${setpoints.actualVdsMv.toFixed(1)} mV`;
     elements.pt3SeSet.textContent = `${formatMv(setpoints.seMv)} fixed`;
     const notch = setpoints.notch ? "SINC2 notch enabled" : "SINC2 notch bypassed";
-    elements.pt3TimingHint.textContent = `Raw time stream ≈ ${setpoints.rawSps.toFixed(2)} samples/s; B1 output ≈ ${setpoints.outputSps.toFixed(2)} samples/s (every ${setpoints.outputDecimation} raw conversion; requested ${setpoints.period} ms, actual ≈ ${setpoints.actualOutputPeriodMs.toFixed(2)} ms). ${notch}. Default 90 s settling applies after RUN.`;
+    elements.pt3TimingHint.textContent = `Raw time stream ≈ ${setpoints.rawSps.toFixed(2)} samples/s; B1 output ≈ ${setpoints.outputSps.toFixed(2)} samples/s (every ${setpoints.outputDecimation} raw conversion; requested ${setpoints.period} ms, actual ≈ ${setpoints.actualOutputPeriodMs.toFixed(2)} ms). ${notch}. RTIA calibration uses ${setpoints.calDft}-point DFT only; it does not filter B1 samples. Default 90 s settling applies after RUN.`;
   } catch {
     elements.pt3VbiasSet.textContent = "Invalid PT3 input";
     elements.pt3VzeroSet.textContent = "Invalid PT3 input";
@@ -382,12 +387,13 @@ function updatePt3Preview() {
 function readPt3Config() {
   const config = {
     vds: integer("pt3Vds"), vgs: integer("pt3Vgs"), period: integer("pt3Period"), settle: integer("pt3Settle"),
-    sinc3: integer("pt3Sinc3"), sinc2: integer("pt3Sinc2"), notch: integer("pt3Notch"),
+    sinc3: integer("pt3Sinc3"), sinc2: integer("pt3Sinc2"), notch: integer("pt3Notch"), calDft: integer("pt3CalDft"),
   };
   const supportedSinc3 = [2, 4, 5];
   const supportedSinc2 = [533, 800, 1067, 1333];
+  const supportedCalibrationDft = [256, 512, 1024, 2048, 4096];
   const timing = calculatePt3Timing(config);
-  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < 10 || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > PT3.maxRequestedOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error("PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / 100 target-B1-SPS range.");
+  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < 10 || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > PT3.maxRequestedOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error("PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / 100 target-B1-SPS range.");
   return config;
 }
 
@@ -419,11 +425,13 @@ function configCommand() {
   const config = readConfig();
   if (state.mode === "AMP") return `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`;
   if (state.mode === "PT3") {
-    const applied = state.pt3DspSupported ? config : { ...config, sinc3: 5, sinc2: 800, notch: 0 };
-    state.pendingPt3 = calculatePt3Setpoints(applied);
+    const applied = state.pt3CalibrationDftSupported ? config : { ...config, calDft: 1024 };
+    const dspApplied = state.pt3DspSupported ? applied : { ...applied, sinc3: 5, sinc2: 800, notch: 0 };
+    state.pendingPt3 = calculatePt3Setpoints(dspApplied);
+    if (state.pt3CalibrationDftSupported) return `CFG,PT3,${dspApplied.vds},${dspApplied.vgs},${dspApplied.period},${dspApplied.settle},${dspApplied.sinc3},${dspApplied.sinc2},${dspApplied.notch},${dspApplied.calDft}`;
     return state.pt3DspSupported
-      ? `CFG,PT3,${applied.vds},${applied.vgs},${applied.period},${applied.settle},${applied.sinc3},${applied.sinc2},${applied.notch}`
-      : `CFG,PT3,${applied.vds},${applied.vgs},${applied.period},${applied.settle}`;
+      ? `CFG,PT3,${dspApplied.vds},${dspApplied.vgs},${dspApplied.period},${dspApplied.settle},${dspApplied.sinc3},${dspApplied.sinc2},${dspApplied.notch}`
+      : `CFG,PT3,${dspApplied.vds},${dspApplied.vgs},${dspApplied.period},${dspApplied.settle}`;
   }
   return `CFG,CV,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia}`;
 }
@@ -479,8 +487,8 @@ function clearSamples() {
 
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);

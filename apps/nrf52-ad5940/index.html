@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v1.4</span></h1>
+        <h1>AD5940 Lab Console <span>v1.5</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -128,6 +128,13 @@
                 <label>SINC2 notch <span>optional</span>
                   <select id="pt3Notch"><option value="0" selected>Bypass (default)</option><option value="1">Enable SINC2 notch</option></select>
                 </label>
+                <label>RTIA calibration dft_num <span>points</span>
+                  <select id="pt3CalDft">
+                    <option value="256">256</option><option value="512">512</option>
+                    <option value="1024" selected>1024 (default)</option><option value="2048">2048</option>
+                    <option value="4096">4096</option>
+                  </select>
+                </label>
               </section>
             </details>
             <section class="pt3-setpoint-summary" aria-labelledby="pt3SetpointTitle">
@@ -142,7 +149,7 @@
             </section>
             <p id="pt3TimingHint" class="hint"></p>
             <p id="pt3CapabilityHint" class="hint capability-hint">PT3-capable controller firmware is checked after connection.</p>
-            <p class="hint">VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. DFT is intentionally not used here because it would replace the pulse trace needed to fit τ. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
+            <p class="hint">VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the B1 pulse trace remains a SINC2 time stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
           </div>
 
           <div class="control-actions">
@@ -218,7 +225,7 @@
             <li id="dfuStagePackage" class="dfu-step is-current"><span>1</span><div><strong>Select signed ZIP</strong><input id="dfuFile" type="file" accept=".zip,application/zip" disabled /><small id="dfuPackageState">No package selected.</small></div></li>
             <li id="dfuStageEntry" class="dfu-step"><span>2</span><div><strong>Enter DFU through NUS</strong><button id="enterDfuButton" class="button compact secondary" disabled>Enter DFU</button><small>Expected: app disconnects and bootloader advertises <code>DfuTarg</code>.</small></div></li>
             <li id="dfuStageTransfer" class="dfu-step"><span>3</span><div><strong>Select DfuTarg and transfer</strong><button id="transferDfuButton" class="button compact primary" disabled>Select DfuTarg &amp; transfer</button><small>The browser chooser requires an explicit selection; transfer starts only after a second confirmation.</small></div></li>
-            <li id="dfuStageVerify" class="dfu-step"><span>4</span><div><strong>Verify rebooted application</strong><button id="verifyAppButton" class="button compact ghost" disabled>Reconnect application to verify</button><small>Confirm V34 and <code>PT3_DSP</code> in the returned <code>@INFO</code> response.</small></div></li>
+            <li id="dfuStageVerify" class="dfu-step"><span>4</span><div><strong>Verify rebooted application</strong><button id="verifyAppButton" class="button compact ghost" disabled>Reconnect application to verify</button><small>Confirm <code>PT3_DSP</code>; V35 additionally returns <code>PT3_CAL_DFT</code> in <code>@INFO</code>.</small></div></li>
           </ol>
           <div class="progress-wrap" aria-live="polite">
             <div id="dfuProgressBar" class="progress-bar" role="progressbar" aria-label="Secure DFU CRC-verified transfer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="dfuProgress"></span></div>
@@ -231,6 +238,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=2176d523c758"></script>
+    <script type="module" src="app.js?v=5195462e83f1"></script>
   </body>
 </html>

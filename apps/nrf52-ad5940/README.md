@@ -18,7 +18,7 @@
 
 Expanded AMP control requires controller firmware **V26 or later**, which advertises `AMPX` in its `@INFO` response. The GUI leaves CV available but disables AMP apply/run on an older controller, avoiding a partial configuration silently reaching the device.
 
-PT3 DSP control requires controller firmware **V34 or later**, which advertises `PT3_DSP`. The PT3 panel sends guarded `VDS`, `VGS`, target output period, gate settling, SINC3 OSR, SINC2 OSR, and optional SINC2-notch values together. Firmware reports the resulting raw rate, B1 rate, and integer decimation in `RAWmHz`, `OUTmHz`, and `DEC`; the GUI stores these configuration values beside unchanged B1 data in CSV. The 10 kOhm HSTIA RTIA and PGA ×9 remain fixed because they are tied to the validated 200 ohm RCAL calibration and 5 uA range. Controller V30 or later reports a rejected RTIA calibration as `@ERR,PT3_CAL,LIB=<error>,SPI=<status>,RTIA=<ohm>`; the GUI preserves that raw line and explains that the requested DUT DAC setpoints were not enabled.
+PT3 time-domain DSP control requires controller firmware **V34 or later**, which advertises `PT3_DSP`. Controller **V35 or later** additionally advertises `PT3_CAL_DFT` and accepts an RTIA-calibration `dft_num` of 256, 512, 1024, 2048, or 4096 points. The PT3 panel sends guarded `VDS`, `VGS`, target output period, gate settling, SINC3 OSR, SINC2 OSR, optional SINC2-notch values, and—on V35—the calibration DFT length together as the eighth `CFG,PT3` field. Firmware reports the resulting raw rate, B1 rate, and integer decimation in `RAWmHz`, `OUTmHz`, and `DEC`; the GUI stores these configuration values beside unchanged B1 data in CSV. The 10 kOhm HSTIA RTIA and PGA ×9 remain fixed because they are tied to the validated 200 ohm RCAL calibration and 5 uA range. Controller V30 or later reports a rejected RTIA calibration as `@ERR,PT3_CAL,LIB=<error>,SPI=<status>,RTIA=<ohm>`; the GUI preserves that raw line and explains that the requested DUT DAC setpoints were not enabled.
 
 ## PT3 settings trace and fixture boundary
 
@@ -45,10 +45,13 @@ decimation; use the acknowledged `OUTmHz` rate when preparing an Edge Impulse
 dataset. The SINC2 notch can be enabled for comparison, but it changes the
 signal path and must be treated as a separate acquisition condition.
 
-DFT is deliberately absent from PT3. DFT produces a periodic frequency-bin
-result and would destroy the time-domain rise/decay waveform needed to extract
-tau. A periodic optical lock-in feature, if required later, will be a separate
-mode and frame contract rather than a checkbox that silently changes tau data.
+The PT3 B1 stream never enables the AD5940 DFT engine: a DFT measurement would
+produce a periodic frequency-bin result and destroy the rise/decay waveform
+needed to extract tau. V35 exposes DFT number only for the pre-RUN, internal
+HSTIA RTIA calibration. It changes calibration integration time and precision,
+not B1 sample filtering. A periodic optical lock-in feature, if required later,
+will be a separate mode and frame contract rather than a checkbox that silently
+changes tau data.
 
 ## Amperometry variables and guardrails
 
@@ -85,7 +88,7 @@ The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (
 
 ### Web UI workflow and progress
 
-The V1.4 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer V34/`PT3_DSP` reconnect check. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
+The V1.5 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
 
 The transfer bar reports the percentage of bytes whose CRC/offset receipt was confirmed by the bootloader (PRN=1). It keeps the last confirmed percentage if a transfer stops instead of resetting it to zero. A `100%` transfer still requires the final NUS reconnect and `@INFO` capability check before it is treated as a deployed application.
 
