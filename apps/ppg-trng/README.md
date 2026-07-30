@@ -120,10 +120,11 @@ entries by ADC source, while `Firmware ENCF key bits` selects only key bits
 received in firmware encryption records. The tab also accepts an uploaded TXT,
 CSV, DAT, or BIN bit file. Text/CSV files may contain a contiguous 0/1 stream,
 one bit per line, or a column named `bit`; binary files can be auto-detected,
-interpreted as one byte per bit, or interpreted as packed MSB-first bits. The
-uploaded stream is kept separate from the live buffer. The calculation is
-performed in `nist-worker.js` so the live serial reader and plot remain
-responsive.
+interpreted as one byte per bit, or interpreted as packed MSB-first bits.
+Multiple files can be selected at once. They are parsed in natural filename
+order (for example, chunk2 comes before chunk10), concatenated in browser
+memory, and kept separate from the live buffer. The calculation is performed
+in `nist-worker.js` so the live serial reader and plot remain responsive.
 
 The tab shows the available and actually tested bit counts and explains every
 parameter in the expandable help area. `Bits to test` selects the newest N

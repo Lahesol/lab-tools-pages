@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=a0bc429f249f" />
+    <link rel="stylesheet" href="styles.css?v=df6942c4a384" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v1.9</span></h1>
+        <h1>AD5940 Lab Console <span>v2.0</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -162,7 +162,7 @@
               <h2>PT3 — drain, gate &amp; timing</h2>
               <label>VDS <span>mV</span><input id="pt3Vds" type="number" min="100" max="1100" step="1" value="1000" required /></label>
               <label>VGS <span>mV</span><input id="pt3Vgs" type="number" min="-800" max="1000" step="1" value="0" required /></label>
-              <label>Target output period <span>ms</span><input id="pt3Period" type="number" min="10" max="1000" step="1" value="10" required /></label>
+              <label>Target output period <span>ms</span><input id="pt3Period" type="number" min="5" max="1000" step="1" value="10" required /></label>
               <label>Gate settling <span>ms</span><input id="pt3Settle" type="number" min="1000" max="120000" step="1000" value="90000" required /></label>
             </section>
             <details class="advanced-parameters" open>
@@ -201,8 +201,8 @@
             </section>
             <p id="pt3TimingHint" class="hint"></p>
             <p id="pt3CapabilityHint" class="hint capability-hint">PT3-capable controller firmware is checked after connection.</p>
-            <p class="hint">V36 writes VDS/VGS only after <code>@EVT,RUNNING,PT3</code>. It does not re-run RTIA calibration or the initial 90 s gate-settling interval; following B1 samples intentionally include the electrical step transient and retain its acknowledged setpoint metadata.</p>
-            <p class="hint">VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the B1 pulse trace remains a SINC2 time stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
+            <p class="hint">V36 writes VDS/VGS only after <code>@EVT,RUNNING,PT3</code>. It does not re-run RTIA calibration or the initial 90 s gate-settling interval; following raw samples intentionally include the electrical step transient and retain their acknowledged setpoint metadata.</p>
+            <p class="hint">V39 permits a 5 ms target only after the board advertises <code>PT3_200SPS</code>. It queues up to three contiguous samples in each <code>B2</code> notification, retries after BLE TX completion, and reports actual queue overflow. The GUI breaks the trace at every indexed gap; it never fills missing current values. VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the time trace remains a SINC2 stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
           </div>
 
           <div class="control-actions">
@@ -237,7 +237,7 @@
             </div>
           </div>
           <canvas id="plotCanvas" aria-label="Measurement plot"></canvas>
-          <p id="plotCaption" class="plot-caption">No device data. The plot displays the selected recent raw-data window only; it does not smooth, filter, or limit the collected data/CSV.</p>
+          <p id="plotCaption" class="plot-caption">No device data. The plot displays the selected recent raw-data window only; it does not smooth, fill indexed gaps, filter, or limit the collected data/CSV.</p>
         </section>
 
         <section id="pt3SettingsPanel" class="panel plot-panel pt3-settings-panel hidden">
@@ -292,6 +292,7 @@
         <section class="panel data-panel">
           <div class="panel-heading">
             <div><p class="eyebrow">RAW RECEIVED FRAMES</p><h2>Latest samples</h2></div>
+            <div id="transportState" class="metric transport-metric">Awaiting binary frames</div>
             <div id="sampleCount" class="metric">0 samples</div>
           </div>
           <div class="table-wrap">
@@ -342,6 +343,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=54a0606e8bf9"></script>
+    <script type="module" src="app.js?v=80bda1758be2"></script>
   </body>
 </html>

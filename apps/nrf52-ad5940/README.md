@@ -20,6 +20,36 @@
 
 Expanded AMP control requires controller firmware **V26 or later**, which advertises `AMPX` in its `@INFO` response. The GUI leaves CV available but disables AMP apply/run on an older controller, avoiding a partial configuration silently reaching the device.
 
+## V39 queued B2 transport and PT3 200 SPS
+
+Controller **V39 source** advertises `PT3_200SPS+NUS_B2_QUEUE`. It replaces
+the one-sample NUS submission path with a 512-sample transport queue and emits
+binary B2 batches: `0xB2`, original A1/B1/C1/D1/E1 source type, count 1--3,
+`uint32 LE` start index, then contiguous `float32 LE` calculated-current
+values. The largest B2 frame is 19 bytes, fitting the 20-byte minimum NUS
+payload. A queued value is retired only after NUS accepts its notification;
+backpressure waits for the BLE TX-complete event. Real queue overflow is
+reported in `STATUS?` as `OVF`, not replaced with a fabricated value.
+
+The GUI continues to decode legacy single-value frames from V38 and earlier.
+For V39 B2 it preserves every individual current/index, annotates known index
+gaps and run boundaries, breaks plot segments over those intervals, and adds
+transport fields to CSV. Browser receive timestamps are retained as receipt
+metadata only: use `sample_index / acknowledged pt3_output_rate_sps` as the
+PT3 time grid.
+
+V39 permits a 5 ms PT3 output request only after both capabilities are seen.
+With SINC3=5 and SINC2=800, this selects decimation 1 of the existing 200-SPS
+raw stream; it does not accelerate the AD5940 conversion clock. `STATUS?`
+returns `Q=<pending samples>`, `OVF=<actual queue overflows>`, and
+`BP=<backpressure retry events>`. An `OVF=0` raw capture is required before
+claiming lossless 200-SPS operation. See `docs/PT3_TRANSPORT_V39.md` for the
+on-air frame contract and physical validation procedure.
+
+V39 is source/build validated only. It is not a signed DFU package and is not
+added to `firmware/latest.json`; the catalogue remains V36 until hardware
+validation and a separately signed application-only artifact are complete.
+
 ## DPV and SWV paired-pulse boundary
 
 Controller **V37 source** advertises `DPV+SWV` and uses ADI's local

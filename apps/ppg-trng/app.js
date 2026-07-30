@@ -334,6 +334,7 @@ const state = {
   nistRunning: false,
   nistUploadedBits: new Uint8Array(0),
   nistUploadedFileName: "",
+  nistUploadedFileNames: [],
 };
 
 const encoder = new TextEncoder();
@@ -4054,32 +4055,54 @@ function updateNistFileStatus(message, isError = false) {
   els.nistFileStatus.classList.toggle("is-error", isError);
 }
 
-async function handleNistBitFile(file) {
-  if (!file) return;
+async function handleNistBitFiles(fileList) {
+  const files = [...(fileList || [])].sort((left, right) => left.name.localeCompare(right.name, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  }));
+  if (!files.length) return;
   try {
     const format = els.nistBitFormat?.value || "auto";
-    const bits = await parseNistBitFile(file, format);
+    updateNistFileStatus(`Loading ${files.length.toLocaleString()} bit files...`);
+    const chunks = [];
+    let totalBits = 0;
+    for (const file of files) {
+      const chunk = await parseNistBitFile(file, format);
+      chunks.push(chunk);
+      totalBits += chunk.length;
+    }
+    const bits = new Uint8Array(totalBits);
+    let writeOffset = 0;
+    chunks.forEach((chunk) => {
+      bits.set(chunk, writeOffset);
+      writeOffset += chunk.length;
+    });
     state.nistUploadedBits = bits;
-    state.nistUploadedFileName = file.name;
+    state.nistUploadedFileNames = files.map((file) => file.name);
+    state.nistUploadedFileName = files.length === 1
+      ? files[0].name
+      : `${files.length} files (${files[0].name} ... ${files[files.length - 1].name})`;
     if (els.nistBitSource) els.nistBitSource.value = "upload";
     if (els.nistRemoveFileButton) els.nistRemoveFileButton.disabled = false;
-    updateNistFileStatus(`${file.name} | ${bits.length.toLocaleString()} bits loaded`);
+    updateNistFileStatus(`${files.length.toLocaleString()} files | ${bits.length.toLocaleString()} bits loaded | natural filename order`);
     clearNistResults();
-    if (els.nistCaption) els.nistCaption.textContent = `${file.name} | ${bits.length.toLocaleString()} bits loaded | ready for NIST tests`;
+    if (els.nistCaption) els.nistCaption.textContent = `${files.length.toLocaleString()} uploaded files | ${bits.length.toLocaleString()} bits loaded | ready for NIST tests`;
     updateNistSourceStatus();
-    addLog("SYS", `Loaded ${bits.length} bits from ${file.name}`);
+    addLog("SYS", `Loaded ${bits.length} bits from ${files.length} NIST bit files`);
   } catch (error) {
     state.nistUploadedBits = new Uint8Array(0);
     state.nistUploadedFileName = "";
+    state.nistUploadedFileNames = [];
     if (els.nistRemoveFileButton) els.nistRemoveFileButton.disabled = true;
     updateNistFileStatus(error.message || "Failed to parse bit file", true);
-    addLog("ERR", `NIST bit file load failed: ${error.message || error}`, true);
+    addLog("ERR", `NIST bit-file load failed: ${error.message || error}`, true);
   }
 }
 
 function removeNistBitFile() {
   state.nistUploadedBits = new Uint8Array(0);
   state.nistUploadedFileName = "";
+  state.nistUploadedFileNames = [];
   if (els.nistBitFile) els.nistBitFile.value = "";
   if (els.nistRemoveFileButton) els.nistRemoveFileButton.disabled = true;
   if (els.nistBitSource?.value === "upload") els.nistBitSource.value = "current";
@@ -5222,10 +5245,10 @@ function bindEvents() {
   });
   els.nistBitLimit?.addEventListener("input", updateNistSourceStatus);
   els.nistBitFile?.addEventListener("change", () => {
-    handleNistBitFile(els.nistBitFile.files?.[0]);
+    handleNistBitFiles(els.nistBitFile.files);
   });
   els.nistBitFormat?.addEventListener("change", () => {
-    if (els.nistBitFile?.files?.[0]) handleNistBitFile(els.nistBitFile.files[0]);
+    if (els.nistBitFile?.files?.length) handleNistBitFiles(els.nistBitFile.files);
   });
   els.nistRemoveFileButton?.addEventListener("click", removeNistBitFile);
   els.nistTemplate?.addEventListener("change", () => {

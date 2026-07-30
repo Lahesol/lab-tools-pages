@@ -202,7 +202,7 @@ function refreshControlAvailability() {
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
   [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported || pt3Running; });
   elements.pt3CalDft.disabled = !connected || !state.pt3CalibrationDftSupported || pt3Running;
-  elements.pt3Period.min = state.pt3HighRateSupported ? "5" : "10";
+  elements.pt3Period.min = state.pt3HighRateSupported && state.nusB2QueueSupported ? "5" : "10";
   if (!connected) {
     elements.pt3CapabilityHint.textContent = "Connect to check PT3 firmware capability before applying phototransistor parameters.";
   } else if (state.pt3Supported && state.pt3HighRateSupported && state.nusB2QueueSupported) {
@@ -451,6 +451,7 @@ function handleTextLine(line) {
     log(state.dpvSupported ? "DPV paired-pulse capability detected." : "DPV capability not advertised by this firmware.", state.dpvSupported ? "INFO" : "WARN");
     log(state.swvSupported ? "SWV paired-pulse capability detected." : "SWV capability not advertised by this firmware.", state.swvSupported ? "INFO" : "WARN");
     log(state.pt3HighRateSupported && state.nusB2QueueSupported ? "PT3 200 SPS and queued B2 transport capability detected." : state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    updatePt3Preview();
     if (line.startsWith("@INFO,AD5940_CTRL")) maybeApplyQueuedDeviceName();
   }
   if (line === "@NAME,SAVING" || line === "@NAME,ERASING") {
@@ -502,19 +503,56 @@ function handleTextLine(line) {
   }
 }
 
+function receiveMeasurementSamples(samples) {
+  samples.forEach((rawSample) => {
+    const sample = annotateTransport(rawSample);
+    if (sample.mode === "DPV" || sample.mode === "SWV") addPulseRawSample(sample, false);
+    else addSample(sample, false);
+  });
+  refreshReceivedSamplesUi();
+}
+
 function handleNusNotification(event) {
   const bytes = new Uint8Array(event.target.value.buffer.slice(0));
-  if (bytes.length === 9 && (bytes[0] === 0xa1 || bytes[0] === 0xb1 || bytes[0] === 0xc1 || bytes[0] === 0xd1 || bytes[0] === 0xe1)) {
-    const view = new DataView(bytes.buffer);
-    const index = view.getUint32(1, true);
-    const currentUa = view.getFloat32(5, true);
-    const mode = bytes[0] === 0xa1 ? "AMP" : bytes[0] === 0xb1 ? "PT3" : bytes[0] === 0xc1 ? "CV" : bytes[0] === 0xd1 ? "DPV" : "SWV";
-    const sample = { mode, index, currentUa, receivedAt: new Date().toISOString(), pt3: mode === "PT3" && state.pt3Applied ? { ...state.pt3Applied } : null };
-    if (mode === "DPV" || mode === "SWV") addPulseRawSample(sample);
-    else addSample(sample);
-  } else {
-    appendText(bytes);
+  const sourceMode = modeForSourceFrame(bytes[0]);
+  if (bytes.length === 9 && sourceMode) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    state.legacyNotifications += 1;
+    receiveMeasurementSamples([{
+      mode: sourceMode,
+      index: view.getUint32(1, true),
+      currentUa: view.getFloat32(5, true),
+      receivedAt: new Date().toISOString(),
+      pt3: sourceMode === "PT3" && state.pt3Applied ? { ...state.pt3Applied } : null,
+      transport: { format: "legacy", sourceFrameType: bytes[0], batchCount: 1, batchOffset: 0 },
+    }]);
+    return;
   }
+  if (bytes[0] === 0xb2) {
+    const sourceType = bytes[1];
+    const batchCount = bytes[2];
+    const mode = modeForSourceFrame(sourceType);
+    const expectedLength = 7 + (batchCount * 4);
+    if (!mode || batchCount < 1 || batchCount > 3 || bytes.length !== expectedLength) {
+      log(`Ignored malformed B2 measurement frame (type 0x${sourceType?.toString(16) ?? "?"}, count ${batchCount}, length ${bytes.length}).`, "WARN");
+      return;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const startIndex = view.getUint32(3, true);
+    const receivedAt = new Date().toISOString();
+    const samples = Array.from({ length: batchCount }, (_, batchOffset) => ({
+      mode,
+      index: (startIndex + batchOffset) >>> 0,
+      currentUa: view.getFloat32(7 + (batchOffset * 4), true),
+      receivedAt,
+      pt3: mode === "PT3" && state.pt3Applied ? { ...state.pt3Applied } : null,
+      transport: { format: "B2", sourceFrameType: sourceType, batchCount, batchOffset },
+    }));
+    state.b2Notifications += 1;
+    receiveMeasurementSamples(samples);
+    return;
+  }
+  appendText(bytes);
 }
 
 async function connectInstrument() {
@@ -700,11 +738,14 @@ function formatMv(value) {
 }
 
 function calculatePt3Timing(config) {
-  const rawSps = PT3.adcClockHz / (config.sinc3 * config.sinc2);
-  const requestedOutputSps = 1000 / config.period;
-  const outputDecimation = Math.round(rawSps / requestedOutputSps);
-  if (!Number.isFinite(rawSps) || !Number.isFinite(outputDecimation) || outputDecimation < 1) throw new Error("PT3 DSP timing is invalid.");
-  const outputSps = rawSps / outputDecimation;
+  const rawRateMillihz = Math.floor((PT3.adcClockHz * 1000) / (config.sinc3 * config.sinc2));
+  const requestedOutputMillihz = Math.floor(1000000 / config.period);
+  const outputDecimation = Math.floor((rawRateMillihz + Math.floor(requestedOutputMillihz / 2)) / requestedOutputMillihz);
+  if (!Number.isFinite(rawRateMillihz) || !Number.isFinite(outputDecimation) || outputDecimation < 1) throw new Error("PT3 DSP timing is invalid.");
+  const outputRateMillihz = Math.floor(rawRateMillihz / outputDecimation);
+  const rawSps = rawRateMillihz / 1000;
+  const requestedOutputSps = requestedOutputMillihz / 1000;
+  const outputSps = outputRateMillihz / 1000;
   return { rawSps, requestedOutputSps, outputDecimation, outputSps, actualOutputPeriodMs: 1000 / outputSps };
 }
 
@@ -738,7 +779,8 @@ function updatePt3Preview() {
     elements.pt3CeSet.textContent = `${formatMv(setpoints.ceMv)}; VDS ${setpoints.actualVdsMv.toFixed(1)} mV`;
     elements.pt3SeSet.textContent = `${formatMv(setpoints.seMv)} fixed`;
     const notch = setpoints.notch ? "SINC2 notch enabled" : "SINC2 notch bypassed";
-    elements.pt3TimingHint.textContent = `Raw time stream ≈ ${setpoints.rawSps.toFixed(2)} samples/s; B1 output ≈ ${setpoints.outputSps.toFixed(2)} samples/s (every ${setpoints.outputDecimation} raw conversion; requested ${setpoints.period} ms, actual ≈ ${setpoints.actualOutputPeriodMs.toFixed(2)} ms). ${notch}. RTIA calibration uses ${setpoints.calDft}-point DFT only; it does not filter B1 samples. Default 90 s settling applies after RUN.`;
+    const transport = state.pt3HighRateSupported && state.nusB2QueueSupported ? "V39 sends up to three contiguous raw samples in each B2 notification and exposes actual queue overflow." : "Legacy firmware sends one raw sample per notification and is limited to 100 SPS.";
+    elements.pt3TimingHint.textContent = `Raw time stream ≈ ${setpoints.rawSps.toFixed(2)} samples/s; output ≈ ${setpoints.outputSps.toFixed(2)} samples/s (every ${setpoints.outputDecimation} raw conversion; requested ${setpoints.period} ms, actual ≈ ${setpoints.actualOutputPeriodMs.toFixed(2)} ms). ${notch}. ${transport} RTIA calibration uses ${setpoints.calDft}-point DFT only; it does not filter time-stream samples. Default 90 s settling applies after RUN.`;
   } catch {
     elements.pt3VbiasSet.textContent = "Invalid PT3 input";
     elements.pt3VzeroSet.textContent = "Invalid PT3 input";
@@ -755,8 +797,11 @@ function readPt3Config() {
   const supportedSinc3 = [2, 4, 5];
   const supportedSinc2 = [533, 800, 1067, 1333];
   const supportedCalibrationDft = [256, 512, 1024, 2048, 4096];
+  const highRateTransportReady = state.pt3HighRateSupported && state.nusB2QueueSupported;
+  const maxOutputSps = highRateTransportReady ? PT3.maxRequestedOutputSps : PT3.legacyMaxRequestedOutputSps;
+  const minPeriodMs = highRateTransportReady ? 5 : 10;
   const timing = calculatePt3Timing(config);
-  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < 10 || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > PT3.maxRequestedOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error("PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / 100 target-B1-SPS range.");
+  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < minPeriodMs || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > maxOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error(`PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / ${maxOutputSps} target-output-SPS range. 200 SPS requires V39 PT3_200SPS.`);
   return config;
 }
 
@@ -860,14 +905,20 @@ async function runAfeProbe() {
   } catch (error) { log(error.message, "ERROR"); }
 }
 
-function addSample(sample) {
-  state.samples.push(sample);
+function refreshReceivedSamplesUi() {
   elements.sampleCount.textContent = `${state.samples.length} samples`;
   elements.downloadCsv.disabled = state.samples.length === 0;
-  renderRows(); schedulePlot();
+  renderRows();
+  updateCaptureSummary();
+  schedulePlot();
 }
 
-function addPulseRawSample(sample) {
+function addSample(sample, refresh = true) {
+  state.samples.push(sample);
+  if (refresh) refreshReceivedSamplesUi();
+}
+
+function addPulseRawSample(sample, refresh = true) {
   const phase = sample.index % 2 === 0 ? "I1" : "I2";
   const applied = state.pulseApplied[sample.mode];
   const pulse = {
@@ -895,7 +946,7 @@ function addPulseRawSample(sample) {
     }
     state.pulsePairs[sample.mode] = null;
   }
-  addSample({ ...sample, pulse });
+  addSample({ ...sample, pulse }, refresh);
 }
 
 function schedulePlot() {
@@ -909,12 +960,18 @@ function renderRows() {
   elements.sampleRows.innerHTML = recent.length ? recent.map((s) => {
     const pt3 = s.pt3 ? `CE ${formatMv(s.pt3.ceMv)}, gate ${formatMv(s.pt3.gateMv)}; S3/S2 ${s.pt3.sinc3}/${s.pt3.sinc2}` : "—";
     const pulse = s.pulse ? `pair ${s.pulse.pairIndex}, ${s.pulse.phase}${Number.isFinite(s.pulse.differenceUa) ? `; I₂−I₁ ${s.pulse.differenceUa}` : s.pulse.pairGap ? "; pair gap" : ""}` : pt3;
-    return `<tr><td>${s.mode}</td><td>${s.index}</td><td>${s.currentUa}</td><td>${pulse}</td><td>${new Date(s.receivedAt).toLocaleTimeString()}</td></tr>`;
+    const transport = s.transport?.runBoundary ? "; new run" : s.transport?.gapBefore ? `; gap +${s.transport.gapBefore}` : "";
+    return `<tr><td>${s.mode}</td><td>${s.index}</td><td>${s.currentUa}</td><td>${pulse}${transport}</td><td>${new Date(s.receivedAt).toLocaleTimeString()}</td></tr>`;
   }).join("") : '<tr><td colspan="5" class="empty">No binary measurement frames received.</td></tr>';
 }
 
 function clearSamples() {
-  state.samples = []; state.pulsePairs = { DPV: null, SWV: null }; state.pulseDerived = []; elements.sampleCount.textContent = "0 samples"; elements.downloadCsv.disabled = true; renderRows(); drawPlot(); log("Displayed and exportable received sample list cleared.");
+  state.samples = []; state.pulsePairs = { DPV: null, SWV: null }; state.pulseDerived = [];
+  state.lastIndexByMode = { AMP: null, CV: null, DPV: null, SWV: null, PT3: null };
+  state.pendingRunBoundaryByMode = { AMP: false, CV: false, DPV: false, SWV: false, PT3: false };
+  state.missingSamples = 0; state.b2Notifications = 0; state.legacyNotifications = 0;
+  state.firmwareQueueDepth = null; state.firmwareOverflowSamples = null; state.firmwareBackpressureEvents = null;
+  refreshReceivedSamplesUi(); drawPlot(); log("Displayed and exportable received sample list cleared; the board's own STATUS counters were not altered.");
 }
 
 function updatePlotWindow() {
@@ -926,8 +983,8 @@ function updatePlotWindow() {
 
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pulse_pair_index,pulse_raw_phase,pulse_i2_minus_i1_uA,pulse_pair_gap,pulse_adi_convention,pulse_adi_vre_minus_vse_start_mV,pulse_adi_vre_minus_vse_end_mV,pulse_standard_convention,pulse_standard_ewe_minus_re_start_mV,pulse_standard_ewe_minus_re_end_mV,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pulse ? s.pulse.pairIndex : ""},${s.pulse ? s.pulse.phase : ""},${s.pulse && Number.isFinite(s.pulse.differenceUa) ? s.pulse.differenceUa : ""},${s.pulse?.pairGap ? "TRUE" : ""},${s.pulse?.potential ? "VRE_MINUS_VSE_EQUALS_VBIAS_MINUS_VZERO" : ""},${s.pulse?.potential ? s.pulse.potential.adiStartMv : ""},${s.pulse?.potential ? s.pulse.potential.adiEndMv : ""},${s.pulse?.potential ? "EWE_MINUS_RE_EQUALS_NEGATIVE_OF_VRE_MINUS_VSE" : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReStartMv : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReEndMv : ""},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pulse_pair_index,pulse_raw_phase,pulse_i2_minus_i1_uA,pulse_pair_gap,pulse_adi_convention,pulse_adi_vre_minus_vse_start_mV,pulse_adi_vre_minus_vse_end_mV,pulse_standard_convention,pulse_standard_ewe_minus_re_start_mV,pulse_standard_ewe_minus_re_end_mV,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_output_rate_sps,pt3_actual_output_period_ms,transport_format,transport_source_frame_hex,transport_batch_count,transport_batch_offset,transport_gap_before,transport_run_boundary";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pulse ? s.pulse.pairIndex : ""},${s.pulse ? s.pulse.phase : ""},${s.pulse && Number.isFinite(s.pulse.differenceUa) ? s.pulse.differenceUa : ""},${s.pulse?.pairGap ? "TRUE" : ""},${s.pulse?.potential ? "VRE_MINUS_VSE_EQUALS_VBIAS_MINUS_VZERO" : ""},${s.pulse?.potential ? s.pulse.potential.adiStartMv : ""},${s.pulse?.potential ? s.pulse.potential.adiEndMv : ""},${s.pulse?.potential ? "EWE_MINUS_RE_EQUALS_NEGATIVE_OF_VRE_MINUS_VSE" : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReStartMv : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReEndMv : ""},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""},${s.transport?.format ?? ""},${s.transport ? `0x${s.transport.sourceFrameType.toString(16).padStart(2, "0")}` : ""},${s.transport?.batchCount ?? ""},${s.transport?.batchOffset ?? ""},${s.transport?.gapBefore ?? ""},${s.transport?.runBoundary ? "TRUE" : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);
@@ -952,7 +1009,11 @@ function drawPlot() {
   const px = (x) => margin.left + (x - minX) / (maxX - minX) * chartW; const py = (y) => margin.top + (maxY - y) / (maxY - minY) * chartH;
   ctx.textAlign = "right"; for (let i = 0; i <= 5; i += 1) { const value = maxY - (maxY - minY) * i / 5; ctx.fillText(value.toPrecision(4), margin.left - 7, margin.top + chartH * i / 5 + 4); }
   ctx.textAlign = "center"; for (let i = 0; i <= 6; i += 1) { const value = minX + (maxX - minX) * i / 6; ctx.fillText(Math.round(value), margin.left + chartW * i / 6, height - 12); }
-  ctx.strokeStyle = state.mode === "PT3" ? "#63d67d" : state.mode === "SWV" ? "#5d8dff" : "#3fd0e6"; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => { if (index) ctx.lineTo(px(p.index), py(p.currentUa)); else ctx.moveTo(px(p.index), py(p.currentUa)); }); ctx.stroke();
+  ctx.strokeStyle = state.mode === "PT3" ? "#63d67d" : state.mode === "SWV" ? "#5d8dff" : "#3fd0e6"; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => {
+    const previous = points[index - 1];
+    const contiguous = index && p.index === previous.index + 1 && !p.transport?.gapBefore && !p.transport?.runBoundary;
+    if (contiguous) ctx.lineTo(px(p.index), py(p.currentUa)); else ctx.moveTo(px(p.index), py(p.currentUa));
+  }); ctx.stroke();
   ctx.fillStyle = "#c9dce9"; ctx.textAlign = "left"; ctx.fillText(pulseMode ? "I₂ − I₁ (µA)" : "Current (µA)", margin.left, 12); ctx.textAlign = "right"; ctx.fillText(pulseMode ? "staircase pair index" : "sample index", width - margin.right, height - 12);
   if (state.mode === "PT3") drawPt3SettingsPlot();
 }
