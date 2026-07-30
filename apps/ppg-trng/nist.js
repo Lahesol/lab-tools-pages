@@ -6,6 +6,18 @@
   "use strict";
 
   const ALPHA = 0.01;
+  const PROFILE_TARGETS = {
+    "500k": 500000,
+    "nist1m": 1000000,
+  };
+
+  function normalizeProfile(value) {
+    return value === "nist1m" ? "nist1m" : "500k";
+  }
+
+  function profileTarget(profile) {
+    return PROFILE_TARGETS[normalizeProfile(profile)];
+  }
 
   function clampP(value) {
     if (!Number.isFinite(value)) return null;
@@ -157,10 +169,20 @@
     return result("Frequency (Monobit)", n, erfc(Math.abs(sum) / Math.sqrt(2 * n)), `S=${sum}`, "p = erfc(|S| / sqrt(2n))");
   }
 
-  function blockFrequencyTest(bits, blockSize = 128) {
+  function blockFrequencyTest(bits, blockSize = 128, profile = "500k") {
     const n = bits.length;
     const blocks = Math.floor(n / blockSize);
     if (!blocks) return unavailable("Block Frequency", n, `requires n >= ${blockSize}`);
+    if (normalizeProfile(profile) === "500k") {
+      const minimumBlockSize = Math.max(20, Math.floor(n * 0.01) + 1);
+      if (blockSize < minimumBlockSize || blocks >= 100) {
+        return unavailable(
+          "Block Frequency",
+          n,
+          `500k profile requires M >= ${minimumBlockSize} and blocks < 100; received M=${blockSize}, blocks=${blocks}`,
+        );
+      }
+    }
     let chi = 0;
     for (let block = 0; block < blocks; block += 1) {
       let ones = 0;
@@ -213,7 +235,7 @@
     const { ones } = bitCounts(bits);
     const pi = ones / n;
     if (Math.abs(pi - 0.5) >= 2 / Math.sqrt(n)) {
-      return result("Runs", n, 0, `pi=${pi.toFixed(6)}`, "precondition |pi - 0.5| >= 2/sqrt(n)");
+      return unavailable("Runs", n, `not applicable: frequency precondition |pi - 0.5| < 2/sqrt(n) failed; pi=${pi.toFixed(6)}`);
     }
     let runs = 1;
     for (let index = 1; index < n; index += 1) {
@@ -284,7 +306,7 @@
   function matrixRankTest(bits) {
     const matrixBits = 32 * 32;
     const matrices = Math.floor(bits.length / matrixBits);
-    if (!matrices) return unavailable("Binary Matrix Rank", bits.length, "requires at least 1024 bits");
+    if (bits.length < 38912) return unavailable("Binary Matrix Rank", bits.length, "requires n >= 38912 for 32x32 matrices");
     let full = 0;
     let minusOne = 0;
     for (let matrix = 0; matrix < matrices; matrix += 1) {
@@ -311,20 +333,20 @@
     return result("Binary Matrix Rank", bits.length, Math.exp(-chi / 2), `chi²=${chi.toFixed(3)}`, `32x32, matrices=${matrices}, ranks=${full}/${minusOne}/${observed[2]}`);
   }
 
-  function fft(real) {
+  function fftComplex(real, imag, inverse = false) {
     const n = real.length;
-    const imag = new Float64Array(n);
     for (let i = 1, j = 0; i < n; i += 1) {
       let bit = n >> 1;
       for (; j & bit; bit >>= 1) j ^= bit;
       j ^= bit;
       if (i < j) {
         [real[i], real[j]] = [real[j], real[i]];
+        [imag[i], imag[j]] = [imag[j], imag[i]];
       }
     }
     for (let length = 2; length <= n; length <<= 1) {
       const half = length >> 1;
-      const angle = -2 * Math.PI / length;
+      const angle = (inverse ? 2 : -2) * Math.PI / length;
       const wReal = Math.cos(angle);
       const wImag = Math.sin(angle);
       for (let start = 0; start < n; start += length) {
@@ -347,25 +369,85 @@
         }
       }
     }
-    return imag;
+    if (inverse) {
+      for (let index = 0; index < n; index += 1) {
+        real[index] /= n;
+        imag[index] /= n;
+      }
+    }
   }
 
-  function dftTest(bits) {
-    const n = bits.length;
-    if (n < 1024) return unavailable("Discrete Fourier Transform", n, "requires n >= 1024");
-    const used = 2 ** Math.floor(Math.log2(n));
-    const real = new Float64Array(used);
-    for (let index = 0; index < used; index += 1) real[index] = bits[index] ? 1 : -1;
-    const imag = fft(real);
-    const threshold = Math.sqrt(Math.log(1 / 0.05) * used);
-    let below = 0;
-    for (let index = 0; index < used / 2; index += 1) {
-      if (Math.hypot(real[index], imag[index]) < threshold) below += 1;
+  function nextPowerOfTwo(value) {
+    let result = 1;
+    while (result < value) result <<= 1;
+    return result;
+  }
+
+  // Bluestein's algorithm keeps the DFT length equal to n even when n is not a power of two.
+  function dftValues(values) {
+    const n = values.length;
+    const size = nextPowerOfTwo(2 * n - 1);
+    const aReal = new Float64Array(size);
+    const aImag = new Float64Array(size);
+    const bReal = new Float64Array(size);
+    const bImag = new Float64Array(size);
+    const phase = (index) => {
+      const reduced = (index * index) % (2 * n);
+      return Math.PI * reduced / n;
+    };
+
+    for (let index = 0; index < n; index += 1) {
+      const angle = phase(index);
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const value = values[index];
+      aReal[index] = value * cosine;
+      aImag[index] = -value * sine;
+      bReal[index] = cosine;
+      bImag[index] = sine;
+      if (index > 0) {
+        bReal[size - index] = cosine;
+        bImag[size - index] = sine;
+      }
     }
-    const expected = 0.95 * used / 2;
-    const denominator = Math.sqrt(used * 0.95 * 0.05 / 4);
+
+    fftComplex(aReal, aImag);
+    fftComplex(bReal, bImag);
+    for (let index = 0; index < size; index += 1) {
+      const real = aReal[index] * bReal[index] - aImag[index] * bImag[index];
+      const imag = aReal[index] * bImag[index] + aImag[index] * bReal[index];
+      aReal[index] = real;
+      aImag[index] = imag;
+    }
+    fftComplex(aReal, aImag, true);
+
+    const outputReal = new Float64Array(n);
+    const outputImag = new Float64Array(n);
+    for (let index = 0; index < n; index += 1) {
+      const angle = phase(index);
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      outputReal[index] = aReal[index] * cosine + aImag[index] * sine;
+      outputImag[index] = aImag[index] * cosine - aReal[index] * sine;
+    }
+    return { real: outputReal, imag: outputImag };
+  }
+
+  function dftTest(bits, profile = "500k") {
+    const n = bits.length;
+    const minimum = profileTarget(profile);
+    if (n < minimum) return unavailable("Discrete Fourier Transform", n, `${normalizeProfile(profile)} profile requires n >= ${minimum}`);
+    const values = Float64Array.from(bits, (bit) => (bit ? 1 : -1));
+    const spectrum = dftValues(values);
+    const threshold = Math.sqrt(Math.log(1 / 0.05) * n);
+    let below = 0;
+    for (let index = 0; index < n / 2; index += 1) {
+      if (Math.hypot(spectrum.real[index], spectrum.imag[index]) < threshold) below += 1;
+    }
+    const expected = 0.95 * n / 2;
+    const denominator = Math.sqrt(n * 0.95 * 0.05 / 4);
     const p = erfc(Math.abs(below - expected) / (Math.SQRT2 * denominator));
-    return result("Discrete Fourier Transform", n, p, `N1=${below}`, `FFT prefix=${used}, threshold=${threshold.toFixed(2)}`);
+    return result("Discrete Fourier Transform", n, p, `N1=${below}`, `DFT n=${n}, threshold=${threshold.toFixed(2)}`);
   }
 
   function matchesAt(bits, start, template) {
@@ -404,8 +486,10 @@
     return result("Non-overlapping Template", n, gammaQ(blocks / 2, chi / 2), `chi²=${chi.toFixed(3)}`, `m=${m}, B=${template}, M=${blockSize}, N=${blocks}, counts=${counts.join("/")}`);
   }
 
-  function overlappingTemplateTest(bits, templateLength = 9) {
+  function overlappingTemplateTest(bits, templateLength = 9, profile = "500k") {
     const n = bits.length;
+    const minimum = profileTarget(profile);
+    if (n < minimum) return unavailable("Overlapping Template", n, `${normalizeProfile(profile)} profile requires n >= ${minimum}`);
     const blockSize = 1032;
     const blocks = Math.floor(n / blockSize);
     if (!blocks) return unavailable("Overlapping Template", n, `requires n >= ${blockSize}`);
@@ -480,7 +564,8 @@
 
   function approximateEntropyTest(bits, m = 10) {
     const n = bits.length;
-    if (n < 2 ** (m + 2)) return unavailable("Approximate Entropy", n, `requires n >= ${2 ** (m + 2)} for m=${m}`);
+    const logN = Math.floor(Math.log2(n));
+    if (!(m < logN - 5)) return unavailable("Approximate Entropy", n, `requires m < floor(log2(n)) - 5; received m=${m}, n=${n}`);
     const phi = (length) => {
       const counts = new Int32Array(2 ** length);
       let pattern = 0;
@@ -503,15 +588,17 @@
     return result("Approximate Entropy", n, gammaQ(2 ** (m - 1), chi / 2), `ApEn=${apEn.toFixed(6)}`, `m=${m}`);
   }
 
-  function buildExcursions(bits) {
-    const states = [-4, -3, -2, -1, 1, 2, 3, 4];
+  function buildExcursions(bits, maximumState = 4) {
+    const states = [];
+    for (let state = -maximumState; state <= maximumState; state += 1) {
+      if (state !== 0) states.push(state);
+    }
     const indexByState = new Map(states.map((state, index) => [state, index]));
     const histograms = states.map(() => new Int32Array(6));
     const totalVisits = new Int32Array(states.length);
     const currentVisits = new Int32Array(states.length);
     let sum = 0;
     let cycles = 0;
-    let hasCycle = false;
     for (let index = 0; index < bits.length; index += 1) {
       sum += bits[index] ? 1 : -1;
       const stateIndex = indexByState.get(sum);
@@ -520,22 +607,21 @@
         totalVisits[stateIndex] += 1;
       }
       if (sum === 0) {
-        if (hasCycle) {
-          for (let stateIndex = 0; stateIndex < states.length; stateIndex += 1) {
-            histograms[stateIndex][Math.min(5, currentVisits[stateIndex])] += 1;
-          }
+        for (let stateIndex = 0; stateIndex < states.length; stateIndex += 1) {
+          histograms[stateIndex][Math.min(5, currentVisits[stateIndex])] += 1;
         }
         cycles += 1;
-        hasCycle = true;
         currentVisits.fill(0);
       }
     }
     return { states, histograms, totalVisits, cycles };
   }
 
-  function randomExcursionsTest(bits) {
+  function randomExcursionsTest(bits, profile = "500k") {
     const n = bits.length;
-    const excursion = buildExcursions(bits);
+    const minimum = profileTarget(profile);
+    if (n < minimum) return family("Random Excursions", n, [], `${normalizeProfile(profile)} profile requires n >= ${minimum}`);
+    const excursion = buildExcursions(bits, 4);
     const { states, histograms, cycles } = excursion;
     if (cycles < 500) return family("Random Excursions", n, states.map((state) => unavailable(String(state), n, `cycles J=${cycles}; requires J >= 500`)), `cycles J=${cycles}`);
     const children = states.map((state, stateIndex) => {
@@ -555,9 +641,11 @@
     return family("Random Excursions", n, children, `cycles J=${cycles}, states=${states.join(",")}`);
   }
 
-  function randomExcursionsVariantTest(bits) {
+  function randomExcursionsVariantTest(bits, profile = "500k") {
     const n = bits.length;
-    const excursion = buildExcursions(bits);
+    const minimum = profileTarget(profile);
+    if (n < minimum) return family("Random Excursions Variant", n, [], `${normalizeProfile(profile)} profile requires n >= ${minimum}`);
+    const excursion = buildExcursions(bits, 9);
     const { states, totalVisits, cycles } = excursion;
     if (cycles < 500) return family("Random Excursions Variant", n, states.map((state) => unavailable(String(state), n, `cycles J=${cycles}; requires J >= 500`)), `cycles J=${cycles}`);
     const children = states.map((state, stateIndex) => {
@@ -585,7 +673,8 @@
 
   function serialTest(bits, m = 10) {
     const n = bits.length;
-    if (n < 2 ** (m + 2)) return family("Serial", n, [unavailable("Delta1", n, `requires n >= ${2 ** (m + 2)} for m=${m}`)]);
+    const logN = Math.floor(Math.log2(n));
+    if (!(m < logN - 2)) return family("Serial", n, [unavailable("Delta1", n, `requires m < floor(log2(n)) - 2; received m=${m}, n=${n}`)]);
     const psiM = circularPsi(bits, m);
     const psiM1 = circularPsi(bits, m - 1);
     const psiM2 = circularPsi(bits, m - 2);
@@ -596,10 +685,13 @@
     return family("Serial", n, [first, second], `m=${m}, minimum of Delta1/Delta2`);
   }
 
-  function linearComplexity(bits, blockSize = 500) {
+  function linearComplexity(bits, blockSize = 500, profile = "500k") {
     const n = bits.length;
+    const minimum = profileTarget(profile);
     const blocks = Math.floor(n / blockSize);
-    if (!blocks) return unavailable("Linear Complexity", n, `requires n >= ${blockSize}`);
+    if (n < minimum) return unavailable("Linear Complexity", n, `${normalizeProfile(profile)} profile requires n >= ${minimum}`);
+    if (blockSize < 500 || blockSize > 5000) return unavailable("Linear Complexity", n, "requires 500 <= M <= 5000");
+    if (blocks < 200) return unavailable("Linear Complexity", n, `requires at least 200 blocks; received ${blocks}`);
     const probabilities = [0.010417, 0.03125, 0.125, 0.5, 0.25, 0.0625, 0.020833];
     const frequencies = new Array(7).fill(0);
     for (let block = 0; block < blocks; block += 1) {
@@ -650,30 +742,34 @@
 
   function runAll(value, options = {}) {
     const bits = normalizeBits(value);
-    const blockSize = Math.max(8, Number.parseInt(options.blockSize, 10) || 128);
-    const template = /^[01]{2,21}$/.test(options.template || "") ? options.template : "000000001";
+    const profile = normalizeProfile(options.profile);
+    const defaultBlockSize = profile === "500k" ? 8192 : 128;
+    const blockSize = Math.max(20, Number.parseInt(options.blockSize, 10) || defaultBlockSize);
+    const template = /^[01]{2,10}$/.test(options.template || "") ? options.template : "000000001";
     const approximateEntropyM = Math.max(2, Math.min(15, Number.parseInt(options.approximateEntropyM, 10) || 10));
-    const serialM = Math.max(3, Math.min(15, Number.parseInt(options.serialM, 10) || 10));
-    const linearBlockSize = Math.max(7, Number.parseInt(options.linearBlockSize, 10) || 500);
+    const serialM = Math.max(3, Math.min(16, Number.parseInt(options.serialM, 10) || (profile === "nist1m" ? 16 : 10)));
+    const linearBlockSize = Math.max(500, Math.min(5000, Number.parseInt(options.linearBlockSize, 10) || 500));
     const tests = [
       frequencyTest(bits),
-      blockFrequencyTest(bits, blockSize),
+      blockFrequencyTest(bits, blockSize, profile),
       cumulativeSumsTest(bits),
       runsTest(bits),
       longestRunOfOnesTest(bits),
       matrixRankTest(bits),
-      dftTest(bits),
+      dftTest(bits, profile),
       nonOverlappingTemplateTest(bits, template),
-      overlappingTemplateTest(bits, 9),
+      overlappingTemplateTest(bits, 9, profile),
       universalTest(bits),
       approximateEntropyTest(bits, approximateEntropyM),
-      randomExcursionsTest(bits),
-      randomExcursionsVariantTest(bits),
+      randomExcursionsTest(bits, profile),
+      randomExcursionsVariantTest(bits, profile),
       serialTest(bits, serialM),
-      linearComplexity(bits, linearBlockSize),
+      linearComplexity(bits, linearBlockSize, profile),
     ];
     return {
       alpha: ALPHA,
+      profile,
+      profileTarget: profileTarget(profile),
       n: bits.length,
       tests,
       testFamilyCount: tests.length,

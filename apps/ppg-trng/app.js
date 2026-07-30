@@ -145,6 +145,7 @@ const els = {
   nistView: document.querySelector("#nistView"),
   nistCaption: document.querySelector("#nistCaption"),
   nistHelp: document.querySelector("#nistHelp"),
+  nistProfile: document.querySelector("#nistProfile"),
   nistBitSource: document.querySelector("#nistBitSource"),
   nistBitLimit: document.querySelector("#nistBitLimit"),
   nistBlockSize: document.querySelector("#nistBlockSize"),
@@ -4148,7 +4149,7 @@ function getNistSourceDescription(source, entries) {
 function updateNistSourceStatus() {
   const source = els.nistBitSource?.value || "current";
   const entries = getNistBitEntries();
-  const requested = clampInteger(els.nistBitLimit?.value, 100, 1000000, 100000);
+  const requested = clampInteger(els.nistBitLimit?.value, 100, 1000000, 500000);
   const testCount = Math.min(entries.length, requested);
   const sourceLabel = source === "current" ? "Current extracted bits" : getNistSourceLabel();
 
@@ -4168,13 +4169,28 @@ function getNistBitValues() {
 }
 
 function getNistOptions() {
+  const profile = els.nistProfile?.value === "nist1m" ? "nist1m" : "500k";
   return {
-    blockSize: clampInteger(els.nistBlockSize?.value, 8, 10000, 128),
-    template: String(els.nistTemplate?.value || "000000001").replace(/[^01]/g, "").slice(0, 21) || "000000001",
+    profile,
+    blockSize: clampInteger(els.nistBlockSize?.value, 20, 50000, profile === "500k" ? 8192 : 128),
+    template: String(els.nistTemplate?.value || "000000001").replace(/[^01]/g, "").slice(0, 10) || "000000001",
     approximateEntropyM: clampInteger(els.nistApproxM?.value, 2, 15, 10),
-    serialM: clampInteger(els.nistSerialM?.value, 3, 15, 10),
-    linearBlockSize: clampInteger(els.nistLinearM?.value, 7, 5000, 500),
+    serialM: clampInteger(els.nistSerialM?.value, 3, 16, profile === "nist1m" ? 16 : 10),
+    linearBlockSize: clampInteger(els.nistLinearM?.value, 500, 5000, 500),
   };
+}
+
+function applyNistProfileDefaults() {
+  const profile = els.nistProfile?.value === "nist1m" ? "nist1m" : "500k";
+  const defaults = profile === "nist1m"
+    ? { bits: 1000000, block: 128, approx: 10, serial: 16, linear: 500 }
+    : { bits: 500000, block: 8192, approx: 10, serial: 10, linear: 500 };
+  if (els.nistBitLimit) els.nistBitLimit.value = String(defaults.bits);
+  if (els.nistBlockSize) els.nistBlockSize.value = String(defaults.block);
+  if (els.nistApproxM) els.nistApproxM.value = String(defaults.approx);
+  if (els.nistSerialM) els.nistSerialM.value = String(defaults.serial);
+  if (els.nistLinearM) els.nistLinearM.value = String(defaults.linear);
+  updateNistSourceStatus();
 }
 
 function formatNistPValue(value) {
@@ -4243,7 +4259,8 @@ function finishNistRun(result, elapsedMs) {
   updateNistSummary(result, elapsedMs);
   renderNistResults(state.nistResults);
   if (els.nistCaption) {
-    els.nistCaption.textContent = `${getNistSourceLabel()} | ${result?.n || 0} bits | ${result?.availableCount || 0}/${result?.testFamilyCount || 15} test families available | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
+    const profileLabel = result?.profile === "nist1m" ? "NIST STS 1M comparison" : "500k diagnostic";
+    els.nistCaption.textContent = `${profileLabel} | ${getNistSourceLabel()} | ${result?.n || 0} bits | ${result?.availableCount || 0}/${result?.testFamilyCount || 15} test families available | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
   }
 }
 
@@ -4268,7 +4285,7 @@ function runNistTestSuite() {
   }
 
   const allBits = getNistBitValues();
-  const requestedLimit = clampInteger(els.nistBitLimit?.value, 100, 1000000, 100000);
+  const requestedLimit = clampInteger(els.nistBitLimit?.value, 100, 1000000, 500000);
   const bits = allBits.slice(Math.max(0, allBits.length - requestedLimit));
   if (bits.length < 100) {
     addLog("SYS", `NIST needs at least 100 retained bits; available ${bits.length}`);
@@ -5239,6 +5256,10 @@ function bindEvents() {
   els.nistRunButton?.addEventListener("click", runNistTestSuite);
   els.nistClearButton?.addEventListener("click", clearNistResults);
   els.nistExportButton?.addEventListener("click", exportNistResultsCsv);
+  els.nistProfile?.addEventListener("change", () => {
+    applyNistProfileDefaults();
+    clearNistResults();
+  });
   els.nistBitSource?.addEventListener("change", () => {
     updateNistSourceStatus();
     clearNistResults();

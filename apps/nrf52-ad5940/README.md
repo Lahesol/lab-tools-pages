@@ -16,7 +16,7 @@
 | GUI → board | `CFG,PT3,<vds_mV>,<vgs_mV>,<period_ms>,<gate_settle_ms>,<sinc3_osr>,<sinc2_osr>,<sinc2_notch_0_or_1>` |
 | GUI → board | `RUN,AMP`, `RUN,CV`, `RUN,DPV`, `RUN,SWV`, `RUN,PT3`, `STOP`, `INFO?`, `STATUS?`, `NAME,<1-20 ASCII characters>`, exact `DFU` |
 | board → GUI | `@ACK`, `@ERR`, `@EVT`, `@STATUS` ASCII status lines |
-| board → GUI | `0xA1` (AMP) / `0xB1` (PT3) / `0xC1` (CV) / `0xD1` (DPV) / `0xE1` (SWV), `uint32 LE index`, `float32 LE calculated current in uA` |
+| board → GUI | Legacy `0xA1` (AMP) / `0xB1` (PT3) / `0xC1` (CV) / `0xD1` (DPV) / `0xE1` (SWV), each with `uint32 LE` index and `float32 LE` calculated current in uA; V39 additionally uses B2 batches |
 
 Expanded AMP control requires controller firmware **V26 or later**, which advertises `AMPX` in its `@INFO` response. The GUI leaves CV available but disables AMP apply/run on an older controller, avoiding a partial configuration silently reaching the device.
 
@@ -93,7 +93,7 @@ writes only the LPDAC0 data register: it changes the 6-bit VBIAS0/CE0 and
 12-bit VZERO0/gate codes atomically, while leaving ADC conversion, SINC state,
 RTIA calibration, and BLE streaming intact. It is rejected during the initial
 gate-settling interval. A live gate step deliberately creates a physical
-transient; every following B1 sample is still raw and receives the new
+transient; every following PT3 sample is still raw and receives the new
 acknowledged setpoint snapshot plus `pt3_setpoint_update=LIVE` in CSV.
 
 ## PT3 settings trace and fixture boundary
@@ -105,7 +105,7 @@ The PT3 settings panel is not a voltage measurement instrument. It plots **ackno
 - SE0 target: the fixed 1.100 V HSTIA internal reference.
 - RE0/PAD4: deliberately unplotted and labelled `OPEN`; it is not a programmable gate output in PT3.
 
-The `0xB1` current samples remain raw received current values in uA. The CSV keeps them unchanged and adds separate `pt3_*_set_mV`, SINC OSR, notch, raw-rate, decimation, and B1-rate columns only when a PT3 configuration ACK was seen. Those columns are configuration metadata, not ADC observations.
+Legacy `0xB1` and V39 B2-contained PT3 current samples remain raw received current values in uA. The CSV keeps them unchanged and adds separate `pt3_*_set_mV`, SINC OSR, notch, raw-rate, decimation, and output-rate columns only when a PT3 configuration ACK was seen. Those columns are configuration metadata, not ADC observations.
 
 For PT3 wiring, connect VZERO0 directly to a separate DUT gate/base fixture contact. Keep PAD4/RE0 open. Do not jumper VZERO0 to PAD4 while the PT3 firmware uses the CE0 buffer path.
 
@@ -115,23 +115,25 @@ PT3 is a static step-control mode: it does not synthesize a continuous VBIAS/VZE
 
 SINC3/SINC2 settings control the time-domain noise-versus-bandwidth trade-off.
 The V34 guard exposes only SINC3 `2/4/5`, SINC2 `533/800/1067/1333`, nominal
-raw rates of 100–800 samples/s, and B1 output no higher than 100 samples/s.
+raw rates of 100–800 samples/s, and output no higher than 100 samples/s on
+V34--V38. V39 retains the same raw-rate guard but permits a 200-SPS output
+only through its queued B2 transport capability.
 The requested output period can be quantized to an integer raw-sample
 decimation; use the acknowledged `OUTmHz` rate when preparing an Edge Impulse
 dataset. The SINC2 notch can be enabled for comparison, but it changes the
 signal path and must be treated as a separate acquisition condition.
 
-The PT3 B1 stream never enables the AD5940 DFT engine: a DFT measurement would
+The PT3 time stream never enables the AD5940 DFT engine: a DFT measurement would
 produce a periodic frequency-bin result and destroy the rise/decay waveform
 needed to extract tau. V35 exposes DFT number only for the pre-RUN, internal
 HSTIA RTIA calibration. It changes calibration integration time and precision,
-not B1 sample filtering. A periodic optical lock-in feature, if required later,
+not PT3 sample filtering. A periodic optical lock-in feature, if required later,
 will be a separate mode and frame contract rather than a checkbox that silently
 changes tau data.
 
 The SINC2 filter itself is active in PT3; the default GUI setting **SINC2
 notch: Bypass** only bypasses the optional notch branch. At the default 100
-SPS B1 rate, a 60 Hz pickup aliases to 40 Hz, so a jagged trace or a raw plot
+SPS output rate, a 60 Hz pickup aliases to 40 Hz, so a jagged trace or a raw plot
 alone cannot prove that its source is mains. Retain raw B1 frames and use the
 acknowledged `OUTmHz` rate for a separate spectral check.
 
@@ -181,7 +183,7 @@ CSV is an export of received binary frame values. The UI does not smooth, averag
 
 ## Live plot behavior
 
-The browser decodes each received 9-byte `0xA1` (AMP), `0xB1` (PT3), or `0xC1` (CV) frame immediately and appends its original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The selectable plot window changes only which recent raw points are drawn. It neither limits memory/CSV capture nor performs a moving average. The downloadable CSV contains the unchanged received values and timestamps.
+The browser decodes each legacy 9-byte frame and V39 B2 batch immediately, then appends every original sample index, calculated-current float, and browser receive timestamp to the in-memory received-frame list. The plot is redrawn at most once per animation frame to keep the UI responsive; no received point is modified, averaged, interpolated, or fabricated. The selectable plot window changes only which recent raw points are drawn. It neither limits memory/CSV capture nor performs a moving average. The downloadable CSV contains the unchanged received values, timestamps, and explicit transport-gap metadata.
 
 ## Controller release and update catalogue
 

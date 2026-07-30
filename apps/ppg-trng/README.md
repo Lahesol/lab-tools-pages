@@ -127,25 +127,28 @@ memory, and kept separate from the live buffer. The calculation is performed
 in `nist-worker.js` so the live serial reader and plot remain responsive.
 
 The tab shows the available and actually tested bit counts and explains every
-parameter in the expandable help area. `Bits to test` selects the newest N
-retained bits. `Block size` is the Block Frequency M, `Non-overlap template` is
-the binary pattern for the Non-overlapping Template test, `Approx entropy m`
-and `Serial m` are pattern lengths, and `Linear block M` is the Linear
-Complexity block length.
+parameter in the expandable help area. The default `500k diagnostic` profile
+targets 500,000 bits and uses a Block Frequency size of 8192 so the block count
+stays below 100. `NIST STS 1M comparison` targets 1,000,000 bits and uses the
+official-software-style Block Frequency size of 128. `Bits to test` selects the
+newest N retained bits. `Block size` is the Block Frequency M,
+`Non-overlap template` is the binary pattern for the Non-overlapping Template
+test, `Approx entropy m` and `Serial m` are pattern lengths, and `Linear block
+M` is the Linear Complexity block length.
 
 The implemented families are Frequency, Block Frequency, Cumulative Sums,
 Runs, Longest Run of Ones, Binary Matrix Rank, DFT, Non-overlapping Template,
 Overlapping Template, Maurer's Universal, Approximate Entropy, Random
 Excursions, Random Excursions Variant, Serial, and Linear Complexity. Results
-use alpha 0.01. Tests that need more bits or random-walk cycles are shown as
-`N/A`, not as a failed result. The CSV export stores one row per test family and
-includes component p-values in the detail column.
+use alpha 0.01. `PASS` means the test ran and p-value >= 0.01. `CHECK` means the
+test ran and p-value < 0.01. `N/A` means a required length or precondition was
+not met, so no p-value was calculated. The CSV export stores one row per test
+family and includes component p-values in the detail column.
 
 The browser tab is a screening tool and does not replace the official NIST STS
 software, repeated-sequence proportion checks, p-value uniformity checks, or
-cryptographic analysis. For the user's 500,000-bit target, Universal is
-available with the default parameters, while Random Excursions may remain
-`N/A` if fewer than 500 complete zero-crossing cycles are present.
+cryptographic analysis. For the 500,000-bit profile, Random Excursions may
+remain `N/A` if fewer than 500 complete zero-crossing cycles are present.
 
 ## Bluetooth LE
 

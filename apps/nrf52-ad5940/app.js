@@ -206,7 +206,7 @@ function refreshControlAvailability() {
   if (!connected) {
     elements.pt3CapabilityHint.textContent = "Connect to check PT3 firmware capability before applying phototransistor parameters.";
   } else if (state.pt3Supported && state.pt3HighRateSupported && state.nusB2QueueSupported) {
-    elements.pt3CapabilityHint.textContent = "V39 PT3_200SPS + NUS_B2_QUEUE detected. A 5 ms target requests the 200 SPS raw stream with queued three-sample BLE batches; queue overflow is reported, never hidden.";
+    elements.pt3CapabilityHint.textContent = "V39 PT3_200SPS + NUS_B2_QUEUE detected. With the default SINC3=5/SINC2=800 profile, a 5 ms target emits the 200 SPS raw stream through queued three-sample BLE batches; queue overflow is reported, never hidden.";
   } else if (state.pt3Supported && state.pt3LiveDacSupported) {
     elements.pt3CapabilityHint.textContent = "PT3_DSP + PT3_CAL_DFT + PT3_LIVE_DAC detected. After @EVT,RUNNING,PT3, VDS/VGS can be written live without re-running RTIA calibration.";
   } else if (state.pt3Supported && state.pt3CalibrationDftSupported) {
@@ -492,8 +492,8 @@ function handleTextLine(line) {
     state.pt3Applied = { ...state.pendingPt3Live, updateKind: "LIVE", acknowledgedAt: new Date().toISOString() };
     state.pt3History.push(state.pt3Applied);
     state.pendingPt3Live = null;
-    elements.pt3RouteState.textContent = `LIVE ACK: VDS ${state.pt3Applied.actualVdsMv.toFixed(1)} mV; VGS ${state.pt3Applied.actualVgsMv.toFixed(1)} mV. Raw B1 data remains unfiltered.`;
-    log("Live PT3 DAC update acknowledged; subsequent raw B1 samples carry the new setpoint metadata.");
+    elements.pt3RouteState.textContent = `LIVE ACK: VDS ${state.pt3Applied.actualVdsMv.toFixed(1)} mV; VGS ${state.pt3Applied.actualVgsMv.toFixed(1)} mV. Raw PT3 data remains unfiltered.`;
+    log("Live PT3 DAC update acknowledged; subsequent raw PT3 samples carry the new setpoint metadata.");
     schedulePlot();
   }
   if (line.startsWith("@ERR,PT3_")) handlePt3Error(line);
@@ -644,7 +644,7 @@ function switchMode(mode) {
     updatePulsePreview(mode);
   } else {
     elements.plotTitle.textContent = "Phototransistor (PT3) — current vs sample index";
-    elements.plotCaption.textContent = "Each received B1 current value is drawn without smoothing or rescaling. DAC and PAD traces below are acknowledged configuration-derived setpoints, not measured voltages.";
+    elements.plotCaption.textContent = "Each received PT3 current value is drawn at its original sample index without smoothing, rescaling, or filling transport gaps. DAC and PAD traces below are acknowledged configuration-derived setpoints, not measured voltages.";
     updatePt3Preview();
   }
   refreshControlAvailability();
@@ -890,7 +890,7 @@ async function applyPt3LiveDac() {
     state.pendingPt3Live = setpoints;
     refreshControlAvailability();
     await sendNusCommand(`LIVE,PT3,${setpoints.vds},${setpoints.vgs}`);
-    log("Live VDS/VGS write queued. The following raw B1 samples will carry the new acknowledged setpoint metadata.");
+    log("Live VDS/VGS write queued. Following raw PT3 samples will carry the new acknowledged setpoint metadata.");
   } catch (error) {
     state.pendingPt3Live = null;
     refreshControlAvailability();
