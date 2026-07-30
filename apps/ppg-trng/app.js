@@ -171,6 +171,55 @@ const els = {
   nistNaCount: document.querySelector("#nistNaCount"),
   nistElapsed: document.querySelector("#nistElapsed"),
   nistResultsBody: document.querySelector("#nistResultsBody"),
+  mlView: document.querySelector("#mlView"),
+  mlCaption: document.querySelector("#mlCaption"),
+  mlBitSource: document.querySelector("#mlBitSource"),
+  mlBitLimit: document.querySelector("#mlBitLimit"),
+  mlLag: document.querySelector("#mlLag"),
+  mlHoldout: document.querySelector("#mlHoldout"),
+  mlMaxTrain: document.querySelector("#mlMaxTrain"),
+  mlSourceName: document.querySelector("#mlSourceName"),
+  mlSourceAvailable: document.querySelector("#mlSourceAvailable"),
+  mlSourceTestCount: document.querySelector("#mlSourceTestCount"),
+  mlSourceDescription: document.querySelector("#mlSourceDescription"),
+  mlRunButton: document.querySelector("#mlRunButton"),
+  mlClearButton: document.querySelector("#mlClearButton"),
+  mlExportButton: document.querySelector("#mlExportButton"),
+  mlBitCount: document.querySelector("#mlBitCount"),
+  mlSplitCount: document.querySelector("#mlSplitCount"),
+  mlBaselineAccuracy: document.querySelector("#mlBaselineAccuracy"),
+  mlAccuracy: document.querySelector("#mlAccuracy"),
+  mlAdvantage: document.querySelector("#mlAdvantage"),
+  mlConditionalEntropy: document.querySelector("#mlConditionalEntropy"),
+  mlResultsBody: document.querySelector("#mlResultsBody"),
+  mlInterpretation: document.querySelector("#mlInterpretation"),
+  mlWarning: document.querySelector("#mlWarning"),
+  entropyView: document.querySelector("#90bView"),
+  entropyCaption: document.querySelector("#90bCaption"),
+  entropyBitSource: document.querySelector("#90bBitSource"),
+  entropyBitLimit: document.querySelector("#90bBitLimit"),
+  entropyTupleK: document.querySelector("#90bTupleK"),
+  entropyDataClass: document.querySelector("#90bDataClass"),
+  entropySourceName: document.querySelector("#90bSourceName"),
+  entropySourceAvailable: document.querySelector("#90bSourceAvailable"),
+  entropySourceTestCount: document.querySelector("#90bSourceTestCount"),
+  entropySourceDescription: document.querySelector("#90bSourceDescription"),
+  entropyRunButton: document.querySelector("#90bRunButton"),
+  entropyClearButton: document.querySelector("#90bClearButton"),
+  entropyExportButton: document.querySelector("#90bExportButton"),
+  entropyExportInputButton: document.querySelector("#90bExportInputButton"),
+  entropySampleCount: document.querySelector("#90bSampleCount"),
+  entropyDataStatus: document.querySelector("#90bDataStatus"),
+  entropyValue: document.querySelector("#90bEntropyValue"),
+  entropyIidStatus: document.querySelector("#90bIidStatus"),
+  entropyRctStatus: document.querySelector("#90bRctStatus"),
+  entropyAptStatus: document.querySelector("#90bAptStatus"),
+  entropyResultsBody: document.querySelector("#90bResultsBody"),
+  entropyHealthSummary: document.querySelector("#90bHealthSummary"),
+  entropyRctDetail: document.querySelector("#90bRctDetail"),
+  entropyAptDetail: document.querySelector("#90bAptDetail"),
+  entropyIidDetail: document.querySelector("#90bIidDetail"),
+  entropyWarning: document.querySelector("#90bWarning"),
 };
 
 const DEFAULT_MAX_SAMPLES = 20000;
@@ -336,6 +385,12 @@ const state = {
   nistUploadedBits: new Uint8Array(0),
   nistUploadedFileName: "",
   nistUploadedFileNames: [],
+  mlResults: null,
+  mlWorker: null,
+  mlRunning: false,
+  entropyResults: null,
+  entropyWorker: null,
+  entropyRunning: false,
 };
 
 const encoder = new TextEncoder();
@@ -384,8 +439,8 @@ const ADC_SOURCE_INFO = {
   },
   ADC0: {
     command: "ADC0",
-    label: "ADC0 commercial PPG",
-    detail: "Commercial PPG - AIN0/P0.02",
+    label: "ADC0 ambient/noise",
+    detail: "Commercial sensor ambient/noise - AIN0/P0.02",
   },
 };
 
@@ -3300,8 +3355,8 @@ function exportBitsCsv() {
 }
 
 function setActiveView(viewId) {
-  const target = ["noiseView", "nistView", "switchView"].includes(viewId) ? viewId : "liveView";
-  [els.liveView, els.noiseView, els.nistView, els.switchView].forEach((view) => {
+  const target = ["noiseView", "nistView", "mlView", "90bView", "switchView"].includes(viewId) ? viewId : "liveView";
+  [els.liveView, els.noiseView, els.nistView, els.mlView, els.entropyView, els.switchView].forEach((view) => {
     if (view) view.hidden = view.id !== target;
   });
   els.viewTabs.forEach((button) => {
@@ -4089,6 +4144,8 @@ async function handleNistBitFiles(fileList) {
     clearNistResults();
     if (els.nistCaption) els.nistCaption.textContent = `${files.length.toLocaleString()} uploaded files | ${bits.length.toLocaleString()} bits loaded | ready for NIST tests`;
     updateNistSourceStatus();
+    updateMlSourceStatus();
+    updateEntropySourceStatus();
     addLog("SYS", `Loaded ${bits.length} bits from ${files.length} NIST bit files`);
   } catch (error) {
     state.nistUploadedBits = new Uint8Array(0);
@@ -4109,17 +4166,22 @@ function removeNistBitFile() {
   if (els.nistBitSource?.value === "upload") els.nistBitSource.value = "current";
   updateNistFileStatus("No bit file loaded. Uploaded data remains separate from the live bit buffer.");
   clearNistResults();
+  updateMlSourceStatus();
+  updateEntropySourceStatus();
   addLog("SYS", "Removed uploaded NIST bit file");
 }
 
-function getNistBitEntries() {
-  const source = els.nistBitSource?.value || "current";
+function getRetainedBitEntries(source = "current") {
   if (source === "current") return state.bits;
   if (source === "upload") return state.nistUploadedBits;
   if (source === "firmware") {
     return state.bits.filter((entry) => entry.firmwareFrame || /firmware/i.test(entry.source || ""));
   }
   return state.bits.filter((entry) => normalizeAdcSource(entry.adcSource) === source);
+}
+
+function getNistBitEntries() {
+  return getRetainedBitEntries(els.nistBitSource?.value || "current");
 }
 
 function getNistSourceLabel() {
@@ -4166,6 +4228,72 @@ function getNistBitValues() {
   if (source === "upload") return state.nistUploadedBits;
   const entries = getNistBitEntries();
   return Uint8Array.from(entries, (entry) => (entry.bit ? 1 : 0));
+}
+
+function getMlBitValues() {
+  const source = els.mlBitSource?.value || "current";
+  if (source === "upload") return state.nistUploadedBits;
+  return Uint8Array.from(getRetainedBitEntries(source), (entry) => (entry.bit ? 1 : 0));
+}
+
+function getMlSourceLabel() {
+  const source = els.mlBitSource?.value || "current";
+  if (source === "current") return state.bitSource || "Current extracted bits";
+  if (source === "upload") return state.nistUploadedFileName || "Uploaded bit file";
+  if (source === "firmware") return "Firmware ENCF key bits";
+  if (source === "ADC0") return "ADC0 ambient/noise bits";
+  if (source === "ADC3") return "ADC3 green-LED/noise bits";
+  return `${source} bits`;
+}
+
+function updateMlSourceStatus() {
+  const source = els.mlBitSource?.value || "current";
+  const entries = getRetainedBitEntries(source);
+  const requested = clampInteger(els.mlBitLimit?.value, 200, 1000000, 500000);
+  const testCount = Math.min(entries.length, requested);
+  if (els.mlSourceName) els.mlSourceName.textContent = getMlSourceLabel();
+  if (els.mlSourceAvailable) els.mlSourceAvailable.textContent = entries.length.toLocaleString();
+  if (els.mlSourceTestCount) els.mlSourceTestCount.textContent = testCount.toLocaleString();
+  if (els.mlSourceDescription) {
+    const description = source === "upload"
+      ? "Uses the uploaded bit stream as an isolated source; it is not added to the live buffer."
+      : source === "ADC0"
+        ? "Uses retained ADC0 bits. In this project ADC0 is treated as ambient-light/electronic noise, not biomedical PPG."
+        : source === "ADC3"
+          ? "Uses retained ADC3 bits. In this project ADC3 is treated as green-LED-assisted optical/electronic noise."
+          : "Uses only the selected retained bit stream and does not generate new bits.";
+    els.mlSourceDescription.textContent = description;
+  }
+}
+
+function getEntropyBitValues() {
+  const source = els.entropyBitSource?.value || "current";
+  if (source === "upload") return state.nistUploadedBits;
+  return Uint8Array.from(getRetainedBitEntries(source), (entry) => (entry.bit ? 1 : 0));
+}
+
+function getEntropySourceLabel() {
+  const source = els.entropyBitSource?.value || "current";
+  if (source === "current") return state.bitSource || "Current extracted bits";
+  if (source === "upload") return state.nistUploadedFileName || "Uploaded bit file";
+  if (source === "firmware") return "Firmware ENCF key bits";
+  if (source === "ADC0") return "ADC0 ambient/noise bits";
+  if (source === "ADC3") return "ADC3 green-LED/noise bits";
+  return `${source} bits`;
+}
+
+function updateEntropySourceStatus() {
+  const source = els.entropyBitSource?.value || "current";
+  const entries = getRetainedBitEntries(source);
+  const requested = clampInteger(els.entropyBitLimit?.value, 1024, 1000000, 1000000);
+  const testCount = Math.min(entries.length, requested);
+  if (els.entropySourceName) els.entropySourceName.textContent = getEntropySourceLabel();
+  if (els.entropySourceAvailable) els.entropySourceAvailable.textContent = entries.length.toLocaleString();
+  if (els.entropySourceTestCount) els.entropySourceTestCount.textContent = testCount.toLocaleString();
+  if (els.entropySourceDescription) {
+    const classLabel = els.entropyDataClass?.value === "conditioned" ? "conditioned/output" : "raw noise-source candidate";
+    els.entropySourceDescription.textContent = `${getEntropySourceLabel()} | ${classLabel} | browser input is binary; raw ADC provenance must be documented separately.`;
+  }
 }
 
 function getNistOptions() {
@@ -4386,6 +4514,419 @@ function exportNistResultsCsv() {
   link.click();
   URL.revokeObjectURL(url);
   addLog("SYS", `Exported ${state.nistResults.length} NIST test-family results`);
+}
+
+function formatMlMetric(value) {
+  return Number.isFinite(value) ? value.toFixed(6) : "--";
+}
+
+function getMlModel(name) {
+  return state.mlResults?.models?.find((model) => model.name === name) || null;
+}
+
+function renderMlResults(result = state.mlResults) {
+  if (!els.mlResultsBody) return;
+  if (!result?.models?.length) {
+    els.mlResultsBody.innerHTML = '<tr><td colspan="7" class="ml-empty">No analysis run yet.</td></tr>';
+    return;
+  }
+  els.mlResultsBody.innerHTML = result.models.map((model) => {
+    const confusion = model.confusion || {};
+    const training = model.trainingSamples ? ` | train=${model.trainingSamples}` : "";
+    return `
+      <tr>
+        <td><strong>${escapeHtml(model.name)}</strong><small>${escapeHtml(model.features || "constant/history baseline")}${training}</small></td>
+        <td>${formatMlMetric(model.accuracy)}</td>
+        <td>${formatMlMetric(model.balancedAccuracy)}</td>
+        <td>${formatMlMetric(model.logLossBits)}</td>
+        <td>${formatMlMetric(model.brier)}</td>
+        <td>${escapeHtml(model.advantageText || "--")}</td>
+        <td>TP ${confusion.truePositive || 0} / TN ${confusion.trueNegative || 0}<br>FP ${confusion.falsePositive || 0} / FN ${confusion.falseNegative || 0}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function updateMlSummary(result = null, elapsedMs = null) {
+  const logistic = result?.models?.find((model) => model.name === "Logistic regression attack");
+  if (els.mlBitCount) els.mlBitCount.textContent = String(result?.n || 0);
+  if (els.mlSplitCount) {
+    els.mlSplitCount.textContent = result ? `${result.trainCount} / ${result.testCount}` : "--";
+  }
+  if (els.mlBaselineAccuracy) els.mlBaselineAccuracy.textContent = formatMlMetric(result?.baselineAccuracy);
+  if (els.mlAccuracy) els.mlAccuracy.textContent = formatMlMetric(logistic?.accuracy);
+  if (els.mlAdvantage) els.mlAdvantage.textContent = logistic?.advantageText || "--";
+  if (els.mlConditionalEntropy) els.mlConditionalEntropy.textContent = formatMlMetric(result?.conditionalEntropyBits);
+  if (els.mlCaption && result) {
+    els.mlCaption.textContent = `${getMlSourceLabel()} | ${result.n.toLocaleString()} bits | train ${result.trainCount.toLocaleString()} / test ${result.testCount.toLocaleString()} | lag ${result.lag} | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
+  }
+}
+
+function finishMlRun(result, elapsedMs) {
+  state.mlResults = result;
+  state.mlRunning = false;
+  if (state.mlWorker) {
+    state.mlWorker.terminate();
+    state.mlWorker = null;
+  }
+  if (els.mlRunButton) {
+    els.mlRunButton.disabled = false;
+    els.mlRunButton.textContent = "Run ML attack";
+  }
+  updateMlSummary(result, elapsedMs);
+  renderMlResults(result);
+  const logistic = result.models.find((model) => model.name === "Logistic regression attack");
+  if (els.mlInterpretation) {
+    els.mlInterpretation.textContent = result.attack.meaningful
+      ? `The logistic predictor exceeded the majority baseline by ${formatMlMetric(result.attack.advantage)}. This indicates measurable next-bit predictability under the selected split.`
+      : `The logistic predictor did not exceed the majority baseline by 0.02. This is not evidence of cryptographic security; repeat across independent measurement sessions.`;
+  }
+  if (els.mlWarning) {
+    els.mlWarning.textContent = `${result.warning} Logistic accuracy=${formatMlMetric(logistic?.accuracy)}, Markov accuracy=${formatMlMetric(result.models[1]?.accuracy)}.`;
+  }
+}
+
+function runMlMainThread(bits, options, startedAt) {
+  window.setTimeout(() => {
+    try {
+      const result = window.YmPpgMlAttack.run(bits, options);
+      finishMlRun(result, performance.now() - startedAt);
+    } catch (error) {
+      state.mlRunning = false;
+      if (els.mlRunButton) els.mlRunButton.disabled = false;
+      addLog("ERR", `ML attack failed: ${error.message || error}`, true);
+    }
+  }, 0);
+}
+
+function runMlAttack() {
+  if (state.mlRunning) return;
+  if (!window.YmPpgMlAttack) {
+    addLog("ERR", "ML attack calculation module is unavailable", true);
+    return;
+  }
+  const allBits = getMlBitValues();
+  const requestedLimit = clampInteger(els.mlBitLimit?.value, 200, 1000000, 500000);
+  const bits = allBits.slice(Math.max(0, allBits.length - requestedLimit));
+  if (bits.length < 200) {
+    addLog("SYS", `ML attack needs at least 200 retained bits; available ${bits.length}`);
+    return;
+  }
+  const options = {
+    lag: clampInteger(els.mlLag?.value, 2, 64, 16),
+    holdoutPercent: clampInteger(els.mlHoldout?.value, 10, 50, 30),
+    maxTrainSamples: clampInteger(els.mlMaxTrain?.value, 5000, 100000, 60000),
+  };
+  const startedAt = performance.now();
+  state.mlRunning = true;
+  state.mlResults = null;
+  renderMlResults(null);
+  updateMlSummary(null, null);
+  if (els.mlRunButton) {
+    els.mlRunButton.disabled = true;
+    els.mlRunButton.textContent = "Running...";
+  }
+  if (els.mlCaption) els.mlCaption.textContent = `${getMlSourceLabel()} | ${bits.length.toLocaleString()} bits | calculating in background...`;
+
+  const fallbackBits = bits.slice();
+  if (typeof Worker !== "function") {
+    runMlMainThread(fallbackBits, options, startedAt);
+    return;
+  }
+  let settled = false;
+  try {
+    const worker = new Worker("./ml-attack-worker.js");
+    state.mlWorker = worker;
+    worker.onmessage = (event) => {
+      if (settled) return;
+      settled = true;
+      if (event.data?.type === "result") {
+        finishMlRun(event.data.result, performance.now() - startedAt);
+      } else {
+        worker.terminate();
+        state.mlWorker = null;
+        addLog("SYS", `ML worker unavailable; using main thread (${event.data?.message || "worker error"})`);
+        runMlMainThread(fallbackBits, options, startedAt);
+      }
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      state.mlWorker = null;
+      addLog("SYS", `ML worker unavailable; using main thread (${event.message || "worker error"})`);
+      runMlMainThread(fallbackBits, options, startedAt);
+    };
+    worker.postMessage({ bits, options }, [bits.buffer]);
+  } catch (error) {
+    settled = true;
+    if (state.mlWorker) state.mlWorker.terminate();
+    state.mlWorker = null;
+    addLog("SYS", `ML worker unavailable; using main thread (${error.message || error})`);
+    runMlMainThread(fallbackBits, options, startedAt);
+  }
+}
+
+function clearMlResults() {
+  if (state.mlWorker) state.mlWorker.terminate();
+  state.mlWorker = null;
+  state.mlRunning = false;
+  state.mlResults = null;
+  if (els.mlRunButton) {
+    els.mlRunButton.disabled = false;
+    els.mlRunButton.textContent = "Run ML attack";
+  }
+  updateMlSummary(null, null);
+  renderMlResults(null);
+  if (els.mlCaption) els.mlCaption.textContent = "Run a chronological next-bit prediction analysis on a retained bit stream.";
+}
+
+function exportMlResultsCsv() {
+  if (!state.mlResults?.models?.length) {
+    addLog("SYS", "No ML attack results to export");
+    return;
+  }
+  const result = state.mlResults;
+  const rows = ["source,bits,train_count,test_count,lag,model,accuracy,balanced_accuracy,log_loss_bits,brier,advantage,true_positive,true_negative,false_positive,false_negative"];
+  result.models.forEach((model) => {
+    const confusion = model.confusion || {};
+    rows.push([
+      csvCell(getMlSourceLabel()), result.n, result.trainCount, result.testCount, result.lag,
+      csvCell(model.name), formatMlMetric(model.accuracy), formatMlMetric(model.balancedAccuracy),
+      formatMlMetric(model.logLossBits), formatMlMetric(model.brier), formatMlMetric(model.advantage),
+      confusion.truePositive || 0, confusion.trueNegative || 0, confusion.falsePositive || 0, confusion.falseNegative || 0,
+    ].join(","));
+  });
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `ml_attack_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${result.models.length} ML attack model results`);
+}
+
+function formatEntropyMetric(value) {
+  return Number.isFinite(value) ? value.toFixed(6) : "--";
+}
+
+function formatEntropyProbability(value) {
+  if (!Number.isFinite(value)) return "--";
+  if (value < 0.0001) return value.toExponential(3);
+  return value.toFixed(6);
+}
+
+function entropyStatusLabel(estimate) {
+  return estimate?.status === "available" ? "AVAILABLE" : "SHORT";
+}
+
+function renderEntropyResults(result = state.entropyResults) {
+  if (!els.entropyResultsBody) return;
+  if (!result?.estimates?.length) {
+    els.entropyResultsBody.innerHTML = '<tr><td colspan="5" class="entropy-empty">No diagnostic run yet.</td></tr>';
+    return;
+  }
+  els.entropyResultsBody.innerHTML = result.estimates.map((estimate) => `
+    <tr>
+      <td><strong>${escapeHtml(estimate.name)}</strong><small>${escapeHtml(estimate.detail || "")}</small></td>
+      <td>${formatEntropyMetric(estimate.entropy)}</td>
+      <td>${formatEntropyProbability(estimate.probability)}</td>
+      <td>${escapeHtml(estimate.statistic || "--")}</td>
+      <td><span class="entropy-result ${estimate.status === "available" ? "is-available" : "is-short"}">${entropyStatusLabel(estimate)}</span></td>
+    </tr>
+  `).join("");
+}
+
+function updateEntropySummary(result = null) {
+  if (els.entropySampleCount) els.entropySampleCount.textContent = String(result?.n || 0);
+  if (els.entropyDataStatus) {
+    els.entropyDataStatus.textContent = result?.dataStatus === "candidate-1m" ? "1M candidate" : result ? "Exploratory" : "--";
+  }
+  if (els.entropyValue) els.entropyValue.textContent = formatEntropyMetric(result?.officialSubsetEntropy);
+  if (els.entropyIidStatus) {
+    els.entropyIidStatus.textContent = result ? (result.iid.screening === "no immediate concern" ? "Screen pass" : "Concern") : "--";
+  }
+  if (els.entropyRctStatus) els.entropyRctStatus.textContent = result ? (result.health.repetitionCount.pass ? "PASS" : "FAIL") : "--";
+  if (els.entropyAptStatus) els.entropyAptStatus.textContent = result ? (result.health.adaptiveProportion.pass ? "PASS" : "FAIL") : "--";
+  if (els.entropyHealthSummary && result) {
+    els.entropyHealthSummary.textContent = `Assessed subset Hmin=${formatEntropyMetric(result.officialSubsetEntropy)} bits/sample | alpha=${result.health.alpha.toExponential(3)}`;
+  }
+  if (els.entropyRctDetail && result) {
+    const rct = result.health.repetitionCount;
+    els.entropyRctDetail.textContent = `max run ${rct.maximumRun} / cutoff ${rct.cutoff} | ${rct.pass ? "PASS" : "FAIL"}`;
+  }
+  if (els.entropyAptDetail && result) {
+    const apt = result.health.adaptiveProportion;
+    els.entropyAptDetail.textContent = `max ${apt.maximumCount} / cutoff ${apt.cutoff} | ${apt.failures} failures | ${apt.pass ? "PASS" : "FAIL"}`;
+  }
+  if (els.entropyIidDetail && result) {
+    els.entropyIidDetail.textContent = `transition chi2 ${result.iid.transitionChi.toFixed(3)} | block chi2 ${result.iid.blockChi.toFixed(3)} | max |rho| ${result.iid.maxCorrelation.toFixed(4)}`;
+  }
+}
+
+function finishEntropyRun(result, elapsedMs) {
+  state.entropyResults = result;
+  state.entropyRunning = false;
+  if (state.entropyWorker) {
+    state.entropyWorker.terminate();
+    state.entropyWorker = null;
+  }
+  if (els.entropyRunButton) {
+    els.entropyRunButton.disabled = false;
+    els.entropyRunButton.textContent = "Run 90B diagnostic";
+  }
+  updateEntropySummary(result);
+  renderEntropyResults(result);
+  if (els.entropyCaption) {
+    els.entropyCaption.textContent = `${getEntropySourceLabel()} | ${result.n.toLocaleString()} binary samples | subset Hmin ${formatEntropyMetric(result.officialSubsetEntropy)} bits/sample | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
+  }
+  if (els.entropyWarning) els.entropyWarning.textContent = result.warnings.join(" ");
+}
+
+function runEntropyMainThread(bits, options, startedAt) {
+  window.setTimeout(() => {
+    try {
+      const result = window.YmPpg90b.run(bits, options);
+      finishEntropyRun(result, performance.now() - startedAt);
+    } catch (error) {
+      state.entropyRunning = false;
+      if (els.entropyRunButton) els.entropyRunButton.disabled = false;
+      addLog("ERR", `90B diagnostic failed: ${error.message || error}`, true);
+    }
+  }, 0);
+}
+
+function runEntropyDiagnostic() {
+  if (state.entropyRunning) return;
+  if (!window.YmPpg90b) {
+    addLog("ERR", "SP 800-90B calculation module is unavailable", true);
+    return;
+  }
+  const allBits = getEntropyBitValues();
+  const requestedLimit = clampInteger(els.entropyBitLimit?.value, 1024, 1000000, 1000000);
+  const bits = allBits.slice(Math.max(0, allBits.length - requestedLimit));
+  if (bits.length < 1024) {
+    addLog("SYS", `90B diagnostic needs at least 1024 binary samples; available ${bits.length}`);
+    return;
+  }
+  const options = {
+    tupleK: clampInteger(els.entropyTupleK?.value, 2, 16, 12),
+  };
+  const startedAt = performance.now();
+  state.entropyRunning = true;
+  state.entropyResults = null;
+  renderEntropyResults(null);
+  updateEntropySummary(null);
+  if (els.entropyRunButton) {
+    els.entropyRunButton.disabled = true;
+    els.entropyRunButton.textContent = "Running...";
+  }
+  if (els.entropyCaption) els.entropyCaption.textContent = `${getEntropySourceLabel()} | ${bits.length.toLocaleString()} binary samples | calculating in background...`;
+
+  const fallbackBits = bits.slice();
+  if (typeof Worker !== "function") {
+    runEntropyMainThread(fallbackBits, options, startedAt);
+    return;
+  }
+  let settled = false;
+  try {
+    const worker = new Worker("./sp800-90b-worker.js");
+    state.entropyWorker = worker;
+    worker.onmessage = (event) => {
+      if (settled) return;
+      settled = true;
+      if (event.data?.type === "result") {
+        finishEntropyRun(event.data.result, performance.now() - startedAt);
+      } else {
+        worker.terminate();
+        state.entropyWorker = null;
+        addLog("SYS", `90B worker unavailable; using main thread (${event.data?.message || "worker error"})`);
+        runEntropyMainThread(fallbackBits, options, startedAt);
+      }
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      state.entropyWorker = null;
+      addLog("SYS", `90B worker unavailable; using main thread (${event.message || "worker error"})`);
+      runEntropyMainThread(fallbackBits, options, startedAt);
+    };
+    worker.postMessage({ bits, options }, [bits.buffer]);
+  } catch (error) {
+    settled = true;
+    if (state.entropyWorker) state.entropyWorker.terminate();
+    state.entropyWorker = null;
+    addLog("SYS", `90B worker unavailable; using main thread (${error.message || error})`);
+    runEntropyMainThread(fallbackBits, options, startedAt);
+  }
+}
+
+function clearEntropyResults() {
+  if (state.entropyWorker) state.entropyWorker.terminate();
+  state.entropyWorker = null;
+  state.entropyRunning = false;
+  state.entropyResults = null;
+  if (els.entropyRunButton) {
+    els.entropyRunButton.disabled = false;
+    els.entropyRunButton.textContent = "Run 90B diagnostic";
+  }
+  updateEntropySummary(null);
+  renderEntropyResults(null);
+  if (els.entropyHealthSummary) els.entropyHealthSummary.textContent = "No diagnostic run yet.";
+  if (els.entropyRctDetail) els.entropyRctDetail.textContent = "--";
+  if (els.entropyAptDetail) els.entropyAptDetail.textContent = "--";
+  if (els.entropyIidDetail) els.entropyIidDetail.textContent = "--";
+  if (els.entropyWarning) els.entropyWarning.textContent = "This is a browser-side 90B-aligned screening report, not an SP 800-90B validation certificate.";
+  if (els.entropyCaption) els.entropyCaption.textContent = "Run the binary-source screening assessment on a retained bit stream.";
+}
+
+function exportEntropyResultsCsv() {
+  if (!state.entropyResults?.estimates?.length) {
+    addLog("SYS", "No 90B diagnostic results to export");
+    return;
+  }
+  const result = state.entropyResults;
+  const rows = ["source,samples,data_status,estimator,hmin_bits_per_sample,p_max,statistic,detail,status"];
+  result.estimates.forEach((estimate) => {
+    rows.push([
+      csvCell(getEntropySourceLabel()), result.n, result.dataStatus, csvCell(estimate.name),
+      formatEntropyMetric(estimate.entropy), formatEntropyProbability(estimate.probability),
+      csvCell(estimate.statistic), csvCell(estimate.detail), entropyStatusLabel(estimate),
+    ].join(","));
+  });
+  const rct = result.health.repetitionCount;
+  const apt = result.health.adaptiveProportion;
+  rows.push([csvCell(getEntropySourceLabel()), result.n, result.dataStatus, "RCT", "", "", `max_run=${rct.maximumRun}`, `cutoff=${rct.cutoff}`, rct.pass ? "PASS" : "FAIL"].join(","));
+  rows.push([csvCell(getEntropySourceLabel()), result.n, result.dataStatus, "APT", "", "", `max_count=${apt.maximumCount}`, `window=${apt.window};cutoff=${apt.cutoff};failures=${apt.failures}`, apt.pass ? "PASS" : "FAIL"].join(","));
+  rows.push([csvCell(getEntropySourceLabel()), result.n, result.dataStatus, "90B subset minimum", formatEntropyMetric(result.officialSubsetEntropy), "", "", csvCell(result.coverage), "SCREENING"].join(","));
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `sp800-90b_diagnostic_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${result.estimates.length} 90B estimator results`);
+}
+
+function exportEntropyInput() {
+  const allBits = getEntropyBitValues();
+  const requestedLimit = clampInteger(els.entropyBitLimit?.value, 1024, 1000000, 1000000);
+  const bits = allBits.slice(Math.max(0, allBits.length - requestedLimit));
+  if (bits.length < 1) {
+    addLog("SYS", "No binary samples available for 90B input export");
+    return;
+  }
+  const blob = new Blob([bits], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `sp800-90b_input_${new Date().toISOString().replaceAll(":", "-")}.bin`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${bits.length} one-byte binary samples for 90B reproduction`);
 }
 
 function toggleDemo() {
@@ -5275,6 +5816,24 @@ function bindEvents() {
   els.nistTemplate?.addEventListener("change", () => {
     els.nistTemplate.value = getNistOptions().template;
   });
+  els.mlRunButton?.addEventListener("click", runMlAttack);
+  els.mlClearButton?.addEventListener("click", clearMlResults);
+  els.mlExportButton?.addEventListener("click", exportMlResultsCsv);
+  els.mlBitSource?.addEventListener("change", () => {
+    updateMlSourceStatus();
+    clearMlResults();
+  });
+  els.mlBitLimit?.addEventListener("input", updateMlSourceStatus);
+  els.entropyRunButton?.addEventListener("click", runEntropyDiagnostic);
+  els.entropyClearButton?.addEventListener("click", clearEntropyResults);
+  els.entropyExportButton?.addEventListener("click", exportEntropyResultsCsv);
+  els.entropyExportInputButton?.addEventListener("click", exportEntropyInput);
+  els.entropyBitSource?.addEventListener("change", () => {
+    updateEntropySourceStatus();
+    clearEntropyResults();
+  });
+  els.entropyBitLimit?.addEventListener("input", updateEntropySourceStatus);
+  els.entropyDataClass?.addEventListener("change", updateEntropySourceStatus);
   els.bitColumns.addEventListener("change", () => {
     state.needsBitDraw = true;
     resizeBitCanvas();
@@ -5309,6 +5868,12 @@ function init() {
   updateEncryptionUi();
   updateNistSummary(null, null);
   renderNistResults([]);
+  updateMlSourceStatus();
+  updateMlSummary(null, null);
+  renderMlResults(null);
+  updateEntropySourceStatus();
+  updateEntropySummary(null);
+  renderEntropyResults(null);
   resizeCanvas();
   resizeCipherCanvas();
   new ResizeObserver(resizeCanvas).observe(els.canvasWrap || els.plotCanvas);

@@ -259,6 +259,8 @@ select {
 .dfu-panel,
 .noise-panel,
 .nist-panel,
+.ml-panel,
+.entropy-panel,
 .switch-panel {
   width: 100%;
   min-width: 0;
@@ -1116,6 +1118,461 @@ canvas {
   background: #fbfdfc;
 }
 
+.ml-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(120px, 0.7fr));
+  gap: 10px;
+  padding: 14px 16px 0;
+  background: #fbfdfc;
+}
+
+.ml-source-status {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(130px, 0.7fr));
+  gap: 8px;
+  margin: 12px 16px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f5faf8;
+}
+
+.ml-source-stat {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ml-source-stat span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.ml-source-stat strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-source-description {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.ml-help {
+  margin: 12px 16px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.ml-help summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.ml-help-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 0 12px;
+}
+
+.ml-help-grid > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ml-help-grid strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.ml-help-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.ml-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px 0;
+  background: #fbfdfc;
+}
+
+.ml-result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.8fr);
+  gap: 12px;
+  padding: 12px 16px 16px;
+  background: #fbfdfc;
+}
+
+.ml-results-wrap {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.ml-results {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ml-results th,
+.ml-results td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.ml-results th {
+  color: var(--muted);
+  background: #f6faf8;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.ml-results td:first-child {
+  white-space: normal;
+}
+
+.ml-results td:first-child small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.ml-results th:nth-child(1) { width: 25%; }
+.ml-results th:nth-child(2),
+.ml-results th:nth-child(3),
+.ml-results th:nth-child(4),
+.ml-results th:nth-child(5),
+.ml-results th:nth-child(6) { width: 11%; }
+.ml-results th:nth-child(7) { width: 20%; }
+
+.ml-interpretation {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.ml-interpretation h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.ml-interpretation p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.ml-interpretation .ml-warning {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.ml-empty {
+  color: var(--muted);
+  text-align: center !important;
+}
+
+.entropy-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(130px, 0.7fr));
+  gap: 10px;
+  padding: 14px 16px 0;
+  background: #fbfdfc;
+}
+
+.entropy-source-status {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(130px, 0.7fr));
+  gap: 8px;
+  margin: 12px 16px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f5faf8;
+}
+
+.entropy-source-stat {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.entropy-source-stat span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.entropy-source-stat strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entropy-source-description {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.entropy-help {
+  margin: 12px 16px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.entropy-help summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.entropy-help-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 0 12px;
+}
+
+.entropy-help-grid > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.entropy-help-grid strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.entropy-help-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.entropy-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px 0;
+  background: #fbfdfc;
+}
+
+.entropy-result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.8fr);
+  gap: 12px;
+  padding: 12px 16px 0;
+  background: #fbfdfc;
+}
+
+.entropy-results-wrap {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.entropy-results {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.entropy-results th,
+.entropy-results td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.entropy-results th {
+  color: var(--muted);
+  background: #f6faf8;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.entropy-results td:first-child {
+  white-space: normal;
+}
+
+.entropy-results td:first-child small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.entropy-results th:nth-child(1) { width: 27%; }
+.entropy-results th:nth-child(2),
+.entropy-results th:nth-child(3) { width: 16%; }
+.entropy-results th:nth-child(4) { width: 31%; }
+.entropy-results th:nth-child(5) { width: 10%; }
+
+.entropy-result {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.entropy-result.is-available {
+  color: var(--good);
+  background: #effaf4;
+}
+
+.entropy-result.is-short {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.entropy-health-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.entropy-health-card h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.entropy-health-card p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.entropy-health-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 8px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+
+.entropy-health-row span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.entropy-health-row strong {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.entropy-report-note {
+  padding: 12px 16px 16px;
+  background: #fbfdfc;
+}
+
+.entropy-report-note p {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #ead6a0;
+  border-radius: 7px;
+  color: #6f4b00;
+  background: #fff8e7;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.entropy-empty {
+  color: var(--muted);
+  text-align: center !important;
+}
+
 .nist-upload-row {
   display: grid;
   grid-template-columns: minmax(280px, 1.4fr) minmax(170px, 0.8fr) auto minmax(260px, 1.4fr);
@@ -1716,6 +2173,18 @@ canvas {
     grid-template-columns: 1fr;
   }
 
+  .ml-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .entropy-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .entropy-help-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .encryption-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -1749,13 +2218,21 @@ canvas {
     .dfu-grid,
     .noise-grid,
     .nist-controls,
+    .ml-controls,
     .noise-explain-grid,
     .noise-method-blocks,
     .noise-summary,
     .nist-summary,
     .nist-upload-row,
     .nist-source-status,
-    .nist-parameter-grid {
+    .nist-parameter-grid,
+    .ml-source-status,
+    .ml-help-grid,
+    .ml-summary,
+    .entropy-controls,
+    .entropy-source-status,
+    .entropy-help-grid,
+    .entropy-summary {
     grid-template-columns: 1fr;
   }
 

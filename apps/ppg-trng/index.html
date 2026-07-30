@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=e601c5188a12" />
+    <link rel="stylesheet" href="./styles.css?v=74563a006b2f" />
   </head>
   <body>
     <div class="app-shell">
@@ -96,7 +96,7 @@
               <div class="quick-grid">
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC0</span>
-                  <span class="command-label">Commercial PPG - AIN0/P0.02</span>
+                  <span class="command-label">Commercial sensor ambient/noise - AIN0/P0.02</span>
                 </button>
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC2</span>
@@ -160,6 +160,8 @@
             <button class="view-tab is-active" data-view-target="liveView" type="button">Live monitor</button>
             <button class="view-tab" data-view-target="noiseView" type="button">Noise extractor</button>
             <button class="view-tab" data-view-target="nistView" type="button">NIST tests</button>
+            <button class="view-tab" data-view-target="mlView" type="button">ML attack</button>
+            <button class="view-tab" data-view-target="90bView" type="button">90B entropy</button>
             <button class="view-tab" data-view-target="switchView" type="button">DAC switch compare</button>
           </div>
 
@@ -275,7 +277,7 @@
                   <div id="plotAdcSource" class="plot-source-options" role="group" aria-label="Plot channels">
                     <label class="plot-source-option">
                       <input type="checkbox" data-plot-source="ADC0" />
-                      <span>ADC0 commercial PPG</span>
+                      <span>ADC0 ambient/noise</span>
                     </label>
                     <label class="plot-source-option is-primary">
                       <input type="checkbox" data-plot-source="ADC2" checked />
@@ -369,7 +371,7 @@
                 <label class="compact-field" for="encryptionSource">
                   <span>Signal source</span>
                   <select id="encryptionSource">
-                    <option value="ADC0">ADC0 commercial PPG</option>
+                    <option value="ADC0">ADC0 ambient/noise</option>
                     <option value="ADC2" selected>ADC2 BPTT PPG</option>
                     <option value="ADC3">ADC3 BPTT noise/TRNG</option>
                   </select>
@@ -899,6 +901,183 @@
             </div>
           </section>
 
+          <section id="mlView" class="ml-panel view-panel" hidden>
+            <div class="plot-toolbar">
+              <div>
+                <h2>Machine-learning attack</h2>
+                <p id="mlCaption">Run a chronological next-bit prediction analysis on a retained bit stream.</p>
+              </div>
+              <div class="toolbar-actions">
+                <button id="mlRunButton" class="button primary" type="button">Run ML attack</button>
+                <button id="mlClearButton" class="button secondary" type="button">Clear</button>
+                <button id="mlExportButton" class="button secondary" type="button">CSV</button>
+              </div>
+            </div>
+
+            <div class="ml-controls">
+              <label class="compact-field" for="mlBitSource">
+                <span>Bit source</span>
+                <select id="mlBitSource">
+                  <option value="current" selected>Current extracted bits</option>
+                  <option value="ADC0">ADC0 ambient/noise bits</option>
+                  <option value="ADC2">ADC2 bits</option>
+                  <option value="ADC3">ADC3 green-LED/noise bits</option>
+                  <option value="firmware">Firmware ENCF key bits</option>
+                  <option value="upload">Uploaded bit file</option>
+                </select>
+              </label>
+              <label class="compact-field" for="mlBitLimit" title="Use the newest retained bits from the selected source.">
+                <span>Bits to test</span>
+                <input id="mlBitLimit" type="number" min="200" max="1000000" step="100" value="500000" />
+              </label>
+              <label class="compact-field" for="mlLag" title="Number of immediately preceding bits used as model features.">
+                <span>History lag</span>
+                <input id="mlLag" type="number" min="2" max="64" step="1" value="16" />
+              </label>
+              <label class="compact-field" for="mlHoldout" title="The final chronological portion is held out for testing.">
+                <span>Test holdout %</span>
+                <input id="mlHoldout" type="number" min="10" max="50" step="1" value="30" />
+              </label>
+              <label class="compact-field" for="mlMaxTrain" title="Cap the logistic-regression training samples to keep the browser responsive.">
+                <span>Max train samples</span>
+                <input id="mlMaxTrain" type="number" min="5000" max="100000" step="5000" value="60000" />
+              </label>
+            </div>
+
+            <div class="ml-source-status" aria-live="polite">
+              <div class="ml-source-stat"><span>Selected source</span><strong id="mlSourceName">Current extracted bits</strong></div>
+              <div class="ml-source-stat"><span>Available</span><strong id="mlSourceAvailable">0</strong></div>
+              <div class="ml-source-stat"><span>Will test</span><strong id="mlSourceTestCount">0</strong></div>
+              <p id="mlSourceDescription" class="ml-source-description">The analysis uses only the selected bit stream and does not generate new bits.</p>
+            </div>
+
+            <details class="ml-help">
+              <summary>What this attack measures</summary>
+              <div class="ml-help-grid">
+                <div><strong>Attack target</strong><p>Predict the next bit from the preceding bit history. ADC0 and ADC3 are treated as non-biomedical ambient/optical noise sources in this analysis.</p></div>
+                <div><strong>Models</strong><p>Majority baseline, first-order Markov model, and logistic regression using the selected history lag. The logistic model is the ML attack.</p></div>
+                <div><strong>Split rule</strong><p>Training uses the earlier sequence and testing uses the final chronological holdout. Adjacent samples are never randomly mixed between train and test.</p></div>
+                <div><strong>Interpretation</strong><p>Accuracy above the majority baseline indicates predictability. This is an entropy-source diagnostic, not proof of a cryptographic break or security certification.</p></div>
+              </div>
+            </details>
+
+            <div class="ml-summary" aria-live="polite">
+              <div class="bit-stat"><span>Bits</span><strong id="mlBitCount">0</strong></div>
+              <div class="bit-stat"><span>Train / test</span><strong id="mlSplitCount">--</strong></div>
+              <div class="bit-stat"><span>Baseline accuracy</span><strong id="mlBaselineAccuracy">--</strong></div>
+              <div class="bit-stat"><span>ML accuracy</span><strong id="mlAccuracy">--</strong></div>
+              <div class="bit-stat"><span>ML advantage</span><strong id="mlAdvantage">--</strong></div>
+              <div class="bit-stat"><span>Conditional H</span><strong id="mlConditionalEntropy">--</strong></div>
+            </div>
+
+            <div class="ml-result-grid">
+              <div class="ml-results-wrap">
+                <table class="ml-results" aria-label="Machine-learning attack results">
+                  <thead><tr><th>Model</th><th>Accuracy</th><th>Balanced</th><th>Log loss</th><th>Brier</th><th>Advantage</th><th>Confusion</th></tr></thead>
+                  <tbody id="mlResultsBody"><tr><td colspan="7" class="ml-empty">No analysis run yet.</td></tr></tbody>
+                </table>
+              </div>
+              <div class="ml-interpretation">
+                <h3>Analysis result</h3>
+                <p id="mlInterpretation">Run the analysis to compare the ML predictor against the majority baseline.</p>
+                <p id="mlWarning" class="ml-warning">Chronological bit-only prediction. Raw ADC-assisted features are not included.</p>
+              </div>
+            </div>
+          </section>
+
+          <section id="90bView" class="entropy-panel view-panel" hidden>
+            <div class="plot-toolbar">
+              <div>
+                <h2>NIST SP 800-90B entropy diagnostic</h2>
+                <p id="90bCaption">Run the binary-source screening assessment on a retained bit stream.</p>
+              </div>
+              <div class="toolbar-actions">
+                <button id="90bRunButton" class="button primary" type="button">Run 90B diagnostic</button>
+                <button id="90bClearButton" class="button secondary" type="button">Clear</button>
+                <button id="90bExportButton" class="button secondary" type="button">CSV</button>
+                <button id="90bExportInputButton" class="button secondary" type="button">Raw input</button>
+              </div>
+            </div>
+
+            <div class="entropy-controls">
+              <label class="compact-field" for="90bBitSource">
+                <span>Bit source</span>
+                <select id="90bBitSource">
+                  <option value="current" selected>Current extracted bits</option>
+                  <option value="ADC0">ADC0 ambient/noise bits</option>
+                  <option value="ADC2">ADC2 bits</option>
+                  <option value="ADC3">ADC3 green-LED/noise bits</option>
+                  <option value="firmware">Firmware ENCF key bits</option>
+                  <option value="upload">Uploaded bit file</option>
+                </select>
+              </label>
+              <label class="compact-field" for="90bBitLimit" title="Use the newest retained samples from the selected source.">
+                <span>Samples to assess</span>
+                <input id="90bBitLimit" type="number" min="1024" max="1000000" step="1000" value="1000000" />
+              </label>
+              <label class="compact-field" for="90bTupleK" title="Maximum tuple length used by the browser t-tuple screening subset.">
+                <span>Max tuple k</span>
+                <input id="90bTupleK" type="number" min="2" max="16" step="1" value="12" />
+              </label>
+              <label class="compact-field" for="90bDataClass" title="Metadata only. The web stream is not proof of raw-source collection.">
+                <span>Input class</span>
+                <select id="90bDataClass">
+                  <option value="raw" selected>Raw noise-source candidate</option>
+                  <option value="conditioned">Conditioned/output bit stream</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="entropy-source-status" aria-live="polite">
+              <div class="entropy-source-stat"><span>Selected source</span><strong id="90bSourceName">Current extracted bits</strong></div>
+              <div class="entropy-source-stat"><span>Available</span><strong id="90bSourceAvailable">0</strong></div>
+              <div class="entropy-source-stat"><span>Will assess</span><strong id="90bSourceTestCount">0</strong></div>
+              <p id="90bSourceDescription" class="entropy-source-description">SP 800-90B requires raw noise-source samples; this web input is currently a binary bit stream.</p>
+            </div>
+
+            <details class="entropy-help">
+              <summary>How to interpret this panel</summary>
+              <div class="entropy-help-grid">
+                <div><strong>Candidate threshold</strong><p>SP 800-90B validation uses at least 1,000,000 sequential samples for the primary dataset. Shorter input is marked exploratory.</p></div>
+                <div><strong>Entropy estimate</strong><p>The browser reports MCV, Markov, and a t-tuple screening subset. The displayed subset minimum is conservative among those implemented estimates.</p></div>
+                <div><strong>Health tests</strong><p>RCT and binary APT are shown with alpha = 2^-20. They are failure detectors, not proof that the source has high entropy.</p></div>
+                <div><strong>IID decision</strong><p>Frequency, transition dependence, block stability, and autocorrelation are screening aids. Formal 90B IID determination requires the specified permutation tests.</p></div>
+                <div><strong>Raw-source requirement</strong><p>ADC0 and ADC3 bit streams are derived outputs. For a defensible entropy claim, capture and archive the raw ADC noise samples before bit extraction/conditioning.</p></div>
+                <div><strong>Official reproduction</strong><p>Use the Raw input button to export one byte per bit, then reproduce the result with NIST's <a href="https://github.com/usnistgov/SP800-90B_EntropyAssessment" target="_blank" rel="noopener">official EntropyAssessment package</a>.</p></div>
+                <div><strong>Research context</strong><p>Predictor and ML-based min-entropy diagnostics are used in recent TRNG research, but this panel keeps them supplementary to the NIST estimator minimum.</p></div>
+              </div>
+            </details>
+
+            <div class="entropy-summary" aria-live="polite">
+              <div class="bit-stat"><span>Samples</span><strong id="90bSampleCount">0</strong></div>
+              <div class="bit-stat"><span>Data status</span><strong id="90bDataStatus">--</strong></div>
+              <div class="bit-stat"><span>Subset Hmin / sample</span><strong id="90bEntropyValue">--</strong></div>
+              <div class="bit-stat"><span>IID screen</span><strong id="90bIidStatus">--</strong></div>
+              <div class="bit-stat"><span>RCT</span><strong id="90bRctStatus">--</strong></div>
+              <div class="bit-stat"><span>APT</span><strong id="90bAptStatus">--</strong></div>
+            </div>
+
+            <div class="entropy-result-grid">
+              <div class="entropy-results-wrap">
+                <table class="entropy-results" aria-label="SP 800-90B entropy estimator results">
+                  <thead><tr><th>Estimator</th><th>Hmin / sample</th><th>p max</th><th>Statistic</th><th>Result</th></tr></thead>
+                  <tbody id="90bResultsBody"><tr><td colspan="5" class="entropy-empty">No diagnostic run yet.</td></tr></tbody>
+                </table>
+              </div>
+              <div class="entropy-health-card">
+                <h3>Health tests</h3>
+                <p id="90bHealthSummary">No diagnostic run yet.</p>
+                <div class="entropy-health-row"><span>Repetition Count</span><strong id="90bRctDetail">--</strong></div>
+                <div class="entropy-health-row"><span>Adaptive Proportion</span><strong id="90bAptDetail">--</strong></div>
+                <div class="entropy-health-row"><span>IID screening</span><strong id="90bIidDetail">--</strong></div>
+              </div>
+            </div>
+
+            <div class="entropy-report-note">
+              <p id="90bWarning">This is a browser-side 90B-aligned screening report, not an SP 800-90B validation certificate.</p>
+            </div>
+          </section>
+
           <section id="switchView" class="switch-panel view-panel" hidden>
           <div class="plot-toolbar">
             <div>
@@ -977,7 +1156,9 @@
 
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
     <script src="./nist.js?v=20260730-nist-v1" defer></script>
-    <script src="./app.js?v=f8b917eea474" defer></script>
+    <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
+    <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
+    <script src="./app.js?v=c604e6570893" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

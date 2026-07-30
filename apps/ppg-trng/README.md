@@ -5,10 +5,10 @@ YM-PPG firmware.
 
 ## Current Mapping
 
-- ADC0 / AIN0 / P0.02: commercial PPG sensor
+- ADC0 / AIN0 / P0.02: commercial sensor ambient-light/electronic noise input (no biological contact)
 - ADC1: unused
 - ADC2 / AIN2 / P0.04: BPTT PPG signal, selected by default
-- ADC3 / AIN3 / P0.05: BPTT noise/TRNG source
+- ADC3 / AIN3 / P0.05: BPTT green-LED-assisted optical/electronic noise/TRNG source
 
 The firmware always samples ADC0, ADC2, and ADC3 together. `Plot channels` can
 show any combination of the three synchronized channels on the main plot. The
@@ -150,6 +150,24 @@ software, repeated-sequence proportion checks, p-value uniformity checks, or
 cryptographic analysis. For the 500,000-bit profile, Random Excursions may
 remain `N/A` if fewer than 500 complete zero-crossing cycles are present.
 
+## Machine-learning Attack Tab
+
+The `ML attack` tab evaluates next-bit predictability from a selected retained
+bit stream. It compares a majority baseline, a first-order Markov model, and a
+logistic-regression predictor using the previous `History lag` bits. The final
+chronological portion is held out for testing; adjacent bits are not randomly
+shuffled between training and test data. `ML advantage` is the logistic
+accuracy minus the majority-baseline accuracy. `Conditional H` is a first-order
+conditional entropy estimate in bits per output bit.
+
+The current implementation is intentionally bit-only. It does not align raw
+ADC samples to generated bits, so it is not an ADC-assisted attack. ADC0 is
+labelled as an ambient/electronic noise source and ADC3 as a green-LED-assisted
+optical/electronic noise source; neither is treated as a biomedical PPG source
+in this analysis. A positive ML advantage is evidence of predictability under
+the selected recording and split, not proof of a cryptographic break or a
+replacement for NIST SP 800-90B entropy-source evaluation.
+
 ## Bluetooth LE
 
 - Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
@@ -167,6 +185,8 @@ Deploy these files together:
 - `protocol.js`
 - `nist.js`
 - `nist-worker.js`
+- `ml-attack.js`
+- `ml-attack-worker.js`
 - `app.js`
 - `dfu.js`
 - `firmware/` only when publishing an updated DFU package

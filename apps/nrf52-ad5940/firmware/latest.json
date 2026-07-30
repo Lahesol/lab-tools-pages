@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "release": {
-    "controller_version": 36,
-    "capability": "PT3_LIVE_DAC",
-    "secure_dfu_application_version": 37,
-    "package_filename": "AD5940_DFU_TEST_xxaa_s132_smoke_rc_lf_update_v36.zip",
-    "package_size_bytes": 55803,
-    "package_sha256": "7E7C219D8477B2E6E769419C59393EDBA94322C4E0F0542973AE5100F32D3885"
+    "controller_version": 40,
+    "capability": "PT3_200SPS+NUS_B2_QUEUE+SPI0_SYNC_FALLBACK",
+    "secure_dfu_application_version": 41,
+    "package_filename": "AD5940_DFU_TEST_xxaa_s132_smoke_rc_lf_update_v40.zip",
+    "package_size_bytes": 64035,
+    "package_sha256": "6164F9EFB3E4DCE2B6E57EB151535597502C561EA706D3C86FC727044400690C"
   }
 }

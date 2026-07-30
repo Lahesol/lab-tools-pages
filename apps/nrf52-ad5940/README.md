@@ -46,9 +46,11 @@ returns `Q=<pending samples>`, `OVF=<actual queue overflows>`, and
 claiming lossless 200-SPS operation. See `docs/PT3_TRANSPORT_V39.md` for the
 on-air frame contract and physical validation procedure.
 
-V39 is source/build validated only. It is not a signed DFU package and is not
-added to `firmware/latest.json`; the catalogue remains V36 until hardware
-validation and a separately signed application-only artifact are complete.
+V39 has a signed application-only OTA package. The catalogue in
+`firmware/latest.json` identifies it by its filename, byte size, and SHA-256.
+Choose that local ZIP in the browser's DFU panel; the browser checks the local
+file hash before it enables the DFU-entry step. The ZIP is deliberately not
+served from the static GUI deployment and no signing key is included there.
 
 ## DPV and SWV paired-pulse boundary
 
@@ -81,9 +83,8 @@ The DPV tab is deliberately identified in firmware acknowledgements as
 `ENGINE=ADI_SWV_PAIRED`: it is a paired-pulse DPV workflow, not an assertion
 that it has already met a laboratory-standard DPV method. Validate pulse
 polarity, timing, current sign, and redox response with a known standard before
-making electrochemical method or quantitative claims. V37 is source/build
-validated only at this point; it is not yet a signed DFU package and therefore
-is not added to `firmware/latest.json`.
+making electrochemical method or quantitative claims. The signed V39
+application-only package carries this guarded paired-pulse implementation.
 
 PT3 time-domain DSP control requires controller firmware **V34 or later**, which advertises `PT3_DSP`. Controller **V35 or later** additionally advertises `PT3_CAL_DFT` and accepts an RTIA-calibration `dft_num` of 256, 512, 1024, 2048, or 4096 points. The PT3 panel sends guarded `VDS`, `VGS`, target output period, gate settling, SINC3 OSR, SINC2 OSR, optional SINC2-notch values, and—on V35—the calibration DFT length together as the eighth `CFG,PT3` field. Firmware reports the resulting raw rate, B1 rate, and integer decimation in `RAWmHz`, `OUTmHz`, and `DEC`; the GUI stores these configuration values beside unchanged B1 data in CSV. The 10 kOhm HSTIA RTIA and PGA ×9 remain fixed because they are tied to the validated 200 ohm RCAL calibration and 5 uA range. Controller V30 or later reports a rejected RTIA calibration as `@ERR,PT3_CAL,LIB=<error>,SPI=<status>,RTIA=<ohm>`; the GUI preserves that raw line and explains that the requested DUT DAC setpoints were not enabled.
 
@@ -156,8 +157,9 @@ package. A scan/reconnect is needed to observe the new advertised display
 name; the browser retains its prior `BluetoothDevice.name` object until then.
 
 See `docs/BLE_NAME_PERSISTENCE.md` for the fixed flash map, power-loss behavior,
-and release guard. V38 is source/build validated only and has no signed DFU
-package or catalogue entry yet.
+and release guard. The signed V39 package is generic: a board-specific display
+name is written only after the updated V39 application reconnects and confirms
+`NAME_NVM`.
 
 ## Amperometry variables and guardrails
 
