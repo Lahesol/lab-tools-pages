@@ -258,6 +258,7 @@ select {
 .bit-panel,
 .dfu-panel,
 .noise-panel,
+.nist-panel,
 .switch-panel {
   width: 100%;
   min-width: 0;
@@ -1107,6 +1108,98 @@ canvas {
   background: #fbfdfc;
 }
 
+.nist-controls {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.3fr) repeat(6, minmax(105px, 0.7fr));
+  gap: 10px;
+  padding: 14px 16px 0;
+  background: #fbfdfc;
+}
+
+.nist-help {
+  margin: 10px 16px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.nist-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px 0;
+  background: #fbfdfc;
+}
+
+.nist-results-wrap {
+  margin: 12px 16px 16px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.nist-results {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.nist-results th,
+.nist-results td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  vertical-align: top;
+}
+
+.nist-results th {
+  color: var(--muted);
+  background: #f6faf8;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.nist-results th:nth-child(1) { width: 21%; }
+.nist-results th:nth-child(2) { width: 12%; }
+.nist-results th:nth-child(3) { width: 18%; }
+.nist-results th:nth-child(4) { width: 39%; }
+.nist-results th:nth-child(5) { width: 10%; }
+
+.nist-result {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.nist-result.is-pass {
+  color: var(--good);
+  background: #effaf4;
+}
+
+.nist-result.is-check {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.nist-result.is-na {
+  color: var(--muted);
+  background: #eef3f1;
+}
+
+.nist-empty {
+  color: var(--muted);
+  text-align: center !important;
+}
+
 .noise-file-field {
   min-width: 220px;
 }
@@ -1514,9 +1607,11 @@ canvas {
   .encryption-grid,
     .dfu-grid,
     .noise-grid,
+    .nist-controls,
     .noise-explain-grid,
     .noise-method-blocks,
-    .noise-summary {
+    .noise-summary,
+    .nist-summary {
     grid-template-columns: 1fr;
   }
 

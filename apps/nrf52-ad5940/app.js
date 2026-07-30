@@ -1,6 +1,6 @@
 ﻿/* AD5940 Lab Console — static Web Bluetooth client.
  *
- * The app never synthesizes measurement values. Binary A1/B1/C1 frames are
+ * The app never synthesizes measurement values. Binary A1/B1/C1/D1/E1 frames are
  * kept exactly as received. PT3 DAC/pad traces are explicitly configuration-
  * derived setpoints and remain separate from received current data.
  */
@@ -39,6 +39,8 @@ const state = {
   textCarry: "",
   running: false,
   ampxSupported: false,
+  dpvSupported: false,
+  swvSupported: false,
   pt3Supported: false,
   pt3DspSupported: false,
   pt3CalibrationDftSupported: false,
@@ -51,6 +53,8 @@ const state = {
   pendingPt3Live: null,
   pt3Applied: null,
   pt3History: [],
+  pulsePairs: { DPV: null, SWV: null },
+  pulseDerived: [],
   plotWindowSamples: 256,
   expectDfuDisconnect: false,
   plotDrawPending: false,
@@ -63,12 +67,13 @@ const dec = new TextDecoder();
 const elements = {
   connectionDot: $("connectionDot"), connectionLabel: $("connectionLabel"), connect: $("connectButton"), disconnect: $("disconnectButton"),
   browserState: $("browserState"), deviceState: $("deviceState"), controllerVersion: $("controllerVersion"), dfuUpdateState: $("dfuUpdateState"), lastStatus: $("lastStatus"),
-  ampTab: $("ampTab"), cvTab: $("cvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), pt3Parameters: $("pt3Parameters"),
-  ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
+  ampTab: $("ampTab"), cvTab: $("cvTab"), dpvTab: $("dpvTab"), swvTab: $("swvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), dpvParameters: $("dpvParameters"), swvParameters: $("swvParameters"), pt3Parameters: $("pt3Parameters"),
+  ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), dpvTimingHint: $("dpvTimingHint"), dpvCapabilityHint: $("dpvCapabilityHint"), swvTimingHint: $("swvTimingHint"), swvCapabilityHint: $("swvCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
   pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
+  pulseDiagramPanel: $("pulseDiagramPanel"), pulseDiagramTitle: $("pulseDiagramTitle"), pulseDiagramMetric: $("pulseDiagramMetric"), dpvWaveform: $("dpvWaveform"), swvWaveform: $("swvWaveform"), pulseTermOne: $("pulseTermOne"), pulseTermOneValue: $("pulseTermOneValue"), pulseTermTwo: $("pulseTermTwo"), pulseTermTwoValue: $("pulseTermTwoValue"), pulseTermFrequency: $("pulseTermFrequency"), pulseTermDelay: $("pulseTermDelay"), pulseDiagramCaption: $("pulseDiagramCaption"),
   clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), plotWindow: $("plotWindowSamples"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
   dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
   dfuProgress: $("dfuProgress"), dfuProgressBar: $("dfuProgressBar"), dfuProgressPercent: $("dfuProgressPercent"), dfuProgressText: $("dfuProgressText"), verifyApp: $("verifyAppButton"),
@@ -136,7 +141,10 @@ async function loadReleaseManifest() {
 
 function refreshControlAvailability() {
   const connected = isInstrumentConnected();
-  const modeReady = state.mode === "AMP" ? state.ampxSupported : state.mode === "PT3" ? state.pt3Supported : true;
+  const modeReady = state.mode === "AMP" ? state.ampxSupported
+    : state.mode === "DPV" ? state.dpvSupported
+      : state.mode === "SWV" ? state.swvSupported
+        : state.mode === "PT3" ? state.pt3Supported : true;
   const canConfigure = connected && !state.running && modeReady;
   const pt3Running = connected && state.running && state.mode === "PT3";
   const canLivePt3Dac = pt3Running && state.pt3LiveDacSupported && state.pt3LiveReady && Boolean(state.pt3Applied) && !state.pendingPt3Live;
@@ -145,7 +153,7 @@ function refreshControlAvailability() {
   elements.stop.disabled = !connected || !state.running;
   elements.probe.disabled = !connected || state.running;
   elements.pt3Live.disabled = !canLivePt3Dac;
-  [elements.ampTab, elements.cvTab, elements.pt3Tab].forEach((tab) => { tab.disabled = connected && state.running; });
+  [elements.ampTab, elements.cvTab, elements.dpvTab, elements.swvTab, elements.pt3Tab].forEach((tab) => { tab.disabled = connected && state.running; });
   [elements.pt3Vds, elements.pt3Vgs].forEach((control) => { control.disabled = pt3Running && !canLivePt3Dac; });
   [elements.pt3Period, elements.pt3Settle].forEach((control) => { control.disabled = pt3Running; });
 
@@ -159,6 +167,21 @@ function refreshControlAvailability() {
   } else {
     elements.ampCapabilityHint.textContent = "CV remains available; AMPX capability is required only for the expanded AMP controls.";
   }
+
+  const refreshPulseCapability = (mode, supported, hint) => {
+    hint.classList.toggle("ready", connected && supported);
+    if (!connected) {
+      hint.textContent = `Connect to check ${mode} firmware capability before applying paired-pulse parameters.`;
+    } else if (supported) {
+      hint.textContent = `${mode} capability detected. The board emits two raw frames per staircase step; the browser derives I₂ − I₁ only after preserving both raw frames.`;
+    } else if (state.mode === mode) {
+      hint.textContent = `This controller does not advertise ${mode}. Install controller V37 or later before using this tab.`;
+    } else {
+      hint.textContent = `${mode} capability is required only for this paired-pulse measurement tab.`;
+    }
+  };
+  refreshPulseCapability("DPV", state.dpvSupported, elements.dpvCapabilityHint);
+  refreshPulseCapability("SWV", state.swvSupported, elements.swvCapabilityHint);
 
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
   [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported || pt3Running; });
@@ -264,14 +287,22 @@ function handleTextLine(line) {
   log(`NUS RX: ${line}`);
   elements.lastStatus.textContent = line;
   if (line.startsWith("@EVT,RUNNING")) state.running = true;
+  if (line.startsWith("@EVT,RUNNING,DPV") || line.startsWith("@EVT,RUNNING,SWV")) {
+    const mode = line.startsWith("@EVT,RUNNING,DPV") ? "DPV" : "SWV";
+    state.pulsePairs[mode] = null;
+    state.pulseDerived = state.pulseDerived.filter((sample) => sample.mode !== mode);
+    log(`${mode} derived display reset for this run; previously received raw frames remain in the CSV list.`);
+  }
   if (line.startsWith("@EVT,RUNNING,PT3")) state.pt3LiveReady = true;
   if (line.startsWith("@EVT,PT3_SETTLING")) { state.running = true; state.pt3LiveReady = false; }
-  if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@ERR,")) { state.running = false; state.pt3LiveReady = false; state.pendingPt3Live = null; }
+  if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@EVT,DPV_COMPLETE") || line.startsWith("@EVT,SWV_COMPLETE") || line.startsWith("@ERR,")) { state.running = false; state.pt3LiveReady = false; state.pendingPt3Live = null; }
   if (line.startsWith("@INFO,")) {
     const versionMatch = line.match(/^@INFO,AD5940_CTRL,V(\d+)(?:,|$)/);
     if (versionMatch) state.controllerVersion = Number(versionMatch[1]);
     else if (line.startsWith("@INFO,AD5940_CTRL")) state.controllerVersion = null;
     state.ampxSupported = line.includes("AMPX");
+    state.dpvSupported = line.includes("DPV");
+    state.swvSupported = line.includes("SWV");
     state.pt3Supported = line.includes("PT3");
     state.pt3DspSupported = line.includes("PT3_DSP");
     state.pt3CalibrationDftSupported = line.includes("PT3_CAL_DFT");
@@ -279,6 +310,8 @@ function handleTextLine(line) {
     refreshReleaseState();
     if (line.startsWith("@INFO,AD5940_CTRL") && state.controllerVersion === null) log("Controller @INFO did not include a parseable AD5940_CTRL release.", "WARN");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
+    log(state.dpvSupported ? "DPV paired-pulse capability detected." : "DPV capability not advertised by this firmware.", state.dpvSupported ? "INFO" : "WARN");
+    log(state.swvSupported ? "SWV paired-pulse capability detected." : "SWV capability not advertised by this firmware.", state.swvSupported ? "INFO" : "WARN");
     log(state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
   }
   if (line.startsWith("@ACK,CFG,PT3") && state.pendingPt3) {
@@ -306,12 +339,14 @@ function handleTextLine(line) {
 
 function handleNusNotification(event) {
   const bytes = new Uint8Array(event.target.value.buffer.slice(0));
-  if (bytes.length === 9 && (bytes[0] === 0xa1 || bytes[0] === 0xb1 || bytes[0] === 0xc1)) {
+  if (bytes.length === 9 && (bytes[0] === 0xa1 || bytes[0] === 0xb1 || bytes[0] === 0xc1 || bytes[0] === 0xd1 || bytes[0] === 0xe1)) {
     const view = new DataView(bytes.buffer);
     const index = view.getUint32(1, true);
     const currentUa = view.getFloat32(5, true);
-    const mode = bytes[0] === 0xa1 ? "AMP" : bytes[0] === 0xb1 ? "PT3" : "CV";
-    addSample({ mode, index, currentUa, receivedAt: new Date().toISOString(), pt3: mode === "PT3" && state.pt3Applied ? { ...state.pt3Applied } : null });
+    const mode = bytes[0] === 0xa1 ? "AMP" : bytes[0] === 0xb1 ? "PT3" : bytes[0] === 0xc1 ? "CV" : bytes[0] === 0xd1 ? "DPV" : "SWV";
+    const sample = { mode, index, currentUa, receivedAt: new Date().toISOString(), pt3: mode === "PT3" && state.pt3Applied ? { ...state.pt3Applied } : null };
+    if (mode === "DPV" || mode === "SWV") addPulseRawSample(sample);
+    else addSample(sample);
   } else {
     appendText(bytes);
   }
@@ -327,7 +362,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.controllerVersion = null;
+    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -348,7 +383,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPt3Live = null; state.controllerVersion = null;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPt3Live = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -384,17 +419,26 @@ function switchMode(mode) {
   state.mode = mode;
   const amp = mode === "AMP";
   const cv = mode === "CV";
-  elements.ampTab.classList.toggle("active", amp); elements.ampTab.setAttribute("aria-selected", String(amp));
-  elements.cvTab.classList.toggle("active", cv); elements.cvTab.setAttribute("aria-selected", String(cv));
-  elements.pt3Tab.classList.toggle("active", mode === "PT3"); elements.pt3Tab.setAttribute("aria-selected", String(mode === "PT3"));
-  elements.ampParameters.classList.toggle("hidden", !amp); elements.cvParameters.classList.toggle("hidden", !cv); elements.pt3Parameters.classList.toggle("hidden", mode !== "PT3");
+  const dpv = mode === "DPV";
+  const swv = mode === "SWV";
+  [[elements.ampTab, amp], [elements.cvTab, cv], [elements.dpvTab, dpv], [elements.swvTab, swv], [elements.pt3Tab, mode === "PT3"]].forEach(([tab, active]) => {
+    tab.classList.toggle("active", active); tab.setAttribute("aria-selected", String(active));
+  });
+  elements.ampParameters.classList.toggle("hidden", !amp); elements.cvParameters.classList.toggle("hidden", !cv); elements.dpvParameters.classList.toggle("hidden", !dpv); elements.swvParameters.classList.toggle("hidden", !swv); elements.pt3Parameters.classList.toggle("hidden", mode !== "PT3");
   elements.pt3SettingsPanel.classList.toggle("hidden", mode !== "PT3");
+  elements.pulseDiagramPanel.classList.toggle("hidden", !(dpv || swv));
   if (amp) {
     elements.plotTitle.textContent = "Amperometry — current vs sample index";
     elements.plotCaption.textContent = "Each received A1 current value is drawn without smoothing or rescaling.";
   } else if (cv) {
     elements.plotTitle.textContent = "Cyclic voltammetry — current vs sequence sample index";
     elements.plotCaption.textContent = "Each received C1 current value is drawn against the sequence sample index. Voltage mapping is intentionally not inferred in the browser.";
+  } else if (dpv || swv) {
+    const name = dpv ? "Differential pulse voltammetry (DPV)" : "Square-wave voltammetry (SWV)";
+    const frame = dpv ? "D1" : "E1";
+    elements.plotTitle.textContent = `${name} — I₂ − I₁ vs staircase pair index`;
+    elements.plotCaption.textContent = `The plot is a derived I₂ − I₁ view only. Every raw ${frame} current frame, its phase, and derived difference remain separately exportable in CSV.`;
+    updatePulsePreview(mode);
   } else {
     elements.plotTitle.textContent = "Phototransistor (PT3) — current vs sample index";
     elements.plotCaption.textContent = "Each received B1 current value is drawn without smoothing or rescaling. DAC and PAD traces below are acknowledged configuration-derived setpoints, not measured voltages.";
@@ -405,6 +449,52 @@ function switchMode(mode) {
 }
 
 function integer(id) { return Math.trunc(Number($(id).value)); }
+
+function readPulseConfig(mode) {
+  const prefix = mode.toLowerCase();
+  const config = {
+    mode,
+    start: integer(`${prefix}Start`), end: integer(`${prefix}End`), vzero: integer(`${prefix}Vzero`), step: integer(`${prefix}Step`),
+    pulse: integer(`${prefix}Pulse`), frequency: integer(`${prefix}Frequency`), delay: integer(`${prefix}Delay`), rtia: integer(`${prefix}Rtia`), sinc3: integer(`${prefix}Sinc3`),
+  };
+  const span = config.end - config.start;
+  const fullSteps = span / config.step;
+  const rawSamples = 2 * fullSteps;
+  const halfPeriodMs = 500 / config.frequency;
+  const supportedRtia = [1000, 4000, 10000, 20000, 40000, 100000, 160000];
+  const supportedSinc3 = [2, 4, 5];
+  if (!Object.values(config).filter((value) => typeof value === "number").every(Number.isFinite)
+    || config.start < -900 || config.start > 900 || config.end < -900 || config.end > 900 || config.end <= config.start
+    || config.vzero < 200 || config.vzero > 2200 || config.step < 1 || config.step > 25 || span % config.step
+    || config.pulse < 1 || config.pulse > 200 || config.frequency < 1 || config.frequency > 100 || config.delay < 1 || config.delay > 100
+    || !supportedRtia.includes(config.rtia) || !supportedSinc3.includes(config.sinc3) || rawSamples < 4 || rawSamples > 512
+    || config.delay >= halfPeriodMs - 1 || config.vzero + config.start - config.pulse < 200 || config.vzero + config.end + config.pulse > 2200) {
+    throw new Error(`${mode} parameters violate the guarded potential, sequence-length, or sample-timing range.`);
+  }
+  return { ...config, rawSamples, pairCount: rawSamples / 2, halfPeriodMs };
+}
+
+function updatePulsePreview(mode) {
+  const isDpv = mode === "DPV";
+  const hint = isDpv ? elements.dpvTimingHint : elements.swvTimingHint;
+  try {
+    const config = readPulseConfig(mode);
+    const termOne = isDpv ? "ΔE — staircase increment" : "ΔE — staircase increment";
+    const termTwo = isDpv ? "Pulse A — increment about step" : "Square-wave A — alternating amplitude";
+    hint.textContent = `${config.rawSamples} raw ${mode} frames / ${config.pairCount} I₂ − I₁ pairs. Paired-pulse schedule: ${config.frequency} Hz (${config.halfPeriodMs.toFixed(2)} ms half-period); current is sampled ${config.delay} ms after each phase command.`;
+    elements.pulseDiagramTitle.textContent = isDpv ? "DPV waveform and sampled pair" : "SWV waveform and sampled pair";
+    elements.pulseDiagramMetric.textContent = `${config.pairCount} pairs · ${config.frequency} Hz`;
+    elements.dpvWaveform.classList.toggle("hidden", !isDpv); elements.swvWaveform.classList.toggle("hidden", isDpv);
+    elements.pulseTermOne.textContent = termOne; elements.pulseTermOneValue.textContent = `${config.step} mV`;
+    elements.pulseTermTwo.textContent = termTwo; elements.pulseTermTwoValue.textContent = `${config.pulse} mV`;
+    elements.pulseTermFrequency.textContent = `f — paired-pulse frequency: ${config.frequency} Hz (${config.halfPeriodMs.toFixed(2)} ms half-period)`;
+    elements.pulseTermDelay.textContent = `tₛ — sample delay after each phase: ${config.delay} ms; Vzero: ${config.vzero} mV; RTIA: ${(config.rtia / 1000).toFixed(config.rtia < 10000 ? 0 : 1)} kΩ; SINC3: ${config.sinc3}`;
+    elements.pulseDiagramCaption.textContent = `Diagram shows configured ${mode} terms, not a measured potential trace. ADI paired-pulse sequencing sends two raw ${isDpv ? "D1" : "E1"} current frames per step; the display derives I₂ − I₁ only after both frames arrive.`;
+  } catch {
+    hint.textContent = "Enter a complete, guarded paired-pulse configuration to calculate frame count and timing.";
+    elements.pulseDiagramMetric.textContent = "Invalid configuration";
+  }
+}
 
 function updateAmpTimingHint() {
   const period = integer("ampPeriod");
@@ -501,6 +591,11 @@ function readConfig() {
     return config;
   }
   if (state.mode === "PT3") return readPt3Config();
+  if (state.mode === "DPV" || state.mode === "SWV") {
+    const supported = state.mode === "DPV" ? state.dpvSupported : state.swvSupported;
+    if (!supported) throw new Error(`${state.mode} controls require controller V37 or later.`);
+    return readPulseConfig(state.mode);
+  }
   const config = { start: integer("cvStart"), vertex: integer("cvVertex"), vzero: integer("cvVzero"), steps: integer("cvSteps"), duration: integer("cvDuration"), settle: integer("cvSettle"), rtia: integer("cvRtia") };
   const pointPeriod = config.duration / config.steps;
   if (config.start === config.vertex || config.start < -1000 || config.start > 1000 || config.vertex < -1000 || config.vertex > 1000 || config.vzero < 200 || config.vzero > 2200 || config.vzero + config.start < 200 || config.vzero + config.start > 2200 || config.vzero + config.vertex < 200 || config.vzero + config.vertex > 2200 || config.steps < 2 || config.steps > 4095 || config.duration < 10 || config.duration > 600000 || config.settle < 2 || config.settle > 1000 || pointPeriod < config.settle + 1 || pointPeriod < 3) throw new Error("CV parameters violate the firmware guard range or timing relation.");
@@ -510,6 +605,7 @@ function readConfig() {
 function configCommand() {
   const config = readConfig();
   if (state.mode === "AMP") return `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`;
+  if (state.mode === "DPV" || state.mode === "SWV") return `CFG,${state.mode},${config.start},${config.end},${config.vzero},${config.step},${config.pulse},${config.frequency},${config.delay},${config.rtia},${config.sinc3}`;
   if (state.mode === "PT3") {
     const applied = state.pt3CalibrationDftSupported ? config : { ...config, calDft: 1024 };
     const dspApplied = state.pt3DspSupported ? applied : { ...applied, sinc3: 5, sinc2: 800, notch: 0 };
@@ -580,6 +676,25 @@ function addSample(sample) {
   renderRows(); schedulePlot();
 }
 
+function addPulseRawSample(sample) {
+  const phase = sample.index % 2 === 0 ? "I1" : "I2";
+  const pulse = { pairIndex: Math.floor(sample.index / 2), phase, differenceUa: null, pairGap: false };
+  if (phase === "I1") {
+    state.pulsePairs[sample.mode] = sample;
+  } else {
+    const first = state.pulsePairs[sample.mode];
+    if (first && first.index === sample.index - 1) {
+      pulse.differenceUa = sample.currentUa - first.currentUa;
+      state.pulseDerived.push({ mode: sample.mode, index: pulse.pairIndex, currentUa: pulse.differenceUa, receivedAt: sample.receivedAt });
+    } else {
+      pulse.pairGap = true;
+      log(`${sample.mode} raw frame pair gap at index ${sample.index}; I₂ − I₁ was not calculated.`, "WARN");
+    }
+    state.pulsePairs[sample.mode] = null;
+  }
+  addSample({ ...sample, pulse });
+}
+
 function schedulePlot() {
   if (state.plotDrawPending) return;
   state.plotDrawPending = true;
@@ -590,25 +705,26 @@ function renderRows() {
   const recent = state.samples.slice(-40).reverse();
   elements.sampleRows.innerHTML = recent.length ? recent.map((s) => {
     const pt3 = s.pt3 ? `CE ${formatMv(s.pt3.ceMv)}, gate ${formatMv(s.pt3.gateMv)}; S3/S2 ${s.pt3.sinc3}/${s.pt3.sinc2}` : "—";
-    return `<tr><td>${s.mode}</td><td>${s.index}</td><td>${s.currentUa}</td><td>${pt3}</td><td>${new Date(s.receivedAt).toLocaleTimeString()}</td></tr>`;
+    const pulse = s.pulse ? `pair ${s.pulse.pairIndex}, ${s.pulse.phase}${Number.isFinite(s.pulse.differenceUa) ? `; I₂−I₁ ${s.pulse.differenceUa}` : s.pulse.pairGap ? "; pair gap" : ""}` : pt3;
+    return `<tr><td>${s.mode}</td><td>${s.index}</td><td>${s.currentUa}</td><td>${pulse}</td><td>${new Date(s.receivedAt).toLocaleTimeString()}</td></tr>`;
   }).join("") : '<tr><td colspan="5" class="empty">No binary measurement frames received.</td></tr>';
 }
 
 function clearSamples() {
-  state.samples = []; elements.sampleCount.textContent = "0 samples"; elements.downloadCsv.disabled = true; renderRows(); drawPlot(); log("Displayed and exportable received sample list cleared.");
+  state.samples = []; state.pulsePairs = { DPV: null, SWV: null }; state.pulseDerived = []; elements.sampleCount.textContent = "0 samples"; elements.downloadCsv.disabled = true; renderRows(); drawPlot(); log("Displayed and exportable received sample list cleared.");
 }
 
 function updatePlotWindow() {
   const value = elements.plotWindow.value;
   state.plotWindowSamples = value === "all" ? null : Number(value);
   schedulePlot();
-  log(`Plot view changed to ${state.plotWindowSamples === null ? "all" : state.plotWindowSamples} raw samples; collected data and CSV remain unchanged.`);
+  log(`Plot view changed to ${state.plotWindowSamples === null ? "all" : state.plotWindowSamples} display points; collected raw data and CSV remain unchanged.`);
 }
 
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pulse_pair_index,pulse_raw_phase,pulse_i2_minus_i1_uA,pulse_pair_gap,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pulse ? s.pulse.pairIndex : ""},${s.pulse ? s.pulse.phase : ""},${s.pulse && Number.isFinite(s.pulse.differenceUa) ? s.pulse.differenceUa : ""},${s.pulse?.pairGap ? "TRUE" : ""},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);
@@ -624,16 +740,17 @@ function drawPlot() {
   ctx.font = "11px system-ui"; ctx.fillStyle = "#8da9bd";
   for (let i = 0; i <= 5; i += 1) { const y = margin.top + chartH * i / 5; ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(width - margin.right, y); ctx.stroke(); }
   for (let i = 0; i <= 6; i += 1) { const x = margin.left + chartW * i / 6; ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, height - margin.bottom); ctx.stroke(); }
-  const allPoints = state.samples.filter((s) => s.mode === state.mode);
+  const pulseMode = state.mode === "DPV" || state.mode === "SWV";
+  const allPoints = pulseMode ? state.pulseDerived.filter((s) => s.mode === state.mode) : state.samples.filter((s) => s.mode === state.mode);
   const points = state.plotWindowSamples === null ? allPoints : allPoints.slice(-state.plotWindowSamples);
-  if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText("Awaiting received device data", width / 2, height / 2); if (state.mode === "PT3") drawPt3SettingsPlot(); return; }
+  if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText(pulseMode ? "Awaiting a complete raw I₁ / I₂ pair" : "Awaiting received device data", width / 2, height / 2); if (state.mode === "PT3") drawPt3SettingsPlot(); return; }
   let minX = Math.min(...points.map((p) => p.index)); let maxX = Math.max(...points.map((p) => p.index)); let minY = Math.min(...points.map((p) => p.currentUa)); let maxY = Math.max(...points.map((p) => p.currentUa));
   if (minX === maxX) { minX -= 1; maxX += 1; } if (minY === maxY) { minY -= 1; maxY += 1; } const padding = (maxY - minY) * .12; minY -= padding; maxY += padding;
   const px = (x) => margin.left + (x - minX) / (maxX - minX) * chartW; const py = (y) => margin.top + (maxY - y) / (maxY - minY) * chartH;
   ctx.textAlign = "right"; for (let i = 0; i <= 5; i += 1) { const value = maxY - (maxY - minY) * i / 5; ctx.fillText(value.toPrecision(4), margin.left - 7, margin.top + chartH * i / 5 + 4); }
   ctx.textAlign = "center"; for (let i = 0; i <= 6; i += 1) { const value = minX + (maxX - minX) * i / 6; ctx.fillText(Math.round(value), margin.left + chartW * i / 6, height - 12); }
-  ctx.strokeStyle = state.mode === "PT3" ? "#63d67d" : "#3fd0e6"; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => { if (index) ctx.lineTo(px(p.index), py(p.currentUa)); else ctx.moveTo(px(p.index), py(p.currentUa)); }); ctx.stroke();
-  ctx.fillStyle = "#c9dce9"; ctx.textAlign = "left"; ctx.fillText("Current (µA)", margin.left, 12); ctx.textAlign = "right"; ctx.fillText("sample index", width - margin.right, height - 12);
+  ctx.strokeStyle = state.mode === "PT3" ? "#63d67d" : state.mode === "SWV" ? "#5d8dff" : "#3fd0e6"; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => { if (index) ctx.lineTo(px(p.index), py(p.currentUa)); else ctx.moveTo(px(p.index), py(p.currentUa)); }); ctx.stroke();
+  ctx.fillStyle = "#c9dce9"; ctx.textAlign = "left"; ctx.fillText(pulseMode ? "I₂ − I₁ (µA)" : "Current (µA)", margin.left, 12); ctx.textAlign = "right"; ctx.fillText(pulseMode ? "staircase pair index" : "sample index", width - margin.right, height - 12);
   if (state.mode === "PT3") drawPt3SettingsPlot();
 }
 
@@ -849,8 +966,10 @@ async function selectDfuAndTransfer() {
   finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg || state.dfu.completed; }
 }
 
-elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
+elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.dpvTab.addEventListener("click", () => switchMode("DPV")); elements.swvTab.addEventListener("click", () => switchMode("SWV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
+document.querySelectorAll("#dpvParameters input, #dpvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("DPV")); control.addEventListener("change", () => updatePulsePreview("DPV")); });
+document.querySelectorAll("#swvParameters input, #swvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("SWV")); control.addEventListener("change", () => updatePulsePreview("SWV")); });
 document.querySelectorAll("#pt3Parameters input, #pt3Parameters select").forEach((control) => { control.addEventListener("input", updatePt3Preview); control.addEventListener("change", updatePt3Preview); });
 
-browserReady(); void loadReleaseManifest(); switchMode("AMP"); updateAmpTimingHint(); updatePt3Preview(); drawPlot();
+browserReady(); void loadReleaseManifest(); switchMode("AMP"); updateAmpTimingHint(); updatePulsePreview("DPV"); updatePulsePreview("SWV"); updatePt3Preview(); drawPlot();

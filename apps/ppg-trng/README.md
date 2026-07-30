@@ -110,6 +110,29 @@ signal is filtered by a channel-specific 22-sample moving average before its low
 8/10/12/14-bit field is XORed with ADC3-derived key bits. Raw plotting and the raw
 CSV field remain unchanged.
 
+## NIST Test Tab
+
+The `NIST tests` tab runs the 15 NIST SP 800-22 Rev.1a test families on the
+retained browser bit buffer. The calculation is performed in
+`nist-worker.js` so the live serial reader and plot remain responsive. The tab
+supports a selectable bit source, a test-length limit, block/template settings,
+approximate-entropy and serial pattern lengths, and the linear-complexity block
+size.
+
+The implemented families are Frequency, Block Frequency, Cumulative Sums,
+Runs, Longest Run of Ones, Binary Matrix Rank, DFT, Non-overlapping Template,
+Overlapping Template, Maurer's Universal, Approximate Entropy, Random
+Excursions, Random Excursions Variant, Serial, and Linear Complexity. Results
+use alpha 0.01. Tests that need more bits or random-walk cycles are shown as
+`N/A`, not as a failed result. The CSV export stores one row per test family and
+includes component p-values in the detail column.
+
+The browser tab is a screening tool and does not replace the official NIST STS
+software, repeated-sequence proportion checks, p-value uniformity checks, or
+cryptographic analysis. For the user's 500,000-bit target, Universal is
+available with the default parameters, while Random Excursions may remain
+`N/A` if fewer than 500 complete zero-crossing cycles are present.
+
 ## Bluetooth LE
 
 - Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
@@ -125,6 +148,8 @@ Deploy these files together:
 - `index.html`
 - `styles.css`
 - `protocol.js`
+- `nist.js`
+- `nist-worker.js`
 - `app.js`
 - `dfu.js`
 - `firmware/` only when publishing an updated DFU package

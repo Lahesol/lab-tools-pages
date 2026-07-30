@@ -142,6 +142,26 @@ const els = {
   noiseMethodBlocks: document.querySelector("#noiseMethodBlocks"),
   noiseBitCanvas: document.querySelector("#noiseBitCanvas"),
   noiseBitCanvasWrap: document.querySelector(".noise-canvas-wrap"),
+  nistView: document.querySelector("#nistView"),
+  nistCaption: document.querySelector("#nistCaption"),
+  nistHelp: document.querySelector("#nistHelp"),
+  nistBitSource: document.querySelector("#nistBitSource"),
+  nistBitLimit: document.querySelector("#nistBitLimit"),
+  nistBlockSize: document.querySelector("#nistBlockSize"),
+  nistTemplate: document.querySelector("#nistTemplate"),
+  nistApproxM: document.querySelector("#nistApproxM"),
+  nistSerialM: document.querySelector("#nistSerialM"),
+  nistLinearM: document.querySelector("#nistLinearM"),
+  nistRunButton: document.querySelector("#nistRunButton"),
+  nistClearButton: document.querySelector("#nistClearButton"),
+  nistExportButton: document.querySelector("#nistExportButton"),
+  nistBitCount: document.querySelector("#nistBitCount"),
+  nistOneRatio: document.querySelector("#nistOneRatio"),
+  nistPassCount: document.querySelector("#nistPassCount"),
+  nistCheckCount: document.querySelector("#nistCheckCount"),
+  nistNaCount: document.querySelector("#nistNaCount"),
+  nistElapsed: document.querySelector("#nistElapsed"),
+  nistResultsBody: document.querySelector("#nistResultsBody"),
 };
 
 const DEFAULT_MAX_SAMPLES = 20000;
@@ -301,6 +321,9 @@ const state = {
   noiseResults: [],
   noiseSelectedBits: [],
   noiseSelectedMethod: "",
+  nistResults: [],
+  nistWorker: null,
+  nistRunning: false,
 };
 
 const encoder = new TextEncoder();
@@ -3264,8 +3287,8 @@ function exportBitsCsv() {
 }
 
 function setActiveView(viewId) {
-  const target = ["noiseView", "switchView"].includes(viewId) ? viewId : "liveView";
-  [els.liveView, els.noiseView, els.switchView].forEach((view) => {
+  const target = ["noiseView", "nistView", "switchView"].includes(viewId) ? viewId : "liveView";
+  [els.liveView, els.noiseView, els.nistView, els.switchView].forEach((view) => {
     if (view) view.hidden = view.id !== target;
   });
   els.viewTabs.forEach((button) => {
@@ -3942,6 +3965,226 @@ function exportNoiseBitsCsv() {
   link.click();
   URL.revokeObjectURL(url);
   addLog("SYS", `Exported ${state.noiseResults.length} noise bit streams`);
+}
+
+function getNistBitEntries() {
+  const source = els.nistBitSource?.value || "current";
+  if (source === "current") return state.bits;
+  if (source === "firmware") {
+    return state.bits.filter((entry) => entry.firmwareFrame || /firmware/i.test(entry.source || ""));
+  }
+  return state.bits.filter((entry) => normalizeAdcSource(entry.adcSource) === source);
+}
+
+function getNistSourceLabel() {
+  const source = els.nistBitSource?.value || "current";
+  if (source === "current") return state.bitSource || "current web bit buffer";
+  if (source === "firmware") return "Firmware ENCF key bits";
+  return `${source} bits`;
+}
+
+function getNistOptions() {
+  return {
+    blockSize: clampInteger(els.nistBlockSize?.value, 8, 10000, 128),
+    template: String(els.nistTemplate?.value || "000000001").replace(/[^01]/g, "").slice(0, 21) || "000000001",
+    approximateEntropyM: clampInteger(els.nistApproxM?.value, 2, 15, 10),
+    serialM: clampInteger(els.nistSerialM?.value, 3, 15, 10),
+    linearBlockSize: clampInteger(els.nistLinearM?.value, 7, 5000, 500),
+  };
+}
+
+function formatNistPValue(value) {
+  if (!Number.isFinite(value)) return "--";
+  if (value < 0.0001) return value.toExponential(3);
+  return value.toFixed(6);
+}
+
+function getNistResultStatus(test) {
+  if (!test?.available) return { label: "N/A", className: "is-na" };
+  return test.pass
+    ? { label: "PASS", className: "is-pass" }
+    : { label: "CHECK", className: "is-check" };
+}
+
+function getNistComponentsText(test) {
+  const componentText = test?.children?.length
+    ? test.children.map((child) => `${child.name}: p=${formatNistPValue(child.p)}${child.detail ? ` (${child.detail})` : ""}`).join(" | ")
+    : "";
+  return [test?.detail || "", componentText].filter(Boolean).join(" | ");
+}
+
+function renderNistResults(results = state.nistResults) {
+  if (!els.nistResultsBody) return;
+  if (!results.length) {
+    els.nistResultsBody.innerHTML = '<tr><td colspan="5" class="nist-empty">No test run yet.</td></tr>';
+    return;
+  }
+
+  els.nistResultsBody.innerHTML = results.map((test) => {
+    const status = getNistResultStatus(test);
+    return `
+      <tr>
+        <td>${escapeHtml(test.name || "Unknown")}</td>
+        <td>${formatNistPValue(test.p)}</td>
+        <td>${escapeHtml(test.value || "--")}</td>
+        <td>${escapeHtml(getNistComponentsText(test))}</td>
+        <td><span class="nist-result ${status.className}">${status.label}</span></td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function updateNistSummary(result = null, elapsedMs = null) {
+  const bitCount = result?.n || 0;
+  const ones = result?.ones || 0;
+  if (els.nistBitCount) els.nistBitCount.textContent = String(bitCount);
+  if (els.nistOneRatio) els.nistOneRatio.textContent = bitCount ? (ones / bitCount).toFixed(6) : "--";
+  if (els.nistPassCount) els.nistPassCount.textContent = String(result?.passCount || 0);
+  if (els.nistCheckCount) els.nistCheckCount.textContent = String(result?.checkCount || 0);
+  if (els.nistNaCount) els.nistNaCount.textContent = String(result?.unavailableCount || 0);
+  if (els.nistElapsed) els.nistElapsed.textContent = Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "--";
+}
+
+function finishNistRun(result, elapsedMs) {
+  state.nistResults = result?.tests || [];
+  state.nistRunning = false;
+  if (state.nistWorker) {
+    state.nistWorker.terminate();
+    state.nistWorker = null;
+  }
+  if (els.nistRunButton) {
+    els.nistRunButton.disabled = false;
+    els.nistRunButton.textContent = "Run all 15 tests";
+  }
+  updateNistSummary(result, elapsedMs);
+  renderNistResults(state.nistResults);
+  if (els.nistCaption) {
+    els.nistCaption.textContent = `${getNistSourceLabel()} | ${result?.n || 0} bits | ${result?.availableCount || 0}/${result?.testFamilyCount || 15} test families available | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
+  }
+}
+
+function runNistMainThread(bits, options, startedAt) {
+  window.setTimeout(() => {
+    try {
+      const result = window.YmPpgNist.runAll(bits, options);
+      finishNistRun(result, performance.now() - startedAt);
+    } catch (error) {
+      state.nistRunning = false;
+      if (els.nistRunButton) els.nistRunButton.disabled = false;
+      addLog("ERR", `NIST suite failed: ${error.message || error}`, true);
+    }
+  }, 0);
+}
+
+function runNistTestSuite() {
+  if (state.nistRunning) return;
+  if (!window.YmPpgNist) {
+    addLog("ERR", "NIST calculation module is unavailable", true);
+    return;
+  }
+
+  const entries = getNistBitEntries();
+  const requestedLimit = clampInteger(els.nistBitLimit?.value, 100, 1000000, 100000);
+  const selectedEntries = entries.slice(-requestedLimit);
+  const bits = Uint8Array.from(selectedEntries, (entry) => (entry.bit ? 1 : 0));
+  if (bits.length < 100) {
+    addLog("SYS", `NIST needs at least 100 retained bits; available ${bits.length}`);
+    return;
+  }
+
+  const options = getNistOptions();
+  const startedAt = performance.now();
+  state.nistRunning = true;
+  state.nistResults = [];
+  renderNistResults([]);
+  updateNistSummary(null, null);
+  if (els.nistRunButton) {
+    els.nistRunButton.disabled = true;
+    els.nistRunButton.textContent = "Running...";
+  }
+  if (els.nistCaption) els.nistCaption.textContent = `${getNistSourceLabel()} | ${bits.length} bits | calculating in background...`;
+
+  const fallbackBits = bits.slice();
+  const useWorker = typeof Worker === "function";
+  if (!useWorker) {
+    runNistMainThread(fallbackBits, options, startedAt);
+    return;
+  }
+
+  let settled = false;
+  try {
+    const worker = new Worker("./nist-worker.js");
+    state.nistWorker = worker;
+    worker.onmessage = (event) => {
+      if (settled) return;
+      settled = true;
+      if (event.data?.type === "result") {
+        finishNistRun(event.data.result, performance.now() - startedAt);
+      } else {
+        worker.terminate();
+        state.nistWorker = null;
+        runNistMainThread(fallbackBits, options, startedAt);
+      }
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      state.nistWorker = null;
+      addLog("SYS", `NIST worker unavailable; using main thread (${event.message || "worker error"})`);
+      runNistMainThread(fallbackBits, options, startedAt);
+    };
+    worker.postMessage({ bits, options }, [bits.buffer]);
+  } catch (error) {
+    settled = true;
+    if (state.nistWorker) state.nistWorker.terminate();
+    state.nistWorker = null;
+    addLog("SYS", `NIST worker unavailable; using main thread (${error.message || error})`);
+    runNistMainThread(fallbackBits, options, startedAt);
+  }
+}
+
+function clearNistResults() {
+  if (state.nistWorker) state.nistWorker.terminate();
+  state.nistWorker = null;
+  state.nistRunning = false;
+  state.nistResults = [];
+  if (els.nistRunButton) {
+    els.nistRunButton.disabled = false;
+    els.nistRunButton.textContent = "Run all 15 tests";
+  }
+  updateNistSummary(null, null);
+  renderNistResults([]);
+  if (els.nistCaption) els.nistCaption.textContent = "Run the suite on the retained web bit buffer.";
+}
+
+function exportNistResultsCsv() {
+  if (!state.nistResults.length) {
+    addLog("SYS", "No NIST results to export");
+    return;
+  }
+  const rows = ["test_family,p_value,statistic,parameters_components,result,available,n,alpha"];
+  state.nistResults.forEach((test) => {
+    const status = getNistResultStatus(test);
+    rows.push([
+      csvCell(test.name),
+      csvCell(formatNistPValue(test.p)),
+      csvCell(test.value),
+      csvCell(getNistComponentsText(test)),
+      status.label,
+      test.available ? "1" : "0",
+      test.n,
+      window.YmPpgNist?.ALPHA || 0.01,
+    ].join(","));
+  });
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `nist_sp800-22_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${state.nistResults.length} NIST test-family results`);
 }
 
 function toggleDemo() {
@@ -4809,6 +5052,12 @@ function bindEvents() {
   });
   els.runNoiseButton.addEventListener("click", runNoiseExtraction);
   els.exportNoiseBitsButton.addEventListener("click", exportNoiseBitsCsv);
+  els.nistRunButton?.addEventListener("click", runNistTestSuite);
+  els.nistClearButton?.addEventListener("click", clearNistResults);
+  els.nistExportButton?.addEventListener("click", exportNistResultsCsv);
+  els.nistTemplate?.addEventListener("change", () => {
+    els.nistTemplate.value = getNistOptions().template;
+  });
   els.bitColumns.addEventListener("change", () => {
     state.needsBitDraw = true;
     resizeBitCanvas();
@@ -4841,6 +5090,8 @@ function init() {
   updateFilterUi();
   updateBitStats();
   updateEncryptionUi();
+  updateNistSummary(null, null);
+  renderNistResults([]);
   resizeCanvas();
   resizeCipherCanvas();
   new ResizeObserver(resizeCanvas).observe(els.canvasWrap || els.plotCanvas);

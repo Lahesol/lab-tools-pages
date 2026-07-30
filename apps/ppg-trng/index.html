@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=d5a647e9c4fd" />
+    <link rel="stylesheet" href="./styles.css?v=69aa6e6d4a62" />
   </head>
   <body>
     <div class="app-shell">
@@ -159,6 +159,7 @@
           <div class="view-tabs" role="tablist" aria-label="Main views">
             <button class="view-tab is-active" data-view-target="liveView" type="button">Live monitor</button>
             <button class="view-tab" data-view-target="noiseView" type="button">Noise extractor</button>
+            <button class="view-tab" data-view-target="nistView" type="button">NIST tests</button>
             <button class="view-tab" data-view-target="switchView" type="button">DAC switch compare</button>
           </div>
 
@@ -731,6 +732,87 @@
             </div>
           </section>
 
+          <section id="nistView" class="nist-panel view-panel" hidden>
+            <div class="plot-toolbar">
+              <div>
+                <h2>NIST SP 800-22 Rev.1a</h2>
+                <p id="nistCaption">Run the suite on the retained web bit buffer.</p>
+              </div>
+              <div class="toolbar-actions">
+                <button id="nistRunButton" class="button primary" type="button">Run all 15 tests</button>
+                <button id="nistClearButton" class="button secondary" type="button">Clear</button>
+                <button id="nistExportButton" class="button secondary" type="button">CSV</button>
+              </div>
+            </div>
+
+            <div class="nist-controls">
+              <label class="compact-field" for="nistBitSource">
+                <span>Bit source</span>
+                <select id="nistBitSource">
+                  <option value="current" selected>Current web bit buffer</option>
+                  <option value="ADC0">ADC0 bits</option>
+                  <option value="ADC2">ADC2 bits</option>
+                  <option value="ADC3">ADC3 bits</option>
+                  <option value="firmware">Firmware ENCF key bits</option>
+                </select>
+              </label>
+              <label class="compact-field" for="nistBitLimit" title="Use the newest retained bits. Increase Bit history in the Live monitor before capturing longer sequences.">
+                <span>Bits to test</span>
+                <input id="nistBitLimit" type="number" min="100" max="1000000" step="100" value="100000" />
+              </label>
+              <label class="compact-field" for="nistBlockSize">
+                <span>Block size</span>
+                <input id="nistBlockSize" type="number" min="8" max="10000" step="1" value="128" />
+              </label>
+              <label class="compact-field" for="nistTemplate">
+                <span>Non-overlap template</span>
+                <input id="nistTemplate" type="text" inputmode="numeric" pattern="[01]{2,21}" value="000000001" />
+              </label>
+              <label class="compact-field" for="nistApproxM">
+                <span>Approx entropy m</span>
+                <input id="nistApproxM" type="number" min="2" max="15" step="1" value="10" />
+              </label>
+              <label class="compact-field" for="nistSerialM">
+                <span>Serial m</span>
+                <input id="nistSerialM" type="number" min="3" max="15" step="1" value="10" />
+              </label>
+              <label class="compact-field" for="nistLinearM">
+                <span>Linear block M</span>
+                <input id="nistLinearM" type="number" min="7" max="5000" step="1" value="500" />
+              </label>
+            </div>
+
+            <p id="nistHelp" class="nist-help">
+              Alpha = 0.01. PASS means p-value &gt;= 0.01; N/A means the retained sequence is shorter than the NIST input recommendation. This is a statistical screen, not a cryptographic certification. Universal and random-excursion tests normally need substantially more data.
+            </p>
+
+            <div class="nist-summary" aria-live="polite">
+              <div class="bit-stat"><span>Bits</span><strong id="nistBitCount">0</strong></div>
+              <div class="bit-stat"><span>One ratio</span><strong id="nistOneRatio">--</strong></div>
+              <div class="bit-stat"><span>PASS</span><strong id="nistPassCount">0</strong></div>
+              <div class="bit-stat"><span>CHECK</span><strong id="nistCheckCount">0</strong></div>
+              <div class="bit-stat"><span>N/A</span><strong id="nistNaCount">0</strong></div>
+              <div class="bit-stat"><span>Elapsed</span><strong id="nistElapsed">--</strong></div>
+            </div>
+
+            <div class="nist-results-wrap">
+              <table class="nist-results" aria-label="NIST SP 800-22 results">
+                <thead>
+                  <tr>
+                    <th>Test family</th>
+                    <th>p-value</th>
+                    <th>Statistic</th>
+                    <th>Parameters / components</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody id="nistResultsBody">
+                  <tr><td colspan="5" class="nist-empty">No test run yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           <section id="switchView" class="switch-panel view-panel" hidden>
           <div class="plot-toolbar">
             <div>
@@ -808,7 +890,8 @@
     </div>
 
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
-    <script src="./app.js?v=bbe70e4c2a85" defer></script>
+    <script src="./nist.js?v=20260730-nist-v1" defer></script>
+    <script src="./app.js?v=8765c9bc46fc" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

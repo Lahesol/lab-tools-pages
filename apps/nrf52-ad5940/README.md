@@ -11,12 +11,39 @@
 | GUI → board | `CFG,AMPX,<vzero_mV>,<sensor_bias_mV>,<period_ms>,<rtia_ohm>,<rf_ohm>,<pga_x10>,<sinc3_osr>,<sinc2_osr>,<fifo_words>,<rcal_ohm>,<adc_ref_mV>` |
 | legacy host → board | `CFG,AMP,<vzero_mV>,<sensor_bias_mV>,<period_ms>,<rtia_ohm>` (keeps the current advanced AMP values) |
 | GUI → board | `CFG,CV,<start_mV>,<vertex_mV>,<vzero_mV>,<steps>,<duration_ms>,<settle_ms>,<rtia_ohm>` |
+| GUI → board | `CFG,DPV,<start_mV>,<end_mV>,<vzero_mV>,<step_mV>,<pulse_mV>,<frequency_hz>,<sample_delay_ms>,<rtia_ohm>,<sinc3_osr>` |
+| GUI → board | `CFG,SWV,<start_mV>,<end_mV>,<vzero_mV>,<step_mV>,<amplitude_mV>,<frequency_hz>,<sample_delay_ms>,<rtia_ohm>,<sinc3_osr>` |
 | GUI → board | `CFG,PT3,<vds_mV>,<vgs_mV>,<period_ms>,<gate_settle_ms>,<sinc3_osr>,<sinc2_osr>,<sinc2_notch_0_or_1>` |
-| GUI → board | `RUN,AMP`, `RUN,CV`, `RUN,PT3`, `STOP`, `INFO?`, `STATUS?`, exact `DFU` |
+| GUI → board | `RUN,AMP`, `RUN,CV`, `RUN,DPV`, `RUN,SWV`, `RUN,PT3`, `STOP`, `INFO?`, `STATUS?`, exact `DFU` |
 | board → GUI | `@ACK`, `@ERR`, `@EVT`, `@STATUS` ASCII status lines |
-| board → GUI | `0xA1` (AMP) / `0xB1` (PT3) / `0xC1` (CV), `uint32 LE index`, `float32 LE calculated current in uA` |
+| board → GUI | `0xA1` (AMP) / `0xB1` (PT3) / `0xC1` (CV) / `0xD1` (DPV) / `0xE1` (SWV), `uint32 LE index`, `float32 LE calculated current in uA` |
 
 Expanded AMP control requires controller firmware **V26 or later**, which advertises `AMPX` in its `@INFO` response. The GUI leaves CV available but disables AMP apply/run on an older controller, avoiding a partial configuration silently reaching the device.
+
+## DPV and SWV paired-pulse boundary
+
+Controller **V37 source** advertises `DPV+SWV` and uses ADI's local
+`AppSWV` sequencer implementation as a guarded paired-pulse engine. Both modes
+send two unmodified calculated-current frames for every staircase increment:
+`0xD1` for DPV and `0xE1` for SWV. The browser labels those frames `I1` and
+`I2`, preserves them in acquisition order and CSV, and only then displays the
+derived `I2 - I1` pair difference. A missing raw partner is marked as a pair
+gap and no difference is fabricated.
+
+`start`, `end`, `Vzero`, staircase increment, pulse/square-wave amplitude,
+frequency, sample delay, RTIA, and SINC3 are applied before `RUN`. Firmware and
+GUI both require a divisible span, 2--512 raw frames, 1--100 Hz, and a sample
+delay below the half-period margin; they also keep the nominal DAC endpoints in
+the 0.2--2.2 V range. The waveform panel is a parameter-meaning diagram, not a
+measured potential trace.
+
+The DPV tab is deliberately identified in firmware acknowledgements as
+`ENGINE=ADI_SWV_PAIRED`: it is a paired-pulse DPV workflow, not an assertion
+that it has already met a laboratory-standard DPV method. Validate pulse
+polarity, timing, current sign, and redox response with a known standard before
+making electrochemical method or quantitative claims. V37 is source/build
+validated only at this point; it is not yet a signed DFU package and therefore
+is not added to `firmware/latest.json`.
 
 PT3 time-domain DSP control requires controller firmware **V34 or later**, which advertises `PT3_DSP`. Controller **V35 or later** additionally advertises `PT3_CAL_DFT` and accepts an RTIA-calibration `dft_num` of 256, 512, 1024, 2048, or 4096 points. The PT3 panel sends guarded `VDS`, `VGS`, target output period, gate settling, SINC3 OSR, SINC2 OSR, optional SINC2-notch values, and—on V35—the calibration DFT length together as the eighth `CFG,PT3` field. Firmware reports the resulting raw rate, B1 rate, and integer decimation in `RAWmHz`, `OUTmHz`, and `DEC`; the GUI stores these configuration values beside unchanged B1 data in CSV. The 10 kOhm HSTIA RTIA and PGA ×9 remain fixed because they are tied to the validated 200 ohm RCAL calibration and 5 uA range. Controller V30 or later reports a rejected RTIA calibration as `@ERR,PT3_CAL,LIB=<error>,SPI=<status>,RTIA=<ohm>`; the GUI preserves that raw line and explains that the requested DUT DAC setpoints were not enabled.
 
@@ -135,7 +162,7 @@ inventing an update state.
 
 ### Web UI workflow and progress
 
-The V1.7 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`; V36 additionally returns `PT3_LIVE_DAC`. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
+The V1.8 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`; V36 additionally returns `PT3_LIVE_DAC`; V37 source additionally advertises `DPV+SWV` but has no signed catalogue entry yet. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
 
 The transfer bar reports the percentage of bytes whose CRC/offset receipt was confirmed by the bootloader (PRN=1). It keeps the last confirmed percentage if a transfer stops instead of resetting it to zero. A `100%` transfer still requires the final NUS reconnect and `@INFO` capability check before it is treated as a deployed application.
 

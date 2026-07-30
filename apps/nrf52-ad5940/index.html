@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=ddb42c6090b5" />
+    <link rel="stylesheet" href="styles.css?v=99fde7d0d4b1" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v1.7</span></h1>
+        <h1>AD5940 Lab Console <span>v1.8</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -28,6 +28,8 @@
           <div class="mode-switch" role="tablist" aria-label="Experiment type">
             <button id="ampTab" class="mode-tab active" role="tab" aria-selected="true">Amperometry</button>
             <button id="cvTab" class="mode-tab" role="tab" aria-selected="false">Cyclic voltammetry</button>
+            <button id="dpvTab" class="mode-tab" role="tab" aria-selected="false">Differential pulse (DPV)</button>
+            <button id="swvTab" class="mode-tab" role="tab" aria-selected="false">Square wave (SWV)</button>
             <button id="pt3Tab" class="mode-tab" role="tab" aria-selected="false">Phototransistor (PT3)</button>
           </div>
         </section>
@@ -103,6 +105,46 @@
               </label>
             </section>
             <p class="hint">펌웨어는 Vzero + start/vertex가 200–2200 mV를 넘는 설정을 거부합니다.</p>
+          </div>
+
+          <div id="dpvParameters" class="parameter-set hidden">
+            <section class="parameter-group">
+              <h2>Differential pulse voltammetry</h2>
+              <label>Start potential <span>mV</span><input id="dpvStart" type="number" min="-900" max="900" step="1" value="-500" required /></label>
+              <label>End potential <span>mV</span><input id="dpvEnd" type="number" min="-900" max="900" step="1" value="500" required /></label>
+              <label>Vzero offset <span>mV</span><input id="dpvVzero" type="number" min="200" max="2200" step="1" value="1200" required /></label>
+              <label>Staircase increment ΔE <span>mV</span><input id="dpvStep" type="number" min="1" max="25" step="1" value="5" required /></label>
+              <label>Pulse amplitude <span>mV</span><input id="dpvPulse" type="number" min="1" max="200" step="1" value="50" required /></label>
+              <label>Pulse frequency <span>Hz</span><input id="dpvFrequency" type="number" min="1" max="100" step="1" value="10" required /></label>
+              <label>Sample delay <span>ms</span><input id="dpvDelay" type="number" min="1" max="100" step="1" value="1" required /></label>
+              <label>Internal RTIA <span>Ω</span>
+                <select id="dpvRtia"><option value="1000">1 kΩ</option><option value="4000">4 kΩ</option><option value="10000">10 kΩ</option><option value="20000" selected>20 kΩ</option><option value="40000">40 kΩ</option><option value="100000">100 kΩ</option><option value="160000">160 kΩ</option></select>
+              </label>
+              <label>SINC3 OSR <span>ratio</span><select id="dpvSinc3"><option value="2">2</option><option value="4" selected>4</option><option value="5">5</option></select></label>
+            </section>
+            <p id="dpvTimingHint" class="hint"></p>
+            <p id="dpvCapabilityHint" class="hint capability-hint">Connect to check DPV firmware capability.</p>
+            <p class="hint">The controller emits both raw paired current samples as D1 frames. The GUI separately plots the explicitly labelled <code>I₂ − I₁</code> pair difference; it never overwrites the raw frames or CSV values.</p>
+          </div>
+
+          <div id="swvParameters" class="parameter-set hidden">
+            <section class="parameter-group">
+              <h2>Square-wave voltammetry</h2>
+              <label>Start potential <span>mV</span><input id="swvStart" type="number" min="-900" max="900" step="1" value="-500" required /></label>
+              <label>End potential <span>mV</span><input id="swvEnd" type="number" min="-900" max="900" step="1" value="500" required /></label>
+              <label>Vzero offset <span>mV</span><input id="swvVzero" type="number" min="200" max="2200" step="1" value="1200" required /></label>
+              <label>Staircase increment ΔE <span>mV</span><input id="swvStep" type="number" min="1" max="25" step="1" value="5" required /></label>
+              <label>Square-wave amplitude <span>mV</span><input id="swvPulse" type="number" min="1" max="200" step="1" value="25" required /></label>
+              <label>Square-wave frequency <span>Hz</span><input id="swvFrequency" type="number" min="1" max="100" step="1" value="25" required /></label>
+              <label>Sample delay <span>ms</span><input id="swvDelay" type="number" min="1" max="100" step="1" value="1" required /></label>
+              <label>Internal RTIA <span>Ω</span>
+                <select id="swvRtia"><option value="1000">1 kΩ</option><option value="4000">4 kΩ</option><option value="10000">10 kΩ</option><option value="20000" selected>20 kΩ</option><option value="40000">40 kΩ</option><option value="100000">100 kΩ</option><option value="160000">160 kΩ</option></select>
+              </label>
+              <label>SINC3 OSR <span>ratio</span><select id="swvSinc3"><option value="2">2</option><option value="4" selected>4</option><option value="5">5</option></select></label>
+            </section>
+            <p id="swvTimingHint" class="hint"></p>
+            <p id="swvCapabilityHint" class="hint capability-hint">Connect to check SWV firmware capability.</p>
+            <p class="hint">Raw E1 frames remain in acquisition order. The displayed differential curve is a browser-side <code>I₂ − I₁</code> view only; retain the phase-labelled raw frames for electrochemical validation.</p>
           </div>
 
           <div id="pt3Parameters" class="parameter-set hidden">
@@ -197,6 +239,44 @@
           <p class="plot-caption">CE0, SE0, and gate-fixture values are calculated from the acknowledged PT3 DAC codes. RE0/PAD4 remains open and has no plotted voltage.</p>
         </section>
 
+        <section id="pulseDiagramPanel" class="panel plot-panel pulse-diagram-panel hidden" aria-labelledby="pulseDiagramTitle">
+          <div class="panel-heading">
+            <div><p class="eyebrow">PARAMETER DIAGRAM</p><h2 id="pulseDiagramTitle">DPV waveform and sampled pair</h2></div>
+            <div id="pulseDiagramMetric" class="metric">Awaiting configuration</div>
+          </div>
+          <div class="pulse-diagram-layout">
+            <svg class="pulse-schematic" viewBox="0 0 650 260" role="img" aria-labelledby="pulseDiagramTitle pulseDiagramCaption">
+              <line class="pulse-axis" x1="52" y1="216" x2="625" y2="216" /><line class="pulse-axis" x1="52" y1="24" x2="52" y2="216" />
+              <text class="pulse-axis-label" x="14" y="35">E</text><text class="pulse-axis-label" x="607" y="244">time</text>
+              <g id="dpvWaveform">
+                <path class="pulse-stair" d="M58 186 H144 V166 H230 V146 H316 V126 H402 V106 H488 V86 H574" />
+                <path class="pulse-pulse" d="M144 166 V84 H212 V166 M316 126 V44 H384 V126 M488 86 V26 H556 V86" />
+                <circle class="pulse-dot" cx="184" cy="88" r="5" /><circle class="pulse-dot muted-dot" cx="214" cy="166" r="5" />
+                <path class="pulse-bracket" d="M118 166 H128 M123 166 V146 M118 146 H128" /><text class="pulse-label" x="93" y="140">ΔE</text>
+                <path class="pulse-bracket pulse-green" d="M224 166 H234 M229 166 V84 M224 84 H234" /><text class="pulse-label pulse-green-fill" x="239" y="126">pulse A</text>
+                <path class="pulse-delay" d="M144 202 H212" /><text class="pulse-label" x="154" y="196">tₛ</text>
+              </g>
+              <g id="swvWaveform" class="hidden">
+                <path class="pulse-stair dashed" d="M58 178 H144 V158 H230 V138 H316 V118 H402 V98 H488 V78 H574" />
+                <path class="pulse-swv" d="M58 178 V146 H100 V210 H144 V158 H186 V190 H230 V138 H272 V170 H316 V118 H358 V150 H402 V98 H444 V130 H488 V78 H530 V110 H574" />
+                <circle class="pulse-dot" cx="100" cy="210" r="5" /><circle class="pulse-dot muted-dot" cx="144" cy="158" r="5" />
+                <path class="pulse-bracket" d="M118 178 H128 M123 178 V158 M118 158 H128" /><text class="pulse-label" x="92" y="151">ΔE</text>
+                <path class="pulse-bracket pulse-blue" d="M72 210 H82 M77 210 V146 M72 146 H82" /><text class="pulse-label pulse-blue-fill" x="85" y="182">A</text>
+                <path class="pulse-delay" d="M58 202 H144" /><text class="pulse-label" x="89" y="196">1/f</text>
+              </g>
+              <text class="pulse-annotation" x="62" y="236">Estart</text><text class="pulse-annotation" x="544" y="54">Eend</text>
+            </svg>
+            <dl class="pulse-legend">
+              <dt id="pulseTermOne">ΔE — staircase increment</dt><dd id="pulseTermOneValue">5 mV</dd>
+              <dt id="pulseTermTwo">A — pulse amplitude</dt><dd id="pulseTermTwoValue">50 mV</dd>
+              <dt>f — paired-pulse frequency</dt><dd id="pulseTermFrequency">10 Hz</dd>
+              <dt>tₛ — ADC sample delay</dt><dd id="pulseTermDelay">1 ms</dd>
+              <dt>Raw/current boundary</dt><dd>I₁, I₂ raw; plot = I₂ − I₁</dd>
+            </dl>
+          </div>
+          <p id="pulseDiagramCaption" class="plot-caption">Diagram is a parameter meaning aid, not a measured potential trace. The board's acknowledged raw D1/E1 current frames remain the measurement record.</p>
+        </section>
+
         <section class="panel data-panel">
           <div class="panel-heading">
             <div><p class="eyebrow">RAW RECEIVED FRAMES</p><h2>Latest samples</h2></div>
@@ -204,7 +284,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Mode</th><th>Index</th><th>Current (µA)</th><th>PT3 setpoint</th><th>Received at</th></tr></thead>
+              <thead><tr><th>Mode</th><th>Index</th><th>Current (µA)</th><th>Method metadata</th><th>Received at</th></tr></thead>
               <tbody id="sampleRows"><tr><td colspan="5" class="empty">No binary measurement frames received.</td></tr></tbody>
             </table>
           </div>
@@ -249,6 +329,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=536e12bf57bd"></script>
+    <script type="module" src="app.js?v=820252e7b2ff"></script>
   </body>
 </html>
