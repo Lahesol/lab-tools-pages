@@ -53,6 +53,8 @@ const state = {
   pendingPt3Live: null,
   pt3Applied: null,
   pt3History: [],
+  pendingPulse: { DPV: null, SWV: null },
+  pulseApplied: { DPV: null, SWV: null },
   pulsePairs: { DPV: null, SWV: null },
   pulseDerived: [],
   plotWindowSamples: 256,
@@ -73,7 +75,7 @@ const elements = {
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
-  pulseDiagramPanel: $("pulseDiagramPanel"), pulseDiagramTitle: $("pulseDiagramTitle"), pulseDiagramMetric: $("pulseDiagramMetric"), dpvWaveform: $("dpvWaveform"), swvWaveform: $("swvWaveform"), pulseTermOne: $("pulseTermOne"), pulseTermOneValue: $("pulseTermOneValue"), pulseTermTwo: $("pulseTermTwo"), pulseTermTwoValue: $("pulseTermTwoValue"), pulseTermFrequency: $("pulseTermFrequency"), pulseTermDelay: $("pulseTermDelay"), pulseDiagramCaption: $("pulseDiagramCaption"),
+  pulseDiagramPanel: $("pulseDiagramPanel"), pulseDiagramTitle: $("pulseDiagramTitle"), pulseDiagramMetric: $("pulseDiagramMetric"), dpvWaveform: $("dpvWaveform"), swvWaveform: $("swvWaveform"), pulseTermOne: $("pulseTermOne"), pulseTermOneValue: $("pulseTermOneValue"), pulseTermTwo: $("pulseTermTwo"), pulseTermTwoValue: $("pulseTermTwoValue"), pulseTermFrequency: $("pulseTermFrequency"), pulseTermDelay: $("pulseTermDelay"), pulseAdiPotential: $("pulseAdiPotential"), pulseStandardPotential: $("pulseStandardPotential"), dpvAdiPotential: $("dpvAdiPotential"), dpvStandardPotential: $("dpvStandardPotential"), swvAdiPotential: $("swvAdiPotential"), swvStandardPotential: $("swvStandardPotential"), pulseDiagramCaption: $("pulseDiagramCaption"),
   clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), plotWindow: $("plotWindowSamples"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
   dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
   dfuProgress: $("dfuProgress"), dfuProgressBar: $("dfuProgressBar"), dfuProgressPercent: $("dfuProgressPercent"), dfuProgressText: $("dfuProgressText"), verifyApp: $("verifyAppButton"),
@@ -296,6 +298,8 @@ function handleTextLine(line) {
   if (line.startsWith("@EVT,RUNNING,PT3")) state.pt3LiveReady = true;
   if (line.startsWith("@EVT,PT3_SETTLING")) { state.running = true; state.pt3LiveReady = false; }
   if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@EVT,DPV_COMPLETE") || line.startsWith("@EVT,SWV_COMPLETE") || line.startsWith("@ERR,")) { state.running = false; state.pt3LiveReady = false; state.pendingPt3Live = null; }
+  if (line.startsWith("@ERR,DPV")) state.pendingPulse.DPV = null;
+  if (line.startsWith("@ERR,SWV")) state.pendingPulse.SWV = null;
   if (line.startsWith("@INFO,")) {
     const versionMatch = line.match(/^@INFO,AD5940_CTRL,V(\d+)(?:,|$)/);
     if (versionMatch) state.controllerVersion = Number(versionMatch[1]);
@@ -321,6 +325,14 @@ function handleTextLine(line) {
     elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} B1 SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}, cal DFT ${state.pt3Applied.calDft}`;
     log("PT3 configuration acknowledged; DAC/pad trace and DSP metadata updated.");
     schedulePlot();
+  }
+  if ((line.startsWith("@ACK,CFG,DPV") || line.startsWith("@ACK,CFG,SWV"))) {
+    const mode = line.startsWith("@ACK,CFG,DPV") ? "DPV" : "SWV";
+    if (state.pendingPulse[mode]) {
+      state.pulseApplied[mode] = { ...state.pendingPulse[mode], acknowledgedAt: new Date().toISOString() };
+      state.pendingPulse[mode] = null;
+      log(`${mode} potential convention acknowledged: VRE−VSE command with EWE−RE comparison metadata.`);
+    }
   }
   if (line.startsWith("@ACK,LIVE,PT3") && state.pendingPt3Live) {
     state.pt3Applied = { ...state.pendingPt3Live, updateKind: "LIVE", acknowledgedAt: new Date().toISOString() };
@@ -362,7 +374,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.controllerVersion = null;
+    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -383,7 +395,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPt3Live = null; state.controllerVersion = null;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -450,6 +462,11 @@ function switchMode(mode) {
 
 function integer(id) { return Math.trunc(Number($(id).value)); }
 
+function formatSignedMv(value) {
+  const rounded = Math.round(value);
+  return `${rounded < 0 ? "−" : "+"}${Math.abs(rounded)} mV`;
+}
+
 function readPulseConfig(mode) {
   const prefix = mode.toLowerCase();
   const config = {
@@ -471,7 +488,16 @@ function readPulseConfig(mode) {
     || config.delay >= halfPeriodMs - 1 || config.vzero + config.start - config.pulse < 200 || config.vzero + config.end + config.pulse > 2200) {
     throw new Error(`${mode} parameters violate the guarded potential, sequence-length, or sample-timing range.`);
   }
-  return { ...config, rawSamples, pairCount: rawSamples / 2, halfPeriodMs };
+  return {
+    ...config,
+    rawSamples,
+    pairCount: rawSamples / 2,
+    halfPeriodMs,
+    adiStartMv: config.start,
+    adiEndMv: config.end,
+    standardEweReStartMv: -config.start,
+    standardEweReEndMv: -config.end,
+  };
 }
 
 function updatePulsePreview(mode) {
@@ -481,7 +507,9 @@ function updatePulsePreview(mode) {
     const config = readPulseConfig(mode);
     const termOne = isDpv ? "ΔE — staircase increment" : "ΔE — staircase increment";
     const termTwo = isDpv ? "Pulse A — increment about step" : "Square-wave A — alternating amplitude";
-    hint.textContent = `${config.rawSamples} raw ${mode} frames / ${config.pairCount} I₂ − I₁ pairs. Paired-pulse schedule: ${config.frequency} Hz (${config.halfPeriodMs.toFixed(2)} ms half-period); current is sampled ${config.delay} ms after each phase command.`;
+    const adiTrace = `${formatSignedMv(config.adiStartMv)} → ${formatSignedMv(config.adiEndMv)}`;
+    const standardTrace = `${formatSignedMv(config.standardEweReStartMv)} → ${formatSignedMv(config.standardEweReEndMv)}`;
+    hint.textContent = `${config.rawSamples} raw ${mode} frames / ${config.pairCount} I₂ − I₁ pairs. ADI command VRE−VSE: ${adiTrace}; standard EWE−RE comparison: ${standardTrace}. Paired-pulse schedule: ${config.frequency} Hz (${config.halfPeriodMs.toFixed(2)} ms half-period); current is sampled ${config.delay} ms after each phase command.`;
     elements.pulseDiagramTitle.textContent = isDpv ? "DPV waveform and sampled pair" : "SWV waveform and sampled pair";
     elements.pulseDiagramMetric.textContent = `${config.pairCount} pairs · ${config.frequency} Hz`;
     elements.dpvWaveform.classList.toggle("hidden", !isDpv); elements.swvWaveform.classList.toggle("hidden", isDpv);
@@ -489,10 +517,16 @@ function updatePulsePreview(mode) {
     elements.pulseTermTwo.textContent = termTwo; elements.pulseTermTwoValue.textContent = `${config.pulse} mV`;
     elements.pulseTermFrequency.textContent = `f — paired-pulse frequency: ${config.frequency} Hz (${config.halfPeriodMs.toFixed(2)} ms half-period)`;
     elements.pulseTermDelay.textContent = `tₛ — sample delay after each phase: ${config.delay} ms; Vzero: ${config.vzero} mV; RTIA: ${(config.rtia / 1000).toFixed(config.rtia < 10000 ? 0 : 1)} kΩ; SINC3: ${config.sinc3}`;
-    elements.pulseDiagramCaption.textContent = `Diagram shows configured ${mode} terms, not a measured potential trace. ADI paired-pulse sequencing sends two raw ${isDpv ? "D1" : "E1"} current frames per step; the display derives I₂ − I₁ only after both frames arrive.`;
+    elements.pulseAdiPotential.textContent = adiTrace; elements.pulseStandardPotential.textContent = standardTrace;
+    (isDpv ? elements.dpvAdiPotential : elements.swvAdiPotential).textContent = adiTrace;
+    (isDpv ? elements.dpvStandardPotential : elements.swvStandardPotential).textContent = standardTrace;
+    elements.pulseDiagramCaption.textContent = `Diagram shows configured ${mode} terms, not a measured potential trace. Firmware commands VRE−VSE = VBIAS−VZERO; EWE−RE is the sign-inverted comparison. ADI paired-pulse sequencing sends two raw ${isDpv ? "D1" : "E1"} current frames per step; the display derives I₂ − I₁ only after both frames arrive.`;
   } catch {
     hint.textContent = "Enter a complete, guarded paired-pulse configuration to calculate frame count and timing.";
     elements.pulseDiagramMetric.textContent = "Invalid configuration";
+    elements.pulseAdiPotential.textContent = "Invalid"; elements.pulseStandardPotential.textContent = "Invalid";
+    (isDpv ? elements.dpvAdiPotential : elements.swvAdiPotential).textContent = "Invalid";
+    (isDpv ? elements.dpvStandardPotential : elements.swvStandardPotential).textContent = "Invalid";
   }
 }
 
@@ -605,7 +639,11 @@ function readConfig() {
 function configCommand() {
   const config = readConfig();
   if (state.mode === "AMP") return `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`;
-  if (state.mode === "DPV" || state.mode === "SWV") return `CFG,${state.mode},${config.start},${config.end},${config.vzero},${config.step},${config.pulse},${config.frequency},${config.delay},${config.rtia},${config.sinc3}`;
+  if (state.mode === "DPV" || state.mode === "SWV") {
+    state.pendingPulse[state.mode] = config;
+    state.pulseApplied[state.mode] = null;
+    return `CFG,${state.mode},${config.start},${config.end},${config.vzero},${config.step},${config.pulse},${config.frequency},${config.delay},${config.rtia},${config.sinc3}`;
+  }
   if (state.mode === "PT3") {
     const applied = state.pt3CalibrationDftSupported ? config : { ...config, calDft: 1024 };
     const dspApplied = state.pt3DspSupported ? applied : { ...applied, sinc3: 5, sinc2: 800, notch: 0 };
@@ -678,7 +716,19 @@ function addSample(sample) {
 
 function addPulseRawSample(sample) {
   const phase = sample.index % 2 === 0 ? "I1" : "I2";
-  const pulse = { pairIndex: Math.floor(sample.index / 2), phase, differenceUa: null, pairGap: false };
+  const applied = state.pulseApplied[sample.mode];
+  const pulse = {
+    pairIndex: Math.floor(sample.index / 2),
+    phase,
+    differenceUa: null,
+    pairGap: false,
+    potential: applied ? {
+      adiStartMv: applied.adiStartMv,
+      adiEndMv: applied.adiEndMv,
+      standardEweReStartMv: applied.standardEweReStartMv,
+      standardEweReEndMv: applied.standardEweReEndMv,
+    } : null,
+  };
   if (phase === "I1") {
     state.pulsePairs[sample.mode] = sample;
   } else {
@@ -723,8 +773,8 @@ function updatePlotWindow() {
 
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pulse_pair_index,pulse_raw_phase,pulse_i2_minus_i1_uA,pulse_pair_gap,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pulse ? s.pulse.pairIndex : ""},${s.pulse ? s.pulse.phase : ""},${s.pulse && Number.isFinite(s.pulse.differenceUa) ? s.pulse.differenceUa : ""},${s.pulse?.pairGap ? "TRUE" : ""},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pulse_pair_index,pulse_raw_phase,pulse_i2_minus_i1_uA,pulse_pair_gap,pulse_adi_convention,pulse_adi_vre_minus_vse_start_mV,pulse_adi_vre_minus_vse_end_mV,pulse_standard_convention,pulse_standard_ewe_minus_re_start_mV,pulse_standard_ewe_minus_re_end_mV,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_b1_output_rate_sps,pt3_actual_output_period_ms";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pulse ? s.pulse.pairIndex : ""},${s.pulse ? s.pulse.phase : ""},${s.pulse && Number.isFinite(s.pulse.differenceUa) ? s.pulse.differenceUa : ""},${s.pulse?.pairGap ? "TRUE" : ""},${s.pulse?.potential ? "VRE_MINUS_VSE_EQUALS_VBIAS_MINUS_VZERO" : ""},${s.pulse?.potential ? s.pulse.potential.adiStartMv : ""},${s.pulse?.potential ? s.pulse.potential.adiEndMv : ""},${s.pulse?.potential ? "EWE_MINUS_RE_EQUALS_NEGATIVE_OF_VRE_MINUS_VSE" : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReStartMv : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReEndMv : ""},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);

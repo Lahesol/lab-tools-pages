@@ -37,6 +37,16 @@ delay below the half-period margin; they also keep the nominal DAC endpoints in
 the 0.2--2.2 V range. The waveform panel is a parameter-meaning diagram, not a
 measured potential trace.
 
+### Potential convention shown in the GUI
+
+The DPV/SWV `start` and `end` inputs are explicitly **ADI command values**:
+`V_RE - V_SE = VBIAS - VZERO`. The GUI displays a second, sign-inverted line
+for comparison with the common electrochemical convention:
+`E_WE-RE = V_SE - V_RE = -(V_RE - V_SE)`. The command sent to firmware is never
+silently inverted. Both conventions, start/end values, and their formulas are
+recorded as CSV metadata only after the board acknowledges `CFG,DPV` or
+`CFG,SWV`; they are configuration setpoints, not measured electrode voltages.
+
 The DPV tab is deliberately identified in firmware acknowledgements as
 `ENGINE=ADI_SWV_PAIRED`: it is a paired-pulse DPV workflow, not an assertion
 that it has already met a laboratory-standard DPV method. Validate pulse

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=99fde7d0d4b1" />
+    <link rel="stylesheet" href="styles.css?v=0e8dfbcb385e" />
   </head>
   <body>
     <header class="topbar">
@@ -110,8 +110,8 @@
           <div id="dpvParameters" class="parameter-set hidden">
             <section class="parameter-group">
               <h2>Differential pulse voltammetry</h2>
-              <label>Start potential <span>mV</span><input id="dpvStart" type="number" min="-900" max="900" step="1" value="-500" required /></label>
-              <label>End potential <span>mV</span><input id="dpvEnd" type="number" min="-900" max="900" step="1" value="500" required /></label>
+              <label>Start: V<sub>RE</sub> − V<sub>SE</sub> (ADI command) <span>mV</span><input id="dpvStart" type="number" min="-900" max="900" step="1" value="-500" required /></label>
+              <label>End: V<sub>RE</sub> − V<sub>SE</sub> (ADI command) <span>mV</span><input id="dpvEnd" type="number" min="-900" max="900" step="1" value="500" required /></label>
               <label>Vzero offset <span>mV</span><input id="dpvVzero" type="number" min="200" max="2200" step="1" value="1200" required /></label>
               <label>Staircase increment ΔE <span>mV</span><input id="dpvStep" type="number" min="1" max="25" step="1" value="5" required /></label>
               <label>Pulse amplitude <span>mV</span><input id="dpvPulse" type="number" min="1" max="200" step="1" value="50" required /></label>
@@ -122,6 +122,11 @@
               </label>
               <label>SINC3 OSR <span>ratio</span><select id="dpvSinc3"><option value="2">2</option><option value="4" selected>4</option><option value="5">5</option></select></label>
             </section>
+            <section class="potential-convention" aria-label="DPV potential convention">
+              <p><strong>Firmware / ADI sweep</strong><span id="dpvAdiPotential">V<sub>RE</sub> − V<sub>SE</sub> = −500 → +500 mV</span></p>
+              <p><strong>Standard comparison</strong><span id="dpvStandardPotential">E<sub>WE−RE</sub> = V<sub>SE</sub> − V<sub>RE</sub> = +500 → −500 mV</span></p>
+              <small>Firmware sends the first value only. The standard comparison is its sign-inverted display; neither line is a measured electrode voltage.</small>
+            </section>
             <p id="dpvTimingHint" class="hint"></p>
             <p id="dpvCapabilityHint" class="hint capability-hint">Connect to check DPV firmware capability.</p>
             <p class="hint">The controller emits both raw paired current samples as D1 frames. The GUI separately plots the explicitly labelled <code>I₂ − I₁</code> pair difference; it never overwrites the raw frames or CSV values.</p>
@@ -130,8 +135,8 @@
           <div id="swvParameters" class="parameter-set hidden">
             <section class="parameter-group">
               <h2>Square-wave voltammetry</h2>
-              <label>Start potential <span>mV</span><input id="swvStart" type="number" min="-900" max="900" step="1" value="-500" required /></label>
-              <label>End potential <span>mV</span><input id="swvEnd" type="number" min="-900" max="900" step="1" value="500" required /></label>
+              <label>Start: V<sub>RE</sub> − V<sub>SE</sub> (ADI command) <span>mV</span><input id="swvStart" type="number" min="-900" max="900" step="1" value="-500" required /></label>
+              <label>End: V<sub>RE</sub> − V<sub>SE</sub> (ADI command) <span>mV</span><input id="swvEnd" type="number" min="-900" max="900" step="1" value="500" required /></label>
               <label>Vzero offset <span>mV</span><input id="swvVzero" type="number" min="200" max="2200" step="1" value="1200" required /></label>
               <label>Staircase increment ΔE <span>mV</span><input id="swvStep" type="number" min="1" max="25" step="1" value="5" required /></label>
               <label>Square-wave amplitude <span>mV</span><input id="swvPulse" type="number" min="1" max="200" step="1" value="25" required /></label>
@@ -141,6 +146,11 @@
                 <select id="swvRtia"><option value="1000">1 kΩ</option><option value="4000">4 kΩ</option><option value="10000">10 kΩ</option><option value="20000" selected>20 kΩ</option><option value="40000">40 kΩ</option><option value="100000">100 kΩ</option><option value="160000">160 kΩ</option></select>
               </label>
               <label>SINC3 OSR <span>ratio</span><select id="swvSinc3"><option value="2">2</option><option value="4" selected>4</option><option value="5">5</option></select></label>
+            </section>
+            <section class="potential-convention" aria-label="SWV potential convention">
+              <p><strong>Firmware / ADI sweep</strong><span id="swvAdiPotential">V<sub>RE</sub> − V<sub>SE</sub> = −500 → +500 mV</span></p>
+              <p><strong>Standard comparison</strong><span id="swvStandardPotential">E<sub>WE−RE</sub> = V<sub>SE</sub> − V<sub>RE</sub> = +500 → −500 mV</span></p>
+              <small>Firmware sends the first value only. The standard comparison is its sign-inverted display; neither line is a measured electrode voltage.</small>
             </section>
             <p id="swvTimingHint" class="hint"></p>
             <p id="swvCapabilityHint" class="hint capability-hint">Connect to check SWV firmware capability.</p>
@@ -271,6 +281,8 @@
               <dt id="pulseTermTwo">A — pulse amplitude</dt><dd id="pulseTermTwoValue">50 mV</dd>
               <dt>f — paired-pulse frequency</dt><dd id="pulseTermFrequency">10 Hz</dd>
               <dt>tₛ — ADC sample delay</dt><dd id="pulseTermDelay">1 ms</dd>
+              <dt>ADI control: V<sub>RE</sub> − V<sub>SE</sub></dt><dd id="pulseAdiPotential">−500 → +500 mV</dd>
+              <dt>Compare: E<sub>WE−RE</sub></dt><dd id="pulseStandardPotential">+500 → −500 mV</dd>
               <dt>Raw/current boundary</dt><dd>I₁, I₂ raw; plot = I₂ − I₁</dd>
             </dl>
           </div>
@@ -329,6 +341,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=820252e7b2ff"></script>
+    <script type="module" src="app.js?v=ee640f36e5cc"></script>
   </body>
 </html>
