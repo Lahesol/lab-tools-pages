@@ -14,7 +14,7 @@
 | GUI → board | `CFG,DPV,<start_mV>,<end_mV>,<vzero_mV>,<step_mV>,<pulse_mV>,<frequency_hz>,<sample_delay_ms>,<rtia_ohm>,<sinc3_osr>` |
 | GUI → board | `CFG,SWV,<start_mV>,<end_mV>,<vzero_mV>,<step_mV>,<amplitude_mV>,<frequency_hz>,<sample_delay_ms>,<rtia_ohm>,<sinc3_osr>` |
 | GUI → board | `CFG,PT3,<vds_mV>,<vgs_mV>,<period_ms>,<gate_settle_ms>,<sinc3_osr>,<sinc2_osr>,<sinc2_notch_0_or_1>` |
-| GUI → board | `RUN,AMP`, `RUN,CV`, `RUN,DPV`, `RUN,SWV`, `RUN,PT3`, `STOP`, `INFO?`, `STATUS?`, exact `DFU` |
+| GUI → board | `RUN,AMP`, `RUN,CV`, `RUN,DPV`, `RUN,SWV`, `RUN,PT3`, `STOP`, `INFO?`, `STATUS?`, `NAME,<1-20 ASCII characters>`, exact `DFU` |
 | board → GUI | `@ACK`, `@ERR`, `@EVT`, `@STATUS` ASCII status lines |
 | board → GUI | `0xA1` (AMP) / `0xB1` (PT3) / `0xC1` (CV) / `0xD1` (DPV) / `0xE1` (SWV), `uint32 LE index`, `float32 LE calculated current in uA` |
 
@@ -105,6 +105,28 @@ SPS B1 rate, a 60 Hz pickup aliases to 40 Hz, so a jagged trace or a raw plot
 alone cannot prove that its source is mains. Retain raw B1 frames and use the
 acknowledged `OUTmHz` rate for a separate spectral check.
 
+## Persistent BLE device name
+
+Controller **V38 source** advertises `NAME_NVM` and accepts the NUS command
+`NAME,<name>`, where `name` is 1--20 ASCII letters, digits, internal spaces,
+underscores, or hyphens. The board validates the request, writes a CRC-checked
+record to its DFU-preserved application-data area, then updates the GAP name
+and advertising payload. It returns `@NAME,SAVING` (or `@NAME,ERASING` only
+when its small log is full), followed by `@ACK,NAME`; an `@ERR,NAME_*` reply
+leaves the previous valid stored name in use.
+
+The Web Bluetooth UI accepts an optional name before DFU. The generic signed
+application is transferred unchanged. After the user explicitly reconnects
+the rebooted application and V38's `NAME_NVM` capability is observed, the GUI
+sends the queued `NAME,...` command. This separation is intentional: a
+different name must not require a different unsigned or browser-signed DFU
+package. A scan/reconnect is needed to observe the new advertised display
+name; the browser retains its prior `BluetoothDevice.name` object until then.
+
+See `docs/BLE_NAME_PERSISTENCE.md` for the fixed flash map, power-loss behavior,
+and release guard. V38 is source/build validated only and has no signed DFU
+package or catalogue entry yet.
+
 ## Amperometry variables and guardrails
 
 All AMP parameters are applied as one `CFG,AMPX` transaction, then the firmware reinitializes and recalibrates the internal RTIA at the next `RUN,AMP`.
@@ -172,7 +194,7 @@ inventing an update state.
 
 ### Web UI workflow and progress
 
-The V1.8 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`; V36 additionally returns `PT3_LIVE_DAC`; V37 source additionally advertises `DPV+SWV` but has no signed catalogue entry yet. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
+The V1.9 UI displays the four DFU stages: ZIP structure inspection, selected NUS application's `DFU` transition, an explicit browser chooser selection of `DfuTarg`, and a post-transfer capability reconnect check. An optional display name is queued before DFU and sent only after a V38+ reconnect advertises `NAME_NVM`. V34 must return `PT3_DSP`; V35 additionally returns `PT3_CAL_DFT`; V36 additionally returns `PT3_LIVE_DAC`; V37 source additionally advertises `DPV+SWV`; and V38 source adds persistent-name support. V37/V38 have no signed catalogue entry yet. Buttonless DFU can intentionally terminate NUS before Windows completes the command write; that transition is surfaced as a guarded `DfuTarg`-selection step rather than a false failure. The browser privacy model does not expose a physical BLE address for a Web Bluetooth chooser selection; the explicit user selection in that chooser is the available target-selection boundary.
 
 The transfer bar reports the percentage of bytes whose CRC/offset receipt was confirmed by the bootloader (PRN=1). It keeps the last confirmed percentage if a transfer stops instead of resetting it to zero. A `100%` transfer still requires the final NUS reconnect and `@INFO` capability check before it is treated as a deployed application.
 

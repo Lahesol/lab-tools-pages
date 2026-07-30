@@ -152,6 +152,14 @@ const els = {
   nistApproxM: document.querySelector("#nistApproxM"),
   nistSerialM: document.querySelector("#nistSerialM"),
   nistLinearM: document.querySelector("#nistLinearM"),
+  nistBitFile: document.querySelector("#nistBitFile"),
+  nistBitFormat: document.querySelector("#nistBitFormat"),
+  nistRemoveFileButton: document.querySelector("#nistRemoveFileButton"),
+  nistFileStatus: document.querySelector("#nistFileStatus"),
+  nistSourceName: document.querySelector("#nistSourceName"),
+  nistSourceAvailable: document.querySelector("#nistSourceAvailable"),
+  nistSourceTestCount: document.querySelector("#nistSourceTestCount"),
+  nistSourceDescription: document.querySelector("#nistSourceDescription"),
   nistRunButton: document.querySelector("#nistRunButton"),
   nistClearButton: document.querySelector("#nistClearButton"),
   nistExportButton: document.querySelector("#nistExportButton"),
@@ -324,6 +332,8 @@ const state = {
   nistResults: [],
   nistWorker: null,
   nistRunning: false,
+  nistUploadedBits: new Uint8Array(0),
+  nistUploadedFileName: "",
 };
 
 const encoder = new TextEncoder();
@@ -2549,6 +2559,7 @@ function updateBitStats(options = {}) {
     ? `${source} | ${getAdcSourceInfo(state.bitAdcSource).label} | plane ${state.bitColumns}x${state.bitRows} | saved ${state.bits.length}/${state.maxBits} | total ${state.totalBits}`
     : `Waiting for ${source} bits | plane ${state.bitColumns}x${state.bitRows} | saved ${state.bits.length}/${state.maxBits}`;
   updateBitModeUi();
+  updateNistSourceStatus();
   if (options.updateEncryption !== false) updateEncryptionUi();
 }
 
@@ -3967,9 +3978,120 @@ function exportNoiseBitsCsv() {
   addLog("SYS", `Exported ${state.noiseResults.length} noise bit streams`);
 }
 
+function parsePackedNistBits(bytes) {
+  const bits = new Uint8Array(bytes.length * 8);
+  let outputIndex = 0;
+  bytes.forEach((value) => {
+    for (let bitIndex = 7; bitIndex >= 0; bitIndex -= 1) {
+      bits[outputIndex] = (value >> bitIndex) & 1;
+      outputIndex += 1;
+    }
+  });
+  return bits;
+}
+
+function parseByteNistBits(bytes) {
+  const bits = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] !== 0 && bytes[index] !== 1) {
+      throw new Error(`Binary byte format contains value ${bytes[index]} at byte ${index}; expected only 0 or 1`);
+    }
+    bits[index] = bytes[index];
+  }
+  return bits;
+}
+
+function isLikelyNistText(bytes) {
+  const sample = bytes.slice(0, Math.min(bytes.length, 8192));
+  if (!sample.length) return true;
+  let printable = 0;
+  sample.forEach((value) => {
+    if (value === 9 || value === 10 || value === 13 || (value >= 32 && value <= 126)) printable += 1;
+  });
+  return printable / sample.length > 0.98;
+}
+
+function parseTextNistBits(text) {
+  const normalized = String(text || "").replace(/^\uFEFF/, "");
+  const compact = normalized.replace(/[\s,;|]+/g, "");
+  if (/^[01]+$/.test(compact)) {
+    return Uint8Array.from(compact, (bit) => Number(bit));
+  }
+
+  const table = parseCsvText(normalized, "auto");
+  const bitHeaderPattern = /^(bit|bits|bit[_ ]?value|random[_ ]?bit|randomness[_ ]?bit|value)$/i;
+  const bitColumn = table.headers.findIndex((header) => bitHeaderPattern.test(String(header).trim()));
+  if (bitColumn >= 0) {
+    const bits = [];
+    table.rows.forEach((row) => {
+      const number = parseNumberCell(row[bitColumn]);
+      if (number === 0 || number === 1) bits.push(number);
+    });
+    if (bits.length) return Uint8Array.from(bits);
+  }
+
+  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length && lines.every((line) => line === "0" || line === "1")) {
+    return Uint8Array.from(lines, (bit) => Number(bit));
+  }
+  throw new Error("Could not find a bit column or a 0/1 bit stream in the text file");
+}
+
+async function parseNistBitFile(file, format = "auto") {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!bytes.length) throw new Error("The selected bit file is empty");
+  if (format === "packed") return parsePackedNistBits(bytes);
+  if (format === "bytes") return parseByteNistBits(bytes);
+  if (format === "text") return parseTextNistBits(new TextDecoder().decode(bytes));
+  if (isLikelyNistText(bytes)) return parseTextNistBits(new TextDecoder().decode(bytes));
+  if (bytes.every((value) => value === 0 || value === 1)) return parseByteNistBits(bytes);
+  return parsePackedNistBits(bytes);
+}
+
+function updateNistFileStatus(message, isError = false) {
+  if (!els.nistFileStatus) return;
+  els.nistFileStatus.textContent = message;
+  els.nistFileStatus.classList.toggle("is-error", isError);
+}
+
+async function handleNistBitFile(file) {
+  if (!file) return;
+  try {
+    const format = els.nistBitFormat?.value || "auto";
+    const bits = await parseNistBitFile(file, format);
+    state.nistUploadedBits = bits;
+    state.nistUploadedFileName = file.name;
+    if (els.nistBitSource) els.nistBitSource.value = "upload";
+    if (els.nistRemoveFileButton) els.nistRemoveFileButton.disabled = false;
+    updateNistFileStatus(`${file.name} | ${bits.length.toLocaleString()} bits loaded`);
+    clearNistResults();
+    if (els.nistCaption) els.nistCaption.textContent = `${file.name} | ${bits.length.toLocaleString()} bits loaded | ready for NIST tests`;
+    updateNistSourceStatus();
+    addLog("SYS", `Loaded ${bits.length} bits from ${file.name}`);
+  } catch (error) {
+    state.nistUploadedBits = new Uint8Array(0);
+    state.nistUploadedFileName = "";
+    if (els.nistRemoveFileButton) els.nistRemoveFileButton.disabled = true;
+    updateNistFileStatus(error.message || "Failed to parse bit file", true);
+    addLog("ERR", `NIST bit file load failed: ${error.message || error}`, true);
+  }
+}
+
+function removeNistBitFile() {
+  state.nistUploadedBits = new Uint8Array(0);
+  state.nistUploadedFileName = "";
+  if (els.nistBitFile) els.nistBitFile.value = "";
+  if (els.nistRemoveFileButton) els.nistRemoveFileButton.disabled = true;
+  if (els.nistBitSource?.value === "upload") els.nistBitSource.value = "current";
+  updateNistFileStatus("No bit file loaded. Uploaded data remains separate from the live bit buffer.");
+  clearNistResults();
+  addLog("SYS", "Removed uploaded NIST bit file");
+}
+
 function getNistBitEntries() {
   const source = els.nistBitSource?.value || "current";
   if (source === "current") return state.bits;
+  if (source === "upload") return state.nistUploadedBits;
   if (source === "firmware") {
     return state.bits.filter((entry) => entry.firmwareFrame || /firmware/i.test(entry.source || ""));
   }
@@ -3978,9 +4100,48 @@ function getNistBitEntries() {
 
 function getNistSourceLabel() {
   const source = els.nistBitSource?.value || "current";
-  if (source === "current") return state.bitSource || "current web bit buffer";
+  if (source === "current") return state.bitSource || "Current extracted bits";
+  if (source === "upload") return state.nistUploadedFileName || "Uploaded bit file";
   if (source === "firmware") return "Firmware ENCF key bits";
   return `${source} bits`;
+}
+
+function getNistSourceDescription(source, entries) {
+  const available = entries.length;
+  if (source === "current") {
+    const method = state.bitSource || getBitMethodLabel();
+    const adcLabel = getAdcSourceInfo(state.bitAdcSource).label;
+    return `Uses the current web bit buffer: ${method} from ${adcLabel}. It reuses retained bits and does not generate new bits.`;
+  }
+  if (source === "firmware") {
+    return "Uses only key bits carried by firmware ENCF records. Browser-side ADC extraction is not included.";
+  }
+  if (source === "upload") {
+    return `Uses ${state.nistUploadedFileName || "the uploaded file"} as an isolated bit stream. It is not added to the live buffer or bitmap.`;
+  }
+  return `Uses ${source} entries retained in the web bit buffer. Selecting a source only filters the buffer; it does not start extraction for that ADC.`;
+}
+
+function updateNistSourceStatus() {
+  const source = els.nistBitSource?.value || "current";
+  const entries = getNistBitEntries();
+  const requested = clampInteger(els.nistBitLimit?.value, 100, 1000000, 100000);
+  const testCount = Math.min(entries.length, requested);
+  const sourceLabel = source === "current" ? "Current extracted bits" : getNistSourceLabel();
+
+  if (els.nistSourceName) els.nistSourceName.textContent = sourceLabel;
+  if (els.nistSourceAvailable) els.nistSourceAvailable.textContent = entries.length.toLocaleString();
+  if (els.nistSourceTestCount) els.nistSourceTestCount.textContent = testCount.toLocaleString();
+  if (els.nistSourceDescription) {
+    els.nistSourceDescription.textContent = getNistSourceDescription(source, entries);
+  }
+}
+
+function getNistBitValues() {
+  const source = els.nistBitSource?.value || "current";
+  if (source === "upload") return state.nistUploadedBits;
+  const entries = getNistBitEntries();
+  return Uint8Array.from(entries, (entry) => (entry.bit ? 1 : 0));
 }
 
 function getNistOptions() {
@@ -4083,10 +4244,9 @@ function runNistTestSuite() {
     return;
   }
 
-  const entries = getNistBitEntries();
+  const allBits = getNistBitValues();
   const requestedLimit = clampInteger(els.nistBitLimit?.value, 100, 1000000, 100000);
-  const selectedEntries = entries.slice(-requestedLimit);
-  const bits = Uint8Array.from(selectedEntries, (entry) => (entry.bit ? 1 : 0));
+  const bits = allBits.slice(Math.max(0, allBits.length - requestedLimit));
   if (bits.length < 100) {
     addLog("SYS", `NIST needs at least 100 retained bits; available ${bits.length}`);
     return;
@@ -4156,6 +4316,7 @@ function clearNistResults() {
   updateNistSummary(null, null);
   renderNistResults([]);
   if (els.nistCaption) els.nistCaption.textContent = "Run the suite on the retained web bit buffer.";
+  updateNistSourceStatus();
 }
 
 function exportNistResultsCsv() {
@@ -5055,6 +5216,18 @@ function bindEvents() {
   els.nistRunButton?.addEventListener("click", runNistTestSuite);
   els.nistClearButton?.addEventListener("click", clearNistResults);
   els.nistExportButton?.addEventListener("click", exportNistResultsCsv);
+  els.nistBitSource?.addEventListener("change", () => {
+    updateNistSourceStatus();
+    clearNistResults();
+  });
+  els.nistBitLimit?.addEventListener("input", updateNistSourceStatus);
+  els.nistBitFile?.addEventListener("change", () => {
+    handleNistBitFile(els.nistBitFile.files?.[0]);
+  });
+  els.nistBitFormat?.addEventListener("change", () => {
+    if (els.nistBitFile?.files?.[0]) handleNistBitFile(els.nistBitFile.files[0]);
+  });
+  els.nistRemoveFileButton?.addEventListener("click", removeNistBitFile);
   els.nistTemplate?.addEventListener("change", () => {
     els.nistTemplate.value = getNistOptions().template;
   });

@@ -46,6 +46,9 @@ const state = {
   pt3CalibrationDftSupported: false,
   pt3LiveDacSupported: false,
   pt3LiveReady: false,
+  deviceNameSupported: false,
+  deviceName: null,
+  nameUpdatePending: null,
   controllerVersion: null,
   releaseManifest: null,
   releaseManifestError: null,
@@ -60,7 +63,7 @@ const state = {
   plotWindowSamples: 256,
   expectDfuDisconnect: false,
   plotDrawPending: false,
-  dfu: { file: null, pkg: null, device: null, server: null, control: null, packet: null, waiter: null, transferring: false, completed: false, progress: 0, stage: "package" },
+  dfu: { file: null, pkg: null, device: null, server: null, control: null, packet: null, waiter: null, transferring: false, completed: false, progress: 0, stage: "package", queuedDeviceName: null, nameDispatchAttempted: false },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -68,7 +71,7 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 const elements = {
   connectionDot: $("connectionDot"), connectionLabel: $("connectionLabel"), connect: $("connectButton"), disconnect: $("disconnectButton"),
-  browserState: $("browserState"), deviceState: $("deviceState"), controllerVersion: $("controllerVersion"), dfuUpdateState: $("dfuUpdateState"), lastStatus: $("lastStatus"),
+  browserState: $("browserState"), deviceState: $("deviceState"), deviceNameState: $("deviceNameState"), controllerVersion: $("controllerVersion"), dfuUpdateState: $("dfuUpdateState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), dpvTab: $("dpvTab"), swvTab: $("swvTab"), pt3Tab: $("pt3Tab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), dpvParameters: $("dpvParameters"), swvParameters: $("swvParameters"), pt3Parameters: $("pt3Parameters"),
   ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), dpvTimingHint: $("dpvTimingHint"), dpvCapabilityHint: $("dpvCapabilityHint"), swvTimingHint: $("swvTimingHint"), swvCapabilityHint: $("swvCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"),
   pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"),
@@ -77,7 +80,7 @@ const elements = {
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
   pulseDiagramPanel: $("pulseDiagramPanel"), pulseDiagramTitle: $("pulseDiagramTitle"), pulseDiagramMetric: $("pulseDiagramMetric"), dpvWaveform: $("dpvWaveform"), swvWaveform: $("swvWaveform"), pulseTermOne: $("pulseTermOne"), pulseTermOneValue: $("pulseTermOneValue"), pulseTermTwo: $("pulseTermTwo"), pulseTermTwoValue: $("pulseTermTwoValue"), pulseTermFrequency: $("pulseTermFrequency"), pulseTermDelay: $("pulseTermDelay"), pulseAdiPotential: $("pulseAdiPotential"), pulseStandardPotential: $("pulseStandardPotential"), dpvAdiPotential: $("dpvAdiPotential"), dpvStandardPotential: $("dpvStandardPotential"), swvAdiPotential: $("swvAdiPotential"), swvStandardPotential: $("swvStandardPotential"), pulseDiagramCaption: $("pulseDiagramCaption"),
   clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), plotWindow: $("plotWindowSamples"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
-  dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
+  dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), dfuDeviceName: $("dfuDeviceName"), dfuDeviceNameState: $("dfuDeviceNameState"), applyDeviceName: $("applyDeviceNameButton"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
   dfuProgress: $("dfuProgress"), dfuProgressBar: $("dfuProgressBar"), dfuProgressPercent: $("dfuProgressPercent"), dfuProgressText: $("dfuProgressText"), verifyApp: $("verifyAppButton"),
   dfuStages: { package: $("dfuStagePackage"), entry: $("dfuStageEntry"), transfer: $("dfuStageTransfer"), verify: $("dfuStageVerify") },
 };
@@ -203,6 +206,7 @@ function refreshControlAvailability() {
   } else {
     elements.pt3CapabilityHint.textContent = "PT3 capability is required only for the phototransistor controls.";
   }
+  refreshDeviceNameUi();
 }
 
 function setConnection(connected, text = "Instrument disconnected") {
@@ -254,6 +258,60 @@ async function sendNusCommand(command) {
   const bytes = enc.encode(`${command}\r\n`);
   await queueGatt(() => writeCharacteristic(state.nusRx, bytes, true));
   log(`NUS TX: ${command}`);
+}
+
+function normalizedDeviceName(value = elements.dfuDeviceName.value) {
+  const name = value.trim();
+  if (!name) return null;
+  if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,19}$/.test(name)) {
+    throw new Error("BLE name must be 1–20 ASCII letters, digits, spaces, underscores, or hyphens, without leading or trailing spaces.");
+  }
+  return name;
+}
+
+function refreshDeviceNameUi() {
+  const connected = isInstrumentConnected();
+  elements.deviceNameState.textContent = connected ? (state.deviceName || state.device?.name || "Unknown") : "—";
+  elements.applyDeviceName.disabled = !connected || !state.deviceNameSupported || Boolean(state.nameUpdatePending);
+}
+
+async function requestDeviceNameUpdate(requestedName, origin = "manual") {
+  if (!requestedName) throw new Error("Enter a BLE display name first.");
+  if (!state.deviceNameSupported) throw new Error("The connected firmware does not advertise persistent NAME_NVM support; install V38 or later.");
+  if (state.nameUpdatePending) throw new Error("A BLE name write is already pending.");
+  state.nameUpdatePending = requestedName;
+  refreshDeviceNameUi();
+  elements.dfuDeviceNameState.textContent = `Saving “${requestedName}” in the board’s DFU-preserved name area…`;
+  try {
+    await sendNusCommand(`NAME,${requestedName}`);
+    log(`Persistent BLE name request sent (${origin}): ${requestedName}.`);
+  } catch (error) {
+    state.nameUpdatePending = null;
+    refreshDeviceNameUi();
+    elements.dfuDeviceNameState.textContent = `Name write was not accepted: ${error.message}`;
+    throw error;
+  }
+}
+
+async function applyDeviceNameNow() {
+  try {
+    await requestDeviceNameUpdate(normalizedDeviceName(), "manual");
+  } catch (error) {
+    log(error.message, "ERROR");
+  }
+}
+
+function maybeApplyQueuedDeviceName() {
+  const requestedName = state.dfu.queuedDeviceName;
+  if (!requestedName || state.dfu.nameDispatchAttempted || state.nameUpdatePending) return;
+  if (!state.deviceNameSupported) {
+    state.dfu.nameDispatchAttempted = true;
+    elements.dfuDeviceNameState.textContent = `Queued name “${requestedName}” was not sent: this firmware does not advertise NAME_NVM.`;
+    log("Queued BLE name retained but not applied because the reconnected firmware lacks NAME_NVM.", "WARN");
+    return;
+  }
+  state.dfu.nameDispatchAttempted = true;
+  void requestDeviceNameUpdate(requestedName, "post-DFU queued").catch((error) => log(`Queued BLE name failed: ${error.message}`, "ERROR"));
 }
 
 function appendText(bytes) {
@@ -311,12 +369,32 @@ function handleTextLine(line) {
     state.pt3DspSupported = line.includes("PT3_DSP");
     state.pt3CalibrationDftSupported = line.includes("PT3_CAL_DFT");
     state.pt3LiveDacSupported = line.includes("PT3_LIVE_DAC");
+    state.deviceNameSupported = line.includes("NAME_NVM");
     refreshReleaseState();
     if (line.startsWith("@INFO,AD5940_CTRL") && state.controllerVersion === null) log("Controller @INFO did not include a parseable AD5940_CTRL release.", "WARN");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
     log(state.dpvSupported ? "DPV paired-pulse capability detected." : "DPV capability not advertised by this firmware.", state.dpvSupported ? "INFO" : "WARN");
     log(state.swvSupported ? "SWV paired-pulse capability detected." : "SWV capability not advertised by this firmware.", state.swvSupported ? "INFO" : "WARN");
     log(state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    if (line.startsWith("@INFO,AD5940_CTRL")) maybeApplyQueuedDeviceName();
+  }
+  if (line === "@NAME,SAVING" || line === "@NAME,ERASING") {
+    elements.dfuDeviceNameState.textContent = line === "@NAME,ERASING" ? "Name storage is compacting; keep the board powered." : "Name storage write accepted; waiting for flash completion.";
+  }
+  if (line === "@ACK,NAME") {
+    const savedName = state.nameUpdatePending;
+    state.nameUpdatePending = null;
+    if (savedName) {
+      state.deviceName = savedName;
+      if (state.dfu.queuedDeviceName === savedName) state.dfu.queuedDeviceName = null;
+      elements.dfuDeviceName.value = savedName;
+      elements.dfuDeviceNameState.textContent = `Saved “${savedName}”. Disconnect and scan again to see the new advertised name.`;
+      log(`Persistent BLE name saved: ${savedName}. Reconnect or rescan to observe the updated advertisement.`);
+    }
+  }
+  if (line.startsWith("@ERR,NAME")) {
+    state.nameUpdatePending = null;
+    elements.dfuDeviceNameState.textContent = `Board rejected the name request (${line}). The previous stored name remains in use.`;
   }
   if (line.startsWith("@ACK,CFG,PT3") && state.pendingPt3) {
     state.pt3Applied = { ...state.pendingPt3, updateKind: "CONFIG", acknowledgedAt: new Date().toISOString() };
@@ -374,7 +452,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.controllerVersion = null;
+    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -395,7 +473,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.controllerVersion = null;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -929,8 +1007,21 @@ async function onDfuFile() {
 
 async function enterDfu() {
   if (!state.dfu.pkg || !state.nusRx) return;
+  let requestedName;
+  try {
+    requestedName = normalizedDeviceName();
+  } catch (error) {
+    elements.dfuDeviceNameState.textContent = error.message;
+    log(error.message, "ERROR");
+    return;
+  }
   if (!window.confirm("Enter Secure DFU bootloader now? Measurement will stop and the current BLE connection will disconnect.")) return;
   try {
+    state.dfu.queuedDeviceName = requestedName;
+    state.dfu.nameDispatchAttempted = false;
+    if (requestedName) {
+      elements.dfuDeviceNameState.textContent = `Queued “${requestedName}”. It will be saved only after V38+ reconnects after DFU.`;
+    }
     state.expectDfuDisconnect = true; elements.enterDfu.disabled = true; elements.transferDfu.disabled = true; setDfuStage("entry");
     await sendNusCommand("DFU"); setDfuProgress(0, "DFU command sent. Wait for application disconnect, then select DfuTarg.");
   } catch (error) {
@@ -1011,15 +1102,15 @@ async function selectDfuAndTransfer() {
     state.dfu.transferring = true; elements.transferDfu.disabled = true; elements.enterDfu.disabled = true; setDfuProgress(0, "DfuTarg connected. Setting packet receipt notification interval to 1.");
     const prn = new Uint8Array([1, 0]); assertDfuSuccess(await dfuControl(DFU.setPrn, prn), DFU.setPrn);
     await transferObject(DFU.commandObject, state.dfu.pkg.dat, 0, 10, "Init packet"); await transferObject(DFU.dataObject, state.dfu.pkg.binary, 10, 100, "Application");
-    state.dfu.completed = true; setDfuStage("verify"); setDfuProgress(100, "Secure DFU transfer protocol completed. Reconnect the application to verify advertising and NUS."); elements.verifyApp.disabled = false; log("DFU protocol complete. Signature acceptance and reboot were decided by the target bootloader; application verification remains required.");
+    state.dfu.completed = true; setDfuStage("verify"); setDfuProgress(100, state.dfu.queuedDeviceName ? "Secure DFU transfer protocol completed. Reconnect the application; the queued name will be saved after V38+ capability verification." : "Secure DFU transfer protocol completed. Reconnect the application to verify advertising and NUS."); elements.verifyApp.disabled = false; log("DFU protocol complete. Signature acceptance and reboot were decided by the target bootloader; application verification remains required.");
   } catch (error) { setDfuProgress(state.dfu.progress, `DFU stopped after ${state.dfu.progress.toFixed(1)}% CRC-verified transfer: ${error.message}`); log(`DFU failed safely: ${error.message}`, "ERROR"); }
   finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg || state.dfu.completed; }
 }
 
-elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.dpvTab.addEventListener("click", () => switchMode("DPV")); elements.swvTab.addEventListener("click", () => switchMode("SWV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
+elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.dpvTab.addEventListener("click", () => switchMode("DPV")); elements.swvTab.addEventListener("click", () => switchMode("SWV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.applyDeviceName.addEventListener("click", applyDeviceNameNow); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
 document.querySelectorAll("#dpvParameters input, #dpvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("DPV")); control.addEventListener("change", () => updatePulsePreview("DPV")); });
 document.querySelectorAll("#swvParameters input, #swvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("SWV")); control.addEventListener("change", () => updatePulsePreview("SWV")); });
 document.querySelectorAll("#pt3Parameters input, #pt3Parameters select").forEach((control) => { control.addEventListener("input", updatePt3Preview); control.addEventListener("change", updatePt3Preview); });
 
-browserReady(); void loadReleaseManifest(); switchMode("AMP"); updateAmpTimingHint(); updatePulsePreview("DPV"); updatePulsePreview("SWV"); updatePt3Preview(); drawPlot();
+browserReady(); void loadReleaseManifest(); switchMode("AMP"); updateAmpTimingHint(); updatePulsePreview("DPV"); updatePulsePreview("SWV"); updatePt3Preview(); refreshDeviceNameUi(); drawPlot();

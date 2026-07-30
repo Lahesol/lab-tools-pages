@@ -1116,6 +1116,147 @@ canvas {
   background: #fbfdfc;
 }
 
+.nist-upload-row {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.4fr) minmax(170px, 0.8fr) auto minmax(260px, 1.4fr);
+  align-items: end;
+  gap: 10px;
+  padding: 12px 16px 0;
+  background: #fbfdfc;
+}
+
+.nist-upload-file input[type="file"] {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 12px;
+}
+
+.nist-file-status {
+  min-width: 0;
+  margin: 0;
+  padding: 9px 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: #fff;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nist-file-status.is-error {
+  color: var(--danger, #a23b3b);
+  border-color: #e5bcbc;
+  background: #fff7f7;
+}
+
+.nist-source-status {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(130px, 0.7fr));
+  gap: 8px;
+  margin: 12px 16px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f5faf8;
+}
+
+.nist-source-stat {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.nist-source-stat span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.nist-source-stat strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nist-source-description {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.nist-parameter-help {
+  margin: 12px 16px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.nist-parameter-help summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.nist-parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 0 12px;
+}
+
+.nist-parameter-grid > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.nist-parameter-grid strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.nist-parameter-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.nist-parameter-grid code {
+  font-family: var(--mono);
+}
+
 .nist-help {
   margin: 10px 16px 0;
   color: var(--muted);
@@ -1611,7 +1752,10 @@ canvas {
     .noise-explain-grid,
     .noise-method-blocks,
     .noise-summary,
-    .nist-summary {
+    .nist-summary,
+    .nist-upload-row,
+    .nist-source-status,
+    .nist-parameter-grid {
     grid-template-columns: 1fr;
   }
 

@@ -113,11 +113,24 @@ CSV field remain unchanged.
 ## NIST Test Tab
 
 The `NIST tests` tab runs the 15 NIST SP 800-22 Rev.1a test families on the
-retained browser bit buffer. The calculation is performed in
-`nist-worker.js` so the live serial reader and plot remain responsive. The tab
-supports a selectable bit source, a test-length limit, block/template settings,
-approximate-entropy and serial pattern lengths, and the linear-complexity block
-size.
+retained browser bit buffer. `Current extracted bits` is the default source and
+uses the bits currently produced by the selected web extraction method; it does
+not generate a second bit stream. ADC0/ADC2/ADC3 selections filter the retained
+entries by ADC source, while `Firmware ENCF key bits` selects only key bits
+received in firmware encryption records. The tab also accepts an uploaded TXT,
+CSV, DAT, or BIN bit file. Text/CSV files may contain a contiguous 0/1 stream,
+one bit per line, or a column named `bit`; binary files can be auto-detected,
+interpreted as one byte per bit, or interpreted as packed MSB-first bits. The
+uploaded stream is kept separate from the live buffer. The calculation is
+performed in `nist-worker.js` so the live serial reader and plot remain
+responsive.
+
+The tab shows the available and actually tested bit counts and explains every
+parameter in the expandable help area. `Bits to test` selects the newest N
+retained bits. `Block size` is the Block Frequency M, `Non-overlap template` is
+the binary pattern for the Non-overlapping Template test, `Approx entropy m`
+and `Serial m` are pattern lengths, and `Linear block M` is the Linear
+Complexity block length.
 
 The implemented families are Frequency, Block Frequency, Cumulative Sums,
 Runs, Longest Run of Ones, Binary Matrix Rank, DFT, Non-overlapping Template,

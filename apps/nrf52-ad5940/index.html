@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=0e8dfbcb385e" />
+    <link rel="stylesheet" href="styles.css?v=a0bc429f249f" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v1.8</span></h1>
+        <h1>AD5940 Lab Console <span>v1.9</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -314,6 +314,7 @@
           <dl class="connection-grid">
             <dt>Browser</dt><dd id="browserState">Checking Web Bluetooth…</dd>
             <dt>Device</dt><dd id="deviceState">—</dd>
+            <dt>BLE display name</dt><dd id="deviceNameState">—</dd>
             <dt>Firmware protocol</dt><dd>NUS / AD5940_CTRL / AMPX + PT3</dd>
             <dt>Controller release</dt><dd id="controllerVersion">Awaiting @INFO</dd>
             <dt>DFU update</dt><dd id="dfuUpdateState">Loading signed-release catalogue…</dd>
@@ -325,10 +326,10 @@
           <p class="eyebrow">SECURE BLE DFU</p>
           <h2>Application-only signed ZIP</h2>
           <ol class="dfu-steps" aria-label="Secure DFU stages">
-            <li id="dfuStagePackage" class="dfu-step is-current"><span>1</span><div><strong>Select signed ZIP</strong><input id="dfuFile" type="file" accept=".zip,application/zip" disabled /><small id="dfuPackageState">No package selected.</small></div></li>
+            <li id="dfuStagePackage" class="dfu-step is-current"><span>1</span><div><strong>Select signed ZIP</strong><input id="dfuFile" type="file" accept=".zip,application/zip" disabled /><label class="dfu-name-field" for="dfuDeviceName"><span>New BLE display name (optional)</span><input id="dfuDeviceName" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="e.g. PT3-Lab-A" aria-describedby="dfuDeviceNameState" /></label><button id="applyDeviceNameButton" class="button compact ghost" type="button" disabled>Apply name to connected board</button><small id="dfuDeviceNameState">Allowed: 1–20 ASCII letters, digits, spaces, underscores, or hyphens. During DFU, the name is saved only after the updated application reconnects.</small><small id="dfuPackageState">No package selected.</small></div></li>
             <li id="dfuStageEntry" class="dfu-step"><span>2</span><div><strong>Enter DFU through NUS</strong><button id="enterDfuButton" class="button compact secondary" disabled>Enter DFU</button><small>Expected: app disconnects and bootloader advertises <code>DfuTarg</code>.</small></div></li>
             <li id="dfuStageTransfer" class="dfu-step"><span>3</span><div><strong>Select DfuTarg and transfer</strong><button id="transferDfuButton" class="button compact primary" disabled>Select DfuTarg &amp; transfer</button><small>The browser chooser requires an explicit selection; transfer starts only after a second confirmation.</small></div></li>
-            <li id="dfuStageVerify" class="dfu-step"><span>4</span><div><strong>Verify rebooted application</strong><button id="verifyAppButton" class="button compact ghost" disabled>Reconnect application to verify</button><small>Confirm the expected capability in <code>@INFO</code>. The listed V36 release reports <code>PT3_LIVE_DAC</code>.</small></div></li>
+            <li id="dfuStageVerify" class="dfu-step"><span>4</span><div><strong>Verify rebooted application</strong><button id="verifyAppButton" class="button compact ghost" disabled>Reconnect application to verify</button><small>Confirm the expected capability in <code>@INFO</code>. V38 adds persistent <code>NAME_NVM</code>; a queued name is then saved and takes effect on the next scan.</small></div></li>
           </ol>
           <div class="progress-wrap" aria-live="polite">
             <div id="dfuProgressBar" class="progress-bar" role="progressbar" aria-label="Secure DFU CRC-verified transfer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="dfuProgress"></span></div>
@@ -341,6 +342,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=ee640f36e5cc"></script>
+    <script type="module" src="app.js?v=847ad8020c54"></script>
   </body>
 </html>
