@@ -1,7 +1,7 @@
 ﻿/* AD5940 Lab Console — static Web Bluetooth client.
  *
- * The app never synthesizes measurement values. Binary A1/B1/C1/D1/E1 frames are
- * kept exactly as received. PT3 DAC/pad traces are explicitly configuration-
+ * The app never synthesizes measurement values. Legacy A1/B1/C1/D1/E1 and
+ * queued B2 binary frames are kept exactly as received. PT3 DAC/pad traces are explicitly configuration-
  * derived setpoints and remain separate from received current data.
  */
 const UUID = {
@@ -25,7 +25,8 @@ const PT3 = {
   adcClockHz: 800000,
   minRawSps: 100,
   maxRawSps: 800,
-  maxRequestedOutputSps: 100,
+  legacyMaxRequestedOutputSps: 100,
+  maxRequestedOutputSps: 200,
 };
 
 const state = {
@@ -45,6 +46,8 @@ const state = {
   pt3DspSupported: false,
   pt3CalibrationDftSupported: false,
   pt3LiveDacSupported: false,
+  pt3HighRateSupported: false,
+  nusB2QueueSupported: false,
   pt3LiveReady: false,
   deviceNameSupported: false,
   deviceName: null,
@@ -60,6 +63,14 @@ const state = {
   pulseApplied: { DPV: null, SWV: null },
   pulsePairs: { DPV: null, SWV: null },
   pulseDerived: [],
+  lastIndexByMode: { AMP: null, CV: null, DPV: null, SWV: null, PT3: null },
+  pendingRunBoundaryByMode: { AMP: false, CV: false, DPV: false, SWV: false, PT3: false },
+  missingSamples: 0,
+  b2Notifications: 0,
+  legacyNotifications: 0,
+  firmwareQueueDepth: null,
+  firmwareOverflowSamples: null,
+  firmwareBackpressureEvents: null,
   plotWindowSamples: 256,
   expectDfuDisconnect: false,
   plotDrawPending: false,
@@ -77,7 +88,7 @@ const elements = {
   pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
-  plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"),
+  plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"), transportState: $("transportState"),
   pulseDiagramPanel: $("pulseDiagramPanel"), pulseDiagramTitle: $("pulseDiagramTitle"), pulseDiagramMetric: $("pulseDiagramMetric"), dpvWaveform: $("dpvWaveform"), swvWaveform: $("swvWaveform"), pulseTermOne: $("pulseTermOne"), pulseTermOneValue: $("pulseTermOneValue"), pulseTermTwo: $("pulseTermTwo"), pulseTermTwoValue: $("pulseTermTwoValue"), pulseTermFrequency: $("pulseTermFrequency"), pulseTermDelay: $("pulseTermDelay"), pulseAdiPotential: $("pulseAdiPotential"), pulseStandardPotential: $("pulseStandardPotential"), dpvAdiPotential: $("dpvAdiPotential"), dpvStandardPotential: $("dpvStandardPotential"), swvAdiPotential: $("swvAdiPotential"), swvStandardPotential: $("swvStandardPotential"), pulseDiagramCaption: $("pulseDiagramCaption"),
   clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), plotWindow: $("plotWindowSamples"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
   dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), dfuDeviceName: $("dfuDeviceName"), dfuDeviceNameState: $("dfuDeviceNameState"), applyDeviceName: $("applyDeviceNameButton"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
@@ -191,8 +202,11 @@ function refreshControlAvailability() {
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
   [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported || pt3Running; });
   elements.pt3CalDft.disabled = !connected || !state.pt3CalibrationDftSupported || pt3Running;
+  elements.pt3Period.min = state.pt3HighRateSupported ? "5" : "10";
   if (!connected) {
     elements.pt3CapabilityHint.textContent = "Connect to check PT3 firmware capability before applying phototransistor parameters.";
+  } else if (state.pt3Supported && state.pt3HighRateSupported && state.nusB2QueueSupported) {
+    elements.pt3CapabilityHint.textContent = "V39 PT3_200SPS + NUS_B2_QUEUE detected. A 5 ms target requests the 200 SPS raw stream with queued three-sample BLE batches; queue overflow is reported, never hidden.";
   } else if (state.pt3Supported && state.pt3LiveDacSupported) {
     elements.pt3CapabilityHint.textContent = "PT3_DSP + PT3_CAL_DFT + PT3_LIVE_DAC detected. After @EVT,RUNNING,PT3, VDS/VGS can be written live without re-running RTIA calibration.";
   } else if (state.pt3Supported && state.pt3CalibrationDftSupported) {
@@ -343,10 +357,68 @@ function handlePt3Error(line) {
   }
 }
 
+function modeForSourceFrame(sourceType) {
+  if (sourceType === 0xa1) return "AMP";
+  if (sourceType === 0xb1) return "PT3";
+  if (sourceType === 0xc1) return "CV";
+  if (sourceType === 0xd1) return "DPV";
+  if (sourceType === 0xe1) return "SWV";
+  return null;
+}
+
+function resetModeTransportBoundary(mode) {
+  if (!Object.hasOwn(state.lastIndexByMode, mode)) return;
+  state.lastIndexByMode[mode] = null;
+  state.pendingRunBoundaryByMode[mode] = true;
+}
+
+function annotateTransport(sample) {
+  const previous = state.lastIndexByMode[sample.mode];
+  let gapBefore = 0;
+  let runBoundary = state.pendingRunBoundaryByMode[sample.mode];
+  state.pendingRunBoundaryByMode[sample.mode] = false;
+  if (!runBoundary && previous !== null) {
+    if (sample.index > previous + 1) gapBefore = sample.index - previous - 1;
+    else if (sample.index <= previous) runBoundary = true;
+  }
+  state.lastIndexByMode[sample.mode] = sample.index;
+  state.missingSamples += gapBefore;
+  return { ...sample, transport: { ...sample.transport, gapBefore, runBoundary } };
+}
+
+function updateCaptureSummary() {
+  const frameSummary = `${state.b2Notifications} B2 batch / ${state.legacyNotifications} legacy notification`;
+  const gapSummary = state.missingSamples ? `${state.missingSamples} indexed sample gap${state.missingSamples === 1 ? "" : "s"}` : "no indexed gaps";
+  const queueSummary = state.firmwareOverflowSamples === null ? "firmware queue status awaiting STATUS?" : `FW queue ${state.firmwareQueueDepth ?? "?"}; overflow ${state.firmwareOverflowSamples}`;
+  elements.transportState.textContent = `${frameSummary}; ${gapSummary}; ${queueSummary}`;
+  elements.plotCaption.textContent = `Received data are displayed at their original sample indexes. Trace segments break across known index gaps or run boundaries; no current values are smoothed, filled, or interpolated. ${frameSummary}; ${gapSummary}.`;
+}
+
+function updateFirmwareTransportStatus(line) {
+  const value = (key) => {
+    const match = line.match(new RegExp(`(?:^|,)${key}=(\\d+)(?:,|$)`));
+    return match ? Number(match[1]) : null;
+  };
+  const queueDepth = value("Q");
+  const overflow = value("OVF") ?? value("DROP");
+  const backpressure = value("BP");
+  if (queueDepth === null && overflow === null && backpressure === null) return;
+  const overflowChanged = overflow !== null && overflow !== state.firmwareOverflowSamples;
+  state.firmwareQueueDepth = queueDepth;
+  state.firmwareOverflowSamples = overflow;
+  state.firmwareBackpressureEvents = backpressure;
+  if (overflowChanged && overflow > 0) log(`Firmware reports ${overflow} actual transport-overflow sample(s); indexed gaps remain visible and are never fabricated.`, "WARN");
+  updateCaptureSummary();
+}
+
 function handleTextLine(line) {
   log(`NUS RX: ${line}`);
   elements.lastStatus.textContent = line;
-  if (line.startsWith("@EVT,RUNNING")) state.running = true;
+  if (line.startsWith("@EVT,RUNNING")) {
+    const mode = line.match(/^@EVT,RUNNING,(AMP|CV|DPV|SWV|PT3)(?:,|$)/)?.[1];
+    state.running = true;
+    if (mode) resetModeTransportBoundary(mode);
+  }
   if (line.startsWith("@EVT,RUNNING,DPV") || line.startsWith("@EVT,RUNNING,SWV")) {
     const mode = line.startsWith("@EVT,RUNNING,DPV") ? "DPV" : "SWV";
     state.pulsePairs[mode] = null;
@@ -358,6 +430,7 @@ function handleTextLine(line) {
   if (line.startsWith("@EVT,STOPPED") || line.startsWith("@EVT,CV_COMPLETE") || line.startsWith("@EVT,DPV_COMPLETE") || line.startsWith("@EVT,SWV_COMPLETE") || line.startsWith("@ERR,")) { state.running = false; state.pt3LiveReady = false; state.pendingPt3Live = null; }
   if (line.startsWith("@ERR,DPV")) state.pendingPulse.DPV = null;
   if (line.startsWith("@ERR,SWV")) state.pendingPulse.SWV = null;
+  if (line.startsWith("@STATUS,")) updateFirmwareTransportStatus(line);
   if (line.startsWith("@INFO,")) {
     const versionMatch = line.match(/^@INFO,AD5940_CTRL,V(\d+)(?:,|$)/);
     if (versionMatch) state.controllerVersion = Number(versionMatch[1]);
@@ -369,13 +442,15 @@ function handleTextLine(line) {
     state.pt3DspSupported = line.includes("PT3_DSP");
     state.pt3CalibrationDftSupported = line.includes("PT3_CAL_DFT");
     state.pt3LiveDacSupported = line.includes("PT3_LIVE_DAC");
+    state.pt3HighRateSupported = line.includes("PT3_200SPS");
+    state.nusB2QueueSupported = line.includes("NUS_B2_QUEUE");
     state.deviceNameSupported = line.includes("NAME_NVM");
     refreshReleaseState();
     if (line.startsWith("@INFO,AD5940_CTRL") && state.controllerVersion === null) log("Controller @INFO did not include a parseable AD5940_CTRL release.", "WARN");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
     log(state.dpvSupported ? "DPV paired-pulse capability detected." : "DPV capability not advertised by this firmware.", state.dpvSupported ? "INFO" : "WARN");
     log(state.swvSupported ? "SWV paired-pulse capability detected." : "SWV capability not advertised by this firmware.", state.swvSupported ? "INFO" : "WARN");
-    log(state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    log(state.pt3HighRateSupported && state.nusB2QueueSupported ? "PT3 200 SPS and queued B2 transport capability detected." : state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
     if (line.startsWith("@INFO,AD5940_CTRL")) maybeApplyQueuedDeviceName();
   }
   if (line === "@NAME,SAVING" || line === "@NAME,ERASING") {
@@ -400,7 +475,7 @@ function handleTextLine(line) {
     state.pt3Applied = { ...state.pendingPt3, updateKind: "CONFIG", acknowledgedAt: new Date().toISOString() };
     state.pt3History.push(state.pt3Applied);
     state.pendingPt3 = null;
-    elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} B1 SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}, cal DFT ${state.pt3Applied.calDft}`;
+    elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} output SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}, cal DFT ${state.pt3Applied.calDft}`;
     log("PT3 configuration acknowledged; DAC/pad trace and DSP metadata updated.");
     schedulePlot();
   }
@@ -452,7 +527,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.controllerVersion = null;
+    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -473,7 +548,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.controllerVersion = null;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
