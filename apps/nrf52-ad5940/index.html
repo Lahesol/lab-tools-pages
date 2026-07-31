@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v2.0</span></h1>
+        <h1>AD5940 Lab Console <span>v2.1</span></h1>
       </div>
       <div class="top-status">
         <span id="connectionDot" class="status-dot"></span>
@@ -31,6 +31,7 @@
             <button id="dpvTab" class="mode-tab" role="tab" aria-selected="false">Differential pulse (DPV)</button>
             <button id="swvTab" class="mode-tab" role="tab" aria-selected="false">Square wave (SWV)</button>
             <button id="pt3Tab" class="mode-tab" role="tab" aria-selected="false">Phototransistor (PT3)</button>
+            <button id="pt3PulseTab" class="mode-tab" role="tab" aria-selected="false">VDS pulse (PT3P)</button>
           </div>
         </section>
 
@@ -205,6 +206,42 @@
             <p class="hint">V39 permits a 5 ms target only after the board advertises <code>PT3_200SPS</code>. It queues up to three contiguous samples in each <code>B2</code> notification, retries after BLE TX completion, and reports actual queue overflow. The GUI breaks the trace at every indexed gap; it never fills missing current values. VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the time trace remains a SINC2 stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
           </div>
 
+          <div id="pt3PulseParameters" class="parameter-set hidden">
+            <section class="parameter-group">
+              <h2>Sequencer-timed VDS pulse</h2>
+              <label>Low VDS <span>mV</span><input id="pt3PulseLow" type="number" min="100" max="1100" step="1" value="100" required /></label>
+              <label>High VDS <span>mV</span><input id="pt3PulseHigh" type="number" min="100" max="1100" step="1" value="1000" required /></label>
+              <label>Fixed VGS <span>mV</span><input id="pt3PulseVgs" type="number" min="-800" max="1000" step="1" value="0" required /></label>
+              <label>High-pulse width <span>ms</span><input id="pt3PulseWidth" type="number" min="5" max="500" step="1" value="10" required /></label>
+              <label>Pulse period <span>ms</span><input id="pt3PulsePeriod" type="number" min="10" max="1000" step="1" value="100" required /></label>
+              <label>Pulse count <span>count</span><input id="pt3PulseCount" type="number" min="1" max="100" step="1" value="10" required /></label>
+              <label>Baseline before first edge <span>ms</span><input id="pt3PulsePretrigger" type="number" min="0" max="1000" step="1" value="25" required /></label>
+              <label>Target output period <span>ms</span><input id="pt3PulseOutputPeriod" type="number" min="5" max="1000" step="1" value="5" required /></label>
+              <label>Gate settling before burst <span>ms</span><input id="pt3PulseSettle" type="number" min="1000" max="120000" step="1000" value="90000" required /></label>
+            </section>
+            <details class="advanced-parameters" open>
+              <summary>PT3P time-domain DSP / calibration</summary>
+              <section class="parameter-group advanced-group">
+                <label>SINC3 OSR <span>ratio</span><select id="pt3PulseSinc3"><option value="2">2</option><option value="4">4</option><option value="5" selected>5</option></select></label>
+                <label>SINC2 OSR <span>ratio</span><select id="pt3PulseSinc2"><option value="533">533</option><option value="800" selected>800</option><option value="1067">1067</option><option value="1333">1333</option></select></label>
+                <label>SINC2 notch <span>optional</span><select id="pt3PulseNotch"><option value="0" selected>Bypass (default)</option><option value="1">Enable SINC2 notch</option></select></label>
+                <label>RTIA calibration dft_num <span>points</span><select id="pt3PulseCalDft"><option value="256">256</option><option value="512">512</option><option value="1024" selected>1024 (default)</option><option value="2048">2048</option><option value="4096">4096</option></select></label>
+              </section>
+            </details>
+            <section class="pt3-setpoint-summary" aria-labelledby="pt3PulseSetpointTitle">
+              <h2 id="pt3PulseSetpointTitle">Calculated VDS pulse path</h2>
+              <dl class="setpoint-grid">
+                <dt>CE0 / VBIAS0 low</dt><dd id="pt3PulseLowSet">—</dd>
+                <dt>CE0 / VBIAS0 high</dt><dd id="pt3PulseHighSet">—</dd>
+                <dt>VZERO0 / gate fixture</dt><dd id="pt3PulseGateSet">—</dd>
+                <dt>SE0 / PAD5</dt><dd>1.100 V fixed</dd>
+              </dl>
+            </section>
+            <p id="pt3PulseTimingHint" class="hint"></p>
+            <p id="pt3PulseCapabilityHint" class="hint capability-hint">Connect to check sequencer VDS-pulse capability.</p>
+            <p class="hint">PT3P is a one-shot AD5940 sequencer burst. It writes only the CE0/VBIAS0 6-bit code; VZERO0 remains fixed at VGS. The current stream is free-running SINC2 data, so the recorded start sample indexes bracket the DAC edge but do not claim exact ADC edge synchronization. Inspect CE0 and the DUT with a high-impedance probe before interpreting sub-ms electrical behavior.</p>
+          </div>
+
           <div class="control-actions">
             <button id="applyButton" class="button secondary" type="submit" disabled>Apply configuration</button>
             <button id="runButton" class="button primary" type="button" disabled>Start measurement</button>
@@ -343,6 +380,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=34bb55cffbee"></script>
+    <script type="module" src="app.js?v=1c78f21b0ec9"></script>
   </body>
 </html>

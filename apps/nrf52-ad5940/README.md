@@ -1,5 +1,21 @@
 # AD5940 Lab Console
 
+## V41 sequencer-timed VDS pulse
+
+Controller **V41** advertises `PT3_VDS_PULSE`. Its PT3P tab configures a
+one-shot VDS pulse burst using the AD5940 sequencer rather than BLE-paced live
+writes. The sequencer changes only the 6-bit VBIAS0/CE0 code while VZERO0
+remains at the selected fixed VGS code. Low/high VDS, high width, period,
+count, baseline before the first edge, PT3 output period, gate settling, SINC
+settings, and RTIA-calibration DFT length are applied together.
+
+PT3P current remains the received free-running B1/B2 SINC2 stream. The GUI
+stores the `@EVT,RUNNING,PT3P` start sample index and renders high-pulse guides
+from it, but labels them as a **sample-index bracket, not an ADC trigger**.
+CSV retains raw current values and writes the full pulse configuration in
+separate metadata columns. See `docs/PT3P_VDS_PULSE.md` for the sequence,
+DAC resolution, limits, and mandatory scope validation.
+
 정적 Web Bluetooth 계측 UI 원본이다. 배포 진입점은 `web_gui/index.html`이며 `app.js`, `styles.css` 외에 런타임 의존성이 없다.
 
 ## Firmware contract
