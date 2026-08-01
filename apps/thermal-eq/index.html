@@ -1,0 +1,190 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Thermal_eq nRF52840 raw ADC and safety controller">
+    <title>Thermal Eq Controller</title>
+    <link rel="stylesheet" href="./styles.css?v=5f2a1ab83c45">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="product-lockup">
+          <span class="product-name">Thermal Eq Controller</span>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <span id="connection-summary">USB · 연결 안 됨</span>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <span id="firmware-summary">DFU · 확인 전</span>
+        </div>
+        <div class="topbar-note">nRF52840 · TPS922053 · 안전 우선</div>
+      </header>
+
+      <aside class="sidebar" aria-label="주 탐색">
+        <a class="nav-item is-active" href="#measurements">측정</a>
+        <a class="nav-item" href="#calibration">보정</a>
+        <a class="nav-item" href="#dfu">DFU</a>
+        <div class="sidebar-spacer"></div>
+        <p class="sidebar-note">Web Serial은 HTTPS 환경의 Chromium 계열 브라우저에서 사용합니다.</p>
+      </aside>
+
+      <main class="workspace">
+        <section class="page-heading" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow">USB CDC 제어 포트</p>
+            <h1 id="page-title">측정 및 보정</h1>
+            <p class="subhead">원시 ADC 스캔은 활성화되어 있습니다. 전류 및 온도 물리량은 보정 전까지 잠금 상태입니다.</p>
+          </div>
+          <div class="connection-actions">
+            <button id="connect-button" class="button button-primary" type="button">제어 포트 연결</button>
+            <button id="disconnect-button" class="button button-secondary" type="button" disabled>연결 해제</button>
+          </div>
+        </section>
+
+        <section class="status-grid" aria-label="시스템 상태">
+          <article class="status-card">
+            <p>USB 연결 상태</p>
+            <strong id="usb-status" class="status-value status-muted">연결 안 됨</strong>
+            <span id="usb-detail">ThermalEq Control 포트를 선택하세요</span>
+          </article>
+          <article class="status-card">
+            <p>ADC 상태</p>
+            <strong id="adc-status" class="status-value status-amber">보정 대기</strong>
+            <span id="adc-detail">원시 스캔 전</span>
+          </article>
+          <article class="status-card">
+            <p>전류 제어 상태</p>
+            <strong id="current-status" class="status-value status-amber">보정 대기</strong>
+            <span>ADC 전달함수 미등록</span>
+          </article>
+          <article class="status-card">
+            <p>온도 추정 상태</p>
+            <strong id="temperature-status" class="status-value status-amber">보정 대기</strong>
+            <span>TSEP / 기준온도 데이터 필요</span>
+          </article>
+        </section>
+
+        <section id="measurements" class="content-grid">
+          <article class="panel adc-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>ADC 채널 상태</h2>
+                <p>12-bit SAADC · 내부 0.6 V 기준 · ×1/6 이득 · 핀 전압은 명목값</p>
+              </div>
+              <div class="inline-actions">
+                <label class="checkbox-label"><input id="auto-scan" type="checkbox" disabled> 2초 자동 스캔</label>
+                <button id="scan-button" class="button button-secondary" type="button" disabled>ADC 스캔</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>채널</th>
+                    <th>보드 신호</th>
+                    <th>ADC 원시값</th>
+                    <th>핀 전압 (명목)</th>
+                    <th>상태</th>
+                  </tr>
+                </thead>
+                <tbody id="adc-table-body">
+                  <tr data-channel="AIN0"><th scope="row">AIN0</th><td>IC4 OUT_D</td><td class="raw">—</td><td class="mv">—</td><td class="channel-state">스캔 대기</td></tr>
+                  <tr data-channel="AIN1"><th scope="row">AIN1</th><td>IC2 OUT_D</td><td class="raw">—</td><td class="mv">—</td><td class="channel-state">스캔 대기</td></tr>
+                  <tr data-channel="AIN3"><th scope="row">AIN3</th><td>IC3 OUT_C</td><td class="raw">—</td><td class="mv">—</td><td class="channel-state">스캔 대기</td></tr>
+                  <tr data-channel="AIN4"><th scope="row">AIN4</th><td>IC4 OUT_C</td><td class="raw">—</td><td class="mv">—</td><td class="channel-state">스캔 대기</td></tr>
+                  <tr data-channel="AIN5"><th scope="row">AIN5</th><td>IC2 OUT_C</td><td class="raw">—</td><td class="mv">—</td><td class="channel-state">스캔 대기</td></tr>
+                  <tr data-channel="AIN6"><th scope="row">AIN6</th><td>IC4 OUT_B</td><td class="raw">—</td><td class="mv">—</td><td class="channel-state">스캔 대기</td></tr>
+                  <tr data-channel="AIN7"><th scope="row">AIN7</th><td>IC3 OUT_D</td><td class="raw">—</td><td class="mv">—</td><td class="channel-state">스캔 대기</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <aside class="panel safety-panel" aria-labelledby="safety-title">
+            <div class="panel-heading compact">
+              <div>
+                <h2 id="safety-title">안전 인터록</h2>
+                <p id="interlock-detail">ADC 스캔 전 · 히터는 명시적 ARM 후에만 동작</p>
+              </div>
+            </div>
+            <div id="interlock-banner" class="interlock-banner is-safe">
+              <strong id="interlock-state">히터 출력: 대기</strong>
+              <span>최대 수동 출력은 10%로 제한됩니다.</span>
+            </div>
+            <div class="heater-control">
+              <div class="control-label-row"><label for="heater-duty">수동 히터 출력</label><output id="heater-output" for="heater-duty">0.0%</output></div>
+              <input id="heater-duty" type="range" min="0" max="10" step="0.1" value="0" disabled>
+              <div class="button-row">
+                <button id="arm-button" class="button button-warning" type="button" disabled>ARM</button>
+                <button id="heater-apply-button" class="button button-primary" type="button" disabled>출력 적용</button>
+                <button id="disarm-button" class="button button-danger" type="button" disabled>DISARM</button>
+              </div>
+            </div>
+            <div class="locked-control">
+              <h3>전류 제어 (보정 필요)</h3>
+              <p>전류 감지 채널, 전달함수, 영점/스팬 보정이 등록되기 전에는 목표 전류 명령을 보낼 수 없습니다.</p>
+            </div>
+            <div class="locked-control">
+              <h3>온도 변환 (보정 필요)</h3>
+              <p>ADC 채널 식별과 TSEP/외부 기준온도 상관 보정 전에는 온도 추정값을 표시하지 않습니다.</p>
+            </div>
+          </aside>
+        </section>
+
+        <section class="lower-grid">
+          <article class="panel chart-panel">
+            <div class="panel-heading compact">
+              <div>
+                <h2>원시 ADC 추세</h2>
+                <p>브라우저가 수신한 `ADC?` 응답만 표시합니다.</p>
+              </div>
+              <span id="sample-count" class="mono">0 samples</span>
+            </div>
+            <canvas id="trend-canvas" width="860" height="250" aria-label="원시 ADC 추세 차트"></canvas>
+          </article>
+          <article id="calibration" class="panel calibration-panel">
+            <div class="panel-heading compact">
+              <div>
+                <h2>보정 상태</h2>
+                <p>보정값 저장/제어 활성화는 이후의 검증된 펌웨어 릴리스에서만 허용됩니다.</p>
+              </div>
+              <button id="calibration-query-button" class="button button-secondary" type="button" disabled>CAL? 확인</button>
+            </div>
+            <dl class="calibration-list">
+              <div><dt>채널 맵</dt><dd id="channel-map">펌웨어 확인 전</dd></div>
+              <div><dt>전류 환산</dt><dd>미보정</dd></div>
+              <div><dt>온도 추정</dt><dd>미보정</dd></div>
+              <div><dt>데이터 내보내기</dt><dd>수신 원시 프로토콜과 별도 메타데이터</dd></div>
+            </dl>
+          </article>
+        </section>
+
+        <section class="lower-grid">
+          <article class="panel console-panel">
+            <div class="panel-heading compact">
+              <div><h2>프로토콜 콘솔</h2><p>수신 원문은 별도 파일로 내보낼 수 있습니다.</p></div>
+              <button id="clear-console-button" class="button button-tertiary" type="button">화면 지우기</button>
+            </div>
+            <div id="console-output" class="console-output" role="log" aria-live="polite"></div>
+            <form id="command-form" class="command-form">
+              <label for="command-input">명령</label>
+              <input id="command-input" type="text" value="STATUS?" autocomplete="off" spellcheck="false" disabled>
+              <button id="command-send-button" class="button button-secondary" type="submit" disabled>전송</button>
+            </form>
+          </article>
+          <article id="dfu" class="panel export-panel">
+            <h2>DFU 및 원시 데이터</h2>
+            <p>일반 제어 명령은 <strong>ThermalEq Control</strong> 포트만 선택합니다. MCUmgr 업로드는 별도의 <strong>ThermalEq DFU</strong> 포트와 `smpmgr` 절차를 사용합니다.</p>
+            <div class="button-row">
+              <button id="dfu-query-button" class="button button-secondary" type="button" disabled>DFU? 확인</button>
+              <button id="export-raw-button" class="button button-secondary" type="button" disabled>수신 원문 내보내기</button>
+              <button id="export-meta-button" class="button button-secondary" type="button" disabled>메타데이터 내보내기</button>
+            </div>
+          </article>
+        </section>
+      </main>
+      <footer class="footerbar"><span>보드: nRF52840 / PLE-52F</span><span>측정 모드: 원시 ADC</span><span id="footer-safety">인터록: 대기</span><span>물리량 추정: 보정 대기</span></footer>
+    </div>
+    <script src="./app.js?v=50b1484c4d2a"></script>
+  </body>
+</html>

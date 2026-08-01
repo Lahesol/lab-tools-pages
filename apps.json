@@ -32,6 +32,14 @@
         "accent":  "#255f85"
     },
     {
+        "name":  "Thermal Eq Controller",
+        "description":  "Web Serial dashboard for Thermal_eq nRF52840 raw ADC scans, safety interlock status, and explicit heater commands.",
+        "url":  "apps/thermal-eq/",
+        "group":  "Thermal",
+        "status":  "Ready",
+        "accent":  "#9a5a2f"
+    },
+    {
         "name":  "KETI Lab Console",
         "description":  "Web Serial ADC acquisition, filtering, plotting, recording, and helper-based flashing console for Arduino Nano 33 BLE Rev2.",
         "url":  "apps/keti-platform/",
