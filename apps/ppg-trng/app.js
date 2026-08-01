@@ -3355,12 +3355,14 @@ function exportBitsCsv() {
 }
 
 function setActiveView(viewId) {
-  const target = ["noiseView", "nistView", "mlView", "90bView", "switchView"].includes(viewId) ? viewId : "liveView";
+  const target = ["liveView", "noiseView", "nistView", "mlView", "90bView", "switchView"].includes(viewId) ? viewId : "liveView";
   [els.liveView, els.noiseView, els.nistView, els.mlView, els.entropyView, els.switchView].forEach((view) => {
     if (view) view.hidden = view.id !== target;
   });
   els.viewTabs.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.viewTarget === target);
+    const isActive = button.dataset.viewTarget === target;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
   });
   window.requestAnimationFrame(() => {
     resizeCanvas();
@@ -5583,14 +5585,15 @@ function animationLoop() {
 }
 
 function bindEvents() {
-  els.uiScale.addEventListener("change", () => {
-    setUiScale(els.uiScale.value);
+  const viewTabContainer = document.querySelector(".view-tabs");
+  viewTabContainer?.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-view-target]");
+    if (!button || !viewTabContainer.contains(button)) return;
+    setActiveView(button.dataset.viewTarget);
   });
 
-  els.viewTabs.forEach((button) => {
-    button.addEventListener("click", () => {
-      setActiveView(button.dataset.viewTarget);
-    });
+  els.uiScale.addEventListener("change", () => {
+    setUiScale(els.uiScale.value);
   });
 
   els.connectButton.addEventListener("click", () => {

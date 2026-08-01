@@ -252,6 +252,10 @@ select {
   gap: 14px;
 }
 
+.view-panel[hidden] {
+  display: none !important;
+}
+
 .panel,
 .plot-panel,
 .encryption-panel,

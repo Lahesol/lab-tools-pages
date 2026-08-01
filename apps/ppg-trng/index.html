@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=74563a006b2f" />
+    <link rel="stylesheet" href="./styles.css?v=297d4053ecb2" />
   </head>
   <body>
     <div class="app-shell">
@@ -157,12 +157,12 @@
 
         <section class="main-panel">
           <div class="view-tabs" role="tablist" aria-label="Main views">
-            <button class="view-tab is-active" data-view-target="liveView" type="button">Live monitor</button>
-            <button class="view-tab" data-view-target="noiseView" type="button">Noise extractor</button>
-            <button class="view-tab" data-view-target="nistView" type="button">NIST tests</button>
-            <button class="view-tab" data-view-target="mlView" type="button">ML attack</button>
-            <button class="view-tab" data-view-target="90bView" type="button">90B entropy</button>
-            <button class="view-tab" data-view-target="switchView" type="button">DAC switch compare</button>
+            <button class="view-tab is-active" data-view-target="liveView" role="tab" aria-selected="true" type="button">Live monitor</button>
+            <button class="view-tab" data-view-target="noiseView" role="tab" aria-selected="false" type="button">Noise extractor</button>
+            <button class="view-tab" data-view-target="nistView" role="tab" aria-selected="false" type="button">NIST tests</button>
+            <button class="view-tab" data-view-target="mlView" role="tab" aria-selected="false" type="button">ML attack</button>
+            <button class="view-tab" data-view-target="90bView" role="tab" aria-selected="false" type="button">90B entropy</button>
+            <button class="view-tab" data-view-target="switchView" role="tab" aria-selected="false" type="button">DAC switch compare</button>
           </div>
 
           <div id="liveView" class="view-panel">
@@ -1158,7 +1158,7 @@
     <script src="./nist.js?v=20260730-nist-v1" defer></script>
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=c604e6570893" defer></script>
+    <script src="./app.js?v=64fa8104a064" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>
