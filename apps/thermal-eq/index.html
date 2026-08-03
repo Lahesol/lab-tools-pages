@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Thermal_eq nRF52840 raw ADC and safety controller">
     <title>Thermal Eq Controller</title>
-    <link rel="stylesheet" href="./styles.css?v=5f2a1ab83c45">
+    <link rel="stylesheet" href="./styles.css?v=ce06bfda726d">
   </head>
   <body>
     <div class="app-shell">
@@ -142,7 +142,7 @@
             </div>
             <canvas id="trend-canvas" width="860" height="250" aria-label="원시 ADC 추세 차트"></canvas>
           </article>
-          <article id="calibration" class="panel calibration-panel">
+          <article id="calibration-status" class="panel calibration-panel">
             <div class="panel-heading compact">
               <div>
                 <h2>보정 상태</h2>
@@ -157,6 +157,83 @@
               <div><dt>데이터 내보내기</dt><dd>수신 원시 프로토콜과 별도 메타데이터</dd></div>
             </dl>
           </article>
+        </section>
+
+        <section id="calibration" class="panel calibration-workbench" aria-labelledby="calibration-title">
+          <div class="panel-heading calibration-heading">
+            <div>
+              <h2 id="calibration-title">보정 세션</h2>
+              <p>기준 계측값과 같은 순간의 원시 ADC 값을 연결합니다. 수집된 원문은 별도 원시 프로토콜 파일에도 남아야 합니다.</p>
+            </div>
+            <span id="calibration-session-status" class="mono">점 수집 전</span>
+          </div>
+          <ol class="calibration-steps" aria-label="보정 순서">
+            <li class="is-current">1 채널 선택</li><li>2 기준값 입력</li><li>3 원시 ADC 캡처</li><li>4 피팅 검토</li><li>5 JSON 내보내기</li>
+          </ol>
+          <div class="calibration-layout">
+            <article class="calibration-collection">
+              <h3>점 수집</h3>
+              <div class="calibration-form-grid">
+                <label>물리량
+                  <select id="calibration-quantity" disabled>
+                    <option value="current">전류 (mA)</option>
+                    <option value="temperature">온도 (°C)</option>
+                  </select>
+                </label>
+                <label>채널
+                  <select id="calibration-channel" disabled>
+                    <option value="AIN0">AIN0 · IC4 OUT_D</option>
+                    <option value="AIN1">AIN1 · IC2 OUT_D</option>
+                    <option value="AIN3">AIN3 · IC3 OUT_C</option>
+                    <option value="AIN4">AIN4 · IC4 OUT_C</option>
+                    <option value="AIN5">AIN5 · IC2 OUT_C</option>
+                    <option value="AIN6">AIN6 · IC4 OUT_B</option>
+                    <option value="AIN7">AIN7 · IC3 OUT_D</option>
+                  </select>
+                </label>
+                <label>기준 계측값
+                  <span class="measurement-input"><input id="calibration-reference" type="number" step="any" inputmode="decimal" placeholder="값 입력" disabled><span id="calibration-reference-unit">mA</span></span>
+                </label>
+                <label>메모 (선택)
+                  <input id="calibration-note" type="text" maxlength="120" placeholder="계측기, 조건, 안정화 시간" disabled>
+                </label>
+              </div>
+              <div class="calibration-capture-row">
+                <button id="calibration-capture-button" class="button button-primary" type="button" disabled>원시 ADC 캡처 후 점 추가</button>
+                <p id="calibration-capture-status" role="status">캡처 대기 — ADC? 응답을 받은 뒤에만 점을 저장합니다.</p>
+              </div>
+              <div class="table-wrap calibration-point-table">
+                <table>
+                  <thead><tr><th>순번</th><th>시각</th><th>채널</th><th>원시값</th><th>명목 mV</th><th>기준값</th><th>메모</th><th>삭제</th></tr></thead>
+                  <tbody id="calibration-point-body"><tr><td colspan="8" class="empty-table">아직 수집된 보정점이 없습니다.</td></tr></tbody>
+                </table>
+              </div>
+            </article>
+            <aside class="calibration-fit">
+              <h3>피팅 검토</h3>
+              <label>모델 선택
+                <select id="calibration-model" disabled><option value="linear">선형 (2점 이상)</option><option value="quadratic">2차 (3점 이상)</option></select>
+              </label>
+              <p id="calibration-prerequisite" class="fit-prerequisite">필수 조건: 아직 0 / 2 점</p>
+              <div id="calibration-equation" class="fit-equation">계수: —</div>
+              <dl class="fit-metrics">
+                <div><dt>최대 잔차</dt><dd id="calibration-max-error">—</dd></div>
+                <div><dt>MAE</dt><dd id="calibration-mae">—</dd></div>
+                <div><dt>RMSE</dt><dd id="calibration-rmse">—</dd></div>
+              </dl>
+              <button id="calibration-fit-button" class="button button-secondary calibration-fit-button" type="button" disabled>피팅 실행</button>
+              <div class="host-preview-warning"><strong>호스트 보정 미리보기만 제공</strong><span>펌웨어 히터 제어에는 자동 반영되지 않습니다.</span></div>
+            </aside>
+          </div>
+          <div class="calibration-bottom">
+            <div class="calibration-export-actions">
+              <button id="export-calibration-json-button" class="button button-secondary" type="button" disabled>보정 JSON 내보내기</button>
+              <button id="export-calibration-csv-button" class="button button-secondary" type="button" disabled>보정 점 CSV 내보내기</button>
+              <button id="import-calibration-button" class="button button-secondary" type="button" disabled>보정 JSON 가져오기</button>
+              <input id="import-calibration-file" type="file" accept="application/json,.json" hidden>
+            </div>
+            <div class="calibration-scatter-wrap"><h3>보정 점</h3><canvas id="calibration-scatter-canvas" width="840" height="220" aria-label="원시 ADC 값과 기준 계측값의 보정점 산점도"></canvas></div>
+          </div>
         </section>
 
         <section class="lower-grid">
@@ -185,6 +262,7 @@
       </main>
       <footer class="footerbar"><span>보드: nRF52840 / PLE-52F</span><span>측정 모드: 원시 ADC</span><span id="footer-safety">인터록: 대기</span><span>물리량 추정: 보정 대기</span></footer>
     </div>
-    <script src="./app.js?v=50b1484c4d2a"></script>
+    <script src="./calibration-core.js"></script>
+    <script src="./app.js?v=64b7dfdd52da"></script>
   </body>
 </html>

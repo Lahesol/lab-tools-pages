@@ -23,12 +23,24 @@ The UI intentionally shows no current or temperature numbers until the ADC
 channel identities, transfer functions, and thermal/TSEP reference data have
 been measured and committed in a later signed firmware release.
 
+## Guided host calibration
+
+`보정 세션` lets the operator select a quantity/channel, enter an independent
+reference value, and save it only with a fresh `ADC?` response. It supports
+linear and quadratic least-squares review, residual metrics, session JSON/CSV
+export, and JSON import for later review. The browser fit is explicitly a
+host-side preview; it is not sent to the firmware or heater control path.
+
+Use [CALIBRATION_GUIDE.md](./CALIBRATION_GUIDE.md) for the required reference
+measurement, raw-data preservation, and temperature interpretation boundary.
+
 ## Static verification
 
 No local server is required or started for this project. Run:
 
 ```powershell
 node --check .\web_gui\app.js
+node .\web_gui\tests\calibration-core.test.js
 ```
 
 The Web Serial interaction itself needs an HTTPS Chromium runtime and a user
