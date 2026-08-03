@@ -264,6 +264,7 @@ select {
 .noise-panel,
 .nist-panel,
 .ml-panel,
+.puf-panel,
 .entropy-panel,
 .switch-panel {
   width: 100%;
@@ -1128,6 +1129,187 @@ canvas {
   gap: 10px;
   padding: 14px 16px 0;
   background: #fbfdfc;
+}
+
+.puf-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.25fr) repeat(6, minmax(120px, 0.7fr));
+  gap: 10px;
+  padding: 14px 16px 0;
+  background: #fbfdfc;
+}
+
+.puf-file-field {
+  grid-column: span 2;
+}
+
+.puf-source-status {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(130px, 0.7fr));
+  gap: 8px;
+  margin: 12px 16px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f5faf8;
+}
+
+.puf-source-stat {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.puf-source-stat span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.puf-source-stat strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.puf-source-description {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.puf-help {
+  margin: 12px 16px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.puf-help summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.puf-help-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 0 12px;
+}
+
+.puf-help-grid > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.puf-help-grid strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.puf-help-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.puf-summary {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px 0;
+  background: #fbfdfc;
+}
+
+.puf-result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 16px 16px;
+  background: #fbfdfc;
+}
+
+.puf-results-wrap {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.puf-results-wrap h3 {
+  margin: 0;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.puf-results {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.puf-results th,
+.puf-results td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.puf-results th {
+  color: var(--muted);
+  background: #f6faf8;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.puf-empty {
+  color: var(--muted);
+  text-align: center !important;
+}
+
+.puf-report-note {
+  margin: 0 16px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.puf-report-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.5;
 }
 
 .ml-source-status {
@@ -2181,6 +2363,10 @@ canvas {
     grid-template-columns: 1fr;
   }
 
+  .puf-result-grid {
+    grid-template-columns: 1fr;
+  }
+
   .entropy-result-grid {
     grid-template-columns: 1fr;
   }
@@ -2233,6 +2419,10 @@ canvas {
     .ml-source-status,
     .ml-help-grid,
     .ml-summary,
+    .puf-controls,
+    .puf-source-status,
+    .puf-help-grid,
+    .puf-summary,
     .entropy-controls,
     .entropy-source-status,
     .entropy-help-grid,
@@ -2246,6 +2436,10 @@ canvas {
 
   .view-tab {
     flex: 1;
+  }
+
+  .puf-file-field {
+    grid-column: auto;
   }
 
   .quick-grid {

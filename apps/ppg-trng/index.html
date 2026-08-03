@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=297d4053ecb2" />
+    <link rel="stylesheet" href="./styles.css?v=730b31222113" />
   </head>
   <body>
     <div class="app-shell">
@@ -96,7 +96,7 @@
               <div class="quick-grid">
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC0</span>
-                  <span class="command-label">Commercial sensor ambient/noise - AIN0/P0.02</span>
+                  <span class="command-label">commercial PPG sensor ambient/noise - AIN0/P0.02</span>
                 </button>
                 <button class="button secondary command-button is-active" data-command="ADC?" type="button" title="Query synchronized ADC routing">
                   <span class="command-code">ADC2</span>
@@ -161,6 +161,7 @@
             <button class="view-tab" data-view-target="noiseView" role="tab" aria-selected="false" type="button">Noise extractor</button>
             <button class="view-tab" data-view-target="nistView" role="tab" aria-selected="false" type="button">NIST tests</button>
             <button class="view-tab" data-view-target="mlView" role="tab" aria-selected="false" type="button">ML attack</button>
+            <button class="view-tab" data-view-target="pufView" role="tab" aria-selected="false" type="button">PUF evaluation</button>
             <button class="view-tab" data-view-target="90bView" role="tab" aria-selected="false" type="button">90B entropy</button>
             <button class="view-tab" data-view-target="switchView" role="tab" aria-selected="false" type="button">DAC switch compare</button>
           </div>
@@ -277,7 +278,7 @@
                   <div id="plotAdcSource" class="plot-source-options" role="group" aria-label="Plot channels">
                     <label class="plot-source-option">
                       <input type="checkbox" data-plot-source="ADC0" />
-                      <span>ADC0 ambient/noise</span>
+                      <span>ADC0 commercial PPG ambient/noise</span>
                     </label>
                     <label class="plot-source-option is-primary">
                       <input type="checkbox" data-plot-source="ADC2" checked />
@@ -985,6 +986,110 @@
             </div>
           </section>
 
+          <section id="pufView" class="puf-panel view-panel" hidden>
+            <div class="plot-toolbar">
+              <div>
+                <h2>Paper-inspired PUF evaluation</h2>
+                <p id="pufCaption">Load multiple equal-length response vectors, or segment one retained bit stream into responses.</p>
+              </div>
+              <div class="toolbar-actions">
+                <button id="pufRunButton" class="button primary" type="button">Run PUF evaluation</button>
+                <button id="pufClearButton" class="button secondary" type="button">Clear</button>
+                <button id="pufExportButton" class="button secondary" type="button">CSV</button>
+              </div>
+            </div>
+
+            <div class="puf-controls">
+              <label class="compact-field" for="pufSource">
+                <span>Response source</span>
+                <select id="pufSource">
+                  <option value="upload" selected>Uploaded response files</option>
+                  <option value="nist">NIST uploaded bit stream</option>
+                  <option value="current">Current extracted bits</option>
+                  <option value="noise">Noise extractor result</option>
+                </select>
+              </label>
+              <label class="compact-field" for="pufBitFormat" title="Use text for 0/1 text files, bytes for one byte per bit, or packed for eight bits per byte.">
+                <span>File format</span>
+                <select id="pufBitFormat">
+                  <option value="auto" selected>Auto</option>
+                  <option value="text">Text 0/1</option>
+                  <option value="bytes">One byte / bit</option>
+                  <option value="packed">Packed bytes</option>
+                </select>
+              </label>
+              <label class="compact-field" for="pufResponseLength" title="For a stream source, each response is one consecutive block of this many bits. Uploaded files are kept as separate responses.">
+                <span>Response length</span>
+                <input id="pufResponseLength" type="number" min="32" max="1000000" step="100" value="100000" />
+              </label>
+              <label class="compact-field" for="pufResponseCount" title="For a stream source, use this many newest response blocks. Leave 0 to use all complete blocks.">
+                <span>Response count</span>
+                <input id="pufResponseCount" type="number" min="0" max="100" step="1" value="5" />
+              </label>
+              <label class="compact-field" for="pufGroupSize" title="Responses are ordered as repeated measurements of one device. 1 disables intra-response repeatability.">
+                <span>Repeat group size</span>
+                <input id="pufGroupSize" type="number" min="1" max="100" step="1" value="1" />
+              </label>
+              <label class="compact-field" for="pufRows" title="Rows used by the paper-style coordinate challenge for the ML attack.">
+                <span>Challenge rows</span>
+                <input id="pufRows" type="number" min="2" max="1024" step="1" value="250" />
+              </label>
+              <label class="compact-field" for="pufColumns" title="Columns used by the paper-style coordinate challenge for the ML attack.">
+                <span>Challenge columns</span>
+                <input id="pufColumns" type="number" min="2" max="1024" step="1" value="250" />
+              </label>
+              <label class="compact-field puf-file-field" for="pufBitFile">
+                <span>Response files</span>
+                <input id="pufBitFile" type="file" multiple accept=".txt,.csv,.bin,.dat" />
+              </label>
+            </div>
+
+            <div class="puf-source-status" aria-live="polite">
+              <div class="puf-source-stat"><span>Selected source</span><strong id="pufSourceName">Uploaded response files</strong></div>
+              <div class="puf-source-stat"><span>Responses</span><strong id="pufResponseAvailable">0</strong></div>
+              <div class="puf-source-stat"><span>Bits / response</span><strong id="pufResponseBits">0</strong></div>
+              <p id="pufSourceDescription" class="puf-source-description">Each uploaded file is treated as one response vector. Files must contain the same number of binary samples.</p>
+            </div>
+
+            <details class="puf-help">
+              <summary>Reference method and interpretation</summary>
+              <div class="puf-help-grid">
+                <div><strong>Preprocessing</strong><p>The paper denoises an image, bins neighboring pixels, and thresholds the averaged values into equal-size binary response matrices. For ADC data, this panel uses the retained bit stream after the selected extraction method and makes consecutive blocks the response vectors.</p></div>
+                <div><strong>Core metrics</strong><p>Uniformity targets 50%, inter-HD targets 50%, Shannon entropy targets 1, bit-aliasing targets 50%, and Pearson correlation targets 0. Intra-HD measures repeated-response stability and is only available when a repeat group size is provided.</p></div>
+                <div><strong>ML attack</strong><p>The paper uses coordinate bits as the challenge and evaluates logistic regression and SVM at 10-70% training ratios over five trials. This is reproduced as a supplementary modeling diagnostic for the first response.</p></div>
+                <div><strong>Boundary</strong><p>This is not a formal PUF security proof and does not replace SP 800-90B raw-source/min-entropy assessment. Temporal ADC blocks are only PUF-like responses after their challenge and repeat conditions are explicitly defined.</p></div>
+              </div>
+            </details>
+
+            <div class="puf-summary" aria-live="polite">
+              <div class="bit-stat"><span>Responses</span><strong id="pufResponseCountSummary">0</strong></div>
+              <div class="bit-stat"><span>Uniformity</span><strong id="pufUniformity">--</strong></div>
+              <div class="bit-stat"><span>Inter-HD</span><strong id="pufInterHd">--</strong></div>
+              <div class="bit-stat"><span>Shannon H</span><strong id="pufEntropy">--</strong></div>
+              <div class="bit-stat"><span>Bit aliasing</span><strong id="pufAliasing">--</strong></div>
+              <div class="bit-stat"><span>Intra-HD</span><strong id="pufIntraHd">--</strong></div>
+              <div class="bit-stat"><span>Max |corr|</span><strong id="pufCorrelation">--</strong></div>
+            </div>
+
+            <div class="puf-result-grid">
+              <div class="puf-results-wrap">
+                <h3>Response metrics</h3>
+                <table class="puf-results" aria-label="PUF response metrics">
+                  <thead><tr><th>Response</th><th>Bits</th><th>Ones</th><th>Uniformity</th><th>Shannon H</th></tr></thead>
+                  <tbody id="pufResponseResultsBody"><tr><td colspan="5" class="puf-empty">No evaluation run yet.</td></tr></tbody>
+                </table>
+              </div>
+              <div class="puf-results-wrap">
+                <h3>Paper-style coordinate ML attack</h3>
+                <table class="puf-results" aria-label="PUF coordinate machine learning attack">
+                  <thead><tr><th>Train</th><th>Test points</th><th>LR accuracy</th><th>SVM accuracy</th></tr></thead>
+                  <tbody id="pufAttackResultsBody"><tr><td colspan="4" class="puf-empty">No evaluation run yet.</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="puf-report-note"><p id="pufWarning">Paper-inspired PUF evaluation is waiting for response vectors.</p></div>
+          </section>
+
           <section id="90bView" class="entropy-panel view-panel" hidden>
             <div class="plot-toolbar">
               <div>
@@ -1157,8 +1262,9 @@
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
     <script src="./nist.js?v=20260730-nist-v1" defer></script>
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
+    <script src="./puf.js?v=20260803-puf-v1" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=989b4e0495dd" defer></script>
+    <script src="./app.js?v=cdba48813ec5" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

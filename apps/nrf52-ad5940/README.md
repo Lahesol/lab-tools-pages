@@ -1,5 +1,13 @@
 # AD5940 Lab Console
 
+## Dual-BLE optical experiment console
+
+`optical_lab.html` is a separate static entry point for a 6-color LED board
+and an AD5940 PT3 board. It keeps raw current values, LED/AFE command events,
+and derived analysis artefacts separate. See
+`../docs/SIX_COLOR_PT3_OPTICAL_EXPERIMENT.md` before using it: independent BLE
+command timing is an event marker, never a claimed hardware optical trigger.
+
 ## V41 sequencer-timed VDS pulse
 
 Controller **V41** advertises `PT3_VDS_PULSE`. Its PT3P tab configures a

@@ -194,6 +194,33 @@ const els = {
   mlResultsBody: document.querySelector("#mlResultsBody"),
   mlInterpretation: document.querySelector("#mlInterpretation"),
   mlWarning: document.querySelector("#mlWarning"),
+  pufView: document.querySelector("#pufView"),
+  pufCaption: document.querySelector("#pufCaption"),
+  pufSource: document.querySelector("#pufSource"),
+  pufBitFormat: document.querySelector("#pufBitFormat"),
+  pufResponseLength: document.querySelector("#pufResponseLength"),
+  pufResponseCount: document.querySelector("#pufResponseCount"),
+  pufGroupSize: document.querySelector("#pufGroupSize"),
+  pufRows: document.querySelector("#pufRows"),
+  pufColumns: document.querySelector("#pufColumns"),
+  pufBitFile: document.querySelector("#pufBitFile"),
+  pufSourceName: document.querySelector("#pufSourceName"),
+  pufResponseAvailable: document.querySelector("#pufResponseAvailable"),
+  pufResponseBits: document.querySelector("#pufResponseBits"),
+  pufSourceDescription: document.querySelector("#pufSourceDescription"),
+  pufRunButton: document.querySelector("#pufRunButton"),
+  pufClearButton: document.querySelector("#pufClearButton"),
+  pufExportButton: document.querySelector("#pufExportButton"),
+  pufResponseCountSummary: document.querySelector("#pufResponseCountSummary"),
+  pufUniformity: document.querySelector("#pufUniformity"),
+  pufInterHd: document.querySelector("#pufInterHd"),
+  pufEntropy: document.querySelector("#pufEntropy"),
+  pufAliasing: document.querySelector("#pufAliasing"),
+  pufIntraHd: document.querySelector("#pufIntraHd"),
+  pufCorrelation: document.querySelector("#pufCorrelation"),
+  pufResponseResultsBody: document.querySelector("#pufResponseResultsBody"),
+  pufAttackResultsBody: document.querySelector("#pufAttackResultsBody"),
+  pufWarning: document.querySelector("#pufWarning"),
   entropyView: document.querySelector('[id="90bView"]'),
   entropyCaption: document.querySelector('[id="90bCaption"]'),
   entropyBitSource: document.querySelector('[id="90bBitSource"]'),
@@ -388,6 +415,11 @@ const state = {
   mlResults: null,
   mlWorker: null,
   mlRunning: false,
+  pufResults: null,
+  pufUploadedResponses: [],
+  pufUploadedFileNames: [],
+  pufRunning: false,
+  pufWorker: null,
   entropyResults: null,
   entropyWorker: null,
   entropyRunning: false,
@@ -439,7 +471,7 @@ const ADC_SOURCE_INFO = {
   },
   ADC0: {
     command: "ADC0",
-    label: "ADC0 ambient/noise",
+    label: "ADC0 commercial PPG ambient/noise",
     detail: "Commercial sensor ambient/noise - AIN0/P0.02",
   },
 };
@@ -3355,8 +3387,8 @@ function exportBitsCsv() {
 }
 
 function setActiveView(viewId) {
-  const target = ["liveView", "noiseView", "nistView", "mlView", "90bView", "switchView"].includes(viewId) ? viewId : "liveView";
-  [els.liveView, els.noiseView, els.nistView, els.mlView, els.entropyView, els.switchView].forEach((view) => {
+  const target = ["liveView", "noiseView", "nistView", "mlView", "pufView", "90bView", "switchView"].includes(viewId) ? viewId : "liveView";
+  [els.liveView, els.noiseView, els.nistView, els.mlView, els.pufView, els.entropyView, els.switchView].forEach((view) => {
     if (view) view.hidden = view.id !== target;
   });
   els.viewTabs.forEach((button) => {
@@ -3519,6 +3551,7 @@ async function loadNoiseCsvFile(file) {
   state.noiseSelectedBits = [];
   els.noiseCaption.textContent = `${file.name} | ${table.rows.length} rows | ${table.headers.length} columns`;
   updateNoiseSummary(0, 0, []);
+  updatePufSourceStatus();
   renderNoisePreview();
   renderNoiseResults([]);
   resizeNoiseBitCanvas();
@@ -3825,6 +3858,7 @@ function runNoiseExtraction() {
   state.noiseSelectedBits = selected?.bits || [];
   updateNoiseSummary(state.noiseTable?.rows?.length || 0, values.length, state.noiseResults);
   renderNoiseResults(state.noiseResults);
+  updatePufSourceStatus();
   resizeNoiseBitCanvas();
 }
 
@@ -4148,6 +4182,7 @@ async function handleNistBitFiles(fileList) {
     updateNistSourceStatus();
     updateMlSourceStatus();
     updateEntropySourceStatus();
+    updatePufSourceStatus();
     addLog("SYS", `Loaded ${bits.length} bits from ${files.length} NIST bit files`);
   } catch (error) {
     state.nistUploadedBits = new Uint8Array(0);
@@ -4170,6 +4205,7 @@ function removeNistBitFile() {
   clearNistResults();
   updateMlSourceStatus();
   updateEntropySourceStatus();
+  updatePufSourceStatus();
   addLog("SYS", "Removed uploaded NIST bit file");
 }
 
@@ -4243,7 +4279,7 @@ function getMlSourceLabel() {
   if (source === "current") return state.bitSource || "Current extracted bits";
   if (source === "upload") return state.nistUploadedFileName || "Uploaded bit file";
   if (source === "firmware") return "Firmware ENCF key bits";
-  if (source === "ADC0") return "ADC0 ambient/noise bits";
+  if (source === "ADC0") return "ADC0 commercial PPG/ambient-noise bits";
   if (source === "ADC3") return "ADC3 green-LED/noise bits";
   return `${source} bits`;
 }
@@ -4260,7 +4296,7 @@ function updateMlSourceStatus() {
     const description = source === "upload"
       ? "Uses the uploaded bit stream as an isolated source; it is not added to the live buffer."
       : source === "ADC0"
-        ? "Uses retained ADC0 bits. In this project ADC0 is treated as ambient-light/electronic noise, not biomedical PPG."
+        ? "Uses retained ADC0 bits. In this project ADC0 is treated as the commercial PPG sensor's ambient/electronic-noise path, not the BPTT PPG signal."
         : source === "ADC3"
           ? "Uses retained ADC3 bits. In this project ADC3 is treated as green-LED-assisted optical/electronic noise."
           : "Uses only the selected retained bit stream and does not generate new bits.";
@@ -4279,7 +4315,7 @@ function getEntropySourceLabel() {
   if (source === "current") return state.bitSource || "Current extracted bits";
   if (source === "upload") return state.nistUploadedFileName || "Uploaded bit file";
   if (source === "firmware") return "Firmware ENCF key bits";
-  if (source === "ADC0") return "ADC0 ambient/noise bits";
+  if (source === "ADC0") return "ADC0 commercial PPG/ambient-noise bits";
   if (source === "ADC3") return "ADC3 green-LED/noise bits";
   return `${source} bits`;
 }
@@ -4707,6 +4743,258 @@ function exportMlResultsCsv() {
   link.click();
   URL.revokeObjectURL(url);
   addLog("SYS", `Exported ${result.models.length} ML attack model results`);
+}
+
+function getPufSourceLabel() {
+  const labels = {
+    upload: "Uploaded response files",
+    nist: "NIST uploaded bit stream",
+    current: "Current extracted bits",
+    noise: "Noise extractor result",
+  };
+  return labels[els.pufSource?.value] || "PUF source";
+}
+
+function getPufStreamBits() {
+  const source = els.pufSource?.value || "upload";
+  if (source === "nist") return state.nistUploadedBits || new Uint8Array(0);
+  if (source === "noise") return Uint8Array.from(state.noiseSelectedBits || []);
+  if (source === "current") return Uint8Array.from(state.bits.map((entry) => entry.bit));
+  return new Uint8Array(0);
+}
+
+function getPufResponses() {
+  const source = els.pufSource?.value || "upload";
+  if (source === "upload") return state.pufUploadedResponses || [];
+  const bits = getPufStreamBits();
+  const responseLength = clampInteger(els.pufResponseLength?.value, 32, 1000000, 100000);
+  const completeCount = Math.floor(bits.length / responseLength);
+  const requestedCount = clampInteger(els.pufResponseCount?.value, 0, 100, 5);
+  const responseCount = requestedCount > 0 ? Math.min(requestedCount, completeCount) : completeCount;
+  const start = Math.max(0, completeCount - responseCount);
+  const responses = [];
+  for (let responseIndex = start; responseIndex < completeCount; responseIndex += 1) {
+    responses.push(bits.slice(responseIndex * responseLength, (responseIndex + 1) * responseLength));
+  }
+  return responses;
+}
+
+function updatePufSourceStatus() {
+  const source = els.pufSource?.value || "upload";
+  const responses = getPufResponses();
+  const stream = source === "upload" ? null : getPufStreamBits();
+  if (els.pufSourceName) {
+    const names = state.pufUploadedFileNames || [];
+    els.pufSourceName.textContent = source === "upload" && names.length
+      ? `${names.length} files (${names[0]}${names.length > 1 ? ` ... ${names[names.length - 1]}` : ""})`
+      : getPufSourceLabel();
+  }
+  if (els.pufResponseAvailable) els.pufResponseAvailable.textContent = String(responses.length);
+  if (els.pufResponseBits) els.pufResponseBits.textContent = String(responses[0]?.length || 0);
+  if (els.pufSourceDescription) {
+    els.pufSourceDescription.textContent = source === "upload"
+      ? "Each uploaded file is treated as one response vector. Files must contain the same number of binary samples."
+      : `${stream.length.toLocaleString()} bits available | using ${responses.length.toLocaleString()} newest complete response blocks of ${clampInteger(els.pufResponseLength?.value, 32, 1000000, 100000).toLocaleString()} bits.`;
+  }
+}
+
+async function handlePufBitFiles(fileList) {
+  const files = [...(fileList || [])].sort((left, right) => left.name.localeCompare(right.name, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  }));
+  if (!files.length) return;
+  try {
+    const format = els.pufBitFormat?.value || "auto";
+    const responses = [];
+    for (const file of files) responses.push(await parseNistBitFile(file, format));
+    state.pufUploadedResponses = responses;
+    state.pufUploadedFileNames = files.map((file) => file.name);
+    if (els.pufSource) els.pufSource.value = "upload";
+    clearPufResults();
+    updatePufSourceStatus();
+    addLog("SYS", `Loaded ${responses.length} PUF response files`);
+  } catch (error) {
+    state.pufUploadedResponses = [];
+    state.pufUploadedFileNames = [];
+    updatePufSourceStatus();
+    addLog("ERR", `PUF response-file load failed: ${error.message || error}`, true);
+  }
+}
+
+function formatPufMetric(value, digits = 3) {
+  return Number.isFinite(value) ? value.toFixed(digits) : "--";
+}
+
+function renderPufResults(result = state.pufResults) {
+  if (!els.pufResponseResultsBody || !els.pufAttackResultsBody) return;
+  if (!result) {
+    els.pufResponseResultsBody.innerHTML = '<tr><td colspan="5" class="puf-empty">No evaluation run yet.</td></tr>';
+    els.pufAttackResultsBody.innerHTML = '<tr><td colspan="4" class="puf-empty">No evaluation run yet.</td></tr>';
+    return;
+  }
+  els.pufResponseResultsBody.innerHTML = result.responseMetrics.map((item) => `
+    <tr><td>R${item.index}</td><td>${item.bits.toLocaleString()}</td><td>${item.ones.toLocaleString()}</td><td>${formatPufMetric(item.uniformityPercent)}%</td><td>${formatPufMetric(item.entropy, 6)}</td></tr>
+  `).join("");
+  if (!result.attack?.results?.length) {
+    els.pufAttackResultsBody.innerHTML = '<tr><td colspan="4" class="puf-empty">Coordinate attack unavailable.</td></tr>';
+    return;
+  }
+  els.pufAttackResultsBody.innerHTML = result.attack.results.map((item) => `
+    <tr><td>${formatPufMetric(item.trainingPercent, 0)}%</td><td>${item.testPointCount.toLocaleString()}</td><td>${formatPufMetric(item.logisticMeanAccuracy, 4)} +/- ${formatPufMetric(item.logisticStandardDeviation, 4)}</td><td>${formatPufMetric(item.svmMeanAccuracy, 4)} +/- ${formatPufMetric(item.svmStandardDeviation, 4)}</td></tr>
+  `).join("");
+}
+
+function updatePufSummary(result = null) {
+  if (els.pufResponseCountSummary) els.pufResponseCountSummary.textContent = String(result?.responseCount || 0);
+  if (els.pufUniformity) els.pufUniformity.textContent = result ? `${formatPufMetric(result.uniformity.meanPercent)}%` : "--";
+  if (els.pufInterHd) els.pufInterHd.textContent = result ? `${formatPufMetric(result.interHd.meanPercent)}%` : "--";
+  if (els.pufEntropy) els.pufEntropy.textContent = result ? formatPufMetric(result.entropy.mean, 6) : "--";
+  if (els.pufAliasing) els.pufAliasing.textContent = result ? `${formatPufMetric(result.bitAliasing.meanPercent)}%` : "--";
+  if (els.pufIntraHd) els.pufIntraHd.textContent = result?.intraHd?.available ? `${formatPufMetric(result.intraHd.meanPercent)}%` : "N/A";
+  if (els.pufCorrelation) els.pufCorrelation.textContent = result ? formatPufMetric(result.correlation.maximumAbsolute, 6) : "--";
+}
+
+function runPufEvaluation() {
+  if (state.pufRunning) return;
+  if (!window.YmPpgPuf) {
+    addLog("ERR", "PUF evaluation module is unavailable", true);
+    return;
+  }
+  const responses = getPufResponses();
+  if (responses.length < 2) {
+    addLog("SYS", `PUF evaluation needs at least two equal-length responses; available ${responses.length}`);
+    return;
+  }
+  const options = {
+    groupSize: clampInteger(els.pufGroupSize?.value, 1, 100, 1),
+    rows: clampInteger(els.pufRows?.value, 2, 1024, 250),
+    columns: clampInteger(els.pufColumns?.value, 2, 1024, 250),
+    maxPoints: 62500,
+    trials: 5,
+  };
+  state.pufRunning = true;
+  state.pufResults = null;
+  renderPufResults(null);
+  updatePufSummary(null);
+  if (els.pufRunButton) {
+    els.pufRunButton.disabled = true;
+    els.pufRunButton.textContent = "Running...";
+  }
+  if (els.pufCaption) els.pufCaption.textContent = `${getPufSourceLabel()} | ${responses.length} responses | ${responses[0].length.toLocaleString()} bits/response | calculating...`;
+  const finish = (result) => {
+    state.pufResults = result;
+    state.pufRunning = false;
+    state.pufWorker?.terminate();
+    state.pufWorker = null;
+    updatePufSummary(result);
+    renderPufResults(result);
+    if (els.pufCaption) els.pufCaption.textContent = `${getPufSourceLabel()} | ${result.responseCount} responses | ${result.responseLength.toLocaleString()} bits/response | coordinate attack on R1`;
+    if (els.pufWarning) els.pufWarning.textContent = result.warning;
+    if (els.pufRunButton) {
+      els.pufRunButton.disabled = false;
+      els.pufRunButton.textContent = "Run PUF evaluation";
+    }
+    addLog("SYS", `Completed PUF evaluation for ${result.responseCount} responses`);
+  };
+  const fail = (error) => {
+    state.pufRunning = false;
+    state.pufWorker?.terminate();
+    state.pufWorker = null;
+    if (els.pufRunButton) {
+      els.pufRunButton.disabled = false;
+      els.pufRunButton.textContent = "Run PUF evaluation";
+    }
+    addLog("ERR", `PUF evaluation failed: ${error.message || error}`, true);
+  };
+  if (typeof Worker !== "function") {
+    window.setTimeout(() => {
+      try {
+        finish(window.YmPpgPuf.evaluate(responses, options));
+      } catch (error) {
+        fail(error);
+      }
+    }, 0);
+    return;
+  }
+  const workerResponses = responses.map((response) => response.slice());
+  let settled = false;
+  try {
+    const worker = new Worker("./puf-worker.js?v=20260803-puf-v1");
+    state.pufWorker = worker;
+    worker.onmessage = (event) => {
+      if (settled) return;
+      settled = true;
+      if (event.data?.type === "result") finish(event.data.result);
+      else fail(new Error(event.data?.message || "PUF worker failed"));
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      state.pufWorker = null;
+      addLog("SYS", `PUF worker unavailable; using main thread (${event.message || "worker error"})`);
+      window.setTimeout(() => {
+        try {
+          finish(window.YmPpgPuf.evaluate(responses, { ...options, maxPoints: 12000, trials: 3 }));
+        } catch (error) {
+          fail(error);
+        }
+      }, 0);
+    };
+    worker.postMessage({ responses: workerResponses, options }, workerResponses.map((response) => response.buffer));
+  } catch (error) {
+    addLog("SYS", `PUF worker unavailable; using main thread (${error.message || error})`);
+    window.setTimeout(() => {
+      try {
+        finish(window.YmPpgPuf.evaluate(responses, { ...options, maxPoints: 12000, trials: 3 }));
+      } catch (fallbackError) {
+        fail(fallbackError);
+      }
+    }, 0);
+  }
+}
+
+function clearPufResults() {
+  state.pufWorker?.terminate();
+  state.pufWorker = null;
+  state.pufResults = null;
+  state.pufRunning = false;
+  if (els.pufRunButton) {
+    els.pufRunButton.disabled = false;
+    els.pufRunButton.textContent = "Run PUF evaluation";
+  }
+  updatePufSummary(null);
+  renderPufResults(null);
+  if (els.pufWarning) els.pufWarning.textContent = "Paper-inspired PUF evaluation is waiting for response vectors.";
+  if (els.pufCaption) els.pufCaption.textContent = "Load multiple equal-length response vectors, or segment one retained bit stream into responses.";
+}
+
+function exportPufResultsCsv() {
+  const result = state.pufResults;
+  if (!result) {
+    addLog("SYS", "No PUF evaluation results to export");
+    return;
+  }
+  const rows = ["record,response,bits,ones,uniformity_percent,shannon_entropy,inter_hd_percent,inter_hd_sd_percent,bit_aliasing_mean_percent,bit_aliasing_sd_percent,intra_hd_percent,max_abs_correlation,train_percent,test_points,lr_accuracy,lr_sd,svm_accuracy,svm_sd"];
+  result.responseMetrics.forEach((item) => rows.push([
+    "response", item.index, item.bits, item.ones, formatPufMetric(item.uniformityPercent, 6), formatPufMetric(item.entropy, 9),
+    "", "", "", "", result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), "", "", "", "", "", "",
+  ].join(",")));
+  (result.attack?.results || []).forEach((item) => rows.push([
+    "coordinate_attack", "", result.responseLength, "", formatPufMetric(result.uniformity.meanPercent, 6), formatPufMetric(result.entropy.mean, 9),
+    formatPufMetric(result.interHd.meanPercent, 6), formatPufMetric(result.interHd.standardDeviationPercent, 6), formatPufMetric(result.bitAliasing.meanPercent, 6), formatPufMetric(result.bitAliasing.standardDeviationPercent, 6),
+    result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), item.trainingPercent, item.testPointCount,
+    formatPufMetric(item.logisticMeanAccuracy, 9), formatPufMetric(item.logisticStandardDeviation, 9), formatPufMetric(item.svmMeanAccuracy, 9), formatPufMetric(item.svmStandardDeviation, 9),
+  ].join(",")));
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `puf_evaluation_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", "Exported PUF evaluation results");
 }
 
 function formatEntropyMetric(value) {
@@ -5827,6 +6115,24 @@ function bindEvents() {
     clearMlResults();
   });
   els.mlBitLimit?.addEventListener("input", updateMlSourceStatus);
+  els.pufRunButton?.addEventListener("click", runPufEvaluation);
+  els.pufClearButton?.addEventListener("click", clearPufResults);
+  els.pufExportButton?.addEventListener("click", exportPufResultsCsv);
+  els.pufSource?.addEventListener("change", () => {
+    updatePufSourceStatus();
+    clearPufResults();
+  });
+  els.pufBitFormat?.addEventListener("change", () => {
+    if (els.pufBitFile?.files?.length) handlePufBitFiles(els.pufBitFile.files);
+  });
+  els.pufBitFile?.addEventListener("change", () => {
+    handlePufBitFiles(els.pufBitFile.files);
+  });
+  [els.pufResponseLength, els.pufResponseCount, els.pufGroupSize, els.pufRows, els.pufColumns]
+    .forEach((control) => control?.addEventListener("input", () => {
+      updatePufSourceStatus();
+      clearPufResults();
+    }));
   els.entropyRunButton?.addEventListener("click", runEntropyDiagnostic);
   els.entropyClearButton?.addEventListener("click", clearEntropyResults);
   els.entropyExportButton?.addEventListener("click", exportEntropyResultsCsv);
@@ -5874,6 +6180,9 @@ function init() {
   updateMlSourceStatus();
   updateMlSummary(null, null);
   renderMlResults(null);
+  updatePufSourceStatus();
+  updatePufSummary(null);
+  renderPufResults(null);
   updateEntropySourceStatus();
   updateEntropySummary(null);
   renderEntropyResults(null);

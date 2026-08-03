@@ -168,6 +168,27 @@ in this analysis. A positive ML advantage is evidence of predictability under
 the selected recording and split, not proof of a cryptographic break or a
 replacement for NIST SP 800-90B entropy-source evaluation.
 
+## Paper-inspired PUF Evaluation Tab
+
+The `PUF evaluation` tab follows the response-vector metrics described in Park
+et al., *Nature Communications* 16, 7323 (2025). Multiple uploaded bit files
+are treated as equal-length response vectors. Alternatively, the NIST upload,
+current bit buffer, or noise-extractor result can be segmented into consecutive
+response blocks. The tab reports per-response uniformity and Shannon entropy,
+mean pairwise inter-Hamming distance, per-position bit-aliasing, Pearson
+correlation, and optional intra-response Hamming distance when the response
+files are ordered into repeat groups.
+
+The coordinate attack uses binary coordinate features, logistic regression, and
+a linear SVM at 10-70% training ratios over five deterministic trials, matching
+the evaluation structure reported in the paper. It is a browser-side
+reproduction of the published evaluation idea, not a byte-for-byte execution of
+the authors' MATLAB implementation. The article states that MATLAB R2024b
+processing code is included in its source-data ZIP. Temporal ADC blocks do not
+become a PUF automatically: the response length, challenge definition, repeat
+condition, and physical measurement condition must be recorded for a defensible
+PUF claim.
+
 ## Bluetooth LE
 
 - Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
@@ -187,6 +208,8 @@ Deploy these files together:
 - `nist-worker.js`
 - `ml-attack.js`
 - `ml-attack-worker.js`
+- `puf.js`
+- `puf-worker.js`
 - `app.js`
 - `dfu.js`
 - `firmware/` only when publishing an updated DFU package

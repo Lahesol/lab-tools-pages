@@ -1,0 +1,119 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#071525" />
+    <title>Optical Response Lab | AD5940 + 6COLOR</title>
+    <link rel="stylesheet" href="optical_lab.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">DUAL-BLE OPTICAL EXPERIMENT</p>
+        <h1>Optical Response Lab <span>preview</span></h1>
+        <p class="subtitle">6-color LED stimulus + AD5940 PT3 raw-current capture</p>
+      </div>
+      <div class="header-actions">
+        <a class="button ghost" href="index.html">AD5940 console</a>
+        <button id="emergencyOffButton" class="button danger">All LEDs off</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="controls">
+        <section class="panel">
+          <h2>1. Connect devices</h2>
+          <div class="device-row">
+            <div><strong>6-color LED</strong><small id="ledDeviceLabel">Disconnected</small></div>
+            <button id="connectLedButton" class="button primary">Connect LED</button>
+          </div>
+          <div class="device-row">
+            <div><strong>AD5940 PT3</strong><small id="afeDeviceLabel">Disconnected</small></div>
+            <button id="connectAfeButton" class="button primary">Connect AFE</button>
+          </div>
+          <p class="hint">Both boards expose Nordic UART Service (NUS). Choose the <code>6COLOR…</code> device first, then the AD5940 device in the browser chooser.</p>
+        </section>
+
+        <section class="panel">
+          <h2>2. PT3 acquisition</h2>
+          <div class="field-grid compact-grid">
+            <label>VDS <span>mV</span><input id="pt3Vds" type="number" min="100" max="1100" value="1000" /></label>
+            <label>VGS <span>mV</span><input id="pt3Vgs" type="number" min="-800" max="1000" value="0" /></label>
+            <label>Output period <span>ms</span><input id="pt3Period" type="number" min="5" max="1000" value="10" /></label>
+            <label>Gate settle <span>ms</span><input id="pt3Settle" type="number" min="1000" max="120000" step="1000" value="90000" /></label>
+            <label>SINC3 OSR<select id="pt3Sinc3"><option value="2">2</option><option value="4">4</option><option value="5" selected>5</option></select></label>
+            <label>SINC2 OSR<select id="pt3Sinc2"><option value="533">533</option><option value="800" selected>800</option><option value="1067">1067</option><option value="1333">1333</option></select></label>
+            <label>SINC2 notch<select id="pt3Notch"><option value="0" selected>Bypass</option><option value="1">Enable</option></select></label>
+            <label>RTIA cal DFT<select id="pt3CalDft"><option value="256">256</option><option value="512">512</option><option value="1024" selected>1024</option><option value="2048">2048</option><option value="4096">4096</option></select></label>
+          </div>
+          <button id="applyPt3Button" class="button secondary">Apply PT3 configuration</button>
+          <p id="pt3Status" class="hint status-text">Connect the AD5940 board, then require an acknowledged PT3 configuration.</p>
+        </section>
+
+        <section class="panel">
+          <h2>3. Light stimulus</h2>
+          <div id="channelGrid" class="channel-grid" aria-label="6-color LED channel controls"></div>
+          <div class="button-row inline-controls"><button id="turnSelectedOnButton" class="button secondary">Turn selected on</button><button id="turnSelectedOffButton" class="button ghost">Turn selected off</button></div>
+          <div class="field-grid compact-grid pulse-grid">
+            <label>Dark baseline <span>ms</span><input id="baselineMs" type="number" min="100" max="60000" value="2000" /></label>
+            <label>Light pulse <span>ms</span><input id="pulseMs" type="number" min="20" max="60000" value="1000" /></label>
+            <label>Post capture <span>ms</span><input id="postMs" type="number" min="100" max="60000" value="3000" /></label>
+          </div>
+          <p class="hint">A run applies the selected channel set after the dark baseline, retains it for the pulse duration, then sends <code>OFF,ALL</code> and records post-pulse relaxation.</p>
+          <button id="startRunButton" class="button success">Start labelled optical run</button>
+          <button id="stopRunButton" class="button danger" disabled>Stop run</button>
+          <p id="runStatus" class="hint status-text">Outputs are disabled by default.</p>
+        </section>
+
+        <section class="panel warning-panel">
+          <h2>Timing boundary</h2>
+          <p>PT3 uses its indexed AD5940 sample clock. LED edges are commanded through a separate BLE link, so the recorded event time is a host/BLE marker—not a hardware trigger timestamp.</p>
+          <p>For an absolute optical edge reference, route a LED-board timing GPIO to an AD5940/nRF GPIO or record it on an oscilloscope.</p>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <section class="panel chart-panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">RAW CURRENT</p><h2>PT3 current vs sample index</h2></div>
+            <div class="button-row"><button id="clearRunButton" class="button ghost">Clear view</button><button id="exportRunButton" class="button secondary">Export evidence</button></div>
+          </div>
+          <canvas id="rawPlot" width="1100" height="430" aria-label="Raw PT3 current plot"></canvas>
+          <p id="plotCaption" class="caption">No raw samples received. B1/B2 values will be plotted unchanged and gaps remain visible.</p>
+        </section>
+
+        <section class="analysis-grid">
+          <section class="panel">
+            <div class="section-heading"><div><p class="eyebrow">FEATURES</p><h2>Pulse response</h2></div><button id="analyseButton" class="button secondary">Analyse latest run</button></div>
+            <div id="featureOutput" class="result-box empty">Capture a complete labelled pulse first.</div>
+            <p class="caption">Features are derived separately from the immutable raw CSV. τ estimates are threshold-based descriptors, not a validated physical device model.</p>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading"><div><p class="eyebrow">REFERENCE LIBRARY</p><h2>Training and classification</h2></div><div class="button-row"><button id="registerReferenceButton" class="button secondary">Register reference</button><button id="clearReferencesButton" class="button ghost">Clear library</button></div></div>
+            <label>Reference label<input id="referenceLabel" type="text" maxlength="80" placeholder="e.g. R_500_pulse_1s" /></label>
+            <div class="button-row"><button id="classifyButton" class="button primary">Classify latest run</button><button id="estimateMixtureButton" class="button primary">Estimate mixture</button></div>
+            <div id="classificationOutput" class="result-box empty">Register repeated labelled captures before classifying.</div>
+            <div id="referenceList" class="reference-list"></div>
+          </section>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading"><div><p class="eyebrow">EVENT LOG</p><h2>Protocol and measurement truth</h2></div><button id="clearLogButton" class="button ghost">Clear log</button></div>
+          <pre id="eventLog" class="event-log" aria-live="polite"></pre>
+        </section>
+      </section>
+    </main>
+
+    <template id="channelTemplate">
+      <label class="channel-card">
+        <input class="channel-enabled" type="checkbox" />
+        <span class="channel-name"></span>
+        <span class="channel-duty-label">duty / 1000</span>
+        <input class="channel-duty" type="number" min="1" max="1000" value="500" />
+      </label>
+    </template>
+    <script src="optical_lab.js"></script>
+  </body>
+</html>
