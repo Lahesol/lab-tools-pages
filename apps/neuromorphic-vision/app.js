@@ -7,6 +7,11 @@
   }
 
   const $ = (id) => document.getElementById(id);
+  const FEATURE_CHANNELS = [
+    { id: "V1", route: "vertical" }, { id: "V2", route: "vertical" }, { id: "V3", route: "vertical" },
+    { id: "H1", route: "horizontal" }, { id: "H2", route: "horizontal" }, { id: "H3", route: "horizontal" },
+    { id: "D1", route: "diagonal" }, { id: "D2", route: "diagonal" }
+  ];
   const controls = {
     illumination: $("illumination"),
     ambient: $("ambient"),
@@ -34,6 +39,7 @@
     eventGrid: $("event-grid"),
     eventCount: $("event-count"),
     featureBars: $("feature-bars"),
+    latinCodebook: $("latin-codebook"),
     fcMatrix: $("fc-matrix"),
     preactivationValues: $("preactivation-values"),
     gateChannels: $("gate-channels"),
@@ -245,7 +251,20 @@
   }
 
   function renderFeatures(result) {
-    view.featureBars.innerHTML = result.features.map((feature, index) => `<div class="feature-bar"><span class="feature-name">F${index + 1}</span><div class="bar-track"><i class="bar-fill" style="height:${(feature.value * 100).toFixed(2)}%"></i></div><span class="feature-value">${fmt(feature.value, 3)}<small>${feature.code.toString().padStart(2, "0")} / 31</small></span></div>`).join("");
+    view.featureBars.innerHTML = result.features.map((feature, index) => `<div class="feature-bar"><span class="feature-name">${FEATURE_CHANNELS[index].id}</span><div class="bar-track"><i class="bar-fill" style="height:${(feature.value * 100).toFixed(2)}%"></i></div><span class="feature-value">${fmt(feature.value, 3)}<small>${feature.code.toString().padStart(2, "0")} / 31</small></span></div>`).join("");
+  }
+
+  function renderLatinCodebook() {
+    view.latinCodebook.innerHTML = latinCodebook.map(({ descriptor }, index) => {
+      const [a, b, shift] = descriptor;
+      const title = FEATURE_CHANNELS[index];
+      const cells = Array.from({ length: 5 }, (_, row) => Array.from({ length: 5 }, (_, col) => {
+        const level = (a * row + b * col + shift) % 5;
+        const label = ["1", "½", "⅓", "¼", "⅕"][level];
+        return `<span class="latin-cell latin-level-${level}">${label}</span>`;
+      }).join("")).join("");
+      return `<div class="latin-map"><div class="latin-map-title"><strong>${title.id}</strong><small>a,b,s = ${descriptor.join(",")}</small></div><div class="latin-grid" aria-label="${title.id}, ${title.route} routing group Latin map">${cells}</div></div>`;
+    }).join("");
   }
 
   function renderFc(result) {
@@ -254,10 +273,11 @@
     let html = "<div class=\"matrix-label is-header\">term</div>";
     for (let node = 0; node < 4; node += 1) html += `<div class="matrix-label is-header">z${node + 1}</div>`;
     contributions.forEach((row, feature) => {
-      html += `<div class="matrix-label">F${feature + 1} × w</div>`;
-      row.forEach((value) => {
+      html += `<div class="matrix-label">${FEATURE_CHANNELS[feature].id} × w</div>`;
+      row.forEach((value, node) => {
         const alpha = Math.min(Math.abs(value) / extent, 1).toFixed(3);
-        html += `<div class="matrix-cell ${value < 0 ? "is-negative" : ""}" style="--weight-alpha:${alpha}">${signed(value, 2)}</div>`;
+        const weight = MODEL.model.w1[feature][node];
+        html += `<div class="matrix-cell ${value < 0 ? "is-negative" : ""}" style="--weight-alpha:${alpha}" aria-label="${FEATURE_CHANNELS[feature].id} to z${node + 1}; weight ${signed(weight)}, term ${signed(value)}"><strong>w ${signed(weight, 2)}</strong><small>term ${signed(value, 2)}</small></div>`;
       });
     });
     view.fcMatrix.innerHTML = html;
@@ -295,6 +315,7 @@
       input: "01 · Photodiode input data",
       event: "02 · RRAM threshold-event data",
       features: "03 · Latin-projection feature data",
+      latin: "03a · Latin-square spatial codebook",
       fc: "04 · 8 × 4 analog MAC data",
       gate: "05 · RRAM-gated analog ReLU data",
       output: "06 · Final analog-adder data",
@@ -304,7 +325,8 @@
       input: "The selected binary glyph is exposed to illumination and ambient offset; each cell receives the retained synthetic Gaussian-noise term for this frame.",
       event: "A cell becomes LRS when its analog input exceeds the event threshold, then its independent uncertainty draw may invert the event state.",
       features: "Each centered Latin mask computes a differential spatial projection. The normalized result is quantized to one of 32 equally spaced levels.",
-      fc: "Every value shown in the 8 × 4 table is the present Fk × wkj contribution. Bias is added after the column sum.",
+      latin: "V/H/D is a physical-routing-group name: vertical V1–V3, horizontal H1–H3, diagonal D1–D2. Every displayed 5 × 5 allocation contains the five Latin levels once per row and column; the differential projection uses its mean-centered counterpart.",
+      fc: "Every MAC tile gives both the raw calibrated input-to-hidden weight wkj and the present Fk × wkj contribution. Bias is added after the column sum.",
       gate: "The numerical abstraction resets before a sample; z > θ is represented as LRS, enabling a buffer that passes the positive analog remainder.",
       output: "Four buffered hidden outputs are multiplied by the fixed trained output weights and added with b2 before conversion.",
       adc: "The scalar is clipped to the model conversion range [−1, +1], quantized by the selectable RRAM ADC resolution, then mapped through the reserved class-code centers."
@@ -315,9 +337,15 @@
     } else if (layer === "event") {
       blocks = result.event.map((row, index) => dataBlock(`row ${index + 1}`, row.map((value) => value ? "LRS" : "HRS").join(" · ")));
     } else if (layer === "features") {
-      blocks = result.features.map((feature, index) => dataBlock(`F${index + 1} · Latin (${feature.descriptor.join(",")})`, `projection ${signed(feature.projection)} · code ${feature.code}/31 · ${fmt(feature.value)}`));
+      blocks = result.features.map((feature, index) => dataBlock(`${FEATURE_CHANNELS[index].id} · Latin (${feature.descriptor.join(",")})`, `projection ${signed(feature.projection)} · code ${feature.code}/31 · ${fmt(feature.value)}`));
+    } else if (layer === "latin") {
+      blocks = latinCodebook.map(({ descriptor }, index) => {
+        const [a, b, shift] = descriptor;
+        const map = Array.from({ length: 5 }, (_, row) => Array.from({ length: 5 }, (_, col) => ["1", "½", "⅓", "¼", "⅕"][(a * row + b * col + shift) % 5]).join(" ")).join(" / ");
+        return dataBlock(`${FEATURE_CHANNELS[index].id} · ${FEATURE_CHANNELS[index].route}`, `a,b,shift = ${descriptor.join(",")} · ${map}`);
+      });
     } else if (layer === "fc") {
-      blocks = result.preactivations.map((value, node) => dataBlock(`z${node + 1}`, `Σ Fk·wk = ${signed(value - MODEL.model.b1[node])}; b = ${signed(MODEL.model.b1[node])}; z = ${signed(value)}`));
+      blocks = result.preactivations.map((value, node) => dataBlock(`z${node + 1}`, `w = [${MODEL.model.w1.map((weights) => signed(weights[node], 2)).join(", ")}]; Σ Fk·wk = ${signed(value - MODEL.model.b1[node])}; b = ${signed(MODEL.model.b1[node])}; z = ${signed(value)}`));
     } else if (layer === "gate") {
       blocks = result.gates.map((gate, node) => dataBlock(`h${node + 1} · ${gate.state}`, `z = ${signed(gate.z)} · θ = ${signed(result.config.gateThreshold)} · y = ${fmt(gate.output)}`));
     } else if (layer === "output") {
@@ -336,6 +364,7 @@
     state.result = result;
     renderInput(result);
     renderEvent(result);
+    renderLatinCodebook();
     renderFeatures(result);
     renderFc(result);
     renderGates(result);

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#071525" />
     <title>AD5940 Lab Console</title>
-    <link rel="stylesheet" href="styles.css?v=113ba69ac555" />
+    <link rel="stylesheet" href="styles.css?v=dfbff4938429" />
   </head>
   <body>
     <header class="topbar">
@@ -203,6 +203,23 @@
             </section>
             <p id="pt3TimingHint" class="hint"></p>
             <p id="pt3CapabilityHint" class="hint capability-hint">PT3-capable controller firmware is checked after connection.</p>
+            <section class="pt3-re-calibration" aria-labelledby="pt3ReCalTitle">
+              <div class="pt3-re-calibration-heading">
+                <div>
+                  <h2 id="pt3ReCalTitle">RE0–SE0 baseline (2 MΩ fixture)</h2>
+                  <p>One raw ADC triplet with the same internal 1.1 V reference: VRE0, VSE0, then VCE0. The command requests VDS = 0 mV and VGS = 0 mV, does not start RUN, and turns all AFE outputs off after the read.</p>
+                </div>
+                <button id="pt3ReCalButton" class="button compact secondary" type="button" disabled>Measure VRE − VSE</button>
+              </div>
+              <dl class="setpoint-grid pt3-re-calibration-grid">
+                <dt>Raw ADC (VRE / VSE / VCE)</dt><dd id="pt3ReCalRaw">—</dd>
+                <dt>VRE − VSE</dt><dd id="pt3ReCalDelta">—</dd>
+                <dt>VCE − VSE residual</dt><dd id="pt3ReCalCeResidual">—</dd>
+                <dt>Apparent leakage via 2 MΩ</dt><dd id="pt3ReCalLeakage">—</dd>
+              </dl>
+              <p id="pt3ReCalState" class="hint">Connect to a V43+ controller that advertises <code>PT3_RE_CAL</code>. This is a pad-voltage baseline, not an HSTIA current measurement.</p>
+              <button id="downloadPt3ReCalButton" class="button compact ghost" type="button" disabled>Download VRE raw CSV</button>
+            </section>
             <p class="hint">V36 writes VDS/VGS only after <code>@EVT,RUNNING,PT3</code>. It does not re-run RTIA calibration or the initial 90 s gate-settling interval; following raw samples intentionally include the electrical step transient and retain their acknowledged setpoint metadata.</p>
             <p class="hint">V39 permits a 5 ms target only after the board advertises <code>PT3_200SPS</code>. It queues up to three contiguous samples in each <code>B2</code> notification, retries after BLE TX completion, and reports actual queue overflow. The GUI breaks the trace at every indexed gap; it never fills missing current values. VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the time trace remains a SINC2 stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
           </div>
@@ -381,6 +398,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=2b96693c2e46"></script>
+    <script type="module" src="app.js?v=ecda7a70c735"></script>
   </body>
 </html>

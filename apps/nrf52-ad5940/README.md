@@ -12,6 +12,22 @@ For operator-visible Windows BLE control without browser pairing, use
 `../tools/optical_response_lab_gui.py`; the raw-data contract and startup
 procedure are documented in `../docs/PYTHON_OPTICAL_RESPONSE_LAB_GUI.md`.
 
+## V43/V44 RE0--SE0 VRE baseline
+
+Controller **V43 or later** advertises `PT3_RE_CAL`. V44 corrects the V43
+ASCII line terminator while keeping the same ADC path. The PT3 tab enables its dedicated
+baseline control only when the board is connected, idle, and has advertised
+that capability. It sends `CAL,PT3RE`, which requests `VDS=0 mV` and `VGS=0
+mV`, captures `VRE0`, `VSE0`, and `VCE0` in that order against the same
+internal 1.1 V reference, returns one raw ADC triplet, then shuts down the
+AFE. It does not enter `RUN` or invoke the HSTIA RTIA calibration.
+
+The panel calls `(VRE-VSE)/2 Mohm` **apparent leakage** and provides a separate
+CSV containing the unchanged reply fields. It must not be conflated with the
+separate VDS=0 HSTIA B1/B2 baseline stream. For repeated raw-first evidence,
+use `../tools/capture_pt3re_baseline.py --run`; it writes notification JSONL
+before decoding calibration or B1/B2 data.
+
 ## V41 sequencer-timed VDS pulse
 
 Controller **V41** advertises `PT3_VDS_PULSE`. Its PT3P tab configures a

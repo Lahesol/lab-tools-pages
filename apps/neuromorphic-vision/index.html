@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>Neuromorphic Vision Pipeline Explorer</title>
-    <link rel="stylesheet" href="styles.css?v=8025b4180717" />
+    <link rel="stylesheet" href="styles.css?v=efc3a7f75513" />
   </head>
   <body>
     <header class="topbar">
@@ -107,17 +107,24 @@
 
           <article class="layer-card feature-card" data-layer="features">
             <button class="layer-heading" type="button" data-layer="features"><span>03</span> Latin projections</button>
-            <div class="layer-meta"><span>8 differential channels</span><span>5-bit equivalent</span></div>
+            <div class="layer-meta"><span>V1–V3 · H1–H3 · D1–D2</span><span>5-bit equivalent</span></div>
             <div id="feature-bars" class="feature-bars" aria-label="Eight Latin-code feature values"></div>
           </article>
         </div>
+
+        <article class="layer-card latin-codebook-card" data-layer="latin">
+          <button class="layer-heading" type="button" data-layer="latin"><span>03a</span> Latin-square spatial codebook</button>
+          <div class="layer-meta"><span>displayed values are the uncentered 1, 1/2, 1/3, 1/4, 1/5 allocation</span><span>click to inspect map parameters</span></div>
+          <div id="latin-codebook" class="latin-codebook" aria-label="Eight 5 by 5 Latin-square spatial maps"></div>
+          <p class="codebook-note">V/H/D denotes the intended vertical, horizontal, and diagonal readout routing group. Differential mean subtraction is applied in the numerical projection after this displayed allocation.</p>
+        </article>
 
         <div class="pipeline-divider"><span>programmable analog FC</span></div>
 
         <div class="mid-grid">
           <article class="layer-card fc-card" data-layer="fc">
             <button class="layer-heading" type="button" data-layer="fc"><span>04</span> 8 × 4 weighted MAC</button>
-            <div class="layer-meta"><span>signed calibrated weights</span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
+            <div class="layer-meta"><span>each tile: calibrated w<sub>kj</sub> / current term</span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
             <div id="fc-matrix" class="fc-matrix" aria-label="Feature contributions into four FC columns"></div>
             <div id="preactivation-values" class="preactivation-values"></div>
           </article>
@@ -153,6 +160,6 @@
     </main>
 
     <script src="model-data.js"></script>
-    <script src="app.js?v=14f77d712934"></script>
+    <script src="app.js?v=987db7f131cf"></script>
   </body>
 </html>

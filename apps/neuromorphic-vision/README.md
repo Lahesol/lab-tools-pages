@@ -8,6 +8,9 @@ it uses no network requests and needs no build step.
   synthetic noise realization; **Run sample** draws the next one.
 - Click any numbered layer title to inspect the numerical terms used in that
   layer.
+- The V1–V3 / H1–H3 / D1–D2 names identify the intended vertical, horizontal,
+  and diagonal readout-routing groups. The visible codebook shows the exact
+  uncentered Latin allocation used by the current numerical model.
 
 The weights in `model-data.js` came from the current synthetic 8 → 4 → 1
 RRAM-gated-ReLU simulation and were converted into raw Latin-feature space.

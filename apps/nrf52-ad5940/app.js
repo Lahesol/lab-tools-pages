@@ -49,6 +49,9 @@ const state = {
   pt3HighRateSupported: false,
   pt3VdsPulseSupported: false,
   pt3ZeroVdsSupported: false,
+  pt3ReCalibrationSupported: false,
+  pt3ReCalibrationPending: false,
+  pt3ReCalibrationHistory: [],
   nusB2QueueSupported: false,
   pt3LiveReady: false,
   deviceNameSupported: false,
@@ -89,7 +92,7 @@ const elements = {
   browserState: $("browserState"), deviceState: $("deviceState"), deviceNameState: $("deviceNameState"), controllerVersion: $("controllerVersion"), dfuUpdateState: $("dfuUpdateState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), dpvTab: $("dpvTab"), swvTab: $("swvTab"), pt3Tab: $("pt3Tab"), pt3PulseTab: $("pt3PulseTab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), dpvParameters: $("dpvParameters"), swvParameters: $("swvParameters"), pt3Parameters: $("pt3Parameters"), pt3PulseParameters: $("pt3PulseParameters"),
   ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), dpvTimingHint: $("dpvTimingHint"), dpvCapabilityHint: $("dpvCapabilityHint"), swvTimingHint: $("swvTimingHint"), swvCapabilityHint: $("swvCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"), pt3PulseTimingHint: $("pt3PulseTimingHint"), pt3PulseCapabilityHint: $("pt3PulseCapabilityHint"),
-  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"),
+  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"), pt3ReCal: $("pt3ReCalButton"), pt3ReCalRaw: $("pt3ReCalRaw"), pt3ReCalDelta: $("pt3ReCalDelta"), pt3ReCalCeResidual: $("pt3ReCalCeResidual"), pt3ReCalLeakage: $("pt3ReCalLeakage"), pt3ReCalState: $("pt3ReCalState"), downloadPt3ReCal: $("downloadPt3ReCalButton"),
   pt3PulseLow: $("pt3PulseLow"), pt3PulseHigh: $("pt3PulseHigh"), pt3PulseVgs: $("pt3PulseVgs"), pt3PulseWidth: $("pt3PulseWidth"), pt3PulsePeriod: $("pt3PulsePeriod"), pt3PulseCount: $("pt3PulseCount"), pt3PulsePretrigger: $("pt3PulsePretrigger"), pt3PulseOutputPeriod: $("pt3PulseOutputPeriod"), pt3PulseSettle: $("pt3PulseSettle"), pt3PulseSinc3: $("pt3PulseSinc3"), pt3PulseSinc2: $("pt3PulseSinc2"), pt3PulseNotch: $("pt3PulseNotch"), pt3PulseCalDft: $("pt3PulseCalDft"), pt3PulseLowSet: $("pt3PulseLowSet"), pt3PulseHighSet: $("pt3PulseHighSet"), pt3PulseGateSet: $("pt3PulseGateSet"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
@@ -175,6 +178,8 @@ function refreshControlAvailability() {
   elements.stop.disabled = !connected || !state.running;
   elements.probe.disabled = !connected || state.running;
   elements.pt3Live.disabled = !canLivePt3Dac;
+  elements.pt3ReCal.disabled = !connected || !state.pt3ReCalibrationSupported || state.running || state.pt3ReCalibrationPending;
+  elements.downloadPt3ReCal.disabled = state.pt3ReCalibrationHistory.length === 0;
   [elements.ampTab, elements.cvTab, elements.dpvTab, elements.swvTab, elements.pt3Tab, elements.pt3PulseTab].forEach((tab) => { tab.disabled = connected && state.running; });
   [elements.pt3Vds, elements.pt3Vgs].forEach((control) => { control.disabled = pt3Running && !canLivePt3Dac; });
   [elements.pt3Period, elements.pt3Settle].forEach((control) => { control.disabled = pt3Running; });
@@ -241,6 +246,7 @@ function refreshControlAvailability() {
   } else {
     elements.pt3PulseCapabilityHint.textContent = "PT3_VDS_PULSE is required only for the VDS pulse mode.";
   }
+  renderPt3ReCalibration();
   refreshDeviceNameUi();
 }
 
@@ -356,6 +362,62 @@ function appendText(bytes) {
   lines.filter(Boolean).forEach(handleTextLine);
 }
 
+function parsePt3ReCalibration(line) {
+  const raw = line.match(/(?:^|,)RAW=(\d+)\/(\d+)\/(\d+)(?:,|$)/);
+  const deltas = line.match(/(?:^|,)DUV=(-?\d+)\/(-?\d+)(?:,|$)/);
+  const leakage = line.match(/(?:^|,)LPA=(-?\d+)(?:,|$)/);
+  const requestedVds = line.match(/(?:^|,)REQVDS=(-?\d+)(?:,|$)/);
+  const actualVds = line.match(/(?:^|,)ACTVDS=(-?\d+)(?:,|$)/);
+  if (!raw || !deltas || !leakage || !requestedVds || !actualVds) throw new Error("PT3RE reply is incomplete.");
+  const values = [...raw.slice(1), ...deltas.slice(1), leakage[1], requestedVds[1], actualVds[1]].map(Number);
+  if (!values.every(Number.isFinite)) throw new Error("PT3RE reply contains a non-numeric field.");
+  return {
+    rawVre: values[0], rawVse: values[1], rawVce: values[2],
+    vreMinusVseUv: values[3], vceMinusVseUv: values[4], apparentLeakagePa: values[5],
+    requestedVdsMv: values[6], actualVdsMv: values[7], receivedAt: new Date().toISOString(),
+  };
+}
+
+function signedValue(value, unit) {
+  return `${value < 0 ? "−" : "+"}${Math.abs(value)} ${unit}`;
+}
+
+function renderPt3ReCalibration() {
+  const connected = isInstrumentConnected();
+  const latest = state.pt3ReCalibrationHistory.at(-1);
+  if (!connected) {
+    elements.pt3ReCalState.textContent = "Connect to a V43+ controller that advertises PT3_RE_CAL. This is a pad-voltage baseline, not an HSTIA current measurement.";
+  } else if (!state.pt3ReCalibrationSupported) {
+    elements.pt3ReCalState.textContent = "This controller does not advertise PT3_RE_CAL. Install V43 or later; no calibration command is sent.";
+  } else if (state.pt3ReCalibrationPending) {
+    elements.pt3ReCalState.textContent = "ADC triplet requested. The board will return raw VRE/VSE/VCE codes or an explicit PT3RE error.";
+  } else if (latest) {
+    elements.pt3ReCalRaw.textContent = `${latest.rawVre} / ${latest.rawVse} / ${latest.rawVce}`;
+    elements.pt3ReCalDelta.textContent = signedValue(latest.vreMinusVseUv, "µV");
+    elements.pt3ReCalCeResidual.textContent = signedValue(latest.vceMinusVseUv, "µV");
+    elements.pt3ReCalLeakage.textContent = signedValue(latest.apparentLeakagePa, "pA");
+    elements.pt3ReCalState.textContent = `Captured ${new Date(latest.receivedAt).toLocaleTimeString()}: requested VDS ${latest.requestedVdsMv} mV; quantized CE residual reports actual VDS ${latest.actualVdsMv} mV. Raw triplets are available in the dedicated CSV.`;
+  } else {
+    elements.pt3ReCalState.textContent = "Ready: one command reads VRE0, VSE0, then VCE0. All AFE output is shut down after the triplet.";
+  }
+}
+
+function downloadPt3ReCalibrationCsv() {
+  if (!state.pt3ReCalibrationHistory.length) return;
+  const header = "received_at_iso,raw_vre0,raw_vse0,raw_vce0,vre_minus_vse_uV,vce_minus_vse_uV,apparent_leakage_pA,requested_vds_mV,actual_vds_mV";
+  const rows = state.pt3ReCalibrationHistory.map((sample) => [
+    sample.receivedAt, sample.rawVre, sample.rawVse, sample.rawVce, sample.vreMinusVseUv,
+    sample.vceMinusVseUv, sample.apparentLeakagePa, sample.requestedVdsMv, sample.actualVdsMv,
+  ].join(","));
+  const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `ad5940-vre-baseline-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  log(`Downloaded ${state.pt3ReCalibrationHistory.length} raw VRE calibration triplet(s) as CSV.`);
+}
+
 function handlePt3Error(line) {
   state.pendingPt3 = null;
   if (line.startsWith("@ERR,PT3_CAL,")) {
@@ -467,6 +529,7 @@ function handleTextLine(line) {
     state.pt3HighRateSupported = line.includes("PT3_200SPS");
     state.pt3VdsPulseSupported = line.includes("PT3_VDS_PULSE");
     state.pt3ZeroVdsSupported = line.includes("PT3_ZERO_VDS");
+    state.pt3ReCalibrationSupported = line.includes("PT3_RE_CAL");
     state.nusB2QueueSupported = line.includes("NUS_B2_QUEUE");
     state.deviceNameSupported = line.includes("NAME_NVM");
     refreshReleaseState();
@@ -475,6 +538,7 @@ function handleTextLine(line) {
     log(state.dpvSupported ? "DPV paired-pulse capability detected." : "DPV capability not advertised by this firmware.", state.dpvSupported ? "INFO" : "WARN");
     log(state.swvSupported ? "SWV paired-pulse capability detected." : "SWV capability not advertised by this firmware.", state.swvSupported ? "INFO" : "WARN");
     log(state.pt3HighRateSupported && state.nusB2QueueSupported ? "PT3 200 SPS and queued B2 transport capability detected." : state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    if (state.pt3ReCalibrationSupported) log("PT3_RE_CAL detected: VRE0/VSE0/VCE0 raw ADC baseline is available only while idle.");
     updatePt3Preview();
     updatePt3PulsePreview();
     if (line.startsWith("@INFO,AD5940_CTRL")) maybeApplyQueuedDeviceName();
@@ -538,6 +602,21 @@ function handleTextLine(line) {
     elements.pt3RouteState.textContent = `LIVE ACK: VDS ${state.pt3Applied.actualVdsMv.toFixed(1)} mV; VGS ${state.pt3Applied.actualVgsMv.toFixed(1)} mV. Raw PT3 data remains unfiltered.`;
     log("Live PT3 DAC update acknowledged; subsequent raw PT3 samples carry the new setpoint metadata.");
     schedulePlot();
+  }
+  if (line.startsWith("@CAL,PT3RE,")) {
+    try {
+      const calibration = parsePt3ReCalibration(line);
+      state.pt3ReCalibrationHistory.push(calibration);
+      state.pt3ReCalibrationPending = false;
+      log("PT3RE raw ADC triplet received. VRE−VSE/2 MΩ is labelled apparent leakage, not an HSTIA current measurement.");
+    } catch (error) {
+      state.pt3ReCalibrationPending = false;
+      log(`Ignored malformed PT3RE calibration reply: ${error.message}`, "WARN");
+    }
+  }
+  if (line.startsWith("@ERR,PT3RE")) {
+    state.pt3ReCalibrationPending = false;
+    log(`PT3RE baseline command was rejected (${line}). No result is inferred.`, "WARN");
   }
   if (line.startsWith("@ERR,PT3P_")) {
     state.pendingPt3Pulse = null;
@@ -612,7 +691,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
+    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -633,7 +712,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -988,6 +1067,22 @@ async function applyPt3LiveDac() {
     log("Live VDS/VGS write queued. Following raw PT3 samples will carry the new acknowledged setpoint metadata.");
   } catch (error) {
     state.pendingPt3Live = null;
+    refreshControlAvailability();
+    log(error.message, "ERROR");
+  }
+}
+
+async function runPt3ReCalibration() {
+  try {
+    if (!state.pt3ReCalibrationSupported) throw new Error("VRE baseline calibration requires controller V43 or later.");
+    if (state.running) throw new Error("Stop the active measurement before requesting the VRE baseline ADC triplet.");
+    if (state.pt3ReCalibrationPending) throw new Error("A VRE baseline ADC triplet is already pending.");
+    state.pt3ReCalibrationPending = true;
+    refreshControlAvailability();
+    await sendNusCommand("CAL,PT3RE");
+    log("PT3RE baseline requested: VDS=0 mV request, VGS=0 mV, then VRE0/VSE0/VCE0 raw ADC capture.");
+  } catch (error) {
+    state.pt3ReCalibrationPending = false;
     refreshControlAvailability();
     log(error.message, "ERROR");
   }
@@ -1357,11 +1452,11 @@ async function selectDfuAndTransfer() {
   finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg || state.dfu.completed; }
 }
 
-elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.dpvTab.addEventListener("click", () => switchMode("DPV")); elements.swvTab.addEventListener("click", () => switchMode("SWV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.pt3PulseTab.addEventListener("click", () => switchMode("PT3P")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.applyDeviceName.addEventListener("click", applyDeviceNameNow); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
+elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.dpvTab.addEventListener("click", () => switchMode("DPV")); elements.swvTab.addEventListener("click", () => switchMode("SWV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.pt3PulseTab.addEventListener("click", () => switchMode("PT3P")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.pt3ReCal.addEventListener("click", runPt3ReCalibration); elements.downloadPt3ReCal.addEventListener("click", downloadPt3ReCalibrationCsv); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.applyDeviceName.addEventListener("click", applyDeviceNameNow); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
 document.querySelectorAll("#dpvParameters input, #dpvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("DPV")); control.addEventListener("change", () => updatePulsePreview("DPV")); });
 document.querySelectorAll("#swvParameters input, #swvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("SWV")); control.addEventListener("change", () => updatePulsePreview("SWV")); });
 document.querySelectorAll("#pt3Parameters input, #pt3Parameters select").forEach((control) => { control.addEventListener("input", updatePt3Preview); control.addEventListener("change", updatePt3Preview); });
 document.querySelectorAll("#pt3PulseParameters input, #pt3PulseParameters select").forEach((control) => { control.addEventListener("input", updatePt3PulsePreview); control.addEventListener("change", updatePt3PulsePreview); });
 
-browserReady(); void loadReleaseManifest(); switchMode("AMP"); updateAmpTimingHint(); updatePulsePreview("DPV"); updatePulsePreview("SWV"); updatePt3Preview(); updatePt3PulsePreview(); refreshDeviceNameUi(); drawPlot();
+browserReady(); void loadReleaseManifest(); switchMode("AMP"); updateAmpTimingHint(); updatePulsePreview("DPV"); updatePulsePreview("SWV"); updatePt3Preview(); updatePt3PulsePreview(); renderPt3ReCalibration(); refreshDeviceNameUi(); drawPlot();
