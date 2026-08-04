@@ -8,6 +8,10 @@ and derived analysis artefacts separate. See
 `../docs/SIX_COLOR_PT3_OPTICAL_EXPERIMENT.md` before using it: independent BLE
 command timing is an event marker, never a claimed hardware optical trigger.
 
+For operator-visible Windows BLE control without browser pairing, use
+`../tools/optical_response_lab_gui.py`; the raw-data contract and startup
+procedure are documented in `../docs/PYTHON_OPTICAL_RESPONSE_LAB_GUI.md`.
+
 ## V41 sequencer-timed VDS pulse
 
 Controller **V41** advertises `PT3_VDS_PULSE`. Its PT3P tab configures a

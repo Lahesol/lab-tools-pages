@@ -38,6 +38,63 @@
     return (mismatches / left.length) * 100;
   }
 
+  // Mirrors the row-wise FOM calculation in the source-data Coding.m file.
+  // The web input is a flattened row-major response, so rows/columns must be
+  // supplied explicitly for this metric to be comparable with the MATLAB run.
+  function matlabFom(response, rows, columns) {
+    const rowCount = Math.floor(rows || 0);
+    const columnCount = Math.floor(columns || 0);
+    if (rowCount < 1 || columnCount < 1 || rowCount * columnCount !== response.length) {
+      return {
+        available: false,
+        rows: rowCount,
+        columns: columnCount,
+        averageRowHdPercent: NaN,
+        averageRowEntropy: NaN,
+        averageRowUniformityPercent: NaN,
+      };
+    }
+
+    const rowOnes = new Float64Array(rowCount);
+    for (let row = 0; row < rowCount; row += 1) {
+      let ones = 0;
+      const offset = row * columnCount;
+      for (let column = 0; column < columnCount; column += 1) ones += response[offset + column];
+      rowOnes[row] = ones;
+    }
+
+    const rowEntropy = new Float64Array(rowCount);
+    const rowUniformity = new Float64Array(rowCount);
+    for (let row = 0; row < rowCount; row += 1) {
+      const p1 = rowOnes[row] / columnCount;
+      rowEntropy[row] = binaryEntropy(p1);
+      rowUniformity[row] = p1 * 100;
+    }
+
+    const hammingValues = [];
+    for (let left = 0; left < rowCount; left += 1) {
+      const leftOffset = left * columnCount;
+      for (let right = left + 1; right < rowCount; right += 1) {
+        const rightOffset = right * columnCount;
+        let mismatches = 0;
+        for (let column = 0; column < columnCount; column += 1) {
+          if (response[leftOffset + column] !== response[rightOffset + column]) mismatches += 1;
+        }
+        hammingValues.push((mismatches / columnCount) * 100);
+      }
+    }
+
+    return {
+      available: true,
+      rows: rowCount,
+      columns: columnCount,
+      averageRowHdPercent: mean(hammingValues),
+      rowHdStandardDeviationPercent: standardDeviation(hammingValues),
+      averageRowEntropy: mean(Array.from(rowEntropy)),
+      averageRowUniformityPercent: mean(Array.from(rowUniformity)),
+    };
+  }
+
   function pearson(left, right) {
     const leftMean = mean(left);
     const rightMean = mean(right);
@@ -75,7 +132,7 @@
     });
   }
 
-  function responseMetrics(response, index) {
+  function responseMetrics(response, index, controlResponse, rows, columns) {
     const ones = response.reduce((sum, bit) => sum + bit, 0);
     const ratio = ones / response.length;
     return {
@@ -85,6 +142,8 @@
       zeros: response.length - ones,
       uniformityPercent: ratio * 100,
       entropy: binaryEntropy(ratio),
+      similarityToControlPercent: controlResponse ? 100 - hammingPercent(response, controlResponse) : NaN,
+      matlabFom: matlabFom(response, rows, columns),
     };
   }
 
@@ -110,7 +169,11 @@
 
   function calculateMetrics(responses, options = {}) {
     const normalized = normalizeResponses(responses);
-    const metrics = normalized.map(responseMetrics);
+    const controlIndex = Math.min(normalized.length - 1, Math.max(0, Math.floor(options.controlIndex || 0)));
+    const controlResponse = normalized[controlIndex];
+    const rows = Math.max(1, Math.floor(options.rows || 250));
+    const columns = Math.max(1, Math.floor(options.columns || 250));
+    const metrics = normalized.map((response, index) => responseMetrics(response, index, controlResponse, rows, columns));
     const interValues = [];
     const correlations = [];
     for (let left = 0; left < normalized.length; left += 1) {
@@ -129,11 +192,26 @@
     }
 
     const intraHd = calculateIntraHd(normalized, options.groupSize);
+    const availableFom = metrics.map((item) => item.matlabFom).filter((item) => item.available);
     return {
       responseCount: normalized.length,
       responseLength: normalized[0].length,
+      controlIndex,
       responses: normalized,
       responseMetrics: metrics,
+      controlSimilarity: {
+        meanPercent: mean(metrics.map((item) => item.similarityToControlPercent)),
+        standardDeviationPercent: standardDeviation(metrics.map((item) => item.similarityToControlPercent)),
+      },
+      matlabFom: {
+        available: availableFom.length === metrics.length && availableFom.length > 0,
+        rows,
+        columns,
+        responseCount: availableFom.length,
+        meanRowHdPercent: mean(availableFom.map((item) => item.averageRowHdPercent)),
+        meanRowEntropy: mean(availableFom.map((item) => item.averageRowEntropy)),
+        meanRowUniformityPercent: mean(availableFom.map((item) => item.averageRowUniformityPercent)),
+      },
       uniformity: {
         meanPercent: mean(metrics.map((item) => item.uniformityPercent)),
         standardDeviationPercent: standardDeviation(metrics.map((item) => item.uniformityPercent)),
@@ -245,19 +323,40 @@
     const rows = Math.max(2, Math.floor(options.rows || Math.ceil(response.length / columns)));
     const pointCount = Math.min(response.length, rows * columns, Math.max(1000, Math.floor(options.maxPoints || 62500)));
     const ratios = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
-    const trials = Math.max(1, Math.floor(options.trials || 5));
+    const crpSetCount = Math.max(1, Math.floor(options.crpSetCount || options.trials || 5));
     const samples = [];
     for (let index = 0; index < pointCount; index += 1) samples.push(coordinateFeatures(index, rows, columns));
     const featureCount = samples[0].length;
     const labels = Array.from(response.slice(0, pointCount));
+    const setSize = Math.floor(pointCount / crpSetCount);
+    if (setSize <= featureCount * 4 || setSize < 10) {
+      return {
+        available: false,
+        reason: `Coordinate attack needs at least ${crpSetCount} CRP sets with enough training and test points`,
+        rows,
+        columns,
+        pointCount,
+        featureCount,
+        crpSetCount,
+        results: [],
+      };
+    }
+    // The paper uses five independent CRP subsets. A single deterministic
+    // permutation makes this browser result reproducible without pretending
+    // that the source-data random seed is known.
+    const shuffled = deterministicShuffle(pointCount, 0x9e3779b9).slice(0, setSize * crpSetCount);
     const results = [];
     ratios.forEach((ratio) => {
       const accuracies = { logistic: [], svm: [] };
-      for (let trial = 0; trial < trials; trial += 1) {
-        const shuffled = deterministicShuffle(pointCount, 0x9e3779b9 + trial * 977 + Math.round(ratio * 100));
-        const trainCount = Math.max(featureCount * 4, Math.floor(pointCount * ratio));
-        const trainIndices = shuffled.slice(0, trainCount);
-        const testIndices = shuffled.slice(trainCount);
+      let trainingPointCount = 0;
+      let testPointCount = 0;
+      for (let setIndex = 0; setIndex < crpSetCount; setIndex += 1) {
+        const setStart = setIndex * setSize;
+        const trainCount = Math.max(featureCount * 4, Math.floor(setSize * ratio));
+        const trainIndices = shuffled.slice(setStart, setStart + trainCount);
+        const testIndices = shuffled.slice(setStart + trainCount, setStart + setSize);
+        trainingPointCount = trainCount;
+        testPointCount = testIndices.length;
         const trainSamples = trainIndices.map((index) => samples[index]);
         const trainLabels = trainIndices.map((index) => labels[index]);
         const logistic = trainLogistic(trainSamples, trainLabels, featureCount);
@@ -270,20 +369,21 @@
       }
       results.push({
         trainingPercent: ratio * 100,
-        testPointCount: Math.max(0, pointCount - Math.floor(pointCount * ratio)),
+        trainingPointCount,
+        testPointCount,
         logisticMeanAccuracy: mean(accuracies.logistic),
         logisticStandardDeviation: standardDeviation(accuracies.logistic),
         svmMeanAccuracy: mean(accuracies.svm),
         svmStandardDeviation: standardDeviation(accuracies.svm),
       });
     });
-    return { rows, columns, pointCount, featureCount, trials, results };
+    return { available: true, rows, columns, pointCount: setSize * crpSetCount, featureCount, crpSetCount, results };
   }
 
   function evaluate(responses, options = {}) {
     const metrics = calculateMetrics(responses, options);
     const attack = options.attack === false ? null : runCoordinateAttack(metrics.responses[0], options);
-    return { ...metrics, attack, warning: "Paper-inspired PUF metrics require independent, equal-length response vectors. They are not a replacement for SP 800-90B min-entropy assessment." };
+    return { ...metrics, attack, warning: "PUF metrics follow the supplied Nature Communications source-data structure where possible: response-vector FOMs, control similarity, row-wise MATLAB FOM, and five coordinate CRP subsets. The browser ML models are not the unavailable authors' MATLAB implementation and are not a replacement for SP 800-90B min-entropy assessment." };
   }
 
   global.YmPpgPuf = { evaluate };

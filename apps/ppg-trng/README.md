@@ -168,26 +168,39 @@ in this analysis. A positive ML advantage is evidence of predictability under
 the selected recording and split, not proof of a cryptographic break or a
 replacement for NIST SP 800-90B entropy-source evaluation.
 
-## Paper-inspired PUF Evaluation Tab
+## Source-data-aligned PUF Evaluation Tab
 
 The `PUF evaluation` tab follows the response-vector metrics described in Park
-et al., *Nature Communications* 16, 7323 (2025). Multiple uploaded bit files
-are treated as equal-length response vectors. Alternatively, the NIST upload,
-current bit buffer, or noise-extractor result can be segmented into consecutive
-response blocks. The tab reports per-response uniformity and Shannon entropy,
-mean pairwise inter-Hamming distance, per-position bit-aliasing, Pearson
-correlation, and optional intra-response Hamming distance when the response
-files are ordered into repeat groups.
+et al., *Nature Communications* 16, 7323 (2025) and was checked against the
+project's copied `Source Data` folder. Multiple uploaded bit files are treated
+as equal-length response vectors. PNG/JPG/BMP source-data images are also
+accepted and converted using the MATLAB source-data rule `grayscale > 0`.
+Alternatively, the NIST upload, current bit buffer, or noise-extractor result
+can be segmented into consecutive response blocks. The paper profile is
+250x250 = 62,500 bits per response.
+
+The tab reports per-response uniformity and Shannon entropy, similarity to the
+control response, mean pairwise inter-Hamming distance, per-position
+bit-aliasing, Pearson correlation, and optional repeat-group Hamming distance.
+When the response length exactly equals `rows x columns`, it also reproduces
+the row-wise FOM structure in `Source Data\Supplementary Figure 20\Coding.m`:
+row-pair Hamming distance, row entropy, and row uniformity. This is separate
+from the global inter-response HD and from repeat-group stability.
 
 The coordinate attack uses binary coordinate features, logistic regression, and
-a linear SVM at 10-70% training ratios over five deterministic trials, matching
-the evaluation structure reported in the paper. It is a browser-side
-reproduction of the published evaluation idea, not a byte-for-byte execution of
-the authors' MATLAB implementation. The article states that MATLAB R2024b
-processing code is included in its source-data ZIP. Temporal ADC blocks do not
-become a PUF automatically: the response length, challenge definition, repeat
-condition, and physical measurement condition must be recorded for a defensible
-PUF claim.
+a linear SVM at 10-70% training ratios over five independent CRP subsets. With
+the 62,500-point paper profile, each subset has 12,500 points and the training
+counts are 1,250, 2,500, 3,750, 5,000, 6,250, 7,500, and 8,750. The workbook
+source data contains the paper's LR/SVM result tables, but no corresponding ML
+MATLAB script was present in the copied source folder, so the browser models
+are a comparable diagnostic rather than a byte-for-byte reproduction.
+
+The source folder also contains `Coding2.m`, which evaluates a BCH(127,64)
+helper-data reconstruction path. The web PUF tab does not claim BCH key
+recovery; that remains a separate ECC/secure-key evaluation. Temporal ADC
+blocks do not become a PUF automatically: the response length, challenge
+definition, repeat condition, and physical measurement condition must be
+recorded for a defensible PUF claim.
 
 ## Bluetooth LE
 
@@ -222,6 +235,7 @@ is handled separately through `server-ops`.
 ```powershell
 node --check .\web_gui\protocol.js
 node --check .\web_gui\app.js
+node .\tools\test_puf.js
 node .\tools\test_web_protocol.js
 node .\tools\test_web_static.js
 node .\tools\test_firmware_web_contract.js

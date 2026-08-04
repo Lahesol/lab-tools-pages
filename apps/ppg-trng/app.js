@@ -218,6 +218,10 @@ const els = {
   pufAliasing: document.querySelector("#pufAliasing"),
   pufIntraHd: document.querySelector("#pufIntraHd"),
   pufCorrelation: document.querySelector("#pufCorrelation"),
+  pufControlSimilarity: document.querySelector("#pufControlSimilarity"),
+  pufMatlabRowHd: document.querySelector("#pufMatlabRowHd"),
+  pufMatlabRowEntropy: document.querySelector("#pufMatlabRowEntropy"),
+  pufMatlabRowUniformity: document.querySelector("#pufMatlabRowUniformity"),
   pufResponseResultsBody: document.querySelector("#pufResponseResultsBody"),
   pufAttackResultsBody: document.querySelector("#pufAttackResultsBody"),
   pufWarning: document.querySelector("#pufWarning"),
@@ -4141,6 +4145,38 @@ async function parseNistBitFile(file, format = "auto") {
   return parsePackedNistBits(bytes);
 }
 
+async function parsePufImageFile(file) {
+  if (typeof createImageBitmap !== "function") {
+    throw new Error("This browser does not support source-data image decoding");
+  }
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Could not create an image decoding canvas");
+    context.drawImage(bitmap, 0, 0);
+    const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    const bits = new Uint8Array(bitmap.width * bitmap.height);
+    for (let pixel = 0, bit = 0; bit < bits.length; bit += 1, pixel += 4) {
+      const gray = 0.299 * pixels[pixel] + 0.587 * pixels[pixel + 1] + 0.114 * pixels[pixel + 2];
+      bits[bit] = pixels[pixel + 3] > 0 && gray > 0 ? 1 : 0;
+    }
+    return bits;
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+async function parsePufResponseFile(file, format = "auto") {
+  const imageExtension = /\.(png|jpe?g|bmp)$/i.test(file.name || "");
+  if (format === "image" || imageExtension || String(file.type || "").startsWith("image/")) {
+    return parsePufImageFile(file);
+  }
+  return parseNistBitFile(file, format);
+}
+
 function updateNistFileStatus(message, isError = false) {
   if (!els.nistFileStatus) return;
   els.nistFileStatus.textContent = message;
@@ -4767,9 +4803,9 @@ function getPufResponses() {
   const source = els.pufSource?.value || "upload";
   if (source === "upload") return state.pufUploadedResponses || [];
   const bits = getPufStreamBits();
-  const responseLength = clampInteger(els.pufResponseLength?.value, 32, 1000000, 100000);
+  const responseLength = clampInteger(els.pufResponseLength?.value, 32, 1000000, 62500);
   const completeCount = Math.floor(bits.length / responseLength);
-  const requestedCount = clampInteger(els.pufResponseCount?.value, 0, 100, 5);
+  const requestedCount = clampInteger(els.pufResponseCount?.value, 0, 100, 10);
   const responseCount = requestedCount > 0 ? Math.min(requestedCount, completeCount) : completeCount;
   const start = Math.max(0, completeCount - responseCount);
   const responses = [];
@@ -4794,7 +4830,7 @@ function updatePufSourceStatus() {
   if (els.pufSourceDescription) {
     els.pufSourceDescription.textContent = source === "upload"
       ? "Each uploaded file is treated as one response vector. Files must contain the same number of binary samples."
-      : `${stream.length.toLocaleString()} bits available | using ${responses.length.toLocaleString()} newest complete response blocks of ${clampInteger(els.pufResponseLength?.value, 32, 1000000, 100000).toLocaleString()} bits.`;
+      : `${stream.length.toLocaleString()} bits available | using ${responses.length.toLocaleString()} newest complete response blocks of ${clampInteger(els.pufResponseLength?.value, 32, 1000000, 62500).toLocaleString()} bits.`;
   }
 }
 
@@ -4807,7 +4843,7 @@ async function handlePufBitFiles(fileList) {
   try {
     const format = els.pufBitFormat?.value || "auto";
     const responses = [];
-    for (const file of files) responses.push(await parseNistBitFile(file, format));
+    for (const file of files) responses.push(await parsePufResponseFile(file, format));
     state.pufUploadedResponses = responses;
     state.pufUploadedFileNames = files.map((file) => file.name);
     if (els.pufSource) els.pufSource.value = "upload";
@@ -4829,19 +4865,19 @@ function formatPufMetric(value, digits = 3) {
 function renderPufResults(result = state.pufResults) {
   if (!els.pufResponseResultsBody || !els.pufAttackResultsBody) return;
   if (!result) {
-    els.pufResponseResultsBody.innerHTML = '<tr><td colspan="5" class="puf-empty">No evaluation run yet.</td></tr>';
-    els.pufAttackResultsBody.innerHTML = '<tr><td colspan="4" class="puf-empty">No evaluation run yet.</td></tr>';
+    els.pufResponseResultsBody.innerHTML = '<tr><td colspan="7" class="puf-empty">No evaluation run yet.</td></tr>';
+    els.pufAttackResultsBody.innerHTML = '<tr><td colspan="5" class="puf-empty">No evaluation run yet.</td></tr>';
     return;
   }
   els.pufResponseResultsBody.innerHTML = result.responseMetrics.map((item) => `
-    <tr><td>R${item.index}</td><td>${item.bits.toLocaleString()}</td><td>${item.ones.toLocaleString()}</td><td>${formatPufMetric(item.uniformityPercent)}%</td><td>${formatPufMetric(item.entropy, 6)}</td></tr>
+    <tr><td>R${item.index}</td><td>${item.bits.toLocaleString()}</td><td>${item.ones.toLocaleString()}</td><td>${formatPufMetric(item.uniformityPercent)}%</td><td>${formatPufMetric(item.entropy, 6)}</td><td>${formatPufMetric(item.similarityToControlPercent)}%</td><td>${item.matlabFom?.available ? `${formatPufMetric(item.matlabFom.averageRowHdPercent)}%` : "N/A"}</td></tr>
   `).join("");
   if (!result.attack?.results?.length) {
-    els.pufAttackResultsBody.innerHTML = '<tr><td colspan="4" class="puf-empty">Coordinate attack unavailable.</td></tr>';
+    els.pufAttackResultsBody.innerHTML = `<tr><td colspan="5" class="puf-empty">Coordinate attack unavailable${result.attack?.reason ? `: ${result.attack.reason}` : ""}.</td></tr>`;
     return;
   }
   els.pufAttackResultsBody.innerHTML = result.attack.results.map((item) => `
-    <tr><td>${formatPufMetric(item.trainingPercent, 0)}%</td><td>${item.testPointCount.toLocaleString()}</td><td>${formatPufMetric(item.logisticMeanAccuracy, 4)} +/- ${formatPufMetric(item.logisticStandardDeviation, 4)}</td><td>${formatPufMetric(item.svmMeanAccuracy, 4)} +/- ${formatPufMetric(item.svmStandardDeviation, 4)}</td></tr>
+    <tr><td>${formatPufMetric(item.trainingPercent, 0)}%</td><td>${item.trainingPointCount.toLocaleString()}</td><td>${item.testPointCount.toLocaleString()}</td><td>${formatPufMetric(item.logisticMeanAccuracy, 4)} +/- ${formatPufMetric(item.logisticStandardDeviation, 4)}</td><td>${formatPufMetric(item.svmMeanAccuracy, 4)} +/- ${formatPufMetric(item.svmStandardDeviation, 4)}</td></tr>
   `).join("");
 }
 
@@ -4853,6 +4889,10 @@ function updatePufSummary(result = null) {
   if (els.pufAliasing) els.pufAliasing.textContent = result ? `${formatPufMetric(result.bitAliasing.meanPercent)}%` : "--";
   if (els.pufIntraHd) els.pufIntraHd.textContent = result?.intraHd?.available ? `${formatPufMetric(result.intraHd.meanPercent)}%` : "N/A";
   if (els.pufCorrelation) els.pufCorrelation.textContent = result ? formatPufMetric(result.correlation.maximumAbsolute, 6) : "--";
+  if (els.pufControlSimilarity) els.pufControlSimilarity.textContent = result ? `${formatPufMetric(result.controlSimilarity?.meanPercent)}%` : "--";
+  if (els.pufMatlabRowHd) els.pufMatlabRowHd.textContent = result?.matlabFom?.available ? `${formatPufMetric(result.matlabFom.meanRowHdPercent)}%` : "N/A";
+  if (els.pufMatlabRowEntropy) els.pufMatlabRowEntropy.textContent = result?.matlabFom?.available ? formatPufMetric(result.matlabFom.meanRowEntropy, 6) : "N/A";
+  if (els.pufMatlabRowUniformity) els.pufMatlabRowUniformity.textContent = result?.matlabFom?.available ? `${formatPufMetric(result.matlabFom.meanRowUniformityPercent)}%` : "N/A";
 }
 
 function runPufEvaluation() {
@@ -4871,7 +4911,8 @@ function runPufEvaluation() {
     rows: clampInteger(els.pufRows?.value, 2, 1024, 250),
     columns: clampInteger(els.pufColumns?.value, 2, 1024, 250),
     maxPoints: 62500,
-    trials: 5,
+    crpSetCount: 5,
+    controlIndex: Math.max(0, (state.pufUploadedFileNames || []).findIndex((name) => /control/i.test(name))),
   };
   state.pufRunning = true;
   state.pufResults = null;
@@ -4889,7 +4930,7 @@ function runPufEvaluation() {
     state.pufWorker = null;
     updatePufSummary(result);
     renderPufResults(result);
-    if (els.pufCaption) els.pufCaption.textContent = `${getPufSourceLabel()} | ${result.responseCount} responses | ${result.responseLength.toLocaleString()} bits/response | coordinate attack on R1`;
+    if (els.pufCaption) els.pufCaption.textContent = `${getPufSourceLabel()} | ${result.responseCount} responses | ${result.responseLength.toLocaleString()} bits/response | ${result.attack?.available ? `${result.attack.crpSetCount} CRP sets` : "coordinate attack unavailable"}`;
     if (els.pufWarning) els.pufWarning.textContent = result.warning;
     if (els.pufRunButton) {
       els.pufRunButton.disabled = false;
@@ -4920,7 +4961,7 @@ function runPufEvaluation() {
   const workerResponses = responses.map((response) => response.slice());
   let settled = false;
   try {
-    const worker = new Worker("./puf-worker.js?v=20260803-puf-v1");
+    const worker = new Worker("./puf-worker.js?v=20260804-puf-v2");
     state.pufWorker = worker;
     worker.onmessage = (event) => {
       if (settled) return;
@@ -4936,7 +4977,7 @@ function runPufEvaluation() {
       addLog("SYS", `PUF worker unavailable; using main thread (${event.message || "worker error"})`);
       window.setTimeout(() => {
         try {
-          finish(window.YmPpgPuf.evaluate(responses, { ...options, maxPoints: 12000, trials: 3 }));
+          finish(window.YmPpgPuf.evaluate(responses, { ...options, maxPoints: 12000, crpSetCount: 5 }));
         } catch (error) {
           fail(error);
         }
@@ -4947,7 +4988,7 @@ function runPufEvaluation() {
     addLog("SYS", `PUF worker unavailable; using main thread (${error.message || error})`);
     window.setTimeout(() => {
       try {
-        finish(window.YmPpgPuf.evaluate(responses, { ...options, maxPoints: 12000, trials: 3 }));
+        finish(window.YmPpgPuf.evaluate(responses, { ...options, maxPoints: 12000, crpSetCount: 5 }));
       } catch (fallbackError) {
         fail(fallbackError);
       }
@@ -4966,8 +5007,8 @@ function clearPufResults() {
   }
   updatePufSummary(null);
   renderPufResults(null);
-  if (els.pufWarning) els.pufWarning.textContent = "Paper-inspired PUF evaluation is waiting for response vectors.";
-  if (els.pufCaption) els.pufCaption.textContent = "Load multiple equal-length response vectors, or segment one retained bit stream into responses.";
+  if (els.pufWarning) els.pufWarning.textContent = "Source-data-aligned PUF evaluation is waiting for response vectors.";
+  if (els.pufCaption) els.pufCaption.textContent = "Load binary response vectors or 250x250 source-data images, then compare PUF figures of merit.";
 }
 
 function exportPufResultsCsv() {
@@ -4976,15 +5017,17 @@ function exportPufResultsCsv() {
     addLog("SYS", "No PUF evaluation results to export");
     return;
   }
-  const rows = ["record,response,bits,ones,uniformity_percent,shannon_entropy,inter_hd_percent,inter_hd_sd_percent,bit_aliasing_mean_percent,bit_aliasing_sd_percent,intra_hd_percent,max_abs_correlation,train_percent,test_points,lr_accuracy,lr_sd,svm_accuracy,svm_sd"];
+  const rows = ["record,response,bits,ones,uniformity_percent,shannon_entropy,similarity_to_control_percent,matlab_row_hd_percent,matlab_row_entropy,matlab_row_uniformity_percent,inter_hd_percent,inter_hd_sd_percent,bit_aliasing_mean_percent,bit_aliasing_sd_percent,intra_hd_percent,max_abs_correlation,train_percent,train_points,test_points,lr_accuracy,lr_sd,svm_accuracy,svm_sd"];
   result.responseMetrics.forEach((item) => rows.push([
     "response", item.index, item.bits, item.ones, formatPufMetric(item.uniformityPercent, 6), formatPufMetric(item.entropy, 9),
+    formatPufMetric(item.similarityToControlPercent, 6), item.matlabFom?.available ? formatPufMetric(item.matlabFom.averageRowHdPercent, 6) : "", item.matlabFom?.available ? formatPufMetric(item.matlabFom.averageRowEntropy, 9) : "", item.matlabFom?.available ? formatPufMetric(item.matlabFom.averageRowUniformityPercent, 6) : "",
     "", "", "", "", result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), "", "", "", "", "", "",
   ].join(",")));
   (result.attack?.results || []).forEach((item) => rows.push([
     "coordinate_attack", "", result.responseLength, "", formatPufMetric(result.uniformity.meanPercent, 6), formatPufMetric(result.entropy.mean, 9),
+    formatPufMetric(result.controlSimilarity?.meanPercent, 6), result.matlabFom?.available ? formatPufMetric(result.matlabFom.meanRowHdPercent, 6) : "", result.matlabFom?.available ? formatPufMetric(result.matlabFom.meanRowEntropy, 9) : "", result.matlabFom?.available ? formatPufMetric(result.matlabFom.meanRowUniformityPercent, 6) : "",
     formatPufMetric(result.interHd.meanPercent, 6), formatPufMetric(result.interHd.standardDeviationPercent, 6), formatPufMetric(result.bitAliasing.meanPercent, 6), formatPufMetric(result.bitAliasing.standardDeviationPercent, 6),
-    result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), item.trainingPercent, item.testPointCount,
+    result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), item.trainingPercent, item.trainingPointCount, item.testPointCount,
     formatPufMetric(item.logisticMeanAccuracy, 9), formatPufMetric(item.logisticStandardDeviation, 9), formatPufMetric(item.svmMeanAccuracy, 9), formatPufMetric(item.svmStandardDeviation, 9),
   ].join(",")));
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
