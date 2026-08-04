@@ -38,7 +38,7 @@
     sensorGrid: $("sensor-grid"),
     eventGrid: $("event-grid"),
     eventCount: $("event-count"),
-    featureBars: $("feature-bars"),
+    projectionGeometry: $("projection-geometry"),
     latinCodebook: $("latin-codebook"),
     fcMatrix: $("fc-matrix"),
     preactivationValues: $("preactivation-values"),
@@ -251,7 +251,18 @@
   }
 
   function renderFeatures(result) {
-    view.featureBars.innerHTML = result.features.map((feature, index) => `<div class="feature-bar"><span class="feature-name">${FEATURE_CHANNELS[index].id}</span><div class="bar-track"><i class="bar-fill" style="height:${(feature.value * 100).toFixed(2)}%"></i></div><span class="feature-value">${fmt(feature.value, 3)}<small>${feature.code.toString().padStart(2, "0")} / 31</small></span></div>`).join("");
+    const arrow = (direction) => {
+      const paths = {
+        horizontal: "M2 8h12m-4-4 4 4-4 4",
+        vertical: "M8 2v12m-4-4 4 4 4-4",
+        diagonalLeft: "M14 14 3 3m0 6V3h6",
+        diagonalRight: "M2 14 13 3m-6 0h6v6"
+      };
+      return `<svg class="route-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="${paths[direction]}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    };
+    const token = (feature, index, direction, diagonal = false) => `<div class="route-token route-${direction}${diagonal ? " route-diagonal" : ""}">${arrow(direction === "diagonalLeft" || direction === "diagonalRight" ? direction : direction)}<strong>${FEATURE_CHANNELS[index].id}</strong><span class="route-value">${fmt(feature.value, 3)}</span><small>${feature.code.toString().padStart(2, "0")} / 31</small></div>`;
+    const source = flatten(result.event).map((value) => `<span class="projection-cell ${value ? "is-lrs" : ""}">${value ? "1" : "0"}</span>`).join("");
+    view.projectionGeometry.innerHTML = `<div class="route-group route-group-diagonal-left">${token(result.features[6], 6, "diagonalLeft", true)}</div><div class="route-group route-group-diagonal-right">${token(result.features[7], 7, "diagonalRight", true)}</div><div class="projection-source"><div class="projection-source-label"><span>current source</span><strong>RRAM event map</strong></div><div class="projection-grid">${source}</div></div><div class="route-group route-group-horizontal">${token(result.features[3], 3, "horizontal")}${token(result.features[4], 4, "horizontal")}${token(result.features[5], 5, "horizontal")}</div><div class="route-group route-group-vertical">${token(result.features[0], 0, "vertical")}${token(result.features[1], 1, "vertical")}${token(result.features[2], 2, "vertical")}</div>`;
   }
 
   function renderLatinCodebook() {
