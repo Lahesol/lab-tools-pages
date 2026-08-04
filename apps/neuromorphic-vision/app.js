@@ -2,67 +2,37 @@
   "use strict";
 
   const MODEL = window.NEUROMORPHIC_MODEL;
-  if (!MODEL) {
-    throw new Error("model-data.js did not load");
-  }
+  if (!MODEL) throw new Error("model-data.js did not load");
 
   const $ = (id) => document.getElementById(id);
-  const FEATURE_CHANNELS = [
-    { id: "V1", route: "vertical" }, { id: "V2", route: "vertical" }, { id: "V3", route: "vertical" },
-    { id: "H1", route: "horizontal" }, { id: "H2", route: "horizontal" }, { id: "H3", route: "horizontal" },
-    { id: "D1", route: "diagonal" }, { id: "D2", route: "diagonal" }
-  ];
+  const FEATURE_CHANNELS = MODEL.featureNames.map((id) => ({
+    id,
+    route: id.startsWith("V") ? "vertical" : id.startsWith("H") ? "horizontal" : "diagonal"
+  }));
+  const FEATURE_PATHS = MODEL.featurePaths;
+  const FEATURE_BY_NAME = new Map(FEATURE_PATHS.map((path, index) => [path.name, { ...path, index }]));
   const controls = {
-    illumination: $("illumination"),
-    ambient: $("ambient"),
-    noise: $("noise"),
-    eventThreshold: $("event-threshold"),
-    bitFlip: $("bit-flip"),
-    gateThreshold: $("gate-threshold"),
-    adcBits: $("adc-bits"),
-    adcVref: $("adc-vref")
+    illumination: $("illumination"), ambient: $("ambient"), noise: $("noise"),
+    eventThreshold: $("event-threshold"), bitFlip: $("bit-flip"), gateThreshold: $("gate-threshold"),
+    adcBits: $("adc-bits"), adcVref: $("adc-vref")
   };
   const outputs = {
-    illumination: $("illumination-value"),
-    ambient: $("ambient-value"),
-    noise: $("noise-value"),
-    eventThreshold: $("event-threshold-value"),
-    bitFlip: $("bit-flip-value"),
-    gateThreshold: $("gate-threshold-value"),
-    adcBits: $("adc-bits-value"),
-    adcVref: $("adc-vref-value")
+    illumination: $("illumination-value"), ambient: $("ambient-value"), noise: $("noise-value"),
+    eventThreshold: $("event-threshold-value"), bitFlip: $("bit-flip-value"),
+    gateThreshold: $("gate-threshold-value"), adcBits: $("adc-bits-value"), adcVref: $("adc-vref-value")
   };
   const view = {
-    letterPicker: $("letter-picker"),
-    inputLabel: $("input-label"),
-    sensorGrid: $("sensor-grid"),
-    eventGrid: $("event-grid"),
-    eventCount: $("event-count"),
-    projectionGeometry: $("projection-geometry"),
-    latinCodebook: $("latin-codebook"),
-    fcMatrix: $("fc-matrix"),
-    preactivationValues: $("preactivation-values"),
-    gateChannels: $("gate-channels"),
-    outputValue: $("output-value"),
-    outputTerms: $("output-terms"),
-    adcMode: $("adc-mode"),
-    adcBinary: $("adc-binary"),
-    adcCode: $("adc-code"),
-    adcVoltage: $("adc-voltage"),
-    decodedLetter: $("decoded-letter"),
-    predictionPill: $("prediction-pill"),
-    lutStrip: $("lut-strip"),
-    sampleStatus: $("sample-status"),
-    inspector: $("inspector")
+    letterPicker: $("letter-picker"), inputLabel: $("input-label"), sensorGrid: $("sensor-grid"),
+    eventGrid: $("event-grid"), eventCount: $("event-count"), projectionGeometry: $("projection-geometry"),
+    fcMatrix: $("fc-matrix"), preactivationValues: $("preactivation-values"), gateChannels: $("gate-channels"),
+    outputValue: $("output-value"), outputTerms: $("output-terms"), adcMode: $("adc-mode"),
+    adcBinary: $("adc-binary"), adcCode: $("adc-code"), adcVoltage: $("adc-voltage"),
+    decodedLetter: $("decoded-letter"), predictionPill: $("prediction-pill"), lutStrip: $("lut-strip"),
+    sampleStatus: $("sample-status"), inspector: $("inspector")
   };
-
   const state = {
-    letter: "G",
-    customMap: null,
-    frame: 1,
-    randomTerms: [],
-    activeLayer: "input",
-    result: null
+    letter: "G", customMap: null, frame: 1, randomTerms: [], activeLayer: "input",
+    selectedFeature: "H1", result: null
   };
 
   const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
@@ -70,6 +40,8 @@
   const flatten = (matrix) => matrix.flat();
   const fmt = (value, digits = 3) => Number(value).toFixed(digits);
   const signed = (value, digits = 3) => `${value >= 0 ? "+" : ""}${fmt(value, digits)}`;
+  const fractionForWeight = (weight) => `1/${Math.round(1 / weight)}`;
+  const featureCode = (value) => Math.round(value * 32);
 
   function mulberry32(seed) {
     return function random() {
@@ -81,26 +53,20 @@
   }
 
   function gaussian(random) {
-    const a = Math.max(random(), 1e-12);
-    const b = random();
-    return Math.sqrt(-2 * Math.log(a)) * Math.cos(2 * Math.PI * b);
+    return Math.sqrt(-2 * Math.log(Math.max(random(), 1e-12))) * Math.cos(2 * Math.PI * random());
   }
 
   function getConfig() {
     return {
-      illumination: Number(controls.illumination.value),
-      ambient: Number(controls.ambient.value),
-      noise: Number(controls.noise.value),
-      eventThreshold: Number(controls.eventThreshold.value),
-      bitFlip: Number(controls.bitFlip.value),
-      gateThreshold: Number(controls.gateThreshold.value),
-      adcBits: Number(controls.adcBits.value),
-      adcVref: Number(controls.adcVref.value)
+      illumination: Number(controls.illumination.value), ambient: Number(controls.ambient.value),
+      noise: Number(controls.noise.value), eventThreshold: Number(controls.eventThreshold.value),
+      bitFlip: Number(controls.bitFlip.value), gateThreshold: Number(controls.gateThreshold.value),
+      adcBits: Number(controls.adcBits.value), adcVref: Number(controls.adcVref.value)
     };
   }
 
   function refreshControlLabels() {
-    outputs.illumination.value = `${Number(controls.illumination.value).toFixed(2)} ×`;
+    outputs.illumination.value = `${Number(controls.illumination.value).toFixed(2)} x`;
     outputs.ambient.value = Number(controls.ambient.value).toFixed(2);
     outputs.noise.value = Number(controls.noise.value).toFixed(3);
     outputs.eventThreshold.value = Number(controls.eventThreshold.value).toFixed(2);
@@ -110,56 +76,12 @@
     outputs.adcVref.value = `${Number(controls.adcVref.value).toFixed(2)} V`;
   }
 
-  function glyphToMap(glyph) {
-    return glyph.map((row) => [...row].map((bit) => Number(bit)));
-  }
-
-  function baseMap() {
-    return state.customMap ? state.customMap.map((row) => row.slice()) : glyphToMap(MODEL.glyphs[state.letter]);
-  }
-
+  function glyphToMap(glyph) { return glyph.map((row) => [...row].map(Number)); }
+  function baseMap() { return state.customMap ? state.customMap.map((row) => row.slice()) : glyphToMap(MODEL.glyphs[state.letter]); }
   function drawNewNoise() {
     const random = mulberry32(20260804 + state.frame * 7919);
     state.randomTerms = Array.from({ length: 25 }, () => ({ noise: gaussian(random), flip: random() }));
   }
-
-  function makeLatinCodebook() {
-    const candidates = [];
-    for (let a = 1; a < 5; a += 1) {
-      for (let b = 1; b < 5; b += 1) {
-        for (let shift = 0; shift < 5; shift += 1) {
-          const raw = Array.from({ length: 5 }, (_, row) => Array.from({ length: 5 }, (_, col) => MODEL.latinLevels[(a * row + b * col + shift) % 5]));
-          const mean = flatten(raw).reduce((sum, value) => sum + value, 0) / 25;
-          candidates.push({
-            mask: raw.map((row) => row.map((value) => value - mean)),
-            descriptor: [a, b, shift]
-          });
-        }
-      }
-    }
-    const normalized = candidates.map(({ mask }) => {
-      const values = flatten(mask);
-      const norm = Math.sqrt(dot(values, values));
-      return values.map((value) => value / norm);
-    });
-    const selected = [0];
-    while (selected.length < 8) {
-      let bestIndex = -1;
-      let bestScore = Infinity;
-      candidates.forEach((_, index) => {
-        if (selected.includes(index)) return;
-        const correlation = Math.max(...selected.map((chosen) => Math.abs(dot(normalized[index], normalized[chosen]))));
-        if (correlation < bestScore - 1e-12) {
-          bestIndex = index;
-          bestScore = correlation;
-        }
-      });
-      selected.push(bestIndex);
-    }
-    return selected.map((index) => candidates[index]);
-  }
-
-  const latinCodebook = makeLatinCodebook();
 
   function adcCenters(bits) {
     const maximum = 2 ** bits - 1;
@@ -171,31 +93,31 @@
     const base = baseMap();
     const sensor = [];
     const event = [];
-    let index = 0;
+    let sampleIndex = 0;
     for (let row = 0; row < 5; row += 1) {
       const sensorRow = [];
       const eventRow = [];
       for (let col = 0; col < 5; col += 1) {
-        const randomTerm = state.randomTerms[index];
+        const randomTerm = state.randomTerms[sampleIndex];
         const analog = config.ambient + config.illumination * base[row][col] + config.noise * randomTerm.noise;
-        let stateOn = analog >= config.eventThreshold;
-        if (randomTerm.flip < config.bitFlip) stateOn = !stateOn;
+        let eventState = analog >= config.eventThreshold;
+        if (randomTerm.flip < config.bitFlip) eventState = !eventState;
         sensorRow.push(analog);
-        eventRow.push(stateOn ? 1 : 0);
-        index += 1;
+        eventRow.push(eventState ? 1 : 0);
+        sampleIndex += 1;
       }
       sensor.push(sensorRow);
       event.push(eventRow);
     }
 
-    const features = latinCodebook.map(({ mask, descriptor }) => {
-      const projection = event.reduce((sum, row, r) => sum + row.reduce((inner, value, c) => inner + value * mask[r][c], 0), 0);
-      const weights = flatten(mask);
-      const low = weights.reduce((sum, value) => sum + Math.min(value, 0), 0);
-      const high = weights.reduce((sum, value) => sum + Math.max(value, 0), 0);
-      const normalized = clamp((projection - low) / (high - low), 0, 1);
-      const code = Math.round(normalized * (MODEL.featureLevels - 1));
-      return { descriptor, projection, normalized, code, value: code / (MODEL.featureLevels - 1) };
+    const features = FEATURE_PATHS.map((path) => {
+      const terms = path.cells.map(([row, col]) => {
+        const input = event[row][col];
+        const weight = MODEL.latinSquare[row][col];
+        return { row, col, input, weight, contribution: input * weight };
+      });
+      const value = terms.reduce((sum, term) => sum + term.contribution, 0);
+      return { name: path.name, cells: path.cells, terms, value, code: featureCode(value) };
     });
     const featureValues = features.map((feature) => feature.value);
     const preactivations = Array.from({ length: 4 }, (_, node) => dot(featureValues, MODEL.model.w1.map((weights) => weights[node])) + MODEL.model.b1[node]);
@@ -209,73 +131,76 @@
     const adcCode = Math.round((clamp(output, -1, 1) + 1) * maximumCode / 2);
     const centers = adcCenters(config.adcBits);
     const orderIndex = centers.reduce((best, center, index) => Math.abs(adcCode - center) < Math.abs(adcCode - centers[best]) ? index : best, 0);
-    const decoded = MODEL.adcOrder[orderIndex];
-    return { config, base, sensor, event, features, featureValues, preactivations, gates, terms, output, adcCode, maximumCode, centers, decoded };
+    return { config, base, sensor, event, features, featureValues, preactivations, gates, terms, output, adcCode, maximumCode, centers, decoded: MODEL.adcOrder[orderIndex] };
   }
 
   function renderLetterPicker() {
     view.letterPicker.innerHTML = MODEL.classes.map((letter) => `<button class="letter-option ${state.letter === letter && !state.customMap ? "is-active" : ""}" type="button" data-letter="${letter}">${letter}</button>`).join("");
-    view.letterPicker.querySelectorAll("[data-letter]").forEach((button) => {
-      button.addEventListener("click", () => {
-        state.letter = button.dataset.letter;
-        state.customMap = null;
-        nextFrame();
-      });
-    });
+    view.letterPicker.querySelectorAll("[data-letter]").forEach((button) => button.addEventListener("click", () => {
+      state.letter = button.dataset.letter;
+      state.customMap = null;
+      nextFrame();
+    }));
   }
 
   function renderInput(result) {
-    view.inputLabel.textContent = state.customMap ? "custom 5 × 5 map" : `${state.letter} glyph`;
+    view.inputLabel.textContent = state.customMap ? "custom 5 x 5 map" : `${state.letter} glyph`;
     view.sensorGrid.innerHTML = flatten(result.sensor).map((value, index) => {
       const clipped = clamp(value, 0, 1);
       const shade = Math.round(16 + clipped * 174);
       return `<button type="button" class="sensor-cell" data-cell="${index}" style="--intensity:${shade};--signal:${clipped.toFixed(3)}" aria-label="Sensor cell ${Math.floor(index / 5) + 1}, ${index % 5 + 1}; ${fmt(clipped, 2)}"><span>${fmt(clipped, 2)}</span></button>`;
     }).join("");
-    view.sensorGrid.querySelectorAll("[data-cell]").forEach((cell) => {
-      cell.addEventListener("click", () => {
-        const index = Number(cell.dataset.cell);
-        const map = baseMap();
-        map[Math.floor(index / 5)][index % 5] = map[Math.floor(index / 5)][index % 5] ? 0 : 1;
-        state.customMap = map;
-        state.letter = "custom";
-        renderLetterPicker();
-        render();
-      });
-    });
+    view.sensorGrid.querySelectorAll("[data-cell]").forEach((cell) => cell.addEventListener("click", () => {
+      const index = Number(cell.dataset.cell);
+      const map = baseMap();
+      map[Math.floor(index / 5)][index % 5] = map[Math.floor(index / 5)][index % 5] ? 0 : 1;
+      state.customMap = map;
+      state.letter = "custom";
+      renderLetterPicker();
+      render();
+    }));
   }
 
   function renderEvent(result) {
     const count = flatten(result.event).reduce((sum, value) => sum + value, 0);
     view.eventCount.textContent = `${count} / 25 ON`;
-    view.eventGrid.innerHTML = flatten(result.event).map((value, index) => `<div class="event-cell ${value ? "is-lrs" : ""}"><span>${value ? "1" : "0"}</span></div>`).join("");
+    view.eventGrid.innerHTML = flatten(result.event).map((value) => `<div class="event-cell ${value ? "is-lrs" : ""}"><span>${value ? "1" : "0"}</span></div>`).join("");
+  }
+
+  function routeArrow(direction) {
+    const paths = {
+      horizontal: "M2 8h12m-4-4 4 4-4 4",
+      vertical: "M8 2v12m-4-4 4 4 4-4",
+      diagonalLeft: "M14 14 3 3m0 6V3h6",
+      diagonalRight: "M2 14 13 3m-6 0h6v6"
+    };
+    return `<svg class="route-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="${paths[direction]}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
 
   function renderFeatures(result) {
-    const arrow = (direction) => {
-      const paths = {
-        horizontal: "M2 8h12m-4-4 4 4-4 4",
-        vertical: "M8 2v12m-4-4 4 4 4-4",
-        diagonalLeft: "M14 14 3 3m0 6V3h6",
-        diagonalRight: "M2 14 13 3m-6 0h6v6"
-      };
-      return `<svg class="route-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="${paths[direction]}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const selected = result.features.find((feature) => feature.name === state.selectedFeature) || result.features[0];
+    const selectedCells = new Set(selected.cells.map(([row, col]) => `${row}-${col}`));
+    const featureFor = (name) => result.features.find((feature) => feature.name === name);
+    const token = (name, direction, diagonal = false) => {
+      const feature = featureFor(name);
+      const active = feature.name === selected.name;
+      return `<button class="route-token route-${direction}${diagonal ? " route-diagonal" : ""}${active ? " is-selected" : ""}" type="button" data-feature="${feature.name}" aria-pressed="${active}">${routeArrow(direction)}<strong>${feature.name}</strong><span class="route-value">${fmt(feature.value, 4)}</span><small>${feature.code} / 32</small></button>`;
     };
-    const token = (feature, index, direction, diagonal = false) => `<div class="route-token route-${direction}${diagonal ? " route-diagonal" : ""}">${arrow(direction === "diagonalLeft" || direction === "diagonalRight" ? direction : direction)}<strong>${FEATURE_CHANNELS[index].id}</strong><span class="route-value">${fmt(feature.value, 3)}</span><small>${feature.code.toString().padStart(2, "0")} / 31</small></div>`;
-    const source = flatten(result.event).map((value) => `<span class="projection-cell ${value ? "is-lrs" : ""}">${value ? "1" : "0"}</span>`).join("");
-    view.projectionGeometry.innerHTML = `<div class="route-group route-group-diagonal-left">${token(result.features[6], 6, "diagonalLeft", true)}</div><div class="route-group route-group-diagonal-right">${token(result.features[7], 7, "diagonalRight", true)}</div><div class="projection-source"><div class="projection-source-label"><span>current source</span><strong>RRAM event map</strong></div><div class="projection-grid">${source}</div></div><div class="route-group route-group-horizontal">${token(result.features[3], 3, "horizontal")}${token(result.features[4], 4, "horizontal")}${token(result.features[5], 5, "horizontal")}</div><div class="route-group route-group-vertical">${token(result.features[0], 0, "vertical")}${token(result.features[1], 1, "vertical")}${token(result.features[2], 2, "vertical")}</div>`;
-  }
-
-  function renderLatinCodebook() {
-    view.latinCodebook.innerHTML = latinCodebook.map(({ descriptor }, index) => {
-      const [a, b, shift] = descriptor;
-      const title = FEATURE_CHANNELS[index];
-      const cells = Array.from({ length: 5 }, (_, row) => Array.from({ length: 5 }, (_, col) => {
-        const level = (a * row + b * col + shift) % 5;
-        const label = ["1", "½", "⅓", "¼", "⅕"][level];
-        return `<span class="latin-cell latin-level-${level}">${label}</span>`;
-      }).join("")).join("");
-      return `<div class="latin-map"><div class="latin-map-title"><strong>${title.id}</strong><small>a,b,s = ${descriptor.join(",")}</small></div><div class="latin-grid" aria-label="${title.id}, ${title.route} routing group Latin map">${cells}</div></div>`;
+    const source = flatten(result.event).map((input, index) => {
+      const row = Math.floor(index / 5);
+      const col = index % 5;
+      const weight = MODEL.latinSquare[row][col];
+      const contribution = input * weight;
+      const selectedCell = selectedCells.has(`${row}-${col}`);
+      return `<span class="projection-cell ${input ? "is-lrs" : ""} ${selectedCell ? "is-selected-path" : ""}"><strong>${input}</strong><small>x ${fractionForWeight(weight)}</small><em>${selectedCell ? fmt(contribution, 4) : ""}</em></span>`;
     }).join("");
+    const equation = selected.terms.map((term) => `${term.input}x${fractionForWeight(term.weight)}`).join(" + ");
+    view.projectionGeometry.innerHTML = `<div class="route-group route-group-diagonal-left">${token("D1", "diagonalLeft", true)}</div><div class="route-group route-group-diagonal-right">${token("D2", "diagonalRight", true)}</div><div class="projection-source"><div class="projection-source-label"><span>input x fixed Latin weight</span><strong>selected ${selected.name}</strong></div><div class="projection-grid">${source}</div></div><div class="route-group route-group-horizontal">${token("H1", "horizontal")}${token("H2", "horizontal")}${token("H3", "horizontal")}</div><div class="route-group route-group-vertical">${token("V1", "vertical")}${token("V2", "vertical")}${token("V3", "vertical")}</div><div class="projection-equation"><strong>${selected.name}</strong><span>${equation}</span><b>= ${selected.code} / 32 = ${fmt(selected.value, 4)} VREF</b></div>`;
+    view.projectionGeometry.querySelectorAll("[data-feature]").forEach((button) => button.addEventListener("click", () => {
+      state.selectedFeature = button.dataset.feature;
+      renderFeatures(result);
+      if (state.activeLayer === "features") renderInspector(result);
+    }));
   }
 
   function renderFc(result) {
@@ -284,7 +209,7 @@
     let html = "<div class=\"matrix-label is-header\">term</div>";
     for (let node = 0; node < 4; node += 1) html += `<div class="matrix-label is-header">z${node + 1}</div>`;
     contributions.forEach((row, feature) => {
-      html += `<div class="matrix-label">${FEATURE_CHANNELS[feature].id} × w</div>`;
+      html += `<div class="matrix-label">${FEATURE_CHANNELS[feature].id} x w</div>`;
       row.forEach((value, node) => {
         const alpha = Math.min(Math.abs(value) / extent, 1).toFixed(3);
         const weight = MODEL.model.w1[feature][node];
@@ -297,12 +222,12 @@
 
   function renderGates(result) {
     const height = Math.max(1, ...result.gates.map((gate) => gate.output));
-    view.gateChannels.innerHTML = result.gates.map((gate, node) => `<div class="gate-channel ${gate.state === "LRS" ? "is-lrs" : ""}"><div class="gate-row"><strong>h${node + 1}</strong><strong class="gate-state">${gate.state}</strong></div><div class="gate-row"><span>z${node + 1} − θ</span><strong>${signed(gate.z - result.config.gateThreshold)}</strong></div><div class="gate-meter"><i style="width:${(gate.output / height * 100).toFixed(1)}%"></i></div><div class="gate-row"><span>buffered y${node + 1}</span><strong>${fmt(gate.output)}</strong></div></div>`).join("");
+    view.gateChannels.innerHTML = result.gates.map((gate, node) => `<div class="gate-channel ${gate.state === "LRS" ? "is-lrs" : ""}"><div class="gate-row"><strong>h${node + 1}</strong><strong class="gate-state">${gate.state}</strong></div><div class="gate-row"><span>z${node + 1} - theta</span><strong>${signed(gate.z - result.config.gateThreshold)}</strong></div><div class="gate-meter"><i style="width:${(gate.output / height * 100).toFixed(1)}%"></i></div><div class="gate-row"><span>buffered y${node + 1}</span><strong>${fmt(gate.output)}</strong></div></div>`).join("");
   }
 
   function renderOutput(result) {
     view.outputValue.textContent = signed(result.output);
-    view.outputTerms.innerHTML = result.terms.map((term, node) => `<div class="output-term">w${node + 1} × y${node + 1}<strong>${signed(term)}</strong></div>`).join("");
+    view.outputTerms.innerHTML = result.terms.map((term, node) => `<div class="output-term">w${node + 1} x y${node + 1}<strong>${signed(term)}</strong></div>`).join("");
   }
 
   function renderAdc(result) {
@@ -316,55 +241,37 @@
     view.lutStrip.innerHTML = MODEL.adcOrder.map((letter, index) => `<div class="lut-item ${letter === result.decoded ? "is-decoded" : ""}">${letter}<code>${result.centers[index]}</code></div>`).join("");
   }
 
-  function dataBlock(label, value) {
-    return `<div class="inspector-data"><em>${label}</em>${value}</div>`;
-  }
+  function dataBlock(label, value) { return `<div class="inspector-data"><em>${label}</em>${value}</div>`; }
 
   function renderInspector(result) {
     const layer = state.activeLayer;
-    const headers = {
-      input: "01 · Photodiode input data",
-      event: "02 · RRAM threshold-event data",
-      features: "03 · Latin-projection feature data",
-      latin: "03a · Latin-square spatial codebook",
-      fc: "04 · 8 × 4 analog MAC data",
-      gate: "05 · RRAM-gated analog ReLU data",
-      output: "06 · Final analog-adder data",
-      adc: "07 · ADC code and decoder data"
-    };
+    const headers = { input: "01 - Photodiode input data", event: "02 - RRAM threshold-event data", features: "03 - Fixed Latin-square directional sums", fc: "04 - 8 x 4 analog MAC data", gate: "05 - RRAM-gated analog ReLU data", output: "06 - Final analog-adder data", adc: "07 - ADC code and decoder data" };
     const explanations = {
-      input: "The selected binary glyph is exposed to illumination and ambient offset; each cell receives the retained synthetic Gaussian-noise term for this frame.",
-      event: "A cell becomes LRS when its analog input exceeds the event threshold, then its independent uncertainty draw may invert the event state.",
-      features: "Each centered Latin mask computes a differential spatial projection. The normalized result is quantized to one of 32 equally spaced levels.",
-      latin: "V/H/D is a physical-routing-group name: vertical V1–V3, horizontal H1–H3, diagonal D1–D2. Every displayed 5 × 5 allocation contains the five Latin levels once per row and column; the differential projection uses its mean-centered counterpart.",
-      fc: "Every MAC tile gives both the raw calibrated input-to-hidden weight wkj and the present Fk × wkj contribution. Bias is added after the column sum.",
-      gate: "The numerical abstraction resets before a sample; z > θ is represented as LRS, enabling a buffer that passes the positive analog remainder.",
-      output: "Four buffered hidden outputs are multiplied by the fixed trained output weights and added with b2 before conversion.",
-      adc: "The scalar is clipped to the model conversion range [−1, +1], quantized by the selectable RRAM ADC resolution, then mapped through the reserved class-code centers."
+      input: "The selected glyph receives illumination, ambient offset, and one retained synthetic noise realization.",
+      event: "A cell becomes LRS when the analog input crosses the event threshold; its uncertainty draw can invert the state.",
+      features: "One fixed Latin square supplies 1/2, 1/4, 1/8, 1/16, and 1/32 once on every selected five-cell path. Click a V/H/D token to highlight its terms and exact sum.",
+      fc: "Every MAC tile gives the raw calibrated input-to-hidden weight wkj and the current feature x weight contribution.",
+      gate: "Below theta the binary RRAM state is HRS and the buffered analog remainder is zero; above theta it is LRS.",
+      output: "Four buffered hidden outputs are multiplied by their output weights and added with b2 before final conversion.",
+      adc: "The scalar is clipped to the model range [-1, +1], quantized by the selectable ADC, then mapped through reserved class-code centers."
     };
     let blocks = [];
     if (layer === "input") {
-      blocks = result.sensor.map((row, index) => dataBlock(`row ${index + 1}`, row.map((value) => fmt(clamp(value, 0, 1), 2)).join(" · ")));
+      blocks = result.sensor.map((row, index) => dataBlock(`row ${index + 1}`, row.map((value) => fmt(clamp(value, 0, 1), 2)).join(" | ")));
     } else if (layer === "event") {
-      blocks = result.event.map((row, index) => dataBlock(`row ${index + 1}`, row.map((value) => value ? "LRS" : "HRS").join(" · ")));
+      blocks = result.event.map((row, index) => dataBlock(`row ${index + 1}`, row.map((value) => value ? "LRS" : "HRS").join(" | ")));
     } else if (layer === "features") {
-      blocks = result.features.map((feature, index) => dataBlock(`${FEATURE_CHANNELS[index].id} · Latin (${feature.descriptor.join(",")})`, `projection ${signed(feature.projection)} · code ${feature.code}/31 · ${fmt(feature.value)}`));
-    } else if (layer === "latin") {
-      blocks = latinCodebook.map(({ descriptor }, index) => {
-        const [a, b, shift] = descriptor;
-        const map = Array.from({ length: 5 }, (_, row) => Array.from({ length: 5 }, (_, col) => ["1", "½", "⅓", "¼", "⅕"][(a * row + b * col + shift) % 5]).join(" ")).join(" / ");
-        return dataBlock(`${FEATURE_CHANNELS[index].id} · ${FEATURE_CHANNELS[index].route}`, `a,b,shift = ${descriptor.join(",")} · ${map}`);
-      });
+      blocks = result.features.map((feature) => dataBlock(`${feature.name}${feature.name === state.selectedFeature ? " - selected" : ""}`, `${feature.terms.map((term) => `${term.input}x${fractionForWeight(term.weight)}`).join(" + ")} = ${feature.code}/32 = ${fmt(feature.value, 4)}`));
     } else if (layer === "fc") {
-      blocks = result.preactivations.map((value, node) => dataBlock(`z${node + 1}`, `w = [${MODEL.model.w1.map((weights) => signed(weights[node], 2)).join(", ")}]; Σ Fk·wk = ${signed(value - MODEL.model.b1[node])}; b = ${signed(MODEL.model.b1[node])}; z = ${signed(value)}`));
+      blocks = result.preactivations.map((value, node) => dataBlock(`z${node + 1}`, `w = [${MODEL.model.w1.map((weights) => signed(weights[node], 2)).join(", ")}]; sum = ${signed(value - MODEL.model.b1[node])}; b = ${signed(MODEL.model.b1[node])}; z = ${signed(value)}`));
     } else if (layer === "gate") {
-      blocks = result.gates.map((gate, node) => dataBlock(`h${node + 1} · ${gate.state}`, `z = ${signed(gate.z)} · θ = ${signed(result.config.gateThreshold)} · y = ${fmt(gate.output)}`));
+      blocks = result.gates.map((gate, node) => dataBlock(`h${node + 1} - ${gate.state}`, `z = ${signed(gate.z)}; theta = ${signed(result.config.gateThreshold)}; y = ${fmt(gate.output)}`));
     } else if (layer === "output") {
       blocks = result.terms.map((term, node) => dataBlock(`term ${node + 1}`, `w${node + 1} = ${signed(MODEL.model.w2[node])}; y${node + 1} = ${fmt(result.gates[node].output)}; product = ${signed(term)}`));
       blocks.push(dataBlock("b2 / z out", `b2 = ${signed(MODEL.model.b2)}; z_out = ${signed(result.output)}`));
     } else if (layer === "adc") {
-      blocks = MODEL.adcOrder.map((letter, index) => dataBlock(`${letter} center`, `ADC code ${result.centers[index]}${letter === result.decoded ? " · selected" : ""}`));
-      blocks.push(dataBlock("current conversion", `${result.config.adcBits}-bit · ${result.adcCode}/${result.maximumCode} · ${result.decoded}`));
+      blocks = MODEL.adcOrder.map((letter, index) => dataBlock(`${letter} center`, `ADC code ${result.centers[index]}${letter === result.decoded ? " - selected" : ""}`));
+      blocks.push(dataBlock("current conversion", `${result.config.adcBits}-bit; ${result.adcCode}/${result.maximumCode}; ${result.decoded}`));
     }
     view.inspector.innerHTML = `<h3>${headers[layer]}</h3><p>${explanations[layer]}</p><div class="inspector-grid">${blocks.join("")}</div>`;
   }
@@ -375,14 +282,13 @@
     state.result = result;
     renderInput(result);
     renderEvent(result);
-    renderLatinCodebook();
     renderFeatures(result);
     renderFc(result);
     renderGates(result);
     renderOutput(result);
     renderAdc(result);
     renderInspector(result);
-    view.sampleStatus.textContent = `frame ${String(state.frame).padStart(3, "0")} · synthetic`;
+    view.sampleStatus.textContent = `frame ${String(state.frame).padStart(3, "0")} - synthetic`;
   }
 
   function nextFrame() {
@@ -393,18 +299,10 @@
   }
 
   function reset() {
-    controls.illumination.value = "0.90";
-    controls.ambient.value = "0.08";
-    controls.noise.value = "0.075";
-    controls.eventThreshold.value = "0.48";
-    controls.bitFlip.value = "0.018";
-    controls.gateThreshold.value = "0";
-    controls.adcBits.value = "4";
-    controls.adcVref.value = "1.20";
-    state.letter = "G";
-    state.customMap = null;
-    state.frame = 1;
-    state.activeLayer = "input";
+    controls.illumination.value = "0.90"; controls.ambient.value = "0.08"; controls.noise.value = "0.075";
+    controls.eventThreshold.value = "0.48"; controls.bitFlip.value = "0.018"; controls.gateThreshold.value = "0";
+    controls.adcBits.value = "4"; controls.adcVref.value = "1.20";
+    state.letter = "G"; state.customMap = null; state.frame = 1; state.activeLayer = "input"; state.selectedFeature = "H1";
     drawNewNoise();
     renderLetterPicker();
     render();
