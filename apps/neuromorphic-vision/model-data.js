@@ -1,7 +1,7 @@
 /* Generated from simulations/latin_fc_5x5 with the 20260804 synthetic run.
  * One fixed Latin square drives V/H/D five-cell weighted sums. The input-to-
- * hidden weights were converted into that raw feature domain; do not interpret
- * these values as measured components. */
+ * hidden weights were converted into raw feature space and quantized to signed
+ * 5-bit resistor codes; do not interpret these values as measured components. */
 window.NEUROMORPHIC_MODEL = {
   classes: ["G", "C", "U", "N", "Y", "W", "O", "I"],
   glyphs: {
@@ -35,19 +35,37 @@ window.NEUROMORPHIC_MODEL = {
   featureFullScale: 0.96875,
   featureLevels: 32,
   adcOrder: ["C", "I", "O", "U", "Y", "G", "W", "N"],
+  weightQuantization: {
+    bits: 5,
+    signedMagnitudeLimit: 15,
+    implementation: "Differential positive/negative resistor branches; code denotes the normalized conductance magnitude 0 to 15 per branch.",
+    w1Codes: [
+      [3, -13, 10, 6],
+      [1, 7, -8, -2],
+      [3, -4, 1, -2],
+      [6, 12, -4, -14],
+      [-10, -7, -6, 6],
+      [9, -9, 5, -6],
+      [-7, -2, -11, 9],
+      [15, -3, -9, 7]
+    ],
+    w1FullScale: 2.1499934657,
+    w2Codes: [-10, -10, -15, 11],
+    w2FullScale: 0.4315302504
+  },
   model: {
     w1: [
-      [0.3987160272, -1.8934542956, 1.3707561666, 0.8112483028],
-      [0.1167546295, 1.0622385702, -1.1761155354, -0.2799251161],
-      [0.4879688468, -0.5409992571, 0.1877242410, -0.2483121538],
-      [0.8609634354, 1.7646484387, -0.5341222321, -2.0155878040],
-      [-1.4698925177, -1.0645747468, -0.8927748275, 0.8492796866],
-      [1.3274411989, -1.2349597459, 0.7656269109, -0.8084279389],
-      [-0.9418384875, -0.2695307010, -1.5844707814, 1.3143434578],
-      [2.1499934657, -0.4288477682, -1.2274060664, 1.0429172444]
+      [0.4299986931, -1.8633276702, 1.4333289771, 0.8599973863],
+      [0.1433328977, 1.0033302840, -1.1466631817, -0.2866657954],
+      [0.4299986931, -0.5733315908, 0.1433328977, -0.2866657954],
+      [0.8599973863, 1.7199947725, -0.5733315908, -2.0066605680],
+      [-1.4333289771, -1.0033302840, -0.8599973863, 0.8599973863],
+      [1.2899960794, -1.2899960794, 0.7166644886, -0.8599973863],
+      [-1.0033302840, -0.2866657954, -1.5766618748, 1.2899960794],
+      [2.1499934657, -0.4299986931, -1.2899960794, 1.0033302840]
     ],
     b1: [-0.9377067120, 2.2131465527, 0.8940307758, 0.5708685916],
-    w2: [-0.2830329905, -0.2951169030, -0.4315302504, 0.3303733124],
+    w2: [-0.2876868336, -0.2876868336, -0.4315302504, 0.3164555170],
     b2: 0.3161039395
   }
 };

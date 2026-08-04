@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>Neuromorphic Vision Pipeline Explorer</title>
-    <link rel="stylesheet" href="styles.css?v=1cc6e64eab7d" />
+    <link rel="stylesheet" href="styles.css?v=40b290e011f6" />
   </head>
   <body>
     <header class="topbar">
@@ -115,7 +115,7 @@
         <div class="mid-grid">
           <article class="layer-card fc-card" data-layer="fc">
             <button class="layer-heading" type="button" data-layer="fc"><span>04</span> 8 × 4 weighted MAC</button>
-            <div class="layer-meta"><span>each tile: calibrated w<sub>kj</sub> / current term</span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
+            <div class="layer-meta"><span>each tile: F<sub>k</sub> / 5-bit G-code / w<sub>kj</sub> / F<sub>k</sub>×w<sub>kj</sub></span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
             <div id="fc-matrix" class="fc-matrix" aria-label="Feature contributions into four FC columns"></div>
             <div id="preactivation-values" class="preactivation-values"></div>
           </article>
@@ -151,6 +151,6 @@
     </main>
 
     <script src="model-data.js"></script>
-    <script src="app.js?v=e51b996e3e3f"></script>
+    <script src="app.js?v=d4ee16bfae22"></script>
   </body>
 </html>

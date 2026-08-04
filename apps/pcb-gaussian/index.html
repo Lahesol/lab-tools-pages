@@ -1156,7 +1156,7 @@
             <button id="adcBaselineCaptureButton" class="primary">Capture ADC as zero</button>
             <button id="adcBaselineResetButton">Reset defaults</button>
           </div>
-          <p class="hint">Use this after setting zero-current/TIA bias. ADC0, ADC1, ADC4, and ADC7 use I_uA = (V_AIN - zero V) / Rf by default; the other ADCs use I_uA = (zero V - V_AIN) / Rf unless edited. Values above 1.2 V clip with the current SAADC gain.</p>
+          <p class="hint">Use this after setting zero-current/TIA bias. ADC0, ADC1, ADC4, and ADC7 use I_uA = (V_AIN - zero V) / Rf by default; the other ADCs use I_uA = (zero V - V_AIN) / Rf unless edited. Diagnostic SAADC gain 1/6 uses a nominal 3.6 V full scale, but the analog input must remain within the MCU supply rails.</p>
           <div class="table-wrap">
             <table>
               <thead><tr><th>ADC</th><th>Zero-current V_AIN</th><th>Current formula</th></tr></thead>
@@ -1265,7 +1265,7 @@
 
     </main>
 
-  <script src="./app.js?v=a3586fdce7a1"></script>
+  <script src="./app.js?v=f22e294ba4d2"></script>
     <script src="./application_model_target_data.js?v=20260625-measured-bimodal-target"></script>
     <script src="./application_models.js?v=20260625-measured-bimodal-target"></script>
     <script src="./serial_watchdog.js?v=20260602-curve-ml"></script>

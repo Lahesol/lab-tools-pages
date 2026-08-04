@@ -45,14 +45,16 @@ powershell -ExecutionPolicy Bypass -File .\trust_https_cert_current_user.ps1
 - The DFU tab can program the bundled latest firmware without file selection.
   The bundled package is described by `firmware/latest.json` and stored as
   `firmware/pcb_gaussian_latest_dfu.zip`.
-- Current firmware/GUI ADC scaling is SAADC 14-bit with internal 0.6 V reference
-  and gain 1/2, so raw ADC values are converted over a 0-1.2 V input range.
+- Diagnostic firmware/GUI ADC scaling is SAADC 14-bit with internal 0.6 V
+  reference and gain 1/6, so raw ADC values are converted over a nominal
+  0-3.6 V input range. The physical analog input must remain within the MCU
+  supply rails.
 - The ADC baseline table uses per-channel defaults. ADC0, ADC1, and ADC4
   default to 0.000 V and non-inverted current for the zero-bias TIA/inverter
   paths (`I_uA = (V_AIN - zero V) / Rf * 1e6`). ADC7 defaults to 1.030 V
   baseline with non-inverted current for the restored D15/D16 path. Other ADCs
   default to the previous 1.030 V inverted-current convention unless edited in
-  the ADC baseline panel. With the current gain, V_AIN above 1.2 V clips.
+  the ADC baseline panel.
 - Commands match the firmware UART protocol: `D1,<code>`, `D2,<code>`, `A<device>,<code>`, `M<device>,<code>`, `ADC`, `PING`.
 - The GUI Safe init button does not call firmware `INIT/RST`, because firmware
   `INIT/RST` drives DAC code 0 rather than calibrated 0 V. Safe init instead

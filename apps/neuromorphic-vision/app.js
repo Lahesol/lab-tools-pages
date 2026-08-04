@@ -42,6 +42,7 @@
   const signed = (value, digits = 3) => `${value >= 0 ? "+" : ""}${fmt(value, digits)}`;
   const fractionForWeight = (weight) => `1/${Math.round(1 / weight)}`;
   const featureCode = (value) => Math.round(value * 32);
+  const resistorCode = (code) => `${code > 0 ? "+" : ""}${code}/${MODEL.weightQuantization.signedMagnitudeLimit}`;
 
   function mulberry32(seed) {
     return function random() {
@@ -206,18 +207,25 @@
   function renderFc(result) {
     const contributions = MODEL.model.w1.map((weights, feature) => weights.map((weight) => weight * result.featureValues[feature]));
     const extent = Math.max(...flatten(contributions).map((value) => Math.abs(value)), 1e-6);
-    let html = "<div class=\"matrix-label is-header\">term</div>";
+    let html = "<div class=\"matrix-label is-header\">input feature</div>";
     for (let node = 0; node < 4; node += 1) html += `<div class="matrix-label is-header">z${node + 1}</div>`;
     contributions.forEach((row, feature) => {
-      html += `<div class="matrix-label">${FEATURE_CHANNELS[feature].id} x w</div>`;
+      const channel = FEATURE_CHANNELS[feature].id;
+      const featureValue = result.featureValues[feature];
+      const code = result.features[feature].code;
+      html += `<div class="matrix-label"><strong>${channel}</strong><small>F = ${fmt(featureValue, 4)}</small><small>${code} / 32 VREF</small></div>`;
       row.forEach((value, node) => {
         const alpha = Math.min(Math.abs(value) / extent, 1).toFixed(3);
         const weight = MODEL.model.w1[feature][node];
-        html += `<div class="matrix-cell ${value < 0 ? "is-negative" : ""}" style="--weight-alpha:${alpha}" aria-label="${FEATURE_CHANNELS[feature].id} to z${node + 1}; weight ${signed(weight)}, term ${signed(value)}"><strong>w ${signed(weight, 2)}</strong><small>term ${signed(value, 2)}</small></div>`;
+        const code = MODEL.weightQuantization.w1Codes[feature][node];
+        html += `<div class="matrix-cell ${value < 0 ? "is-negative" : ""}" style="--weight-alpha:${alpha}" aria-label="${channel} to z${node + 1}; feature ${fmt(featureValue, 4)}; 5-bit conductance code ${resistorCode(code)}; calibrated weight ${signed(weight)}; product ${signed(value)}"><strong>F = ${fmt(featureValue, 3)}</strong><small>5b G-code ${resistorCode(code)}</small><small>w = ${signed(weight, 3)}</small><em>F × w = ${signed(value, 3)}</em></div>`;
       });
     });
     view.fcMatrix.innerHTML = html;
-    view.preactivationValues.innerHTML = result.preactivations.map((value, node) => `<div><span>z${node + 1} (with b${node + 1})</span><strong>${signed(value)}</strong></div>`).join("");
+    view.preactivationValues.innerHTML = result.preactivations.map((value, node) => {
+      const sum = value - MODEL.model.b1[node];
+      return `<div><span>z${node + 1} = Σ(F×w) + b${node + 1}</span><strong>${signed(value)}</strong><small>Σ = ${signed(sum)}; b${node + 1} = ${signed(MODEL.model.b1[node])}</small></div>`;
+    }).join("");
   }
 
   function renderGates(result) {
@@ -227,7 +235,7 @@
 
   function renderOutput(result) {
     view.outputValue.textContent = signed(result.output);
-    view.outputTerms.innerHTML = result.terms.map((term, node) => `<div class="output-term">w${node + 1} x y${node + 1}<strong>${signed(term)}</strong></div>`).join("");
+    view.outputTerms.innerHTML = result.terms.map((term, node) => `<div class="output-term"><span>y${node + 1} = ${fmt(result.gates[node].output)}</span><small>5b G-code ${resistorCode(MODEL.weightQuantization.w2Codes[node])}; w = ${signed(MODEL.model.w2[node])}</small><strong>y × w = ${signed(term)}</strong></div>`).join("");
   }
 
   function renderAdc(result) {
@@ -250,7 +258,7 @@
       input: "The selected glyph receives illumination, ambient offset, and one retained synthetic noise realization.",
       event: "A cell becomes LRS when the analog input crosses the event threshold; its uncertainty draw can invert the state.",
       features: "One fixed Latin square supplies 1/2, 1/4, 1/8, 1/16, and 1/32 once on every selected five-cell path. Click a V/H/D token to highlight its terms and exact sum.",
-      fc: "Every MAC tile gives the raw calibrated input-to-hidden weight wkj and the current feature x weight contribution.",
+      fc: "Every MAC tile explicitly gives the raw feature Fk, the signed 5-bit conductance code, its calibrated wkj, and Fk × wkj. A code from -15 to +15 selects the negative or positive resistor branch and a 0-to-15 conductance magnitude.",
       gate: "Below theta the binary RRAM state is HRS and the buffered analog remainder is zero; above theta it is LRS.",
       output: "Four buffered hidden outputs are multiplied by their output weights and added with b2 before final conversion.",
       adc: "The scalar is clipped to the model range [-1, +1], quantized by the selectable ADC, then mapped through reserved class-code centers."
@@ -263,11 +271,11 @@
     } else if (layer === "features") {
       blocks = result.features.map((feature) => dataBlock(`${feature.name}${feature.name === state.selectedFeature ? " - selected" : ""}`, `${feature.terms.map((term) => `${term.input}x${fractionForWeight(term.weight)}`).join(" + ")} = ${feature.code}/32 = ${fmt(feature.value, 4)}`));
     } else if (layer === "fc") {
-      blocks = result.preactivations.map((value, node) => dataBlock(`z${node + 1}`, `w = [${MODEL.model.w1.map((weights) => signed(weights[node], 2)).join(", ")}]; sum = ${signed(value - MODEL.model.b1[node])}; b = ${signed(MODEL.model.b1[node])}; z = ${signed(value)}`));
+      blocks = result.preactivations.map((value, node) => dataBlock(`z${node + 1}`, `F = [${result.featureValues.map((feature) => fmt(feature, 3)).join(", ")}]; G-code = [${MODEL.weightQuantization.w1Codes.map((codes) => resistorCode(codes[node])).join(", ")}]; w = [${MODEL.model.w1.map((weights) => signed(weights[node], 3)).join(", ")}]; Σ(F×w) = ${signed(value - MODEL.model.b1[node])}; b = ${signed(MODEL.model.b1[node])}; z = ${signed(value)}`));
     } else if (layer === "gate") {
       blocks = result.gates.map((gate, node) => dataBlock(`h${node + 1} - ${gate.state}`, `z = ${signed(gate.z)}; theta = ${signed(result.config.gateThreshold)}; y = ${fmt(gate.output)}`));
     } else if (layer === "output") {
-      blocks = result.terms.map((term, node) => dataBlock(`term ${node + 1}`, `w${node + 1} = ${signed(MODEL.model.w2[node])}; y${node + 1} = ${fmt(result.gates[node].output)}; product = ${signed(term)}`));
+      blocks = result.terms.map((term, node) => dataBlock(`adder input ${node + 1}`, `y${node + 1} = ${fmt(result.gates[node].output)}; 5b G-code = ${resistorCode(MODEL.weightQuantization.w2Codes[node])}; w${node + 1} = ${signed(MODEL.model.w2[node])}; y×w = ${signed(term)}`));
       blocks.push(dataBlock("b2 / z out", `b2 = ${signed(MODEL.model.b2)}; z_out = ${signed(result.output)}`));
     } else if (layer === "adc") {
       blocks = MODEL.adcOrder.map((letter, index) => dataBlock(`${letter} center`, `ADC code ${result.centers[index]}${letter === result.decoded ? " - selected" : ""}`));
