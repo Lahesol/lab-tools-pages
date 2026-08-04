@@ -113,7 +113,8 @@ function readPt3Config() {
   const permitted = Number.isFinite(config.vds) && Number.isFinite(config.vgs) && Number.isFinite(config.period)
     && Number.isFinite(config.settle) && [2, 4, 5].includes(config.sinc3) && [533, 800, 1067, 1333].includes(config.sinc2)
     && [0, 1].includes(config.notch) && [256, 512, 1024, 2048, 4096].includes(config.calDft)
-    && config.vds >= 100 && config.vds <= 1100 && config.vgs >= -800 && config.vgs <= 1000
+    && config.vds >= 0 && config.vds <= 1100 && config.vgs >= -800 && config.vgs <= 1000
+    && (config.vds >= 100 || (config.vds === 0 && state.afe.capabilities.includes("PT3_ZERO_VDS")))
     && config.period >= 5 && config.period <= 1000 && config.settle >= 1000 && config.settle <= 120000;
   if (!permitted) throw new Error("PT3 values are outside the firmware guard range.");
   return config;

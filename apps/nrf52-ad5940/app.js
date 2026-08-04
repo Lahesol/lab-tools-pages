@@ -48,6 +48,7 @@ const state = {
   pt3LiveDacSupported: false,
   pt3HighRateSupported: false,
   pt3VdsPulseSupported: false,
+  pt3ZeroVdsSupported: false,
   nusB2QueueSupported: false,
   pt3LiveReady: false,
   deviceNameSupported: false,
@@ -465,6 +466,7 @@ function handleTextLine(line) {
     state.pt3LiveDacSupported = line.includes("PT3_LIVE_DAC");
     state.pt3HighRateSupported = line.includes("PT3_200SPS");
     state.pt3VdsPulseSupported = line.includes("PT3_VDS_PULSE");
+    state.pt3ZeroVdsSupported = line.includes("PT3_ZERO_VDS");
     state.nusB2QueueSupported = line.includes("NUS_B2_QUEUE");
     state.deviceNameSupported = line.includes("NAME_NVM");
     refreshReleaseState();
@@ -851,7 +853,8 @@ function readPt3Config() {
   const maxOutputSps = highRateTransportReady ? PT3.maxRequestedOutputSps : PT3.legacyMaxRequestedOutputSps;
   const minPeriodMs = highRateTransportReady ? 5 : 10;
   const timing = calculatePt3Timing(config);
-  if (!Object.values(config).every(Number.isFinite) || config.vds < 100 || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < minPeriodMs || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > maxOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error(`PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / ${maxOutputSps} target-output-SPS range. 200 SPS requires V39 PT3_200SPS.`);
+  const minVds = state.pt3ZeroVdsSupported ? 0 : 100;
+  if (!Object.values(config).every(Number.isFinite) || config.vds < minVds || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < minPeriodMs || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > maxOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error(`PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / ${maxOutputSps} target-output-SPS range. VDS 0 requires V42 PT3_ZERO_VDS.`);
   return config;
 }
 
@@ -870,7 +873,8 @@ function readPt3PulseConfig() {
   const highRateTransportReady = state.pt3HighRateSupported && state.nusB2QueueSupported;
   const minimumOutputPeriod = highRateTransportReady ? 5 : 10;
   const timing = calculatePt3Timing({ ...config, period: config.outputPeriod });
-  if (!Object.values(config).every(Number.isFinite) || config.low < 100 || config.low > 1100 || config.high < 100 || config.high > 1100 || config.low === config.high || config.vgs < -800 || config.vgs > 1000 || config.width < 5 || config.width > 500 || config.period < 10 || config.period > 1000 || config.width >= config.period || config.count < 1 || config.count > 100 || config.pretrigger < 0 || config.pretrigger > 1000 || config.outputPeriod < minimumOutputPeriod || config.outputPeriod > 1000 || 1000 % config.outputPeriod !== 0 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.outputSps > (highRateTransportReady ? PT3.maxRequestedOutputSps : PT3.legacyMaxRequestedOutputSps) || config.width * timing.outputSps < 1000) {
+  const minVds = state.pt3ZeroVdsSupported ? 0 : 100;
+  if (!Object.values(config).every(Number.isFinite) || config.low < minVds || config.low > 1100 || config.high < minVds || config.high > 1100 || config.low === config.high || config.vgs < -800 || config.vgs > 1000 || config.width < 5 || config.width > 500 || config.period < 10 || config.period > 1000 || config.width >= config.period || config.count < 1 || config.count > 100 || config.pretrigger < 0 || config.pretrigger > 1000 || config.outputPeriod < minimumOutputPeriod || config.outputPeriod > 1000 || 1000 % config.outputPeriod !== 0 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.outputSps > (highRateTransportReady ? PT3.maxRequestedOutputSps : PT3.legacyMaxRequestedOutputSps) || config.width * timing.outputSps < 1000) {
     throw new Error("PT3P parameters violate the sequencer, DAC, or raw-stream guard. Use a high phase at least one acknowledged output interval long.");
   }
   return config;
@@ -965,7 +969,8 @@ function readPt3LiveSetpoints() {
   if (!state.pt3Applied) throw new Error("Apply PT3 configuration and wait for its ACK before a live DAC update.");
   const vds = integer("pt3Vds");
   const vgs = integer("pt3Vgs");
-  if (!Number.isFinite(vds) || !Number.isFinite(vgs) || vds < 100 || vds > 1100 || vgs < -800 || vgs > 1000) {
+  const minVds = state.pt3ZeroVdsSupported ? 0 : 100;
+  if (!Number.isFinite(vds) || !Number.isFinite(vgs) || vds < minVds || vds > 1100 || vgs < -800 || vgs > 1000) {
     throw new Error("Live VDS/VGS values are outside the firmware guard range.");
   }
   return calculatePt3Setpoints({ ...state.pt3Applied, vds, vgs });

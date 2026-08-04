@@ -380,10 +380,165 @@
     return { available: true, rows, columns, pointCount: setSize * crpSetCount, featureCount, crpSetCount, results };
   }
 
+  function fourierFeatures(x, order) {
+    const features = new Float64Array(order * 2 + 1);
+    features[0] = 1;
+    for (let harmonic = 1; harmonic <= order; harmonic += 1) {
+      const angle = 2 * Math.PI * harmonic * x;
+      features[1 + (harmonic - 1) * 2] = Math.sin(angle);
+      features[2 + (harmonic - 1) * 2] = Math.cos(angle);
+    }
+    return features;
+  }
+
+  function invertMatrix(matrix, size) {
+    const augmented = matrix.map((row, rowIndex) => [
+      ...row,
+      ...Array.from({ length: size }, (_, columnIndex) => rowIndex === columnIndex ? 1 : 0),
+    ]);
+    for (let column = 0; column < size; column += 1) {
+      let pivot = column;
+      for (let row = column + 1; row < size; row += 1) {
+        if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+      }
+      if (Math.abs(augmented[pivot][column]) < 1e-12) return null;
+      [augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]];
+      const pivotValue = augmented[column][column];
+      for (let entry = 0; entry < size * 2; entry += 1) augmented[column][entry] /= pivotValue;
+      for (let row = 0; row < size; row += 1) {
+        if (row === column) continue;
+        const factor = augmented[row][column];
+        if (factor === 0) continue;
+        for (let entry = 0; entry < size * 2; entry += 1) augmented[row][entry] -= factor * augmented[column][entry];
+      }
+    }
+    return augmented.map((row) => row.slice(size));
+  }
+
+  function parseFourierOrders(value) {
+    const parsed = String(value || "1,2,4,8")
+      .split(/[\s,;]+/)
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item) && item >= 1 && item <= 32);
+    return [...new Set(parsed)].slice(0, 8);
+  }
+
+  // Implements the Fourier-basis binary regression described in Dodda et al.
+  // The paper's MATLAB code is not available; a ridge-regularized least-squares
+  // Bernoulli surrogate keeps the browser calculation deterministic and bounded.
+  function runFourierAttack(responses, options = {}) {
+    const normalized = normalizeResponses(responses);
+    const responseCount = normalized.length;
+    const trainPercent = Math.min(95, Math.max(5, finite(options.fourierTrainPercent, 75)));
+    const trainCount = Math.max(2, Math.min(responseCount - 1, Math.floor(responseCount * trainPercent / 100)));
+    const testCount = responseCount - trainCount;
+    const maxBits = Math.max(8, Math.floor(options.maxFourierBits || 62500));
+    const bitCount = Math.min(normalized[0].length, maxBits);
+    const orders = parseFourierOrders(options.fourierOrders);
+    if (testCount < 1 || bitCount < 8 || !orders.length) {
+      return { available: false, reason: "Fourier regression needs at least two CRPs and eight tested bits", results: [] };
+    }
+
+    const orderSeed = Math.round(trainPercent * 100) + bitCount;
+    const shuffled = deterministicShuffle(responseCount, 0x51f15e77 + orderSeed);
+    const trainIndices = shuffled.slice(0, trainCount);
+    const testIndices = shuffled.slice(trainCount);
+    const denominator = Math.max(1, responseCount - 1);
+    const results = [];
+
+    orders.forEach((order) => {
+      const featureCount = order * 2 + 1;
+      const trainFeatures = trainIndices.map((index) => fourierFeatures(index / denominator, order));
+      const testFeatures = testIndices.map((index) => fourierFeatures(index / denominator, order));
+      const gram = Array.from({ length: featureCount }, () => Array(featureCount).fill(0));
+      trainFeatures.forEach((features) => {
+        for (let left = 0; left < featureCount; left += 1) {
+          for (let right = 0; right < featureCount; right += 1) gram[left][right] += features[left] * features[right];
+        }
+      });
+      const ridge = 1e-3;
+      for (let diagonal = 0; diagonal < featureCount; diagonal += 1) gram[diagonal][diagonal] += ridge;
+      const inverse = invertMatrix(gram, featureCount);
+      if (!inverse) return;
+
+      // rhs stores F'Y column-wise, where Y contains the binary CRPs.
+      const rhs = new Float64Array(featureCount * bitCount);
+      trainFeatures.forEach((features, sampleIndex) => {
+        const response = normalized[trainIndices[sampleIndex]];
+        for (let feature = 0; feature < featureCount; feature += 1) {
+          const scale = features[feature];
+          const base = feature * bitCount;
+          for (let bit = 0; bit < bitCount; bit += 1) rhs[base + bit] += scale * response[bit];
+        }
+      });
+
+      const coefficients = new Float64Array(featureCount * bitCount);
+      for (let feature = 0; feature < featureCount; feature += 1) {
+        const coefficientBase = feature * bitCount;
+        for (let bit = 0; bit < bitCount; bit += 1) {
+          let value = 0;
+          for (let sourceFeature = 0; sourceFeature < featureCount; sourceFeature += 1) value += inverse[feature][sourceFeature] * rhs[sourceFeature * bitCount + bit];
+          coefficients[coefficientBase + bit] = value;
+        }
+      }
+
+      let correct = 0;
+      let total = 0;
+      const hammingValues = [];
+      const correlations = [];
+      const accuracies = [];
+      testFeatures.forEach((features, sampleIndex) => {
+        const actual = normalized[testIndices[sampleIndex]].slice(0, bitCount);
+        const predicted = new Uint8Array(bitCount);
+        let sampleCorrect = 0;
+        for (let bit = 0; bit < bitCount; bit += 1) {
+          let score = 0;
+          for (let feature = 0; feature < featureCount; feature += 1) score += features[feature] * coefficients[feature * bitCount + bit];
+          predicted[bit] = score >= 0.5 ? 1 : 0;
+          if (predicted[bit] === actual[bit]) {
+            correct += 1;
+            sampleCorrect += 1;
+          }
+          total += 1;
+        }
+        accuracies.push(sampleCorrect / bitCount);
+        hammingValues.push(hammingPercent(actual, predicted));
+        const correlation = pearson(actual, predicted);
+        if (Number.isFinite(correlation)) correlations.push(correlation);
+      });
+      results.push({
+        order,
+        featureCount,
+        trainResponseCount: trainCount,
+        testResponseCount: testCount,
+        trainPercent,
+        testedBits: bitCount,
+        accuracyPercent: (correct / Math.max(1, total)) * 100,
+        meanHdPercent: mean(hammingValues),
+        meanCorrelation: mean(correlations),
+        maximumAccuracyPercent: accuracies.length ? Math.max(...accuracies) * 100 : NaN,
+      });
+    });
+
+    return {
+      available: results.length > 0,
+      responseCount,
+      responseLength: normalized[0].length,
+      trainResponseCount: trainCount,
+      testResponseCount: testCount,
+      trainPercent,
+      testedBits: bitCount,
+      orders,
+      results,
+      warning: "Fourier regression uses the paper's periodic basis and binary prediction metrics. The source MATLAB fitting implementation is not included; the browser uses a ridge least-squares Bernoulli surrogate.",
+    };
+  }
+
   function evaluate(responses, options = {}) {
     const metrics = calculateMetrics(responses, options);
     const attack = options.attack === false ? null : runCoordinateAttack(metrics.responses[0], options);
-    return { ...metrics, attack, warning: "PUF metrics follow the supplied Nature Communications source-data structure where possible: response-vector FOMs, control similarity, row-wise MATLAB FOM, and five coordinate CRP subsets. The browser ML models are not the unavailable authors' MATLAB implementation and are not a replacement for SP 800-90B min-entropy assessment." };
+    const fourier = options.fourier === false ? null : runFourierAttack(metrics.responses, options);
+    return { ...metrics, attack, fourier, warning: "PUF metrics follow the supplied source-data structures where possible: response-vector FOMs, control similarity, row-wise MATLAB FOM, five coordinate CRP subsets, and Fourier regression. The browser ML fits are not the unavailable authors' MATLAB implementations and are not a replacement for SP 800-90B min-entropy assessment." };
   }
 
   global.YmPpgPuf = { evaluate };

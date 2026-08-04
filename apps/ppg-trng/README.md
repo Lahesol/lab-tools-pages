@@ -195,6 +195,19 @@ source data contains the paper's LR/SVM result tables, but no corresponding ML
 MATLAB script was present in the copied source folder, so the browser models
 are a comparable diagnostic rather than a byte-for-byte reproduction.
 
+The added `s41928-021-00569-x.pdf` reference uses a Fourier-series predictive
+regression attack. The tab now compares `N_F=1,2,4,8` and reports binary
+prediction accuracy, normalized Hamming distance, mean correlation, and maximum
+per-CRP accuracy. A 75% train setting reproduces the paper's 18-estimator/6-test
+experimental split when 24 CRPs are supplied; 80% corresponds to its 0.8M/1M
+simulation split. The browser implementation uses a ridge-regularized
+least-squares Bernoulli surrogate because the paper's fitting source code is
+not included. Set `Fourier bits` to 64 for the reference paper's 64-bit CRP
+format; for larger ADC responses the tested-bit limit prevents excessive browser
+memory use. This attack is only meaningful when rows are independent CRPs under
+a defined challenge condition, not merely sequential samples from one time
+series.
+
 The source folder also contains `Coding2.m`, which evaluates a BCH(127,64)
 helper-data reconstruction path. The web PUF tab does not claim BCH key
 recovery; that remains a separate ECC/secure-key evaluation. Temporal ADC

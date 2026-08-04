@@ -162,7 +162,7 @@
           <div id="pt3Parameters" class="parameter-set hidden">
             <section class="parameter-group">
               <h2>PT3 — drain, gate &amp; timing</h2>
-              <label>VDS <span>mV</span><input id="pt3Vds" type="number" min="100" max="1100" step="1" value="1000" required /></label>
+              <label>VDS <span>mV</span><input id="pt3Vds" type="number" min="0" max="1100" step="1" value="1000" required /></label>
               <label>VGS <span>mV</span><input id="pt3Vgs" type="number" min="-800" max="1000" step="1" value="0" required /></label>
               <label>Target output period <span>ms</span><input id="pt3Period" type="number" min="5" max="1000" step="1" value="10" required /></label>
               <label>Gate settling <span>ms</span><input id="pt3Settle" type="number" min="1000" max="120000" step="1000" value="90000" required /></label>
@@ -210,7 +210,7 @@
           <div id="pt3PulseParameters" class="parameter-set hidden">
             <section class="parameter-group">
               <h2>Sequencer-timed VDS pulse</h2>
-              <label>Low VDS <span>mV</span><input id="pt3PulseLow" type="number" min="100" max="1100" step="1" value="100" required /></label>
+              <label>Low VDS <span>mV</span><input id="pt3PulseLow" type="number" min="0" max="1100" step="1" value="100" required /></label>
               <label>High VDS <span>mV</span><input id="pt3PulseHigh" type="number" min="100" max="1100" step="1" value="1000" required /></label>
               <label>Fixed VGS <span>mV</span><input id="pt3PulseVgs" type="number" min="-800" max="1000" step="1" value="0" required /></label>
               <label>High-pulse width <span>ms</span><input id="pt3PulseWidth" type="number" min="5" max="500" step="1" value="10" required /></label>
@@ -381,6 +381,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=1c78f21b0ec9"></script>
+    <script type="module" src="app.js?v=2b96693c2e46"></script>
   </body>
 </html>

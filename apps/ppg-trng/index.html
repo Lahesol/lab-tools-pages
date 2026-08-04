@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=730b31222113" />
+    <link rel="stylesheet" href="./styles.css?v=d0ed4dc9c851" />
   </head>
   <body>
     <div class="app-shell">
@@ -1039,6 +1039,18 @@
                 <span>Challenge columns</span>
                 <input id="pufColumns" type="number" min="2" max="1024" step="1" value="250" />
               </label>
+              <label class="compact-field" for="pufFourierTrainPercent" title="Fourier paper profile: 75% gives 18 estimator CRPs from 24 experimental CRPs; use 80% for the paper's 0.8M/1M simulation profile.">
+                <span>Fourier train %</span>
+                <input id="pufFourierTrainPercent" type="number" min="5" max="95" step="1" value="75" />
+              </label>
+              <label class="compact-field" for="pufFourierOrders" title="Fourier series orders compared by the ML attack.">
+                <span>Fourier orders</span>
+                <input id="pufFourierOrders" type="text" value="1,2,4,8" />
+              </label>
+              <label class="compact-field" for="pufFourierBits" title="Maximum bits used by Fourier regression. Set 64 for the GFET paper's 64-bit CRP profile.">
+                <span>Fourier bits</span>
+                <input id="pufFourierBits" type="number" min="8" max="1000000" step="64" value="62500" />
+              </label>
               <label class="compact-field puf-file-field" for="pufBitFile">
                 <span>Response files / images</span>
                 <input id="pufBitFile" type="file" multiple accept=".txt,.csv,.bin,.dat,.png,.jpg,.jpeg,.bmp" />
@@ -1057,7 +1069,7 @@
               <div class="puf-help-grid">
                 <div><strong>Preprocessing</strong><p>The paper denoises, bins, and thresholds grayscale images upstream. The source-data MATLAB preprocessing then treats nonzero pixels as 1. This tab can apply that nonzero threshold to uploaded PNG/JPG/BMP files; ADC inputs must already be extracted binary responses.</p></div>
                 <div><strong>MATLAB FOM</strong><p>When the response length equals rows x columns, the tab reproduces Coding.m row-wise Hamming distance, row entropy, row uniformity, and similarity to the control response. Use 250 x 250 for the paper profile.</p></div>
-                <div><strong>ML attack</strong><p>The paper uses coordinate bits as the challenge, five independent CRP subsets, and 10-70% training ratios. For 62,500 points this gives 12,500 points per subset and 1,250-8,750 training points; the browser LR/SVM models are a comparable diagnostic, not the unavailable authors' MATLAB code.</p></div>
+                <div><strong>ML attack</strong><p>The coordinate attack uses five independent CRP subsets and 10-70% training ratios. The added GFET paper uses Fourier regression orders 1, 2, 4, and 8; 75% reproduces 18 estimator CRPs from 24 experimental CRPs, while 80% matches its 0.8M/1M simulation profile.</p></div>
                 <div><strong>Boundary</strong><p>This is not a formal PUF security proof and does not replace SP 800-90B raw-source/min-entropy assessment. Temporal ADC blocks are only PUF-like responses after their challenge and repeat conditions are explicitly defined.</p></div>
               </div>
             </details>
@@ -1091,6 +1103,13 @@
                   <tbody id="pufAttackResultsBody"><tr><td colspan="5" class="puf-empty">No evaluation run yet.</td></tr></tbody>
                 </table>
               </div>
+            </div>
+            <div class="puf-results-wrap puf-fourier-results-wrap">
+              <h3>Fourier regression ML attack</h3>
+              <table class="puf-results" aria-label="PUF Fourier regression machine learning attack">
+                <thead><tr><th>N_F</th><th>Train CRPs</th><th>Test CRPs</th><th>Test bits</th><th>Accuracy</th><th>n-HD</th><th>Correlation</th><th>Max accuracy</th></tr></thead>
+                <tbody id="pufFourierResultsBody"><tr><td colspan="8" class="puf-empty">No evaluation run yet.</td></tr></tbody>
+              </table>
             </div>
             <div class="puf-report-note"><p id="pufWarning">Source-data-aligned PUF evaluation is waiting for response vectors.</p></div>
           </section>
@@ -1267,9 +1286,9 @@
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
     <script src="./nist.js?v=20260730-nist-v1" defer></script>
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
-    <script src="./puf.js?v=20260804-puf-v2" defer></script>
+    <script src="./puf.js?v=20260804-puf-v3" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=5681589f3d62" defer></script>
+    <script src="./app.js?v=a062317ad299" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

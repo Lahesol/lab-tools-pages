@@ -203,6 +203,9 @@ const els = {
   pufGroupSize: document.querySelector("#pufGroupSize"),
   pufRows: document.querySelector("#pufRows"),
   pufColumns: document.querySelector("#pufColumns"),
+  pufFourierTrainPercent: document.querySelector("#pufFourierTrainPercent"),
+  pufFourierOrders: document.querySelector("#pufFourierOrders"),
+  pufFourierBits: document.querySelector("#pufFourierBits"),
   pufBitFile: document.querySelector("#pufBitFile"),
   pufSourceName: document.querySelector("#pufSourceName"),
   pufResponseAvailable: document.querySelector("#pufResponseAvailable"),
@@ -224,6 +227,7 @@ const els = {
   pufMatlabRowUniformity: document.querySelector("#pufMatlabRowUniformity"),
   pufResponseResultsBody: document.querySelector("#pufResponseResultsBody"),
   pufAttackResultsBody: document.querySelector("#pufAttackResultsBody"),
+  pufFourierResultsBody: document.querySelector("#pufFourierResultsBody"),
   pufWarning: document.querySelector("#pufWarning"),
   entropyView: document.querySelector('[id="90bView"]'),
   entropyCaption: document.querySelector('[id="90bCaption"]'),
@@ -4863,10 +4867,11 @@ function formatPufMetric(value, digits = 3) {
 }
 
 function renderPufResults(result = state.pufResults) {
-  if (!els.pufResponseResultsBody || !els.pufAttackResultsBody) return;
+  if (!els.pufResponseResultsBody || !els.pufAttackResultsBody || !els.pufFourierResultsBody) return;
   if (!result) {
     els.pufResponseResultsBody.innerHTML = '<tr><td colspan="7" class="puf-empty">No evaluation run yet.</td></tr>';
     els.pufAttackResultsBody.innerHTML = '<tr><td colspan="5" class="puf-empty">No evaluation run yet.</td></tr>';
+    els.pufFourierResultsBody.innerHTML = '<tr><td colspan="8" class="puf-empty">No evaluation run yet.</td></tr>';
     return;
   }
   els.pufResponseResultsBody.innerHTML = result.responseMetrics.map((item) => `
@@ -4874,10 +4879,17 @@ function renderPufResults(result = state.pufResults) {
   `).join("");
   if (!result.attack?.results?.length) {
     els.pufAttackResultsBody.innerHTML = `<tr><td colspan="5" class="puf-empty">Coordinate attack unavailable${result.attack?.reason ? `: ${result.attack.reason}` : ""}.</td></tr>`;
+  } else {
+    els.pufAttackResultsBody.innerHTML = result.attack.results.map((item) => `
+      <tr><td>${formatPufMetric(item.trainingPercent, 0)}%</td><td>${item.trainingPointCount.toLocaleString()}</td><td>${item.testPointCount.toLocaleString()}</td><td>${formatPufMetric(item.logisticMeanAccuracy, 4)} +/- ${formatPufMetric(item.logisticStandardDeviation, 4)}</td><td>${formatPufMetric(item.svmMeanAccuracy, 4)} +/- ${formatPufMetric(item.svmStandardDeviation, 4)}</td></tr>
+    `).join("");
+  }
+  if (!result.fourier?.results?.length) {
+    els.pufFourierResultsBody.innerHTML = `<tr><td colspan="8" class="puf-empty">Fourier regression unavailable${result.fourier?.reason ? `: ${result.fourier.reason}` : ""}.</td></tr>`;
     return;
   }
-  els.pufAttackResultsBody.innerHTML = result.attack.results.map((item) => `
-    <tr><td>${formatPufMetric(item.trainingPercent, 0)}%</td><td>${item.trainingPointCount.toLocaleString()}</td><td>${item.testPointCount.toLocaleString()}</td><td>${formatPufMetric(item.logisticMeanAccuracy, 4)} +/- ${formatPufMetric(item.logisticStandardDeviation, 4)}</td><td>${formatPufMetric(item.svmMeanAccuracy, 4)} +/- ${formatPufMetric(item.svmStandardDeviation, 4)}</td></tr>
+  els.pufFourierResultsBody.innerHTML = result.fourier.results.map((item) => `
+    <tr><td>${item.order}</td><td>${item.trainResponseCount.toLocaleString()}</td><td>${item.testResponseCount.toLocaleString()}</td><td>${item.testedBits.toLocaleString()}</td><td>${formatPufMetric(item.accuracyPercent, 3)}%</td><td>${formatPufMetric(item.meanHdPercent, 3)}%</td><td>${formatPufMetric(item.meanCorrelation, 5)}</td><td>${formatPufMetric(item.maximumAccuracyPercent, 3)}%</td></tr>
   `).join("");
 }
 
@@ -4913,6 +4925,9 @@ function runPufEvaluation() {
     maxPoints: 62500,
     crpSetCount: 5,
     controlIndex: Math.max(0, (state.pufUploadedFileNames || []).findIndex((name) => /control/i.test(name))),
+    fourierTrainPercent: clampInteger(els.pufFourierTrainPercent?.value, 5, 95, 75),
+    fourierOrders: els.pufFourierOrders?.value || "1,2,4,8",
+    maxFourierBits: clampInteger(els.pufFourierBits?.value, 8, 1000000, 62500),
   };
   state.pufRunning = true;
   state.pufResults = null;
@@ -4961,7 +4976,7 @@ function runPufEvaluation() {
   const workerResponses = responses.map((response) => response.slice());
   let settled = false;
   try {
-    const worker = new Worker("./puf-worker.js?v=20260804-puf-v2");
+    const worker = new Worker("./puf-worker.js?v=20260804-puf-v3");
     state.pufWorker = worker;
     worker.onmessage = (event) => {
       if (settled) return;
@@ -5017,11 +5032,11 @@ function exportPufResultsCsv() {
     addLog("SYS", "No PUF evaluation results to export");
     return;
   }
-  const rows = ["record,response,bits,ones,uniformity_percent,shannon_entropy,similarity_to_control_percent,matlab_row_hd_percent,matlab_row_entropy,matlab_row_uniformity_percent,inter_hd_percent,inter_hd_sd_percent,bit_aliasing_mean_percent,bit_aliasing_sd_percent,intra_hd_percent,max_abs_correlation,train_percent,train_points,test_points,lr_accuracy,lr_sd,svm_accuracy,svm_sd"];
+  const rows = ["record,response,bits,ones,uniformity_percent,shannon_entropy,similarity_to_control_percent,matlab_row_hd_percent,matlab_row_entropy,matlab_row_uniformity_percent,inter_hd_percent,inter_hd_sd_percent,bit_aliasing_mean_percent,bit_aliasing_sd_percent,intra_hd_percent,max_abs_correlation,train_percent,train_points,test_points,lr_accuracy,lr_sd,svm_accuracy,svm_sd,fourier_order,fourier_train_crps,fourier_test_crps,fourier_tested_bits,fourier_accuracy_percent,fourier_n_hd_percent,fourier_correlation,fourier_max_accuracy_percent"];
   result.responseMetrics.forEach((item) => rows.push([
     "response", item.index, item.bits, item.ones, formatPufMetric(item.uniformityPercent, 6), formatPufMetric(item.entropy, 9),
     formatPufMetric(item.similarityToControlPercent, 6), item.matlabFom?.available ? formatPufMetric(item.matlabFom.averageRowHdPercent, 6) : "", item.matlabFom?.available ? formatPufMetric(item.matlabFom.averageRowEntropy, 9) : "", item.matlabFom?.available ? formatPufMetric(item.matlabFom.averageRowUniformityPercent, 6) : "",
-    "", "", "", "", result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), "", "", "", "", "", "",
+    "", "", "", "", result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
   ].join(",")));
   (result.attack?.results || []).forEach((item) => rows.push([
     "coordinate_attack", "", result.responseLength, "", formatPufMetric(result.uniformity.meanPercent, 6), formatPufMetric(result.entropy.mean, 9),
@@ -5029,6 +5044,14 @@ function exportPufResultsCsv() {
     formatPufMetric(result.interHd.meanPercent, 6), formatPufMetric(result.interHd.standardDeviationPercent, 6), formatPufMetric(result.bitAliasing.meanPercent, 6), formatPufMetric(result.bitAliasing.standardDeviationPercent, 6),
     result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), item.trainingPercent, item.trainingPointCount, item.testPointCount,
     formatPufMetric(item.logisticMeanAccuracy, 9), formatPufMetric(item.logisticStandardDeviation, 9), formatPufMetric(item.svmMeanAccuracy, 9), formatPufMetric(item.svmStandardDeviation, 9),
+    "", "", "", "", "", "", "", "",
+  ].join(",")));
+  (result.fourier?.results || []).forEach((item) => rows.push([
+    "fourier_regression", "", result.responseLength, "", formatPufMetric(result.uniformity.meanPercent, 6), formatPufMetric(result.entropy.mean, 9),
+    formatPufMetric(result.controlSimilarity?.meanPercent, 6), result.matlabFom?.available ? formatPufMetric(result.matlabFom.meanRowHdPercent, 6) : "", result.matlabFom?.available ? formatPufMetric(result.matlabFom.meanRowEntropy, 9) : "", result.matlabFom?.available ? formatPufMetric(result.matlabFom.meanRowUniformityPercent, 6) : "",
+    formatPufMetric(result.interHd.meanPercent, 6), formatPufMetric(result.interHd.standardDeviationPercent, 6), formatPufMetric(result.bitAliasing.meanPercent, 6), formatPufMetric(result.bitAliasing.standardDeviationPercent, 6),
+    result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), "", "", "", "", "", "", "",
+    item.order, item.trainResponseCount, item.testResponseCount, item.testedBits, formatPufMetric(item.accuracyPercent, 9), formatPufMetric(item.meanHdPercent, 9), formatPufMetric(item.meanCorrelation, 9), formatPufMetric(item.maximumAccuracyPercent, 9),
   ].join(",")));
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -6171,7 +6194,7 @@ function bindEvents() {
   els.pufBitFile?.addEventListener("change", () => {
     handlePufBitFiles(els.pufBitFile.files);
   });
-  [els.pufResponseLength, els.pufResponseCount, els.pufGroupSize, els.pufRows, els.pufColumns]
+  [els.pufResponseLength, els.pufResponseCount, els.pufGroupSize, els.pufRows, els.pufColumns, els.pufFourierTrainPercent, els.pufFourierOrders, els.pufFourierBits]
     .forEach((control) => control?.addEventListener("input", () => {
       updatePufSourceStatus();
       clearPufResults();

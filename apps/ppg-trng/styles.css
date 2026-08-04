@@ -1268,6 +1268,10 @@ canvas {
   font-size: 14px;
 }
 
+.puf-fourier-results-wrap {
+  margin: 0 16px 16px;
+}
+
 .puf-results {
   width: 100%;
   table-layout: fixed;
