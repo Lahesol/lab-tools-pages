@@ -1,0 +1,158 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Neuromorphic Vision Pipeline Explorer</title>
+    <link rel="stylesheet" href="styles.css?v=8025b4180717" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="identity">
+        <span class="signal-dot" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">interactive numerical explorer</p>
+          <h1>Neuromorphic Vision Pipeline</h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="sample-status" class="status-text" aria-live="polite">frame 001 · synthetic</span>
+        <button id="run-button" class="button button-primary" type="button">Run sample</button>
+        <button id="reset-button" class="button button-quiet" type="button">Reset</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="control-rail" aria-label="Simulation controls">
+        <section class="rail-section">
+          <div class="section-kicker">Input glyph</div>
+          <div id="letter-picker" class="letter-picker" aria-label="Select input letter"></div>
+          <p class="rail-help">Click a sensor cell to make a custom 5 × 5 input.</p>
+        </section>
+
+        <section class="rail-section">
+          <div class="section-kicker">Photodiode / event map</div>
+          <div class="range-control">
+            <label for="illumination">Illumination <output id="illumination-value"></output></label>
+            <input id="illumination" type="range" min="0.20" max="1.40" step="0.01" value="0.90" />
+          </div>
+          <div class="range-control">
+            <label for="ambient">Ambient offset <output id="ambient-value"></output></label>
+            <input id="ambient" type="range" min="0" max="0.30" step="0.01" value="0.08" />
+          </div>
+          <div class="range-control">
+            <label for="noise">Sensor noise σ <output id="noise-value"></output></label>
+            <input id="noise" type="range" min="0" max="0.25" step="0.005" value="0.075" />
+          </div>
+          <div class="range-control">
+            <label for="event-threshold">RRAM event threshold <output id="event-threshold-value"></output></label>
+            <input id="event-threshold" type="range" min="0.10" max="0.90" step="0.01" value="0.48" />
+          </div>
+          <div class="range-control">
+            <label for="bit-flip">Event uncertainty <output id="bit-flip-value"></output></label>
+            <input id="bit-flip" type="range" min="0" max="0.20" step="0.001" value="0.018" />
+          </div>
+        </section>
+
+        <section class="rail-section">
+          <div class="section-kicker">RRAM gate / ADC</div>
+          <div class="range-control">
+            <label for="gate-threshold">Gate threshold θ <output id="gate-threshold-value"></output></label>
+            <input id="gate-threshold" type="range" min="-0.50" max="0.50" step="0.01" value="0" />
+          </div>
+          <div class="range-control">
+            <label for="adc-bits">RRAM ADC resolution <output id="adc-bits-value"></output></label>
+            <input id="adc-bits" type="range" min="4" max="6" step="1" value="4" />
+          </div>
+          <div class="range-control">
+            <label for="adc-vref">ADC V<sub>REF</sub> <output id="adc-vref-value"></output></label>
+            <input id="adc-vref" type="range" min="0.60" max="1.80" step="0.05" value="1.20" />
+          </div>
+        </section>
+
+        <section class="rail-section assumptions">
+          <div class="section-kicker">Model boundary</div>
+          <p>Five-bit-equivalent Latin features feed a trained 8 → 4 → 1 numerical model. RRAM gate states, dpot/resistor MAC, and the final ADC are circuit abstractions, not measured device behavior.</p>
+        </section>
+      </aside>
+
+      <section class="workspace" aria-label="Pipeline layers">
+        <div class="workspace-heading">
+          <div>
+            <p class="eyebrow">click a layer heading to inspect its numerical data</p>
+            <h2>5 × 5 letter → 8 analog features → nonlinear scalar readout</h2>
+          </div>
+          <div class="readout-pill"><span>Prediction</span><strong id="prediction-pill">—</strong></div>
+        </div>
+
+        <div class="pipeline-top">
+          <article class="layer-card input-card" data-layer="input">
+            <button class="layer-heading" type="button" data-layer="input"><span>01</span> Photodiode input</button>
+            <div class="layer-meta"><span id="input-label">G glyph</span><span>analog intensity</span></div>
+            <div id="sensor-grid" class="sensor-grid grid-5" aria-label="5 by 5 photodiode intensity array"></div>
+            <div class="scale-row"><span>0.00</span><span>cell voltage (normalized)</span><span>1.00</span></div>
+          </article>
+
+          <div class="pipeline-arrow" aria-hidden="true">→</div>
+
+          <article class="layer-card event-card" data-layer="event">
+            <button class="layer-heading" type="button" data-layer="event"><span>02</span> RRAM event map</button>
+            <div class="layer-meta"><span>HRS / LRS</span><span id="event-count">0 / 25 ON</span></div>
+            <div id="event-grid" class="event-grid grid-5" aria-label="5 by 5 binary RRAM event map"></div>
+            <div class="state-key"><span><i class="state-swatch state-lrs"></i>LRS / pass</span><span><i class="state-swatch state-hrs"></i>HRS / block</span></div>
+          </article>
+
+          <div class="pipeline-arrow" aria-hidden="true">→</div>
+
+          <article class="layer-card feature-card" data-layer="features">
+            <button class="layer-heading" type="button" data-layer="features"><span>03</span> Latin projections</button>
+            <div class="layer-meta"><span>8 differential channels</span><span>5-bit equivalent</span></div>
+            <div id="feature-bars" class="feature-bars" aria-label="Eight Latin-code feature values"></div>
+          </article>
+        </div>
+
+        <div class="pipeline-divider"><span>programmable analog FC</span></div>
+
+        <div class="mid-grid">
+          <article class="layer-card fc-card" data-layer="fc">
+            <button class="layer-heading" type="button" data-layer="fc"><span>04</span> 8 × 4 weighted MAC</button>
+            <div class="layer-meta"><span>signed calibrated weights</span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
+            <div id="fc-matrix" class="fc-matrix" aria-label="Feature contributions into four FC columns"></div>
+            <div id="preactivation-values" class="preactivation-values"></div>
+          </article>
+
+          <article class="layer-card gate-card" data-layer="gate">
+            <button class="layer-heading" type="button" data-layer="gate"><span>05</span> RRAM-gated analog ReLU</button>
+            <div class="layer-meta"><span>SET state enables a buffer</span><span>y<sub>j</sub> = max(0, z<sub>j</sub> − θ)</span></div>
+            <div id="gate-channels" class="gate-channels" aria-label="Four thresholded RRAM gate outputs"></div>
+          </article>
+        </div>
+
+        <div class="pipeline-divider"><span>single analog adder and RRAM ADC</span></div>
+
+        <div class="bottom-grid">
+          <article class="layer-card output-card" data-layer="output">
+            <button class="layer-heading" type="button" data-layer="output"><span>06</span> Weighted output adder</button>
+            <div class="layer-meta"><span>z<sub>out</sub> = Σw<sub>j</sub>y<sub>j</sub> + b<sub>2</sub></span><span>scalar</span></div>
+            <div class="output-readout"><strong id="output-value">+0.000</strong><span>normalized analog score</span></div>
+            <div id="output-terms" class="output-terms"></div>
+          </article>
+
+          <article class="layer-card adc-card" data-layer="adc">
+            <button class="layer-heading" type="button" data-layer="adc"><span>07</span> RRAM ADC + LUT</button>
+            <div class="layer-meta"><span id="adc-mode">4-bit conversion</span><span>nearest code center</span></div>
+            <div id="adc-binary" class="adc-binary" aria-label="ADC binary output code"></div>
+            <div class="adc-summary"><div><span>code</span><strong id="adc-code">0</strong></div><div><span>quantized V</span><strong id="adc-voltage">0.00 V</strong></div><div><span>decoded letter</span><strong id="decoded-letter">—</strong></div></div>
+            <div id="lut-strip" class="lut-strip" aria-label="ADC code to letter lookup table"></div>
+          </article>
+        </div>
+
+        <section id="inspector" class="inspector" aria-live="polite"></section>
+      </section>
+    </main>
+
+    <script src="model-data.js"></script>
+    <script src="app.js?v=14f77d712934"></script>
+  </body>
+</html>

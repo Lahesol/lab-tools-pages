@@ -40,6 +40,14 @@
         "accent":  "#9a5a2f"
     },
     {
+        "name":  "Neuromorphic Vision Pipeline",
+        "description":  "Interactive static explorer for 5x5 photodiode inputs, RRAM event maps, gated feature extraction, and classifier output.",
+        "url":  "apps/neuromorphic-vision/",
+        "group":  "Vision",
+        "status":  "Ready",
+        "accent":  "#2e6f95"
+    },
+    {
         "name":  "KETI Lab Console",
         "description":  "Web Serial ADC acquisition, filtering, plotting, recording, and helper-based flashing console for Arduino Nano 33 BLE Rev2.",
         "url":  "apps/keti-platform/",
