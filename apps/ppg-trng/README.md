@@ -212,7 +212,9 @@ a defined challenge condition, not merely sequential samples from one time
 series. For each Fourier order, the tab also retains the measured and predicted
 test response vectors and renders the full measured-CRP x predicted-CRP maps for
 accuracy, normalized Hamming distance, and correlation; the diagonal represents
-the one-to-one challenge mapping used for the per-CRP comparison.
+the one-to-one challenge mapping used for the per-CRP comparison. The PUF CSV
+export includes these map cells as `fourier_pairwise` records with the Fourier
+order, measured/predicted CRP identifiers, accuracy, n-HD percent, and CC.
 
 The source folder also contains `Coding2.m`, which evaluates a BCH(127,64)
 helper-data reconstruction path. The web PUF tab does not claim BCH key

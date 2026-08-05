@@ -5042,7 +5042,7 @@ function runPufEvaluation() {
   const workerResponses = responses.map((response) => response.slice());
   let settled = false;
   try {
-    const worker = new Worker("./puf-worker.js?v=20260806-puf-v5");
+    const worker = new Worker("./puf-worker.js?v=20260806-puf-v6");
     state.pufWorker = worker;
     worker.onmessage = (event) => {
       if (settled) return;
@@ -5119,6 +5119,23 @@ function exportPufResultsCsv() {
     result.intraHd.available ? formatPufMetric(result.intraHd.meanPercent, 6) : "", formatPufMetric(result.correlation.maximumAbsolute, 9), "", "", "", "", "", "", "",
     item.order, item.trainResponseCount, item.testResponseCount, item.testedBits, formatPufMetric(item.accuracyPercent, 9), formatPufMetric(item.meanHdPercent, 9), formatPufMetric(item.meanCorrelation, 9), formatPufMetric(item.maximumAccuracyPercent, 9),
   ].join(",")));
+  (result.fourier?.results || []).forEach((item) => {
+    const labels = item.testResponseIndices || [];
+    const pairwise = item.pairwise || {};
+    labels.forEach((measuredCrp, measuredIndex) => labels.forEach((predictedCrp, predictedIndex) => {
+      const row = ["fourier_pairwise", `N_F${item.order}:M${measuredCrp}:P${predictedCrp}`, result.responseLength, ""];
+      row.push(...Array(12).fill(""));
+      row.push(
+        item.trainPercent,
+        "", "", "", "", "", "",
+        item.order, item.trainResponseCount, item.testResponseCount, item.testedBits,
+        formatPufMetric(pairwise.accuracyPercent?.[measuredIndex]?.[predictedIndex], 9),
+        formatPufMetric((pairwise.normalizedHd?.[measuredIndex]?.[predictedIndex] ?? NaN) * 100, 9),
+        formatPufMetric(pairwise.correlation?.[measuredIndex]?.[predictedIndex], 9), "",
+      );
+      rows.push(row.join(","));
+    }));
+  });
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -5126,7 +5143,7 @@ function exportPufResultsCsv() {
   link.download = `puf_evaluation_${new Date().toISOString().replaceAll(":", "-")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  addLog("SYS", "Exported PUF evaluation results");
+  addLog("SYS", "Exported PUF evaluation results including Fourier pairwise maps");
 }
 
 function formatEntropyMetric(value) {
