@@ -209,7 +209,10 @@ not included. Set `Fourier bits` to 64 for the reference paper's 64-bit CRP
 format; for larger ADC responses the tested-bit limit prevents excessive browser
 memory use. This attack is only meaningful when rows are independent CRPs under
 a defined challenge condition, not merely sequential samples from one time
-series.
+series. For each Fourier order, the tab also retains the measured and predicted
+test response vectors and renders the full measured-CRP x predicted-CRP maps for
+accuracy, normalized Hamming distance, and correlation; the diagonal represents
+the one-to-one challenge mapping used for the per-CRP comparison.
 
 The source folder also contains `Coding2.m`, which evaluates a BCH(127,64)
 helper-data reconstruction path. The web PUF tab does not claim BCH key

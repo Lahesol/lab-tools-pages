@@ -228,6 +228,7 @@ const els = {
   pufResponseResultsBody: document.querySelector("#pufResponseResultsBody"),
   pufAttackResultsBody: document.querySelector("#pufAttackResultsBody"),
   pufFourierResultsBody: document.querySelector("#pufFourierResultsBody"),
+  pufFourierHeatmaps: document.querySelector("#pufFourierHeatmaps"),
   pufWarning: document.querySelector("#pufWarning"),
   entropyView: document.querySelector('[id="90bView"]'),
   entropyCaption: document.querySelector('[id="90bCaption"]'),
@@ -4866,12 +4867,72 @@ function formatPufMetric(value, digits = 3) {
   return Number.isFinite(value) ? value.toFixed(digits) : "--";
 }
 
+function heatmapColor(metric, value) {
+  if (!Number.isFinite(value)) return "#e5ece9";
+  if (metric === "correlation") {
+    const normalized = Math.max(0, Math.min(1, (value + 1) / 2));
+    const hue = 195 - (normalized * 170);
+    return `hsl(${hue} 62% 66%)`;
+  }
+  const normalized = metric === "normalizedHd"
+    ? Math.max(0, Math.min(1, value))
+    : Math.max(0, Math.min(1, value / 100));
+  const hue = 142 - (normalized * 102);
+  return `hsl(${hue} 58% 64%)`;
+}
+
+function formatHeatmapValue(metric, value) {
+  if (!Number.isFinite(value)) return "--";
+  if (metric === "accuracyPercent") return `${value.toFixed(1)}%`;
+  if (metric === "normalizedHd") return value.toFixed(3);
+  return value.toFixed(3);
+}
+
+function renderPufFourierHeatmaps(fourier = state.pufResults?.fourier) {
+  if (!els.pufFourierHeatmaps) return;
+  const results = (fourier?.results || []).filter((item) => item.pairwise?.accuracyPercent?.length);
+  if (!results.length) {
+    els.pufFourierHeatmaps.innerHTML = '<p class="puf-empty">No measured/predicted response pairs are available.</p>';
+    return;
+  }
+  const metrics = [
+    { key: "accuracyPercent", label: "Prediction accuracy (%)" },
+    { key: "normalizedHd", label: "Normalized Hamming distance" },
+    { key: "correlation", label: "Correlation coefficient (CC)" },
+  ];
+  els.pufFourierHeatmaps.innerHTML = metrics.map((metric) => {
+    const cards = results.map((item) => {
+      const matrix = item.pairwise[metric.key];
+      const labels = item.testResponseIndices || matrix.map((_, index) => index + 1);
+      const header = labels.map((label) => `<th scope="col">${label}</th>`).join("");
+      const body = matrix.map((row, measuredIndex) => `
+        <tr><th scope="row">${labels[measuredIndex]}</th>${row.map((value, predictedIndex) => {
+          const diagonal = measuredIndex === predictedIndex ? " is-diagonal" : "";
+          const displayValue = formatHeatmapValue(metric.key, value);
+          return `<td class="puf-heatmap-cell${diagonal}" style="background:${heatmapColor(metric.key, value)}" title="Measured CRP ${labels[measuredIndex]} vs predicted CRP ${labels[predictedIndex]}: ${displayValue}">${displayValue}</td>`;
+        }).join("")}</tr>
+      `).join("");
+      return `
+        <article class="puf-heatmap-card">
+          <h4>N<sub>F</sub> = ${item.order}</h4>
+          <table class="puf-heatmap" aria-label="${metric.label}, Fourier order ${item.order}">
+            <thead><tr><th scope="col">M/P</th>${header}</tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+        </article>
+      `;
+    }).join("");
+    return `<section class="puf-heatmap-section"><h4>${metric.label}</h4><div class="puf-heatmap-grid">${cards}</div></section>`;
+  }).join("");
+}
+
 function renderPufResults(result = state.pufResults) {
   if (!els.pufResponseResultsBody || !els.pufAttackResultsBody || !els.pufFourierResultsBody) return;
   if (!result) {
     els.pufResponseResultsBody.innerHTML = '<tr><td colspan="7" class="puf-empty">No evaluation run yet.</td></tr>';
     els.pufAttackResultsBody.innerHTML = '<tr><td colspan="6" class="puf-empty">No evaluation run yet.</td></tr>';
     els.pufFourierResultsBody.innerHTML = '<tr><td colspan="8" class="puf-empty">No evaluation run yet.</td></tr>';
+    renderPufFourierHeatmaps(null);
     return;
   }
   els.pufResponseResultsBody.innerHTML = result.responseMetrics.map((item) => `
@@ -4889,11 +4950,13 @@ function renderPufResults(result = state.pufResults) {
   }
   if (!result.fourier?.results?.length) {
     els.pufFourierResultsBody.innerHTML = `<tr><td colspan="8" class="puf-empty">Fourier regression unavailable${result.fourier?.reason ? `: ${result.fourier.reason}` : ""}.</td></tr>`;
+    renderPufFourierHeatmaps(null);
     return;
   }
   els.pufFourierResultsBody.innerHTML = result.fourier.results.map((item) => `
     <tr><td>${item.order}</td><td>${item.trainResponseCount.toLocaleString()}</td><td>${item.testResponseCount.toLocaleString()}</td><td>${item.testedBits.toLocaleString()}</td><td>${formatPufMetric(item.accuracyPercent, 3)}%</td><td>${formatPufMetric(item.meanHdPercent, 3)}%</td><td>${formatPufMetric(item.meanCorrelation, 5)}</td><td>${formatPufMetric(item.maximumAccuracyPercent, 3)}%</td></tr>
   `).join("");
+  renderPufFourierHeatmaps(result.fourier);
 }
 
 function updatePufSummary(result = null) {
@@ -4979,7 +5042,7 @@ function runPufEvaluation() {
   const workerResponses = responses.map((response) => response.slice());
   let settled = false;
   try {
-    const worker = new Worker("./puf-worker.js?v=20260806-puf-v4");
+    const worker = new Worker("./puf-worker.js?v=20260806-puf-v5");
     state.pufWorker = worker;
     worker.onmessage = (event) => {
       if (settled) return;

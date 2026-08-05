@@ -1279,6 +1279,77 @@ canvas {
   margin: 0 16px 16px;
 }
 
+.puf-fourier-heatmaps-wrap {
+  margin: 0 16px 16px;
+}
+
+.puf-fourier-heatmaps {
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+}
+
+.puf-heatmap-section > h4 {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.puf-heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.puf-heatmap-card {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfdfc;
+}
+
+.puf-heatmap-card h4 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: center;
+}
+
+.puf-heatmap {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.puf-heatmap th,
+.puf-heatmap td {
+  width: 1.5em;
+  height: 2.4em;
+  padding: 2px;
+  border: 1px solid rgba(26, 50, 45, 0.16);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.puf-heatmap th {
+  color: var(--muted);
+  background: #f1f6f3;
+  font-weight: 800;
+}
+
+.puf-heatmap-cell {
+  color: #18312b;
+  font-variant-numeric: tabular-nums;
+}
+
+.puf-heatmap-cell.is-diagonal {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  font-weight: 900;
+}
+
 .puf-results {
   width: 100%;
   table-layout: fixed;
@@ -2378,6 +2449,10 @@ canvas {
     grid-template-columns: 1fr;
   }
 
+  .puf-heatmap-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .entropy-result-grid {
     grid-template-columns: 1fr;
   }
@@ -2451,6 +2526,10 @@ canvas {
 
   .puf-file-field {
     grid-column: auto;
+  }
+
+  .puf-heatmap-grid {
+    grid-template-columns: 1fr;
   }
 
   .quick-grid {

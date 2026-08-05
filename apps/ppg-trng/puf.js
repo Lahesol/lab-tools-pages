@@ -498,6 +498,8 @@
       const hammingValues = [];
       const correlations = [];
       const accuracies = [];
+      const measuredResponses = [];
+      const predictedResponses = [];
       testFeatures.forEach((features, sampleIndex) => {
         const actual = normalized[testIndices[sampleIndex]].slice(0, bitCount);
         const predicted = new Uint8Array(bitCount);
@@ -516,7 +518,28 @@
         hammingValues.push(hammingPercent(actual, predicted));
         const correlation = pearson(actual, predicted);
         if (Number.isFinite(correlation)) correlations.push(correlation);
+        measuredResponses.push(actual);
+        predictedResponses.push(predicted);
       });
+      const pairwise = {
+        accuracyPercent: [],
+        normalizedHd: [],
+        correlation: [],
+      };
+      for (let measuredIndex = 0; measuredIndex < measuredResponses.length; measuredIndex += 1) {
+        const accuracyRow = [];
+        const hdRow = [];
+        const correlationRow = [];
+        for (let predictedIndex = 0; predictedIndex < predictedResponses.length; predictedIndex += 1) {
+          const hdPercent = hammingPercent(measuredResponses[measuredIndex], predictedResponses[predictedIndex]);
+          accuracyRow.push(100 - hdPercent);
+          hdRow.push(hdPercent / 100);
+          correlationRow.push(pearson(measuredResponses[measuredIndex], predictedResponses[predictedIndex]));
+        }
+        pairwise.accuracyPercent.push(accuracyRow);
+        pairwise.normalizedHd.push(hdRow);
+        pairwise.correlation.push(correlationRow);
+      }
       results.push({
         order,
         featureCount,
@@ -528,6 +551,8 @@
         meanHdPercent: mean(hammingValues),
         meanCorrelation: mean(correlations),
         maximumAccuracyPercent: accuracies.length ? Math.max(...accuracies) * 100 : NaN,
+        testResponseIndices: testIndices.map((index) => index + 1),
+        pairwise,
       });
     });
 
