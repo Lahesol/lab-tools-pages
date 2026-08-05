@@ -21,18 +21,29 @@
     eventThreshold: $("event-threshold-value"), bitFlip: $("bit-flip-value"),
     gateThreshold: $("gate-threshold-value"), adcBits: $("adc-bits-value"), adcVref: $("adc-vref-value")
   };
+  const evaluationControls = {
+    samples: $("eval-samples"), illuminationMean: $("eval-illumination-mean"), illuminationSpan: $("eval-illumination-span"),
+    ambientMean: $("eval-ambient-mean"), ambientSpan: $("eval-ambient-span"), noise: $("eval-noise"),
+    bitFlip: $("eval-bit-flip"), seed: $("eval-seed")
+  };
+  const evaluationOutputs = {
+    samples: $("eval-samples-value"), illuminationMean: $("eval-illumination-mean-value"), illuminationSpan: $("eval-illumination-span-value"),
+    ambientMean: $("eval-ambient-mean-value"), ambientSpan: $("eval-ambient-span-value"), noise: $("eval-noise-value"), bitFlip: $("eval-bit-flip-value")
+  };
   const view = {
     letterPicker: $("letter-picker"), inputLabel: $("input-label"), sensorGrid: $("sensor-grid"),
     eventGrid: $("event-grid"), eventCount: $("event-count"), projectionGeometry: $("projection-geometry"),
-    fcMatrix: $("fc-matrix"), preactivationValues: $("preactivation-values"), gateChannels: $("gate-channels"),
+    fcMatrix: $("fc-matrix"), preactivationValues: $("preactivation-values"), resistorMap: $("resistor-map"), gateChannels: $("gate-channels"),
     outputValue: $("output-value"), outputTerms: $("output-terms"), adcMode: $("adc-mode"),
     adcBinary: $("adc-binary"), adcCode: $("adc-code"), adcVoltage: $("adc-voltage"),
     decodedLetter: $("decoded-letter"), predictionPill: $("prediction-pill"), lutStrip: $("lut-strip"),
-    sampleStatus: $("sample-status"), inspector: $("inspector")
+    sampleStatus: $("sample-status"), inspector: $("inspector"), evaluationAccuracy: $("evaluation-accuracy"),
+    evaluationTotal: $("evaluation-total"), evaluationReference: $("evaluation-reference"), evaluationProtocol: $("evaluation-protocol"),
+    evaluationPerClass: $("evaluation-per-class"), confusionTable: $("confusion-table")
   };
   const state = {
     letter: "G", customMap: null, frame: 1, randomTerms: [], activeLayer: "input",
-    selectedFeature: "H1", result: null
+    selectedFeature: "H1", result: null, evaluation: null
   };
 
   const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
@@ -77,6 +88,26 @@
     outputs.adcVref.value = `${Number(controls.adcVref.value).toFixed(2)} V`;
   }
 
+  function getEvaluationConfig() {
+    return {
+      samples: Number(evaluationControls.samples.value), illuminationMean: Number(evaluationControls.illuminationMean.value),
+      illuminationSpan: Number(evaluationControls.illuminationSpan.value), ambientMean: Number(evaluationControls.ambientMean.value),
+      ambientSpan: Number(evaluationControls.ambientSpan.value), noise: Number(evaluationControls.noise.value),
+      bitFlip: Number(evaluationControls.bitFlip.value), seed: Math.max(0, Math.floor(Number(evaluationControls.seed.value) || 0))
+    };
+  }
+
+  function refreshEvaluationLabels() {
+    const config = getEvaluationConfig();
+    evaluationOutputs.samples.value = `${config.samples} / class`;
+    evaluationOutputs.illuminationMean.value = config.illuminationMean.toFixed(2);
+    evaluationOutputs.illuminationSpan.value = `+/- ${config.illuminationSpan.toFixed(2)}`;
+    evaluationOutputs.ambientMean.value = config.ambientMean.toFixed(2);
+    evaluationOutputs.ambientSpan.value = `+/- ${config.ambientSpan.toFixed(2)}`;
+    evaluationOutputs.noise.value = config.noise.toFixed(3);
+    evaluationOutputs.bitFlip.value = `${(config.bitFlip * 100).toFixed(1)} %`;
+  }
+
   function glyphToMap(glyph) { return glyph.map((row) => [...row].map(Number)); }
   function baseMap() { return state.customMap ? state.customMap.map((row) => row.slice()) : glyphToMap(MODEL.glyphs[state.letter]); }
   function drawNewNoise() {
@@ -87,6 +118,31 @@
   function adcCenters(bits) {
     const maximum = 2 ** bits - 1;
     return MODEL.adcOrder.map((_, index) => Math.round(1 + index * (maximum - 1) / (MODEL.adcOrder.length - 1)));
+  }
+
+  function projectAndRead(event, config) {
+    const features = FEATURE_PATHS.map((path) => {
+      const terms = path.cells.map(([row, col]) => {
+        const input = event[row][col];
+        const weight = MODEL.latinSquare[row][col];
+        return { row, col, input, weight, contribution: input * weight };
+      });
+      const value = terms.reduce((sum, term) => sum + term.contribution, 0);
+      return { name: path.name, cells: path.cells, terms, value, code: featureCode(value) };
+    });
+    const featureValues = features.map((feature) => feature.value);
+    const preactivations = Array.from({ length: 4 }, (_, node) => dot(featureValues, MODEL.model.w1.map((weights) => weights[node])) + MODEL.model.b1[node]);
+    const gates = preactivations.map((value, node) => {
+      const output = Math.max(0, value - config.gateThreshold);
+      return { node, z: value, output, state: output > 0 ? "LRS" : "HRS" };
+    });
+    const terms = gates.map((gate, node) => gate.output * MODEL.model.w2[node]);
+    const output = terms.reduce((sum, value) => sum + value, MODEL.model.b2);
+    const maximumCode = 2 ** config.adcBits - 1;
+    const adcCode = Math.round((clamp(output, -1, 1) + 1) * maximumCode / 2);
+    const centers = adcCenters(config.adcBits);
+    const orderIndex = centers.reduce((best, center, index) => Math.abs(adcCode - center) < Math.abs(adcCode - centers[best]) ? index : best, 0);
+    return { features, featureValues, preactivations, gates, terms, output, adcCode, maximumCode, centers, decoded: MODEL.adcOrder[orderIndex] };
   }
 
   function runPipeline() {
@@ -110,29 +166,17 @@
       sensor.push(sensorRow);
       event.push(eventRow);
     }
+    return { config, base, sensor, event, ...projectAndRead(event, config) };
+  }
 
-    const features = FEATURE_PATHS.map((path) => {
-      const terms = path.cells.map(([row, col]) => {
-        const input = event[row][col];
-        const weight = MODEL.latinSquare[row][col];
-        return { row, col, input, weight, contribution: input * weight };
-      });
-      const value = terms.reduce((sum, term) => sum + term.contribution, 0);
-      return { name: path.name, cells: path.cells, terms, value, code: featureCode(value) };
-    });
-    const featureValues = features.map((feature) => feature.value);
-    const preactivations = Array.from({ length: 4 }, (_, node) => dot(featureValues, MODEL.model.w1.map((weights) => weights[node])) + MODEL.model.b1[node]);
-    const gates = preactivations.map((value, node) => {
-      const output = Math.max(0, value - config.gateThreshold);
-      return { node, z: value, output, state: output > 0 ? "LRS" : "HRS" };
-    });
-    const terms = gates.map((gate, node) => gate.output * MODEL.model.w2[node]);
-    const output = terms.reduce((sum, value) => sum + value, MODEL.model.b2);
-    const maximumCode = 2 ** config.adcBits - 1;
-    const adcCode = Math.round((clamp(output, -1, 1) + 1) * maximumCode / 2);
-    const centers = adcCenters(config.adcBits);
-    const orderIndex = centers.reduce((best, center, index) => Math.abs(adcCode - center) < Math.abs(adcCode - centers[best]) ? index : best, 0);
-    return { config, base, sensor, event, features, featureValues, preactivations, gates, terms, output, adcCode, maximumCode, centers, decoded: MODEL.adcOrder[orderIndex] };
+  function makeEvaluationEvent(base, config, distribution, random) {
+    const illumination = clamp(distribution.illuminationMean + (random() * 2 - 1) * distribution.illuminationSpan, 0, 1.8);
+    const ambient = clamp(distribution.ambientMean + (random() * 2 - 1) * distribution.ambientSpan, 0, 0.5);
+    return base.map((row) => row.map((pixel) => {
+      const analog = ambient + illumination * pixel + distribution.noise * gaussian(random);
+      const crossed = analog >= config.eventThreshold;
+      return (random() < distribution.bitFlip ? !crossed : crossed) ? 1 : 0;
+    }));
   }
 
   function renderLetterPicker() {
@@ -228,6 +272,24 @@
     }).join("");
   }
 
+  function renderResistorMap() {
+    const limit = MODEL.weightQuantization.signedMagnitudeLimit;
+    let html = "<div class=\"resistor-map-label is-header\">feature / branch</div>";
+    for (let node = 0; node < 4; node += 1) html += `<div class="resistor-map-label is-header">z${node + 1}</div>`;
+    FEATURE_CHANNELS.forEach((channel, feature) => {
+      html += `<div class="resistor-map-label"><strong>${channel.id}</strong><small>F${feature + 1} input</small></div>`;
+      for (let node = 0; node < 4; node += 1) {
+        const code = MODEL.weightQuantization.w1Codes[feature][node];
+        const magnitude = Math.abs(code);
+        const branch = code > 0 ? "positive" : code < 0 ? "negative" : "zero";
+        const branchLabel = code > 0 ? "P branch" : code < 0 ? "N branch" : "off";
+        const codeLabel = `${code > 0 ? "+" : code < 0 ? "-" : ""}${String(magnitude).padStart(2, "0")} / ${limit}`;
+        html += `<div class="resistor-map-cell is-${branch}" style="--code-level:${(magnitude / limit * 100).toFixed(1)}%" aria-label="${channel.id} to z${node + 1}; ${branchLabel}; conductance code ${resistorCode(code)}"><strong>${codeLabel}</strong><span>${branchLabel}; |G| = ${magnitude}/${limit}</span><i><b></b></i></div>`;
+      }
+    });
+    view.resistorMap.innerHTML = html;
+  }
+
   function renderGates(result) {
     const height = Math.max(1, ...result.gates.map((gate) => gate.output));
     view.gateChannels.innerHTML = result.gates.map((gate, node) => `<div class="gate-channel ${gate.state === "LRS" ? "is-lrs" : ""}"><div class="gate-row"><strong>h${node + 1}</strong><strong class="gate-state">${gate.state}</strong></div><div class="gate-row"><span>z${node + 1} - theta</span><strong>${signed(gate.z - result.config.gateThreshold)}</strong></div><div class="gate-meter"><i style="width:${(gate.output / height * 100).toFixed(1)}%"></i></div><div class="gate-row"><span>buffered y${node + 1}</span><strong>${fmt(gate.output)}</strong></div></div>`).join("");
@@ -249,11 +311,80 @@
     view.lutStrip.innerHTML = MODEL.adcOrder.map((letter, index) => `<div class="lut-item ${letter === result.decoded ? "is-decoded" : ""}">${letter}<code>${result.centers[index]}</code></div>`).join("");
   }
 
+  function runEvaluation() {
+    const distribution = getEvaluationConfig();
+    const config = getConfig();
+    const random = mulberry32(distribution.seed);
+    const confusion = Array.from({ length: MODEL.classes.length }, () => Array(MODEL.classes.length).fill(0));
+    let correct = 0;
+    MODEL.classes.forEach((letter, truth) => {
+      const base = glyphToMap(MODEL.glyphs[letter]);
+      for (let sample = 0; sample < distribution.samples; sample += 1) {
+        const event = makeEvaluationEvent(base, config, distribution, random);
+        const prediction = projectAndRead(event, config).decoded;
+        const predictedIndex = MODEL.classes.indexOf(prediction);
+        confusion[truth][predictedIndex] += 1;
+        if (truth === predictedIndex) correct += 1;
+      }
+    });
+    state.evaluation = {
+      distribution, config, confusion, correct,
+      total: distribution.samples * MODEL.classes.length, stale: false
+    };
+    renderEvaluation();
+    if (state.activeLayer === "evaluation") renderInspector(state.result);
+  }
+
+  function renderEvaluation() {
+    const evaluation = state.evaluation;
+    if (!evaluation) return;
+    const { distribution, config, confusion, correct, total, stale } = evaluation;
+    const accuracy = correct / total;
+    const illuminationLow = Math.max(0, distribution.illuminationMean - distribution.illuminationSpan);
+    const illuminationHigh = Math.min(1.8, distribution.illuminationMean + distribution.illuminationSpan);
+    const ambientLow = Math.max(0, distribution.ambientMean - distribution.ambientSpan);
+    const ambientHigh = Math.min(0.5, distribution.ambientMean + distribution.ambientSpan);
+    view.evaluationAccuracy.textContent = `${(accuracy * 100).toFixed(2)} %`;
+    view.evaluationTotal.textContent = `${total}`;
+    view.evaluationReference.textContent = `${(MODEL.syntheticProtocol.fiveBitTestAccuracy * 100).toFixed(2)} %`;
+    view.evaluationProtocol.textContent = `${stale ? "Stored result; rerun after changing layer controls. " : "Current independent held-out sweep. "}A~U(${illuminationLow.toFixed(2)}, ${illuminationHigh.toFixed(2)}), B~U(${ambientLow.toFixed(2)}, ${ambientHigh.toFixed(2)}), sigma=${distribution.noise.toFixed(3)}, p_flip=${(distribution.bitFlip * 100).toFixed(1)}%; event theta=${config.eventThreshold.toFixed(2)}, gate theta=${signed(config.gateThreshold, 2)}, ADC=${config.adcBits}-bit; seed=${distribution.seed}.`;
+    view.evaluationPerClass.innerHTML = MODEL.classes.map((letter, index) => {
+      const classAccuracy = confusion[index][index] / distribution.samples;
+      return `<div class="per-class-item"><span>${letter}</span><i><b style="width:${(classAccuracy * 100).toFixed(1)}%"></b></i><strong>${(classAccuracy * 100).toFixed(1)}%</strong></div>`;
+    }).join("");
+    let table = "<table class=\"confusion-table\"><caption>rows: true class; columns: predicted class</caption><thead><tr><th>T / P</th>";
+    table += MODEL.classes.map((letter) => `<th scope="col">${letter}</th>`).join("");
+    table += "</tr></thead><tbody>";
+    table += confusion.map((row, truth) => `<tr><th scope="row">${MODEL.classes[truth]}</th>${row.map((count, prediction) => `<td class="${truth === prediction ? "is-diagonal" : ""}">${count}</td>`).join("")}</tr>`).join("");
+    table += "</tbody></table>";
+    view.confusionTable.innerHTML = table;
+  }
+
+  function markEvaluationStale() {
+    if (!state.evaluation) return;
+    state.evaluation.stale = true;
+    renderEvaluation();
+    if (state.activeLayer === "evaluation") renderInspector(state.result);
+  }
+
+  function useReferenceDistribution() {
+    const protocol = MODEL.syntheticProtocol;
+    evaluationControls.samples.value = String(protocol.testSamplesPerClass);
+    evaluationControls.illuminationMean.value = ((protocol.illuminationUniform[0] + protocol.illuminationUniform[1]) / 2).toFixed(2);
+    evaluationControls.illuminationSpan.value = ((protocol.illuminationUniform[1] - protocol.illuminationUniform[0]) / 2).toFixed(2);
+    evaluationControls.ambientMean.value = ((protocol.ambientUniform[0] + protocol.ambientUniform[1]) / 2).toFixed(2);
+    evaluationControls.ambientSpan.value = ((protocol.ambientUniform[1] - protocol.ambientUniform[0]) / 2).toFixed(2);
+    evaluationControls.noise.value = String(protocol.sensorNoiseGaussianStd);
+    evaluationControls.bitFlip.value = String(protocol.eventBitFlipProbability);
+    refreshEvaluationLabels();
+    runEvaluation();
+  }
+
   function dataBlock(label, value) { return `<div class="inspector-data"><em>${label}</em>${value}</div>`; }
 
   function renderInspector(result) {
     const layer = state.activeLayer;
-    const headers = { input: "01 - Photodiode input data", event: "02 - RRAM threshold-event data", features: "03 - Fixed Latin-square directional sums", fc: "04 - 8 x 4 analog MAC data", gate: "05 - RRAM-gated analog ReLU data", output: "06 - Final analog-adder data", adc: "07 - ADC code and decoder data" };
+    const headers = { input: "01 - Photodiode input data", event: "02 - RRAM threshold-event data", features: "03 - Fixed Latin-square directional sums", fc: "04 - 8 x 4 analog MAC data", gate: "05 - RRAM-gated analog ReLU data", output: "06 - Final analog-adder data", adc: "07 - ADC code and decoder data", evaluation: "08 - Synthetic held-out evaluation" };
     const explanations = {
       input: "The selected glyph receives illumination, ambient offset, and one retained synthetic noise realization.",
       event: "A cell becomes LRS when the analog input crosses the event threshold; its uncertainty draw can invert the state.",
@@ -261,7 +392,8 @@
       fc: "Every MAC tile explicitly gives the raw feature Fk, the signed 5-bit conductance code, its calibrated wkj, and Fk × wkj. A code from -15 to +15 selects the negative or positive resistor branch and a 0-to-15 conductance magnitude.",
       gate: "Below theta the binary RRAM state is HRS and the buffered analog remainder is zero; above theta it is LRS.",
       output: "Four buffered hidden outputs are multiplied by their output weights and added with b2 before final conversion.",
-      adc: "The scalar is clipped to the model range [-1, +1], quantized by the selectable ADC, then mapped through reserved class-code centers."
+      adc: "The scalar is clipped to the model range [-1, +1], quantized by the selectable ADC, then mapped through reserved class-code centers.",
+      evaluation: "This panel does not retrain weights. It repeatedly samples independent photodiode/event inputs from the selected distribution, then evaluates the fixed 5-bit model and reports the resulting confusion matrix."
     };
     let blocks = [];
     if (layer === "input") {
@@ -280,6 +412,15 @@
     } else if (layer === "adc") {
       blocks = MODEL.adcOrder.map((letter, index) => dataBlock(`${letter} center`, `ADC code ${result.centers[index]}${letter === result.decoded ? " - selected" : ""}`));
       blocks.push(dataBlock("current conversion", `${result.config.adcBits}-bit; ${result.adcCode}/${result.maximumCode}; ${result.decoded}`));
+    } else if (layer === "evaluation" && state.evaluation) {
+      const evaluation = state.evaluation;
+      const accuracy = evaluation.correct / evaluation.total;
+      blocks = [
+        dataBlock("held-out accuracy", `${(accuracy * 100).toFixed(2)}%; ${evaluation.correct}/${evaluation.total}; ${evaluation.stale ? "stored result - rerun needed" : "current settings"}`),
+        dataBlock("distribution", `A = U(${(evaluation.distribution.illuminationMean - evaluation.distribution.illuminationSpan).toFixed(2)}, ${(evaluation.distribution.illuminationMean + evaluation.distribution.illuminationSpan).toFixed(2)}); B = U(${Math.max(0, evaluation.distribution.ambientMean - evaluation.distribution.ambientSpan).toFixed(2)}, ${(evaluation.distribution.ambientMean + evaluation.distribution.ambientSpan).toFixed(2)}); sigma = ${evaluation.distribution.noise.toFixed(3)}; p_flip = ${(evaluation.distribution.bitFlip * 100).toFixed(1)}%`),
+        dataBlock("fixed layer settings", `event theta = ${evaluation.config.eventThreshold.toFixed(2)}; gate theta = ${signed(evaluation.config.gateThreshold, 2)}; ADC = ${evaluation.config.adcBits}-bit; seed = ${evaluation.distribution.seed}`)
+      ];
+      blocks.push(...evaluation.confusion.map((row, index) => dataBlock(`true ${MODEL.classes[index]}`, MODEL.classes.map((letter, predicted) => `${letter}:${row[predicted]}`).join(" | "))));
     }
     view.inspector.innerHTML = `<h3>${headers[layer]}</h3><p>${explanations[layer]}</p><div class="inspector-grid">${blocks.join("")}</div>`;
   }
@@ -292,6 +433,7 @@
     renderEvent(result);
     renderFeatures(result);
     renderFc(result);
+    renderResistorMap();
     renderGates(result);
     renderOutput(result);
     renderAdc(result);
@@ -312,19 +454,31 @@
     controls.adcBits.value = "4"; controls.adcVref.value = "1.20";
     state.letter = "G"; state.customMap = null; state.frame = 1; state.activeLayer = "input"; state.selectedFeature = "H1";
     drawNewNoise();
+    useReferenceDistribution();
     renderLetterPicker();
     render();
   }
 
-  Object.values(controls).forEach((control) => control.addEventListener("input", render));
+  Object.values(controls).forEach((control) => control.addEventListener("input", () => {
+    render();
+    markEvaluationStale();
+  }));
+  Object.values(evaluationControls).forEach((control) => control.addEventListener("input", () => {
+    refreshEvaluationLabels();
+    markEvaluationStale();
+  }));
   document.querySelectorAll("[data-layer]").forEach((button) => button.addEventListener("click", () => {
     state.activeLayer = button.dataset.layer;
     renderInspector(state.result);
   }));
   $("run-button").addEventListener("click", nextFrame);
   $("reset-button").addEventListener("click", reset);
+  $("evaluate-button").addEventListener("click", runEvaluation);
+  $("evaluation-defaults").addEventListener("click", useReferenceDistribution);
 
   drawNewNoise();
+  refreshEvaluationLabels();
+  runEvaluation();
   renderLetterPicker();
   render();
 })();

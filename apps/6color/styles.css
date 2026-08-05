@@ -939,6 +939,117 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.dfu-panel {
+  margin-top: 16px;
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.dfu-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dfu-heading h2 {
+  margin: 2px 0 0;
+  font-size: 19px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+}
+
+.dfu-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  margin-top: 14px;
+  align-items: center;
+}
+
+.dfu-file-label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.dfu-file-label input {
+  max-width: 100%;
+  min-height: 38px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+}
+
+.dfu-state,
+.dfu-progress-text {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dfu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.dfu-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.dfu-progress-track {
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-strong);
+}
+
+.dfu-progress-bar {
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #49a895);
+  transition: width 120ms linear;
+}
+
+.dfu-percent {
+  min-width: 54px;
+  color: var(--text);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 13px;
+  text-align: right;
+}
+
+.dfu-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dfu-note code {
+  color: var(--text);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
 .terminal-head {
   display: flex;
   justify-content: space-between;
@@ -990,6 +1101,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .dfu-grid {
+    grid-template-columns: 1fr;
+  }
+
   .parameter-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1027,6 +1142,11 @@ h1 {
 
   .parameter-list {
     grid-template-columns: 1fr;
+  }
+
+  .dfu-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .timeline-plot {

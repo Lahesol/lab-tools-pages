@@ -35,6 +35,19 @@ window.NEUROMORPHIC_MODEL = {
   featureFullScale: 0.96875,
   featureLevels: 32,
   adcOrder: ["C", "I", "O", "U", "Y", "G", "W", "N"],
+  syntheticProtocol: {
+    trainSamplesPerClass: 800,
+    validationSamplesPerClass: 250,
+    testSamplesPerClass: 400,
+    illuminationUniform: [0.62, 1.18],
+    ambientUniform: [0.00, 0.16],
+    sensorNoiseGaussianStd: 0.075,
+    eventBitFlipProbability: 0.018,
+    rramEventThreshold: 0.48,
+    gateThreshold: 0.00,
+    adcBits: 4,
+    fiveBitTestAccuracy: 0.899375
+  },
   weightQuantization: {
     bits: 5,
     signedMagnitudeLimit: 15,

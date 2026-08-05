@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>Neuromorphic Vision Pipeline Explorer</title>
-    <link rel="stylesheet" href="styles.css?v=40b290e011f6" />
+    <link rel="stylesheet" href="styles.css?v=cc56ec3d60e9" />
   </head>
   <body>
     <header class="topbar">
@@ -118,6 +118,11 @@
             <div class="layer-meta"><span>each tile: F<sub>k</sub> / 5-bit G-code / w<sub>kj</sub> / F<sub>k</sub>×w<sub>kj</sub></span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
             <div id="fc-matrix" class="fc-matrix" aria-label="Feature contributions into four FC columns"></div>
             <div id="preactivation-values" class="preactivation-values"></div>
+            <section class="mac-map-section" aria-label="5-bit MAC conductance map">
+              <div class="mac-map-heading"><strong>5-bit MAC conductance map</strong><span>positive / negative resistor branch</span></div>
+              <div id="resistor-map" class="resistor-map"></div>
+              <p class="mac-map-note">Each tile is sign + 4-bit magnitude: G<sub>eff</sub> = sign x |code|/15 x G<sub>FS</sub>. It is a conductance map, not a direct resistance value.</p>
+            </section>
           </article>
 
           <article class="layer-card gate-card" data-layer="gate">
@@ -146,11 +151,70 @@
           </article>
         </div>
 
+        <div class="pipeline-divider"><span>synthetic dataset evaluation</span></div>
+
+        <article class="layer-card evaluation-card" data-layer="evaluation">
+          <button class="layer-heading" type="button" data-layer="evaluation"><span>08</span> Input distribution and held-out classification</button>
+          <div class="layer-meta"><span>fixed 5-bit model; no retraining in this panel</span><span>independent synthetic test sweep</span></div>
+          <div class="evaluation-layout">
+            <section class="distribution-controls" aria-label="Synthetic input distribution controls">
+              <p class="evaluation-formula">V<sub>PD</sub> = A x glyph + B + N(0, sigma); A and B are uniformly drawn per exposure. The existing event threshold, gate threshold, and ADC controls are used for this evaluation.</p>
+              <div class="distribution-control-grid">
+                <div class="range-control">
+                  <label for="eval-samples">Samples per class <output id="eval-samples-value"></output></label>
+                  <input id="eval-samples" type="range" min="25" max="1000" step="25" value="400" />
+                </div>
+                <div class="range-control">
+                  <label for="eval-illumination-mean">Illumination mean <output id="eval-illumination-mean-value"></output></label>
+                  <input id="eval-illumination-mean" type="range" min="0.20" max="1.40" step="0.01" value="0.90" />
+                </div>
+                <div class="range-control">
+                  <label for="eval-illumination-span">Illumination half-span <output id="eval-illumination-span-value"></output></label>
+                  <input id="eval-illumination-span" type="range" min="0" max="0.60" step="0.01" value="0.28" />
+                </div>
+                <div class="range-control">
+                  <label for="eval-ambient-mean">Ambient mean <output id="eval-ambient-mean-value"></output></label>
+                  <input id="eval-ambient-mean" type="range" min="0" max="0.30" step="0.01" value="0.08" />
+                </div>
+                <div class="range-control">
+                  <label for="eval-ambient-span">Ambient half-span <output id="eval-ambient-span-value"></output></label>
+                  <input id="eval-ambient-span" type="range" min="0" max="0.20" step="0.01" value="0.08" />
+                </div>
+                <div class="range-control">
+                  <label for="eval-noise">Sensor noise sigma <output id="eval-noise-value"></output></label>
+                  <input id="eval-noise" type="range" min="0" max="0.25" step="0.005" value="0.075" />
+                </div>
+                <div class="range-control">
+                  <label for="eval-bit-flip">Event flip probability <output id="eval-bit-flip-value"></output></label>
+                  <input id="eval-bit-flip" type="range" min="0" max="0.20" step="0.001" value="0.018" />
+                </div>
+              </div>
+              <div class="evaluation-actions">
+                <label>Seed <input id="eval-seed" type="number" min="0" step="1" value="20260805" /></label>
+                <button id="evaluate-button" class="button button-primary" type="button">Evaluate held-out set</button>
+                <button id="evaluation-defaults" class="button button-quiet" type="button">Reference distribution</button>
+              </div>
+            </section>
+            <section class="evaluation-summary" aria-live="polite">
+              <div class="evaluation-metrics">
+                <div><span>Accuracy</span><strong id="evaluation-accuracy">--</strong></div>
+                <div><span>Total samples</span><strong id="evaluation-total">--</strong></div>
+                <div><span>Reference script</span><strong id="evaluation-reference">--</strong></div>
+              </div>
+              <p id="evaluation-protocol" class="evaluation-protocol"></p>
+              <div class="evaluation-results">
+                <div><h3>Per-class accuracy</h3><div id="evaluation-per-class" class="per-class-results"></div></div>
+                <div><h3>Confusion matrix</h3><div id="confusion-table" class="confusion-wrap"></div></div>
+              </div>
+            </section>
+          </div>
+        </article>
+
         <section id="inspector" class="inspector" aria-live="polite"></section>
       </section>
     </main>
 
     <script src="model-data.js"></script>
-    <script src="app.js?v=d4ee16bfae22"></script>
+    <script src="app.js?v=98f52efabf6e"></script>
   </body>
 </html>

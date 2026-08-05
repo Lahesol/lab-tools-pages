@@ -1,5 +1,14 @@
 # 6 Color GUI Changelog
 
+## 2026-08-05
+
+- Added the Secure BLE DFU maintenance panel for the LED controller.
+- The panel accepts only application-only Nordic DFU ZIP layouts, checks the ZIP locally, and reports its browser-calculated SHA-256 when supported.
+- Added the explicit `DFU` application transition: the firmware turns all LED channels off, resets into `DfuTarg`, and the browser then filters its chooser to Nordic Secure DFU service FE59.
+- Added transfer progress based on the bootloader's packet-receipt CRC and byte offset. A mismatch stops the transfer instead of continuing.
+- The GUI now detects the firmware `CAPS=SECURE_DFU` declaration and keeps the application-entry button disabled for older firmware. A visible 15 s recovery-window `DfuTarg` can still be selected after reset.
+- Added the final reconnect-and-`VERSION` verification step; browser transfer completion alone is not labeled as proof that the board activated the application.
+
 ## 2026-07-14
 
 - Added a firmware version display in the top bar.

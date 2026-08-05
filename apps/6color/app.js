@@ -1,6 +1,22 @@
 const NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const DFU_SERVICE_UUID = 0xfe59;
+const DFU_CONTROL_UUID = "8ec90001-f315-4f60-9fb8-838830daea50";
+const DFU_PACKET_UUID = "8ec90002-f315-4f60-9fb8-838830daea50";
+
+const DFU = {
+  create: 0x01,
+  setPrn: 0x02,
+  checksum: 0x03,
+  execute: 0x04,
+  select: 0x06,
+  response: 0x60,
+  success: 0x01,
+  commandObject: 0x01,
+  dataObject: 0x02,
+  packetBytes: 20,
+};
 
 const channels = [
   { id: "R", label: "Red", color: "#d73535" },
@@ -47,6 +63,22 @@ let receiveBuffer = "";
 let commandQueue = Promise.resolve();
 let firmwareDetail = "unknown";
 let resetDetail = "";
+let firmwareCapabilities = new Set();
+let secureDfuSupported = false;
+let expectDfuDisconnect = false;
+let dfuGattQueue = Promise.resolve();
+const dfuState = {
+  file: null,
+  pkg: null,
+  device: null,
+  server: null,
+  control: null,
+  packet: null,
+  waiter: null,
+  transferring: false,
+  completed: false,
+  progress: 0,
+};
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -125,6 +157,16 @@ const el = {
   blockTimelineDuration: document.querySelector("#blockTimelineDuration"),
   protocolParameterList: document.querySelector("#protocolParameterList"),
   protocolTermDiagram: document.querySelector("#protocolTermDiagram"),
+  dfuFile: document.querySelector("#dfuFile"),
+  dfuCapabilityState: document.querySelector("#dfuCapabilityState"),
+  dfuPackageState: document.querySelector("#dfuPackageState"),
+  enterDfuButton: document.querySelector("#enterDfuButton"),
+  transferDfuButton: document.querySelector("#transferDfuButton"),
+  verifyDfuButton: document.querySelector("#verifyDfuButton"),
+  dfuProgressTrack: document.querySelector("#dfuProgressTrack"),
+  dfuProgressBar: document.querySelector("#dfuProgressBar"),
+  dfuProgressPercent: document.querySelector("#dfuProgressPercent"),
+  dfuProgressText: document.querySelector("#dfuProgressText"),
 };
 
 function isConnected() {
@@ -137,6 +179,7 @@ function setConnectionStatus(connected, label = "") {
   el.connectButton.textContent = connected ? "Disconnect" : "BLE Connect";
   el.deviceName.textContent = label || "BLE NUS";
   document.body.classList.toggle("is-connected", connected);
+  refreshDfuUi();
 }
 
 function appendLog(direction, text) {
@@ -2703,9 +2746,13 @@ function applyFirmwareLine(line) {
   const version = info.get("VERSION") || "unknown";
   const name = info.get("NAME") || "firmware";
   const sdk = info.get("SDK") || "";
+  const capabilities = info.get("CAPS") || "";
   const build = info.get("BUILD") || "";
-  firmwareDetail = [version, name, sdk, build].filter(Boolean).join(" | ");
+  firmwareCapabilities = new Set(capabilities.split("+").map((value) => value.trim()).filter(Boolean));
+  secureDfuSupported = firmwareCapabilities.has("SECURE_DFU");
+  firmwareDetail = [version, name, sdk, capabilities && `CAPS=${capabilities}`, build].filter(Boolean).join(" | ");
   renderFirmwareVersion();
+  refreshDfuUi();
 }
 
 function applyResetLine(line) {
@@ -2731,6 +2778,336 @@ function applyResetLine(line) {
 function renderFirmwareVersion() {
   const resetText = resetDetail ? ` | Reset: ${resetDetail}` : "";
   el.firmwareVersion.textContent = `FW: ${firmwareDetail}${resetText}`;
+}
+
+function setDfuProgress(value, text) {
+  const percent = Math.max(0, Math.min(100, Number(value) || 0));
+  dfuState.progress = percent;
+  el.dfuProgressBar.style.width = `${percent.toFixed(1)}%`;
+  el.dfuProgressTrack.setAttribute("aria-valuenow", percent.toFixed(1));
+  el.dfuProgressPercent.textContent = `${percent.toFixed(1)}%`;
+  el.dfuProgressText.textContent = text;
+}
+
+function refreshDfuUi() {
+  const webBluetoothReady = Boolean(window.isSecureContext && navigator.bluetooth);
+  const packageReady = Boolean(dfuState.pkg) && !dfuState.transferring && !dfuState.completed;
+  const connected = isConnected();
+  el.dfuFile.disabled = !webBluetoothReady || dfuState.transferring;
+  el.enterDfuButton.disabled = !(connected && secureDfuSupported && packageReady);
+  // A recovery-window DfuTarg may be used without an application connection.
+  el.transferDfuButton.disabled = !webBluetoothReady || !packageReady;
+  el.verifyDfuButton.disabled = !dfuState.completed;
+  if (!webBluetoothReady) {
+    el.dfuCapabilityState.textContent = "Secure context (HTTPS or localhost) and Web Bluetooth are required.";
+  } else if (!connected) {
+    el.dfuCapabilityState.textContent = secureDfuSupported ? "Application disconnected. A selected signed ZIP can be sent to a visible DfuTarg recovery window." : "Connect to the LED application to check Secure DFU capability, or use an already-visible DfuTarg recovery window.";
+  } else if (secureDfuSupported) {
+    el.dfuCapabilityState.textContent = "SECURE_DFU capability detected. Entering DFU turns all LED channels off before reset.";
+  } else {
+    el.dfuCapabilityState.textContent = "Connected firmware does not declare SECURE_DFU. Install the initial Secure DFU image through verified SWD first.";
+  }
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipEntries(buffer) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  let eocd = -1;
+  for (let at = bytes.length - 22; at >= Math.max(0, bytes.length - 65557); at -= 1) {
+    if (view.getUint32(at, true) === 0x06054b50) {
+      eocd = at;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("ZIP end-of-central-directory was not found.");
+  const count = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+  const entries = new Map();
+  for (let index = 0; index < count; index += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) throw new Error("Malformed ZIP central directory.");
+    const method = view.getUint16(offset + 10, true);
+    const compressed = view.getUint32(offset + 20, true);
+    const uncompressed = view.getUint32(offset + 24, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+    entries.set(name, { name, method, compressed, uncompressed, localOffset });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return { buffer, entries };
+}
+
+async function unzipEntry(zip, entry) {
+  const view = new DataView(zip.buffer);
+  const source = new Uint8Array(zip.buffer);
+  const offset = entry.localOffset;
+  if (view.getUint32(offset, true) !== 0x04034b50) throw new Error(`Malformed local ZIP entry: ${entry.name}`);
+  const nameLength = view.getUint16(offset + 26, true);
+  const extraLength = view.getUint16(offset + 28, true);
+  const dataStart = offset + 30 + nameLength + extraLength;
+  const data = source.slice(dataStart, dataStart + entry.compressed);
+  if (entry.method === 0) return data;
+  if (entry.method === 8 && "DecompressionStream" in window) {
+    return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  }
+  throw new Error(`ZIP compression method ${entry.method} is not supported by this browser.`);
+}
+
+async function inspectDfuPackage(file) {
+  const archive = await file.arrayBuffer();
+  const zip = zipEntries(archive);
+  const manifestEntry = zip.entries.get("manifest.json");
+  if (!manifestEntry) throw new Error("manifest.json is missing from the ZIP.");
+  const manifest = JSON.parse(decoder.decode(await unzipEntry(zip, manifestEntry)));
+  const root = manifest.manifest;
+  if (!root || !root.application || Object.keys(root).length !== 1) {
+    throw new Error("Only an application-only nrfutil Secure DFU ZIP is accepted.");
+  }
+  const application = root.application;
+  if (!application.bin_file || !application.dat_file) throw new Error("Application manifest lacks bin_file or dat_file.");
+  const binaryEntry = zip.entries.get(application.bin_file);
+  const datEntry = zip.entries.get(application.dat_file);
+  if (!binaryEntry || !datEntry) throw new Error("Manifest file reference is absent from the ZIP.");
+  const binary = await unzipEntry(zip, binaryEntry);
+  const dat = await unzipEntry(zip, datEntry);
+  if (!binary.length || !dat.length) throw new Error("The application binary or init packet is empty.");
+  const archiveSha256 = globalThis.crypto?.subtle
+    ? Array.from(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", archive))).map((byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase()
+    : null;
+  return { binary, dat, binaryName: application.bin_file, datName: application.dat_file, archiveSha256 };
+}
+
+async function onDfuFile() {
+  const file = el.dfuFile.files?.[0] || null;
+  dfuState.file = file;
+  dfuState.pkg = null;
+  dfuState.completed = false;
+  setDfuProgress(0, "Transfer not started.");
+  if (!file) {
+    el.dfuPackageState.textContent = "No package selected.";
+    refreshDfuUi();
+    return;
+  }
+  try {
+    el.dfuPackageState.textContent = "Checking ZIP structure…";
+    const pkg = await inspectDfuPackage(file);
+    dfuState.pkg = pkg;
+    el.dfuPackageState.textContent = `Structure valid: ${pkg.binaryName} (${pkg.binary.length.toLocaleString()} B), ${pkg.datName} (${pkg.dat.length.toLocaleString()} B).${pkg.archiveSha256 ? ` SHA-256 ${pkg.archiveSha256}.` : ""} Bootloader signature validation remains pending.`;
+    setDfuProgress(0, "ZIP structure verified. Connect the LED application and enter DFU, or select an already-visible DfuTarg recovery window.");
+    appendLog("!", `DFU ZIP structure checked: ${file.name}${pkg.archiveSha256 ? `; SHA-256 ${pkg.archiveSha256}` : ""}. Browser-side signature verification is intentionally not claimed.`);
+  } catch (error) {
+    el.dfuPackageState.textContent = `Rejected: ${error.message}`;
+    setDfuProgress(0, "ZIP rejected before any device write.");
+    appendLog("!", `DFU ZIP rejected: ${error.message}`);
+  }
+  refreshDfuUi();
+}
+
+function clearScheduledLightCommands() {
+  programTimers.forEach((timer) => window.clearTimeout(timer));
+  programTimers = [];
+  runningProgramLabel = "";
+}
+
+async function enterDfu() {
+  if (!dfuState.pkg || !isConnected() || !secureDfuSupported) return;
+  if (!window.confirm("Enter the Secure DFU bootloader? All LEDs will be turned off and the application BLE connection will disconnect.")) return;
+  try {
+    clearScheduledLightCommands();
+    expectDfuDisconnect = true;
+    refreshDfuUi();
+    setDfuProgress(0, "Sending DFU command. The LEDs are being turned off before the application resets.");
+    await sendCommand("DFU");
+    setDfuProgress(0, "DFU command sent. Wait for the application disconnect, then select DfuTarg.");
+  } catch (error) {
+    if (expectDfuDisconnect) {
+      expectDfuDisconnect = false;
+      setDfuProgress(0, "Application link ended during DFU entry. Select DfuTarg only if it is visible.");
+      appendLog("!", `DFU write ended with disconnect: ${error.message}. DfuTarg selection remains the required hardware check.`);
+    } else {
+      setDfuProgress(0, `DFU entry request failed: ${error.message}`);
+      appendLog("!", `Could not enter DFU: ${error.message}`);
+    }
+  }
+  refreshDfuUi();
+}
+
+function queueDfuGatt(operation) {
+  const next = dfuGattQueue.then(operation);
+  dfuGattQueue = next.catch(() => undefined);
+  return next;
+}
+
+async function writeDfuCharacteristic(characteristic, bytes, withResponse = true) {
+  if (!characteristic) throw new Error("DFU GATT characteristic is unavailable.");
+  if (withResponse && typeof characteristic.writeValueWithResponse === "function") {
+    await characteristic.writeValueWithResponse(bytes);
+  } else if (!withResponse && typeof characteristic.writeValueWithoutResponse === "function") {
+    await characteristic.writeValueWithoutResponse(bytes);
+  } else {
+    await characteristic.writeValue(bytes);
+  }
+}
+
+function waitDfuResponse(expectedOpcode, timeoutMs = 10000) {
+  if (dfuState.waiter) throw new Error("A DFU control response is already pending.");
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      dfuState.waiter = null;
+      reject(new Error(`Timed out waiting for DFU opcode 0x${expectedOpcode.toString(16)}.`));
+    }, timeoutMs);
+    dfuState.waiter = {
+      expectedOpcode,
+      resolve: (value) => {
+        window.clearTimeout(timer);
+        dfuState.waiter = null;
+        resolve(value);
+      },
+    };
+  });
+}
+
+function onDfuControlNotification(event) {
+  const bytes = new Uint8Array(event.target.value.buffer.slice(0));
+  const waiter = dfuState.waiter;
+  if (bytes[0] === DFU.response && waiter && bytes[1] === waiter.expectedOpcode) {
+    waiter.resolve(bytes);
+    return;
+  }
+  appendLog("!", `Unmatched DFU control notification: ${[...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join(" ")}`);
+}
+
+async function dfuControl(opcode, payload = new Uint8Array()) {
+  const bytes = new Uint8Array(1 + payload.length);
+  bytes[0] = opcode;
+  bytes.set(payload, 1);
+  return queueDfuGatt(async () => {
+    const response = waitDfuResponse(opcode);
+    await writeDfuCharacteristic(dfuState.control, bytes, true);
+    return response;
+  });
+}
+
+function assertDfuSuccess(response, opcode) {
+  if (response[0] !== DFU.response || response[1] !== opcode || response[2] !== DFU.success) {
+    throw new Error(`DFU opcode 0x${opcode.toString(16)} failed (result 0x${(response[2] ?? 0).toString(16)}).`);
+  }
+  return response;
+}
+
+async function dfuSelect(type) {
+  const response = assertDfuSuccess(await dfuControl(DFU.select, Uint8Array.of(type)), DFU.select);
+  if (response.length < 15) throw new Error("Short SELECT_OBJECT response.");
+  const view = new DataView(response.buffer, response.byteOffset, response.byteLength);
+  return { maxSize: view.getUint32(3, true), offset: view.getUint32(7, true), crc: view.getUint32(11, true) };
+}
+
+async function dfuCreate(type, size) {
+  const payload = new Uint8Array(5);
+  const view = new DataView(payload.buffer);
+  payload[0] = type;
+  view.setUint32(1, size, true);
+  assertDfuSuccess(await dfuControl(DFU.create, payload), DFU.create);
+}
+
+async function dfuChecksum() {
+  const response = assertDfuSuccess(await dfuControl(DFU.checksum), DFU.checksum);
+  if (response.length < 11) throw new Error("Short CALCULATE_CHECKSUM response.");
+  const view = new DataView(response.buffer, response.byteOffset, response.byteLength);
+  return { offset: view.getUint32(3, true), crc: view.getUint32(7, true) };
+}
+
+async function dfuExecute() {
+  assertDfuSuccess(await dfuControl(DFU.execute), DFU.execute);
+}
+
+async function dfuPacketWithPrn(bytes) {
+  return queueDfuGatt(async () => {
+    const response = waitDfuResponse(DFU.checksum);
+    await writeDfuCharacteristic(dfuState.packet, bytes, false);
+    return response;
+  });
+}
+
+async function transferDfuObject(type, payload, startPercent, endPercent, label) {
+  const selected = await dfuSelect(type);
+  if (!selected.maxSize) throw new Error("Bootloader returned an invalid maximum object size.");
+  if (selected.offset > payload.length) throw new Error(`${label} resume offset exceeds local file length.`);
+  if (selected.offset && crc32(payload.slice(0, selected.offset)) !== selected.crc) {
+    throw new Error(`${label} resume CRC does not match this ZIP. Transfer stopped.`);
+  }
+  let offset = selected.offset;
+  appendLog("!", `${label}: resume offset ${offset}/${payload.length}.`);
+  while (offset < payload.length) {
+    const objectEnd = Math.min(offset + selected.maxSize, payload.length);
+    await dfuCreate(type, objectEnd - offset);
+    while (offset < objectEnd) {
+      const packetEnd = Math.min(offset + DFU.packetBytes, objectEnd);
+      const response = assertDfuSuccess(await dfuPacketWithPrn(payload.slice(offset, packetEnd)), DFU.checksum);
+      if (response.length < 11) throw new Error("Short packet receipt notification.");
+      const view = new DataView(response.buffer, response.byteOffset, response.byteLength);
+      const remoteOffset = view.getUint32(3, true);
+      const remoteCrc = view.getUint32(7, true);
+      const localCrc = crc32(payload.slice(0, packetEnd));
+      if (remoteOffset !== packetEnd || remoteCrc !== localCrc) {
+        throw new Error(`${label} CRC/offset mismatch at ${packetEnd}. Transfer stopped.`);
+      }
+      offset = packetEnd;
+      const progress = startPercent + (endPercent - startPercent) * (offset / payload.length);
+      setDfuProgress(progress, `${label}: ${offset.toLocaleString()} / ${payload.length.toLocaleString()} bytes, CRC verified.`);
+    }
+    const check = await dfuChecksum();
+    if (check.offset !== offset || check.crc !== crc32(payload.slice(0, offset))) {
+      throw new Error(`${label} final object CRC mismatch.`);
+    }
+    await dfuExecute();
+  }
+}
+
+async function selectDfuAndTransfer() {
+  if (!dfuState.pkg || dfuState.transferring || dfuState.completed) return;
+  if (!window.confirm("The browser will ask you to select DfuTarg. The selected signed ZIP will be transferred with CRC verification. Continue?")) return;
+  try {
+    setDfuProgress(0, "Choose the intended DfuTarg (Nordic Secure DFU service FE59) in the browser picker.");
+    const target = await navigator.bluetooth.requestDevice({ filters: [{ services: [DFU_SERVICE_UUID] }] });
+    dfuState.device = target;
+    appendLog("!", `DfuTarg selected: ${target.name || "unnamed DFU peripheral"}.`);
+    target.addEventListener("gattserverdisconnected", () => appendLog("!", "DFU peripheral disconnected (expected after final execute)."));
+    dfuState.server = await target.gatt.connect();
+    const service = await dfuState.server.getPrimaryService(DFU_SERVICE_UUID);
+    dfuState.control = await service.getCharacteristic(DFU_CONTROL_UUID);
+    dfuState.packet = await service.getCharacteristic(DFU_PACKET_UUID);
+    await dfuState.control.startNotifications();
+    dfuState.control.addEventListener("characteristicvaluechanged", onDfuControlNotification);
+    dfuState.transferring = true;
+    refreshDfuUi();
+    setDfuProgress(0, "DfuTarg connected. Setting packet receipt notification interval to 1.");
+    assertDfuSuccess(await dfuControl(DFU.setPrn, new Uint8Array([1, 0])), DFU.setPrn);
+    await transferDfuObject(DFU.commandObject, dfuState.pkg.dat, 0, 10, "Init packet");
+    await transferDfuObject(DFU.dataObject, dfuState.pkg.binary, 10, 100, "Application");
+    dfuState.completed = true;
+    setDfuProgress(100, "Secure DFU transfer protocol completed. Reconnect to 6COLOR_LIGHT and query VERSION to verify the application.");
+    appendLog("!", "DFU protocol complete. The target bootloader decided signature acceptance and application activation; reconnect verification is still required.");
+  } catch (error) {
+    setDfuProgress(dfuState.progress, `DFU stopped after ${dfuState.progress.toFixed(1)}%: ${error.message}`);
+    appendLog("!", `DFU failed safely: ${error.message}`);
+  } finally {
+    dfuState.transferring = false;
+    refreshDfuUi();
+  }
 }
 
 function handleNotification(event) {
@@ -2768,14 +3145,24 @@ async function connect() {
   });
 
   device.addEventListener("gattserverdisconnected", () => {
+    const dfuTransition = expectDfuDisconnect;
+    expectDfuDisconnect = false;
     rxCharacteristic = null;
     txCharacteristic = null;
     server = null;
     setConnectionStatus(false);
     firmwareDetail = "unknown";
     resetDetail = "";
+    firmwareCapabilities = new Set();
+    secureDfuSupported = false;
     renderFirmwareVersion();
-    appendLog("!", "Device disconnected");
+    if (dfuTransition) {
+      setDfuProgress(0, "Application disconnected for DFU. Select only the intended DfuTarg (FE59) to upload.");
+      appendLog("!", "DFU transition disconnect observed. Select DfuTarg now.");
+    } else {
+      appendLog("!", "Device disconnected");
+    }
+    refreshDfuUi();
   });
 
   server = await device.gatt.connect();
@@ -2800,7 +3187,10 @@ async function disconnect() {
   setConnectionStatus(false);
   firmwareDetail = "unknown";
   resetDetail = "";
+  firmwareCapabilities = new Set();
+  secureDfuSupported = false;
   renderFirmwareVersion();
+  refreshDfuUi();
 }
 
 async function sendAll(on, duty = null) {
@@ -2980,6 +3370,10 @@ el.manualInput.addEventListener("keydown", (event) => {
 el.clearLogButton.addEventListener("click", () => {
   el.logOutput.textContent = "";
 });
+el.dfuFile.addEventListener("change", () => { void onDfuFile(); });
+el.enterDfuButton.addEventListener("click", () => { void enterDfu(); });
+el.transferDfuButton.addEventListener("click", () => { void selectDfuAndTransfer(); });
+el.verifyDfuButton.addEventListener("click", () => { void connect(); });
 
 channels.forEach(renderChannel);
 renderClipColorOptions();
@@ -2988,3 +3382,4 @@ updateDigitalPreview();
 renderTimeline();
 renderBlocks();
 setConnectionStatus(false);
+refreshDfuUi();

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>6 Color Light Control</title>
-  <link rel="stylesheet" href="./styles.css?v=d9876d665bac">
+  <link rel="stylesheet" href="./styles.css?v=319628e6435d">
 </head>
 <body>
   <main class="app-shell">
@@ -241,6 +241,37 @@
       </div>
     </section>
 
+    <section class="dfu-panel" aria-labelledby="dfuTitle">
+      <div class="dfu-heading">
+        <div>
+          <p class="eyebrow">MAINTENANCE</p>
+          <h2 id="dfuTitle">Secure BLE DFU</h2>
+        </div>
+        <output id="dfuCapabilityState" class="dfu-state">Connect and query firmware capability.</output>
+      </div>
+      <p class="dfu-note">Only application-only, signed Nordic Secure DFU ZIP files are accepted. The browser verifies ZIP structure and transfer CRCs; the LED bootloader verifies the ECDSA signature before activation.</p>
+      <div class="dfu-grid">
+        <label class="dfu-file-label">
+          <span>Signed update ZIP</span>
+          <input id="dfuFile" type="file" accept=".zip,application/zip">
+        </label>
+        <output id="dfuPackageState" class="dfu-state">No package selected.</output>
+      </div>
+      <div class="dfu-actions">
+        <button id="enterDfuButton" class="danger-button" type="button" disabled>Enter DFU (LEDs off)</button>
+        <button id="transferDfuButton" class="primary-button" type="button" disabled>Select DfuTarg + Upload</button>
+        <button id="verifyDfuButton" type="button" disabled>Reconnect to verify</button>
+      </div>
+      <div class="dfu-progress-row">
+        <div id="dfuProgressTrack" class="dfu-progress-track" role="progressbar" aria-label="Secure DFU transfer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="dfuProgressBar" class="dfu-progress-bar"></div>
+        </div>
+        <output id="dfuProgressPercent" class="dfu-percent">0.0%</output>
+      </div>
+      <p id="dfuProgressText" class="dfu-progress-text">Transfer not started.</p>
+      <p class="dfu-note">Recovery route: after every reset, the installed bootloader advertises <code>DfuTarg</code> for 15 seconds. That window can be used even when the application cannot be connected.</p>
+    </section>
+
     <section class="terminal">
       <div class="terminal-head">
         <span>BLE Log</span>
@@ -303,6 +334,6 @@
     </article>
   </template>
 
-  <script src="./app.js?v=018f0c3700b0"></script>
+  <script src="./app.js?v=a9c7c2dc9edc"></script>
 </body>
 </html>
