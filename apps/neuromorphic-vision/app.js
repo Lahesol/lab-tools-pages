@@ -34,7 +34,7 @@
     letterPicker: $("letter-picker"), inputLabel: $("input-label"), sensorGrid: $("sensor-grid"),
     eventGrid: $("event-grid"), eventCount: $("event-count"), projectionGeometry: $("projection-geometry"),
     fcMatrix: $("fc-matrix"), preactivationValues: $("preactivation-values"), resistorMap: $("resistor-map"), gateChannels: $("gate-channels"),
-    outputValue: $("output-value"), outputTerms: $("output-terms"), adcMode: $("adc-mode"),
+    outputValue: $("output-value"), outputTerms: $("output-terms"), outputSum: $("output-sum"), adcMode: $("adc-mode"),
     adcBinary: $("adc-binary"), adcCode: $("adc-code"), adcVoltage: $("adc-voltage"),
     decodedLetter: $("decoded-letter"), predictionPill: $("prediction-pill"), lutStrip: $("lut-strip"),
     sampleStatus: $("sample-status"), inspector: $("inspector"), evaluationAccuracy: $("evaluation-accuracy"),
@@ -265,6 +265,7 @@
         html += `<div class="matrix-cell ${value < 0 ? "is-negative" : ""}" style="--weight-alpha:${alpha}" aria-label="${channel} to z${node + 1}; feature ${fmt(featureValue, 4)}; 5-bit conductance code ${resistorCode(code)}; calibrated weight ${signed(weight)}; product ${signed(value)}"><strong>F = ${fmt(featureValue, 3)}</strong><small>5b G-code ${resistorCode(code)}</small><small>w = ${signed(weight, 3)}</small><em>F × w = ${signed(value, 3)}</em></div>`;
       });
     });
+    html = html.replace(/<strong>F = [^<]+<\/strong><small>5b G-code [^<]+<\/small><small>w = ([^<]+)<\/small><em>F [^<]+ w = ([^<]+)<\/em>/g, "<strong>w = $1</strong><em>F x w = $2</em>");
     view.fcMatrix.innerHTML = html;
     view.preactivationValues.innerHTML = result.preactivations.map((value, node) => {
       const sum = value - MODEL.model.b1[node];
@@ -292,11 +293,13 @@
 
   function renderGates(result) {
     const height = Math.max(1, ...result.gates.map((gate) => gate.output));
-    view.gateChannels.innerHTML = result.gates.map((gate, node) => `<div class="gate-channel ${gate.state === "LRS" ? "is-lrs" : ""}"><div class="gate-row"><strong>h${node + 1}</strong><strong class="gate-state">${gate.state}</strong></div><div class="gate-row"><span>z${node + 1} - theta</span><strong>${signed(gate.z - result.config.gateThreshold)}</strong></div><div class="gate-meter"><i style="width:${(gate.output / height * 100).toFixed(1)}%"></i></div><div class="gate-row"><span>buffered y${node + 1}</span><strong>${fmt(gate.output)}</strong></div></div>`).join("");
+    view.gateChannels.innerHTML = result.gates.map((gate, node) => `<div class="gate-channel ${gate.state === "LRS" ? "is-lrs" : ""}"><div class="gate-row"><strong>h${node + 1}</strong><strong class="gate-state">${gate.state}</strong></div><div class="gate-row"><span>z${node + 1} / theta / delta</span><strong>${signed(gate.z)} / ${signed(result.config.gateThreshold)} / ${signed(gate.z - result.config.gateThreshold)}</strong></div><div class="gate-meter"><i style="width:${(gate.output / height * 100).toFixed(1)}%"></i></div><div class="gate-row"><span>buffered y${node + 1}</span><strong>${fmt(gate.output)}</strong></div></div>`).join("");
   }
 
   function renderOutput(result) {
     view.outputValue.textContent = signed(result.output);
+    const weightedSum = result.terms.reduce((sum, value) => sum + value, 0);
+    view.outputSum.innerHTML = `<span>signed sum: ${signed(weightedSum)}</span><span>b2 reference: ${signed(MODEL.model.b2)}</span><strong>z_out = ${signed(weightedSum)} + ${signed(MODEL.model.b2)} = ${signed(result.output)}</strong>`;
     view.outputTerms.innerHTML = result.terms.map((term, node) => `<div class="output-term"><span>y${node + 1} = ${fmt(result.gates[node].output)}</span><small>5b G-code ${resistorCode(MODEL.weightQuantization.w2Codes[node])}; w = ${signed(MODEL.model.w2[node])}</small><strong>y × w = ${signed(term)}</strong></div>`).join("");
   }
 
@@ -390,8 +393,8 @@
       event: "A cell becomes LRS when the analog input crosses the event threshold; its uncertainty draw can invert the state.",
       features: "One fixed Latin square supplies 1/2, 1/4, 1/8, 1/16, and 1/32 once on every selected five-cell path. Click a V/H/D token to highlight its terms and exact sum.",
       fc: "Every MAC tile explicitly gives the raw feature Fk, the signed 5-bit conductance code, its calibrated wkj, and Fk × wkj. A code from -15 to +15 selects the negative or positive resistor branch and a 0-to-15 conductance magnitude.",
-      gate: "Below theta the binary RRAM state is HRS and the buffered analog remainder is zero; above theta it is LRS.",
-      output: "Four buffered hidden outputs are multiplied by their output weights and added with b2 before final conversion.",
+      gate: "Theta is the normalized reference / SET threshold after the 8 x 4 MAC. At or below theta the modeled RRAM is HRS and y is zero. Above theta it is LRS and a buffer passes z minus theta. It is not a measured device SET voltage.",
+      output: "The four buffered gate voltages drive signed positive/negative conductance branches. Their products yj x wj are summed, then the b2 reference is added. This one scalar z_out, rather than every feature, is sent to the final RRAM ADC.",
       adc: "The scalar is clipped to the model range [-1, +1], quantized by the selectable ADC, then mapped through reserved class-code centers.",
       evaluation: "This panel does not retrain weights. It repeatedly samples independent photodiode/event inputs from the selected distribution, then evaluates the fixed 5-bit model and reports the resulting confusion matrix."
     };

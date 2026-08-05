@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>Neuromorphic Vision Pipeline Explorer</title>
-    <link rel="stylesheet" href="styles.css?v=1c5e6d5dc2c9" />
+    <link rel="stylesheet" href="styles.css?v=640778d93bf4" />
   </head>
   <body>
     <header class="topbar">
@@ -118,6 +118,7 @@
             <div class="layer-meta"><span>each tile: F<sub>k</sub> / 5-bit G-code / w<sub>kj</sub> / F<sub>k</sub>×w<sub>kj</sub></span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
             <div class="fc-map-pair">
               <section class="fc-value-panel" aria-label="Feature-weighted MAC values">
+                <p class="mac-detail-meta">Left map: calibrated w<sub>kj</sub> and F<sub>k</sub> x w<sub>kj</sub>. Right map: signed 5-bit conductance branch/code.</p>
                 <div id="fc-matrix" class="fc-matrix" aria-label="Feature contributions into four FC columns"></div>
                 <div id="preactivation-values" class="preactivation-values"></div>
               </section>
@@ -133,6 +134,7 @@
             <button class="layer-heading" type="button" data-layer="gate"><span>05</span> RRAM-gated analog ReLU</button>
             <div class="layer-meta"><span>SET state enables a buffer</span><span>y<sub>j</sub> = max(0, z<sub>j</sub> − θ)</span></div>
             <div id="gate-channels" class="gate-channels" aria-label="Four thresholded RRAM gate outputs"></div>
+            <p class="gate-note"><strong>theta:</strong> normalized gate reference / SET threshold. If z<sub>j</sub> &lt;= theta, RRAM is HRS and y<sub>j</sub> = 0. If z<sub>j</sub> &gt; theta, RRAM is LRS and the buffer passes y<sub>j</sub> = z<sub>j</sub> - theta. In this GUI theta is a model control, not a measured RRAM SET voltage.</p>
           </article>
         </div>
 
@@ -144,6 +146,8 @@
             <div class="layer-meta"><span>z<sub>out</sub> = Σw<sub>j</sub>y<sub>j</sub> + b<sub>2</sub></span><span>scalar</span></div>
             <div class="output-readout"><strong id="output-value">+0.000</strong><span>normalized analog score</span></div>
             <div id="output-terms" class="output-terms"></div>
+            <div id="output-sum" class="output-sum" aria-label="Output adder summation"></div>
+            <p class="adder-note"><strong>How 06 is formed:</strong> the four buffered gate voltages y<sub>1...4</sub> are sent to positive/negative conductance branches. Their signed currents are summed by the analog adder; the b<sub>2</sub> reference is added to obtain z<sub>out</sub>. Only this scalar then proceeds to the RRAM ADC in 07.</p>
           </article>
 
           <article class="layer-card adc-card" data-layer="adc">
@@ -219,6 +223,6 @@
     </main>
 
     <script src="model-data.js"></script>
-    <script src="app.js?v=98f52efabf6e"></script>
+    <script src="app.js?v=e111b568a766"></script>
   </body>
 </html>

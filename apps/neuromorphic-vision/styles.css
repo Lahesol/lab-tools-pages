@@ -213,7 +213,7 @@ h2 { margin: 3px 0 0; font-size: 18px; letter-spacing: -0.025em; }
 .pipeline-divider::before, .pipeline-divider::after { height: 1px; flex: 1; background: var(--line); content: ""; }
 
 .mid-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
-.fc-map-pair { display: grid; grid-template-columns: minmax(0, 1.24fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.fc-map-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .fc-value-panel { min-width: 0; overflow-x: auto; }
 .fc-matrix { min-width: 700px; display: grid; grid-template-columns: 116px repeat(4, minmax(138px, 1fr)); gap: 4px; margin-top: 5px; overflow-x: auto; padding-bottom: 4px; }
 .matrix-label, .matrix-cell { min-height: 82px; padding: 8px 9px; border: 1px solid rgba(68, 111, 128, .54); font-size: 12px; text-align: left; font-variant-numeric: tabular-nums; }
@@ -226,6 +226,7 @@ h2 { margin: 3px 0 0; font-size: 18px; letter-spacing: -0.025em; }
 .preactivation-values { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
 .preactivation-values div { padding: 7px; border-top: 1px solid var(--line); }
 .preactivation-values span { display: block; color: var(--muted); font-size: 9px; }.preactivation-values strong { display: block; margin: 2px 0; color: var(--teal); font-size: 15px; font-variant-numeric: tabular-nums; }.preactivation-values small { display: block; color: #786655; font-size: 9px; font-variant-numeric: tabular-nums; }
+.fc-card > .layer-meta { display: none; }.mac-detail-meta { margin: 7px 0 8px; color: var(--muted); font-size: 10px; line-height: 1.35; }
 
 .mac-map-section { min-width: 0; margin-top: 0; padding-top: 0; border-top: 0; overflow-x: auto; }
 .mac-map-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 7px; }.mac-map-heading strong { color: #485f56; font-size: 12px; }.mac-map-heading span { color: var(--muted); font-size: 9px; }
@@ -245,11 +246,13 @@ h2 { margin: 3px 0 0; font-size: 18px; letter-spacing: -0.025em; }
 .gate-row span { color: var(--muted); font-size: 9px; }.gate-row strong { color: #503e33; font-size: 11px; font-variant-numeric: tabular-nums; }
 .gate-state { color: var(--amber) !important; font-weight: 750; }.is-lrs .gate-state { color: var(--lime) !important; }
 .gate-meter { height: 6px; overflow: hidden; border: 1px solid var(--line-bright); background: #eee0d1; }.gate-meter i { display: block; height: 100%; background: var(--teal); }
+.gate-note, .adder-note { margin: 10px 0 0; padding-top: 9px; border-top: 1px solid var(--line); color: #6f5b4b; font-size: 10px; line-height: 1.45; }.gate-note strong, .adder-note strong { color: #425f54; }
 
 .bottom-grid { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 14px; }
 .output-readout { margin: 13px 0 11px; padding: 14px; border: 1px solid #9eaf9a; background: #edf3e9; }
 .output-readout strong { display: block; color: #315e53; font-size: clamp(30px, 4vw, 46px); letter-spacing: -0.06em; line-height: 1; font-variant-numeric: tabular-nums; }.output-readout span { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
 .output-terms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }.output-term { padding: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }.output-term span, .output-term small { display: block; }.output-term small { margin-top: 2px; color: #786655; line-height: 1.25; }.output-term strong { display: block; margin-top: 4px; color: #5a493d; font-size: 11px; }
+.output-sum { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; padding: 8px 9px; border: 1px solid rgba(86, 128, 111, .45); background: #edf3e9; color: #5d6e65; font-size: 10px; font-variant-numeric: tabular-nums; }.output-sum strong { color: #315e53; }
 
 .adc-binary { display: flex; gap: 4px; margin: 18px 0 12px; }.bit { min-width: 31px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line-bright); background: #f4e8db; color: #9a8875; font-size: 16px; font-weight: 780; }.bit.is-one { border-color: #668e81; color: #fffdf8; background: #698f80; box-shadow: inset 0 0 14px rgba(77, 136, 125, .15); }
 .adc-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }.adc-summary div { padding: 8px; border-top: 1px solid var(--line); }.adc-summary span { display: block; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }.adc-summary strong { color: #534135; font-size: 14px; font-variant-numeric: tabular-nums; }
@@ -296,4 +299,133 @@ h2 { margin: 3px 0 0; font-size: 18px; letter-spacing: -0.025em; }
 
 @media (prefers-reduced-motion: no-preference) {
   .bar-fill, .gate-meter i, .sensor-cell, .event-cell, .readout-pill strong { transition: all 180ms ease; }
+}
+
+/* Desktop readability pass: the original dense 9--13 px technical labels are
+   intentionally doubled for lab-display use.  Dimensions that contain those
+   labels are enlarged with them so the numerical values remain legible. */
+@media (min-width: 761px) {
+  .topbar { min-height: 112px; padding: 18px 28px; }
+  .signal-dot { width: 16px; height: 16px; }
+  .eyebrow, .section-kicker { font-size: 20px; }
+  h1 { font-size: 34px; }
+  h2 { font-size: 36px; }
+  .status-text { font-size: 24px; }
+  .button { min-height: 58px; padding-inline: 20px; font-size: 24px; }
+
+  .app-shell { grid-template-columns: 390px minmax(0, 1fr); min-height: calc(100vh - 112px); }
+  .control-rail { padding: 24px 22px; }
+  .rail-section { padding-bottom: 23px; margin-bottom: 21px; }
+  .letter-picker { gap: 9px; }
+  .letter-option { height: 58px; font-size: 28px; }
+  .rail-help, .assumptions p { font-size: 22px; }
+  .range-control { margin-bottom: 20px; }
+  .range-control label, .range-control output { font-size: 22px; }
+  .range-control input { min-height: 24px; }
+
+  .workspace { padding: 32px clamp(24px, 2.8vw, 52px) 54px; }
+  .workspace-heading { margin-bottom: 28px; }
+  .readout-pill { min-width: 180px; padding: 14px 19px; }
+  .readout-pill span { font-size: 20px; }
+  .readout-pill strong { font-size: 40px; }
+  .pipeline-top, .compact-stage, .mid-grid, .fc-map-pair, .bottom-grid { gap: 22px; }
+  .layer-card { padding: 24px; }
+  .layer-heading { gap: 13px; font-size: 26px; }
+  .layer-heading span { font-size: 20px; }
+  .layer-meta { margin: 12px 0 16px; font-size: 20px; }
+
+  .sensor-cell { font-size: 18px; }
+  .event-cell { font-size: 22px; }
+  .scale-row, .state-key { font-size: 18px; }
+  .state-swatch { width: 12px; height: 12px; }
+  .compact-stage .layer-card { padding: 18px; }
+  .compact-stage .layer-heading { font-size: 22px; }
+  .compact-stage .layer-meta { font-size: 16px; }
+  .compact-stage .sensor-cell, .compact-stage .event-cell { font-size: 18px; }
+  .compact-stage .scale-row, .compact-stage .state-key { font-size: 14px; }
+  .compact-stage .state-swatch { width: 10px; height: 10px; }
+
+  .projection-source-label, .projection-source-label strong { font-size: 20px; }
+  .projection-cell { min-height: 42px; font-size: 22px; }
+  .projection-cell strong { font-size: 30px; }
+  .projection-cell small { font-size: 20px; }
+  .projection-cell em { min-height: 20px; font-size: 18px; }
+  .route-token { min-width: 170px; grid-template-columns: 28px 1fr; gap: 9px; padding: 11px 13px; }
+  .route-arrow { width: 27px; height: 27px; }
+  .route-token strong, .route-token .route-value { font-size: 26px; }
+  .route-token small { font-size: 18px; }
+  .projection-equation { font-size: 22px; }
+  .projection-equation strong { font-size: 26px; }
+  .latin-map { padding: 12px; }
+  .latin-map-title strong { font-size: 22px; }
+  .latin-map-title small { font-size: 16px; }
+  .latin-cell { min-height: 22px; font-size: clamp(12px, .9vw, 16px); }
+  .codebook-note, .pipeline-divider { font-size: 20px; }
+
+  .fc-matrix { min-width: 860px; grid-template-columns: 146px repeat(4, minmax(170px, 1fr)); gap: 6px; }
+  .matrix-label, .matrix-cell { min-height: 124px; padding: 13px 14px; font-size: 22px; }
+  .matrix-label strong { font-size: 28px; }
+  .matrix-label small { font-size: 20px; }
+  .matrix-label.is-header { min-height: 52px; font-size: 22px; }
+  .matrix-cell strong { font-size: 26px; }
+  .matrix-cell small { font-size: 22px; }
+  .matrix-cell em { font-size: 24px; }
+  .preactivation-values { gap: 10px; margin-top: 16px; }
+  .preactivation-values div { padding: 11px; }
+  .preactivation-values span, .preactivation-values small { font-size: 18px; }
+  .preactivation-values strong { font-size: 30px; }
+  .mac-detail-meta { font-size: 20px; }
+  .mac-map-heading strong { font-size: 24px; }
+  .mac-map-heading span { font-size: 18px; }
+  .resistor-map { min-width: 760px; grid-template-columns: 145px repeat(4, minmax(142px, 1fr)); gap: 5px; }
+  .resistor-map-label, .resistor-map-cell { min-height: 100px; padding: 10px 12px; }
+  .resistor-map-label strong, .resistor-map-cell strong { font-size: 24px; }
+  .resistor-map-label small, .resistor-map-cell span { font-size: 18px; }
+  .resistor-map-label.is-header { min-height: 46px; font-size: 20px; }
+  .resistor-map-cell i { height: 9px; }
+  .mac-map-note { font-size: 18px; }
+
+  .gate-channels { gap: 14px; }
+  .gate-channel { padding: 18px; }
+  .gate-row { gap: 14px; margin-bottom: 14px; }
+  .gate-row span { font-size: 18px; }
+  .gate-row strong { font-size: 22px; }
+  .gate-meter { height: 10px; }
+  .gate-note, .adder-note { margin-top: 16px; padding-top: 14px; font-size: 20px; }
+
+  .output-readout { margin: 20px 0 17px; padding: 22px; }
+  .output-readout strong { font-size: clamp(48px, 5vw, 72px); }
+  .output-readout span { font-size: 20px; }
+  .output-term { padding: 10px; font-size: 18px; }
+  .output-term strong { font-size: 22px; }
+  .output-sum { gap: 8px 18px; padding: 13px 15px; font-size: 20px; }
+  .adc-binary { gap: 8px; }
+  .bit { min-width: 54px; height: 62px; font-size: 30px; }
+  .adc-summary span { font-size: 18px; }
+  .adc-summary strong { font-size: 28px; }
+  .lut-item { min-width: 54px; padding: 8px; font-size: 20px; }
+  .lut-item code { font-size: 16px; }
+
+  .distribution-controls { padding: 18px; }
+  .evaluation-formula, .evaluation-actions label { font-size: 20px; }
+  .evaluation-actions input { width: 150px; min-height: 54px; font-size: 20px; }
+  .evaluation-metrics { gap: 12px; }
+  .evaluation-metrics div { min-height: 112px; padding: 15px; }
+  .evaluation-metrics span { font-size: 18px; }
+  .evaluation-metrics strong { font-size: 32px; }
+  .evaluation-protocol { font-size: 18px; }
+  .evaluation-results h3 { font-size: 22px; }
+  .per-class-item { grid-template-columns: 34px 1fr 74px; gap: 8px; font-size: 20px; }
+  .per-class-item i { height: 10px; }
+  .per-class-item strong { font-size: 20px; }
+  .confusion-table { min-width: 700px; border-spacing: 4px; }
+  .confusion-table th, .confusion-table td { min-width: 54px; height: 44px; padding: 4px 6px; font-size: 18px; }
+  .confusion-table caption { font-size: 16px; }
+
+  .inspector { min-height: 210px; margin-top: 22px; padding: 22px; }
+  .inspector h3 { font-size: 26px; }
+  .inspector p { font-size: 22px; }
+  .inspector-grid { gap: 10px; }
+  .inspector-data { padding: 11px; font-size: 20px; }
+  .inspector-data em { font-size: 18px; }
 }
