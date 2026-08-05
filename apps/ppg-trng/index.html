@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=d0ed4dc9c851" />
+    <link rel="stylesheet" href="./styles.css?v=7cd4ea13f81e" />
   </head>
   <body>
     <div class="app-shell">
@@ -1098,9 +1098,10 @@
               </div>
               <div class="puf-results-wrap">
                 <h3>Paper-style coordinate ML attack</h3>
+                <p class="puf-table-note">Each row is one independent CRP subset. Results are shown individually; no subset averaging is used in this table.</p>
                 <table class="puf-results" aria-label="PUF coordinate machine learning attack">
-                  <thead><tr><th>Train</th><th>Train points</th><th>Test points</th><th>LR accuracy</th><th>SVM accuracy</th></tr></thead>
-                  <tbody id="pufAttackResultsBody"><tr><td colspan="5" class="puf-empty">No evaluation run yet.</td></tr></tbody>
+                  <thead><tr><th>CRP set</th><th>Train</th><th>Train points</th><th>Test points</th><th>LR accuracy</th><th>SVM accuracy</th></tr></thead>
+                  <tbody id="pufAttackResultsBody"><tr><td colspan="6" class="puf-empty">No evaluation run yet.</td></tr></tbody>
                 </table>
               </div>
             </div>
@@ -1286,9 +1287,9 @@
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
     <script src="./nist.js?v=20260730-nist-v1" defer></script>
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
-    <script src="./puf.js?v=20260804-puf-v3" defer></script>
+    <script src="./puf.js?v=20260806-puf-v4" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=a062317ad299" defer></script>
+    <script src="./app.js?v=0f23e215c5e8" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

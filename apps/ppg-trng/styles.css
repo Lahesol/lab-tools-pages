@@ -1268,6 +1268,13 @@ canvas {
   font-size: 14px;
 }
 
+.puf-table-note {
+  margin: 0;
+  padding: 0 10px 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .puf-fourier-results-wrap {
   margin: 0 16px 16px;
 }

@@ -348,6 +348,7 @@
     const results = [];
     ratios.forEach((ratio) => {
       const accuracies = { logistic: [], svm: [] };
+      const perSetResults = [];
       let trainingPointCount = 0;
       let testPointCount = 0;
       for (let setIndex = 0; setIndex < crpSetCount; setIndex += 1) {
@@ -364,8 +365,17 @@
         const logisticPredictions = testIndices.map((index) => sigmoid(dot(logistic, samples[index])) >= 0.5 ? 1 : 0);
         const svmPredictions = testIndices.map((index) => dot(svm, samples[index]) >= 0 ? 1 : 0);
         const testLabels = testIndices.map((index) => labels[index]);
-        accuracies.logistic.push(attackScore(logisticPredictions, testLabels));
-        accuracies.svm.push(attackScore(svmPredictions, testLabels));
+        const logisticAccuracy = attackScore(logisticPredictions, testLabels);
+        const svmAccuracy = attackScore(svmPredictions, testLabels);
+        accuracies.logistic.push(logisticAccuracy);
+        accuracies.svm.push(svmAccuracy);
+        perSetResults.push({
+          setIndex: setIndex + 1,
+          trainingPointCount: trainCount,
+          testPointCount: testIndices.length,
+          logisticAccuracy,
+          svmAccuracy,
+        });
       }
       results.push({
         trainingPercent: ratio * 100,
@@ -375,6 +385,7 @@
         logisticStandardDeviation: standardDeviation(accuracies.logistic),
         svmMeanAccuracy: mean(accuracies.svm),
         svmStandardDeviation: standardDeviation(accuracies.svm),
+        perSetResults,
       });
     });
     return { available: true, rows, columns, pointCount: setSize * crpSetCount, featureCount, crpSetCount, results };

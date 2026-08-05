@@ -190,10 +190,13 @@ from the global inter-response HD and from repeat-group stability.
 The coordinate attack uses binary coordinate features, logistic regression, and
 a linear SVM at 10-70% training ratios over five independent CRP subsets. With
 the 62,500-point paper profile, each subset has 12,500 points and the training
-counts are 1,250, 2,500, 3,750, 5,000, 6,250, 7,500, and 8,750. The workbook
-source data contains the paper's LR/SVM result tables, but no corresponding ML
-MATLAB script was present in the copied source folder, so the browser models
-are a comparable diagnostic rather than a byte-for-byte reproduction.
+counts are 1,250, 2,500, 3,750, 5,000, 6,250, 7,500, and 8,750. The PUF table
+now shows one row for every subset and training ratio, rather than only the
+mean and standard deviation across subsets; the CSV export follows the same
+individual-result layout. The workbook source data contains the paper's LR/SVM
+result tables, but no corresponding ML MATLAB script was present in the copied
+source folder, so the browser models are a comparable diagnostic rather than a
+byte-for-byte reproduction.
 
 The added `s41928-021-00569-x.pdf` reference uses a Fourier-series predictive
 regression attack. The tab now compares `N_F=1,2,4,8` and reports binary
