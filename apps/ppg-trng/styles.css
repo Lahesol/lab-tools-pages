@@ -1283,6 +1283,23 @@ canvas {
   margin: 0 16px 16px;
 }
 
+.puf-heatmap-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.puf-heatmap-toolbar > div {
+  min-width: 0;
+}
+
+.puf-heatmap-toolbar > .button {
+  flex: 0 0 auto;
+  margin: 10px 10px 0 0;
+}
+
 .puf-fourier-heatmaps {
   display: grid;
   gap: 12px;

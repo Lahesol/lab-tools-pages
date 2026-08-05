@@ -229,6 +229,7 @@ const els = {
   pufAttackResultsBody: document.querySelector("#pufAttackResultsBody"),
   pufFourierResultsBody: document.querySelector("#pufFourierResultsBody"),
   pufFourierHeatmaps: document.querySelector("#pufFourierHeatmaps"),
+  pufFourierHeatmapCsvButton: document.querySelector("#pufFourierHeatmapCsvButton"),
   pufWarning: document.querySelector("#pufWarning"),
   entropyView: document.querySelector('[id="90bView"]'),
   entropyCaption: document.querySelector('[id="90bCaption"]'),
@@ -4926,6 +4927,43 @@ function renderPufFourierHeatmaps(fourier = state.pufResults?.fourier) {
   }).join("");
 }
 
+function exportPufFourierHeatmapCsv() {
+  const results = state.pufResults?.fourier?.results || [];
+  if (!results.length) {
+    addLog("SYS", "No Fourier heatmap results to export");
+    return;
+  }
+  const metrics = [
+    { key: "accuracyPercent", label: "accuracy_percent" },
+    { key: "normalizedHd", label: "normalized_hd" },
+    { key: "correlation", label: "correlation" },
+  ];
+  const rows = [];
+  results.forEach((item) => {
+    const labels = item.testResponseIndices || [];
+    const pairwise = item.pairwise || {};
+    metrics.forEach((metric) => {
+      const matrix = pairwise[metric.key] || [];
+      rows.push(["fourier_order", item.order, "metric", metric.label, "train_crps", item.trainResponseCount, "test_crps", item.testResponseCount, "test_bits", item.testedBits].map(csvCell).join(","));
+      rows.push(["metric", "measured_crp", ...labels.map((label) => `predicted_crp_${label}`)].map(csvCell).join(","));
+      matrix.forEach((row, measuredIndex) => rows.push([
+        metric.label,
+        `measured_crp_${labels[measuredIndex]}`,
+        ...row.map((value) => Number.isFinite(value) ? value : ""),
+      ].map(csvCell).join(",")));
+      rows.push("");
+    });
+  });
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `puf_fourier_heatmaps_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", "Exported Fourier heatmaps as 6x6 matrix blocks");
+}
+
 function renderPufResults(result = state.pufResults) {
   if (!els.pufResponseResultsBody || !els.pufAttackResultsBody || !els.pufFourierResultsBody) return;
   if (!result) {
@@ -5042,7 +5080,7 @@ function runPufEvaluation() {
   const workerResponses = responses.map((response) => response.slice());
   let settled = false;
   try {
-    const worker = new Worker("./puf-worker.js?v=20260806-puf-v6");
+    const worker = new Worker("./puf-worker.js?v=20260806-puf-v7");
     state.pufWorker = worker;
     worker.onmessage = (event) => {
       if (settled) return;
@@ -6267,6 +6305,7 @@ function bindEvents() {
   els.pufRunButton?.addEventListener("click", runPufEvaluation);
   els.pufClearButton?.addEventListener("click", clearPufResults);
   els.pufExportButton?.addEventListener("click", exportPufResultsCsv);
+  els.pufFourierHeatmapCsvButton?.addEventListener("click", exportPufFourierHeatmapCsv);
   els.pufSource?.addEventListener("change", () => {
     updatePufSourceStatus();
     clearPufResults();

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=2ef334bd741c" />
+    <link rel="stylesheet" href="./styles.css?v=1aed18c47421" />
   </head>
   <body>
     <div class="app-shell">
@@ -1113,8 +1113,13 @@
               </table>
             </div>
             <div class="puf-results-wrap puf-fourier-heatmaps-wrap">
-              <h3>Measured vs predicted CRP maps</h3>
-              <p class="puf-table-note">Rows are measured test CRPs and columns are predicted test CRPs. The diagonal is the one-to-one comparison; off-diagonal cells show the full pairwise map used in the paper-style figure.</p>
+              <div class="puf-heatmap-toolbar">
+                <div>
+                  <h3>Measured vs predicted CRP maps</h3>
+                  <p class="puf-table-note">Rows are measured test CRPs and columns are predicted test CRPs. The diagonal is the one-to-one comparison; off-diagonal cells show the full pairwise map used in the paper-style figure.</p>
+                </div>
+                <button id="pufFourierHeatmapCsvButton" class="button secondary" type="button">Heatmap CSV</button>
+              </div>
               <div id="pufFourierHeatmaps" class="puf-fourier-heatmaps"><p class="puf-empty">No heatmap available yet.</p></div>
             </div>
             <div class="puf-report-note"><p id="pufWarning">Source-data-aligned PUF evaluation is waiting for response vectors.</p></div>
@@ -1292,9 +1297,9 @@
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
     <script src="./nist.js?v=20260730-nist-v1" defer></script>
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
-    <script src="./puf.js?v=20260806-puf-v6" defer></script>
+    <script src="./puf.js?v=20260806-puf-v7" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=468ad7086cb6" defer></script>
+    <script src="./app.js?v=7f6dabd35959" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

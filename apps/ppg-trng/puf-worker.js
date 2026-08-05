@@ -1,4 +1,4 @@
-importScripts("./puf.js?v=20260806-puf-v6");
+importScripts("./puf.js?v=20260806-puf-v7");
 
 self.onmessage = (event) => {
   try {

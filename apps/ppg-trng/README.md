@@ -215,6 +215,8 @@ accuracy, normalized Hamming distance, and correlation; the diagonal represents
 the one-to-one challenge mapping used for the per-CRP comparison. The PUF CSV
 export includes these map cells as `fourier_pairwise` records with the Fourier
 order, measured/predicted CRP identifiers, accuracy, n-HD percent, and CC.
+The `Heatmap CSV` button additionally exports one 6x6 matrix block per Fourier
+order and metric, which is convenient for direct spreadsheet plotting.
 
 The source folder also contains `Coding2.m`, which evaluates a BCH(127,64)
 helper-data reconstruction path. The web PUF tab does not claim BCH key
