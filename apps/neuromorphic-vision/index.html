@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>Neuromorphic Vision Pipeline Explorer</title>
-    <link rel="stylesheet" href="styles.css?v=cc56ec3d60e9" />
+    <link rel="stylesheet" href="styles.css?v=1c5e6d5dc2c9" />
   </head>
   <body>
     <header class="topbar">
@@ -116,13 +116,17 @@
           <article class="layer-card fc-card" data-layer="fc">
             <button class="layer-heading" type="button" data-layer="fc"><span>04</span> 8 × 4 weighted MAC</button>
             <div class="layer-meta"><span>each tile: F<sub>k</sub> / 5-bit G-code / w<sub>kj</sub> / F<sub>k</sub>×w<sub>kj</sub></span><span>z<sub>j</sub> = Σw<sub>kj</sub>F<sub>k</sub> + b<sub>j</sub></span></div>
-            <div id="fc-matrix" class="fc-matrix" aria-label="Feature contributions into four FC columns"></div>
-            <div id="preactivation-values" class="preactivation-values"></div>
+            <div class="fc-map-pair">
+              <section class="fc-value-panel" aria-label="Feature-weighted MAC values">
+                <div id="fc-matrix" class="fc-matrix" aria-label="Feature contributions into four FC columns"></div>
+                <div id="preactivation-values" class="preactivation-values"></div>
+              </section>
             <section class="mac-map-section" aria-label="5-bit MAC conductance map">
               <div class="mac-map-heading"><strong>5-bit MAC conductance map</strong><span>positive / negative resistor branch</span></div>
               <div id="resistor-map" class="resistor-map"></div>
               <p class="mac-map-note">Each tile is sign + 4-bit magnitude: G<sub>eff</sub> = sign x |code|/15 x G<sub>FS</sub>. It is a conductance map, not a direct resistance value.</p>
             </section>
+            </div>
           </article>
 
           <article class="layer-card gate-card" data-layer="gate">
