@@ -135,6 +135,12 @@ newest N retained bits. `Block size` is the Block Frequency M,
 `Non-overlap template` is the binary pattern for the Non-overlapping Template
 test, `Approx entropy m` and `Serial m` are pattern lengths, and `Linear block
 M` is the Linear Complexity block length.
+The separate Overlapping Template controls keep a `Strict NIST` mode (m=9,
+M=1032, all-ones template, Rev.1a reference probabilities) and an
+`Exploratory` mode. Exploratory mode recomputes the Pólya-Aeppli expected
+distribution for the selected m and M and reports the observed/expected cell
+counts, number of blocks, and discarded tail bits. It should not be reported as
+an official NIST 1M profile.
 
 The implemented families are Frequency, Block Frequency, Cumulative Sums,
 Runs, Longest Run of Ones, Binary Matrix Rank, DFT, Non-overlapping Template,

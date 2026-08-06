@@ -1123,6 +1123,23 @@ canvas {
   background: #fbfdfc;
 }
 
+.nist-overlap-controls {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.3fr) repeat(2, minmax(105px, 0.7fr));
+  gap: 10px;
+  padding: 10px 16px 0;
+  background: #fbfdfc;
+}
+
+.nist-overlap-status {
+  margin: 8px 16px 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
 .ml-controls {
   display: grid;
   grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(120px, 0.7fr));
@@ -2511,6 +2528,7 @@ canvas {
     .dfu-grid,
     .noise-grid,
     .nist-controls,
+    .nist-overlap-controls,
     .ml-controls,
     .noise-explain-grid,
     .noise-method-blocks,

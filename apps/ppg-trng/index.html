@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=1aed18c47421" />
+    <link rel="stylesheet" href="./styles.css?v=cddf38ddfe2d" />
   </head>
   <body>
     <div class="app-shell">
@@ -793,6 +793,25 @@
               </label>
             </div>
 
+            <div class="nist-overlap-controls">
+              <label class="compact-field" for="nistOverlappingMode" title="Strict NIST keeps m=9 and M=1032. Exploratory mode allows alternate m and M values and recomputes the expected distribution.">
+                <span>Overlapping mode</span>
+                <select id="nistOverlappingMode">
+                  <option value="exploratory" selected>Exploratory</option>
+                  <option value="strict">Strict NIST</option>
+                </select>
+              </label>
+              <label class="compact-field" for="nistOverlappingM" title="Run length m of the all-ones overlapping template.">
+                <span>Overlapping m</span>
+                <input id="nistOverlappingM" type="number" min="2" max="10" step="1" value="9" />
+              </label>
+              <label class="compact-field" for="nistOverlappingBlock" title="Block length M for the Overlapping Template test. The strict NIST value is 1032.">
+                <span>Overlapping M</span>
+                <input id="nistOverlappingBlock" type="number" min="20" max="50000" step="1" value="1032" />
+              </label>
+            </div>
+            <p id="nistOverlapStatus" class="nist-overlap-status" aria-live="polite">Exploratory Overlapping Template: m=9, M=1032; expected counts are recomputed.</p>
+
             <div class="nist-upload-row">
               <label class="compact-field nist-upload-file" for="nistBitFile">
                 <span>Bit files</span>
@@ -863,6 +882,14 @@
                 <div>
                   <strong>Linear block M</strong>
                   <p>Block length M for Linear Complexity. Larger M gives longer complexity estimates but reduces the number of blocks. 500 is the standard practical setting for long captures.</p>
+                </div>
+                <div>
+                  <strong>Overlapping mode</strong>
+                  <p><b>Strict NIST</b> uses the Rev.1a reference settings m=9 and M=1032. <b>Exploratory</b> allows alternate values and recomputes the Pólya-Aeppli expected distribution; it is not an official NIST profile.</p>
+                </div>
+                <div>
+                  <strong>Overlapping m / M</strong>
+                  <p>m is the run length of the all-ones template and M is the independent block length. Matches are counted at every 1-bit offset, including overlaps. The result reports blocks, discarded tail bits, and observed/expected cell counts.</p>
                 </div>
                 <div>
                   <strong>Result interpretation</strong>
@@ -1299,7 +1326,7 @@
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
     <script src="./puf.js?v=20260806-puf-v7" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=7f6dabd35959" defer></script>
+    <script src="./app.js?v=eb3ced6dc4fa" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

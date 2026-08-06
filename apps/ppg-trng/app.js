@@ -153,6 +153,10 @@ const els = {
   nistApproxM: document.querySelector("#nistApproxM"),
   nistSerialM: document.querySelector("#nistSerialM"),
   nistLinearM: document.querySelector("#nistLinearM"),
+  nistOverlappingMode: document.querySelector("#nistOverlappingMode"),
+  nistOverlappingM: document.querySelector("#nistOverlappingM"),
+  nistOverlappingBlock: document.querySelector("#nistOverlappingBlock"),
+  nistOverlapStatus: document.querySelector("#nistOverlapStatus"),
   nistBitFile: document.querySelector("#nistBitFile"),
   nistBitFormat: document.querySelector("#nistBitFormat"),
   nistRemoveFileButton: document.querySelector("#nistRemoveFileButton"),
@@ -4385,7 +4389,21 @@ function getNistOptions() {
     approximateEntropyM: clampInteger(els.nistApproxM?.value, 2, 15, 10),
     serialM: clampInteger(els.nistSerialM?.value, 3, 16, profile === "nist1m" ? 16 : 10),
     linearBlockSize: clampInteger(els.nistLinearM?.value, 500, 5000, 500),
+    overlappingMode: els.nistOverlappingMode?.value === "strict" ? "strict" : "exploratory",
+    overlappingM: clampInteger(els.nistOverlappingM?.value, 2, 10, 9),
+    overlappingBlockSize: clampInteger(els.nistOverlappingBlock?.value, 20, 50000, 1032),
   };
+}
+
+function updateNistOverlapControls() {
+  const strict = els.nistOverlappingMode?.value === "strict";
+  if (els.nistOverlappingM) els.nistOverlappingM.disabled = strict;
+  if (els.nistOverlappingBlock) els.nistOverlappingBlock.disabled = strict;
+  if (els.nistOverlapStatus) {
+    els.nistOverlapStatus.textContent = strict
+      ? "Strict NIST Overlapping Template: m=9, M=1032, all-ones template, fixed Rev.1a distribution."
+      : `Exploratory Overlapping Template: m=${clampInteger(els.nistOverlappingM?.value, 2, 10, 9)}, M=${clampInteger(els.nistOverlappingBlock?.value, 20, 50000, 1032)}; expected counts are recomputed.`;
+  }
 }
 
 function applyNistProfileDefaults() {
@@ -4398,6 +4416,10 @@ function applyNistProfileDefaults() {
   if (els.nistApproxM) els.nistApproxM.value = String(defaults.approx);
   if (els.nistSerialM) els.nistSerialM.value = String(defaults.serial);
   if (els.nistLinearM) els.nistLinearM.value = String(defaults.linear);
+  if (els.nistOverlappingMode) els.nistOverlappingMode.value = profile === "nist1m" ? "strict" : "exploratory";
+  if (els.nistOverlappingM) els.nistOverlappingM.value = "9";
+  if (els.nistOverlappingBlock) els.nistOverlappingBlock.value = "1032";
+  updateNistOverlapControls();
   updateNistSourceStatus();
 }
 
@@ -4468,7 +4490,10 @@ function finishNistRun(result, elapsedMs) {
   renderNistResults(state.nistResults);
   if (els.nistCaption) {
     const profileLabel = result?.profile === "nist1m" ? "NIST STS 1M comparison" : "500k diagnostic";
-    els.nistCaption.textContent = `${profileLabel} | ${getNistSourceLabel()} | ${result?.n || 0} bits | ${result?.availableCount || 0}/${result?.testFamilyCount || 15} test families available | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
+    const overlap = result?.options?.overlappingMode === "strict"
+      ? "overlap strict m=9 M=1032"
+      : `overlap exploratory m=${result?.options?.overlappingM || 9} M=${result?.options?.overlappingBlockSize || 1032}`;
+    els.nistCaption.textContent = `${profileLabel} | ${getNistSourceLabel()} | ${result?.n || 0} bits | ${overlap} | ${result?.availableCount || 0}/${result?.testFamilyCount || 15} test families available | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
   }
 }
 
@@ -6279,6 +6304,11 @@ function bindEvents() {
     applyNistProfileDefaults();
     clearNistResults();
   });
+  [els.nistOverlappingMode, els.nistOverlappingM, els.nistOverlappingBlock]
+    .forEach((control) => control?.addEventListener("change", () => {
+      updateNistOverlapControls();
+      clearNistResults();
+    }));
   els.nistBitSource?.addEventListener("change", () => {
     updateNistSourceStatus();
     clearNistResults();

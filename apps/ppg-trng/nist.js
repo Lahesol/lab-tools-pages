@@ -486,23 +486,80 @@
     return result("Non-overlapping Template", n, gammaQ(blocks / 2, chi / 2), `chi²=${chi.toFixed(3)}`, `m=${m}, B=${template}, M=${blockSize}, N=${blocks}, counts=${counts.join("/")}`);
   }
 
-  function overlappingTemplateTest(bits, templateLength = 9, profile = "500k") {
+  function normalizeOverlappingMode(value) {
+    return value === "exploratory" ? "exploratory" : "strict";
+  }
+
+  function factorial(value) {
+    let output = 1;
+    for (let index = 2; index <= value; index += 1) output *= index;
+    return output;
+  }
+
+  function overlappingProbabilities(templateLength, blockSize, mode) {
+    const strict = normalizeOverlappingMode(mode) === "strict";
+    if (strict && templateLength === 9 && blockSize === 1032) {
+      return {
+        values: [0.364091, 0.185659, 0.139381, 0.100571, 0.0704323, 0.139865],
+        lambda: 2,
+        eta: 1,
+        label: "NIST Rev.1a fixed distribution",
+      };
+    }
+
+    const lambda = (blockSize - templateLength + 1) / (2 ** templateLength);
+    const eta = lambda / 2;
+    const values = [Math.exp(-eta)];
+    for (let occurrences = 1; occurrences <= 4; occurrences += 1) {
+      let sum = 0;
+      for (let clusters = 1; clusters <= occurrences; clusters += 1) {
+        sum += (combination(occurrences - 1, clusters - 1) * (eta ** clusters)) / factorial(clusters);
+      }
+      values.push(Math.exp(-eta) * sum / (2 ** occurrences));
+    }
+    values.push(Math.max(0, 1 - values.reduce((sum, value) => sum + value, 0)));
+    return { values, lambda, eta, label: "Pólya–Aeppli exploratory distribution" };
+  }
+
+  function combination(n, k) {
+    if (k < 0 || k > n) return 0;
+    let value = 1;
+    for (let index = 1; index <= k; index += 1) value = (value * (n - k + index)) / index;
+    return value;
+  }
+
+  function overlappingTemplateTest(bits, templateLength = 9, profile = "500k", mode = "strict", requestedBlockSize = 1032) {
     const n = bits.length;
     const minimum = profileTarget(profile);
     if (n < minimum) return unavailable("Overlapping Template", n, `${normalizeProfile(profile)} profile requires n >= ${minimum}`);
-    const blockSize = 1032;
+
+    const normalizedMode = normalizeOverlappingMode(mode);
+    const strict = normalizedMode === "strict";
+    const m = strict ? 9 : Math.max(2, Math.min(10, Number.parseInt(templateLength, 10) || 9));
+    const blockSize = strict ? 1032 : Math.max(m + 1, Math.min(50000, Number.parseInt(requestedBlockSize, 10) || 1032));
     const blocks = Math.floor(n / blockSize);
+    const tail = n - blocks * blockSize;
     if (!blocks) return unavailable("Overlapping Template", n, `requires n >= ${blockSize}`);
-    const probabilities = [0.364091, 0.185659, 0.139381, 0.100571, 0.0704323, 0.139865];
-    let chi = 0;
+
+    const distribution = overlappingProbabilities(m, blockSize, normalizedMode);
+    const probabilities = distribution.values;
+    const expectedCounts = probabilities.map((probability) => probability * blocks);
+    if (expectedCounts.some((expected) => !Number.isFinite(expected) || expected < 5)) {
+      return unavailable(
+        "Overlapping Template",
+        n,
+        `${distribution.label} requires expected count >= 5 in every cell; M=${blockSize}, m=${m}, expected=${expectedCounts.map((value) => value.toFixed(2)).join("/")}`,
+      );
+    }
+
     const counts = [];
     for (let block = 0; block < blocks; block += 1) {
       const start = block * blockSize;
       const end = start + blockSize;
       let count = 0;
-      for (let index = start; index <= end - templateLength; index += 1) {
+      for (let index = start; index <= end - m; index += 1) {
         let matches = true;
-        for (let offset = 0; offset < templateLength; offset += 1) {
+        for (let offset = 0; offset < m; offset += 1) {
           if (bits[index + offset] !== 1) {
             matches = false;
             break;
@@ -510,21 +567,26 @@
         }
         if (matches) count += 1;
       }
-      const category = Math.min(5, count);
       counts.push(count);
-      const expected = probabilities[category] * blocks;
-      // The chi-square term is accumulated after the block loop below.
-      if (!Number.isFinite(expected)) return unavailable("Overlapping Template", n, "invalid expected frequency");
     }
+
     const frequencies = new Array(6).fill(0);
     counts.forEach((count) => {
       frequencies[Math.min(5, count)] += 1;
     });
+    let chi = 0;
     frequencies.forEach((observed, index) => {
-      const expected = probabilities[index] * blocks;
+      const expected = expectedCounts[index];
       chi += (observed - expected) ** 2 / expected;
     });
-    return result("Overlapping Template", n, gammaQ(5 / 2, chi / 2), `chi²=${chi.toFixed(3)}`, `m=${templateLength}, ones template, M=${blockSize}, blocks=${blocks}`);
+    const detail = [
+      `m=${m}, ones template, M=${blockSize}, blocks=${blocks}, tail=${tail}`,
+      `lambda=${distribution.lambda.toFixed(6)}, eta=${distribution.eta.toFixed(6)}`,
+      `observed=${frequencies.join("/")}`,
+      `expected=${expectedCounts.map((value) => value.toFixed(2)).join("/")}`,
+      distribution.label,
+    ].join(" | ");
+    return result("Overlapping Template", n, gammaQ(5 / 2, chi / 2), `chi²=${chi.toFixed(3)}`, detail);
   }
 
   function universalTest(bits) {
@@ -749,6 +811,9 @@
     const approximateEntropyM = Math.max(2, Math.min(15, Number.parseInt(options.approximateEntropyM, 10) || 10));
     const serialM = Math.max(3, Math.min(16, Number.parseInt(options.serialM, 10) || (profile === "nist1m" ? 16 : 10)));
     const linearBlockSize = Math.max(500, Math.min(5000, Number.parseInt(options.linearBlockSize, 10) || 500));
+    const overlappingMode = normalizeOverlappingMode(options.overlappingMode);
+    const overlappingM = Math.max(2, Math.min(10, Number.parseInt(options.overlappingM, 10) || 9));
+    const overlappingBlockSize = Math.max(overlappingM + 1, Math.min(50000, Number.parseInt(options.overlappingBlockSize, 10) || 1032));
     const tests = [
       frequencyTest(bits),
       blockFrequencyTest(bits, blockSize, profile),
@@ -758,7 +823,7 @@
       matrixRankTest(bits),
       dftTest(bits, profile),
       nonOverlappingTemplateTest(bits, template),
-      overlappingTemplateTest(bits, 9, profile),
+      overlappingTemplateTest(bits, overlappingM, profile, overlappingMode, overlappingBlockSize),
       universalTest(bits),
       approximateEntropyTest(bits, approximateEntropyM),
       randomExcursionsTest(bits, profile),
@@ -784,6 +849,9 @@
         approximateEntropyM,
         serialM,
         linearBlockSize,
+        overlappingMode,
+        overlappingM,
+        overlappingBlockSize,
       },
     };
   }
