@@ -150,6 +150,8 @@ const els = {
   nistBitLimit: document.querySelector("#nistBitLimit"),
   nistBlockSize: document.querySelector("#nistBlockSize"),
   nistTemplate: document.querySelector("#nistTemplate"),
+  nistNonOverlapMode: document.querySelector("#nistNonOverlapMode"),
+  nistNonOverlapStatus: document.querySelector("#nistNonOverlapStatus"),
   nistApproxM: document.querySelector("#nistApproxM"),
   nistSerialM: document.querySelector("#nistSerialM"),
   nistLinearM: document.querySelector("#nistLinearM"),
@@ -175,6 +177,9 @@ const els = {
   nistNaCount: document.querySelector("#nistNaCount"),
   nistElapsed: document.querySelector("#nistElapsed"),
   nistResultsBody: document.querySelector("#nistResultsBody"),
+  nistTemplateBatchSummary: document.querySelector("#nistTemplateBatchSummary"),
+  nistTemplateExportButton: document.querySelector("#nistTemplateExportButton"),
+  nistTemplateResultsBody: document.querySelector("#nistTemplateResultsBody"),
   mlView: document.querySelector("#mlView"),
   mlCaption: document.querySelector("#mlCaption"),
   mlBitSource: document.querySelector("#mlBitSource"),
@@ -421,6 +426,7 @@ const state = {
   noiseSelectedBits: [],
   noiseSelectedMethod: "",
   nistResults: [],
+  nistTemplateBatch: null,
   nistWorker: null,
   nistRunning: false,
   nistUploadedBits: new Uint8Array(0),
@@ -4386,6 +4392,9 @@ function getNistOptions() {
     profile,
     blockSize: clampInteger(els.nistBlockSize?.value, 20, 50000, profile === "500k" ? 8192 : 128),
     template: String(els.nistTemplate?.value || "000000001").replace(/[^01]/g, "").slice(0, 10) || "000000001",
+    nonOverlappingMode: els.nistNonOverlapMode?.value === "official10"
+      ? "official10"
+      : els.nistNonOverlapMode?.value === "single" ? "single" : "official9",
     approximateEntropyM: clampInteger(els.nistApproxM?.value, 2, 15, 10),
     serialM: clampInteger(els.nistSerialM?.value, 3, 16, profile === "nist1m" ? 16 : 10),
     linearBlockSize: clampInteger(els.nistLinearM?.value, 500, 5000, 500),
@@ -4393,6 +4402,21 @@ function getNistOptions() {
     overlappingM: clampInteger(els.nistOverlappingM?.value, 2, 10, 9),
     overlappingBlockSize: clampInteger(els.nistOverlappingBlock?.value, 20, 50000, 1032),
   };
+}
+
+function updateNistNonOverlapControls() {
+  const mode = els.nistNonOverlapMode?.value === "official10"
+    ? "official10"
+    : els.nistNonOverlapMode?.value === "single" ? "single" : "official9";
+  const single = mode === "single";
+  if (els.nistTemplate) els.nistTemplate.disabled = !single;
+  if (els.nistNonOverlapStatus) {
+    els.nistNonOverlapStatus.textContent = mode === "official10"
+      ? "Official NIST STS 2.1.2 library: all 284 m=10 templates will be tested."
+      : mode === "single"
+        ? "Single custom pattern: only the binary template entered above will be tested."
+        : "Official NIST STS 2.1.2 library: all 148 m=9 templates will be tested.";
+  }
 }
 
 function updateNistOverlapControls() {
@@ -4416,6 +4440,10 @@ function applyNistProfileDefaults() {
   if (els.nistApproxM) els.nistApproxM.value = String(defaults.approx);
   if (els.nistSerialM) els.nistSerialM.value = String(defaults.serial);
   if (els.nistLinearM) els.nistLinearM.value = String(defaults.linear);
+  if (els.nistNonOverlapMode && !["official9", "official10", "single"].includes(els.nistNonOverlapMode.value)) {
+    els.nistNonOverlapMode.value = "official9";
+  }
+  updateNistNonOverlapControls();
   if (els.nistOverlappingMode) els.nistOverlappingMode.value = profile === "nist1m" ? "strict" : "exploratory";
   if (els.nistOverlappingM) els.nistOverlappingM.value = "9";
   if (els.nistOverlappingBlock) els.nistOverlappingBlock.value = "1032";
@@ -4464,6 +4492,37 @@ function renderNistResults(results = state.nistResults) {
   }).join("");
 }
 
+function renderNistTemplateBatch(batch = state.nistTemplateBatch) {
+  if (!els.nistTemplateResultsBody) return;
+  const rows = batch?.official && Array.isArray(batch.templateResults) ? batch.templateResults : [];
+  if (!rows.length) {
+    els.nistTemplateResultsBody.innerHTML = '<tr><td colspan="6" class="nist-empty">No official template scan yet.</td></tr>';
+    if (els.nistTemplateBatchSummary) els.nistTemplateBatchSummary.textContent = "Run the suite with an official m=9 or m=10 library to show every pattern.";
+    if (els.nistTemplateExportButton) els.nistTemplateExportButton.disabled = true;
+    return;
+  }
+  const passCount = rows.filter((test) => test.available && test.pass).length;
+  const checkCount = rows.filter((test) => test.available && !test.pass).length;
+  const naCount = rows.filter((test) => !test.available).length;
+  if (els.nistTemplateBatchSummary) {
+    els.nistTemplateBatchSummary.textContent = `NIST STS 2.1.2 official m=${batch.templateLength} library | ${rows.length} patterns | PASS ${passCount} | CHECK ${checkCount} | N/A ${naCount} | min p=${formatNistPValue(batch.p)}`;
+  }
+  if (els.nistTemplateExportButton) els.nistTemplateExportButton.disabled = false;
+  els.nistTemplateResultsBody.innerHTML = rows.map((test) => {
+    const status = getNistResultStatus(test);
+    return `
+      <tr>
+        <td>${test.templateIndex}</td>
+        <td><code>${escapeHtml(test.template || "--")}</code></td>
+        <td>${formatNistPValue(test.p)}</td>
+        <td>${escapeHtml(test.value || "--")}</td>
+        <td>${escapeHtml(test.detail || "")}</td>
+        <td><span class="nist-result ${status.className}">${status.label}</span></td>
+      </tr>
+    `;
+  }).join("");
+}
+
 function updateNistSummary(result = null, elapsedMs = null) {
   const bitCount = result?.n || 0;
   const ones = result?.ones || 0;
@@ -4477,6 +4536,7 @@ function updateNistSummary(result = null, elapsedMs = null) {
 
 function finishNistRun(result, elapsedMs) {
   state.nistResults = result?.tests || [];
+  state.nistTemplateBatch = result?.nonOverlappingBatch || null;
   state.nistRunning = false;
   if (state.nistWorker) {
     state.nistWorker.terminate();
@@ -4488,6 +4548,7 @@ function finishNistRun(result, elapsedMs) {
   }
   updateNistSummary(result, elapsedMs);
   renderNistResults(state.nistResults);
+  renderNistTemplateBatch(state.nistTemplateBatch);
   if (els.nistCaption) {
     const profileLabel = result?.profile === "nist1m" ? "NIST STS 1M comparison" : "500k diagnostic";
     const overlap = result?.options?.overlappingMode === "strict"
@@ -4529,7 +4590,9 @@ function runNistTestSuite() {
   const startedAt = performance.now();
   state.nistRunning = true;
   state.nistResults = [];
+  state.nistTemplateBatch = null;
   renderNistResults([]);
+  renderNistTemplateBatch(null);
   updateNistSummary(null, null);
   if (els.nistRunButton) {
     els.nistRunButton.disabled = true;
@@ -4582,12 +4645,14 @@ function clearNistResults() {
   state.nistWorker = null;
   state.nistRunning = false;
   state.nistResults = [];
+  state.nistTemplateBatch = null;
   if (els.nistRunButton) {
     els.nistRunButton.disabled = false;
     els.nistRunButton.textContent = "Run all 15 tests";
   }
   updateNistSummary(null, null);
   renderNistResults([]);
+  renderNistTemplateBatch(null);
   if (els.nistCaption) els.nistCaption.textContent = "Run the suite on the retained web bit buffer.";
   updateNistSourceStatus();
 }
@@ -4619,6 +4684,38 @@ function exportNistResultsCsv() {
   link.click();
   URL.revokeObjectURL(url);
   addLog("SYS", `Exported ${state.nistResults.length} NIST test-family results`);
+}
+
+function exportNistTemplateCsv() {
+  const batch = state.nistTemplateBatch;
+  const rows = batch?.official && Array.isArray(batch.templateResults) ? batch.templateResults : [];
+  if (!rows.length) {
+    addLog("SYS", "No official non-overlapping template results to export");
+    return;
+  }
+  const csvRows = ["template_index,template,p_value,statistic,parameters_components,result,available,n,alpha"];
+  rows.forEach((test) => {
+    const status = getNistResultStatus(test);
+    csvRows.push([
+      test.templateIndex,
+      csvCell(test.template),
+      csvCell(formatNistPValue(test.p)),
+      csvCell(test.value),
+      csvCell(test.detail),
+      status.label,
+      test.available ? "1" : "0",
+      test.n,
+      window.YmPpgNist?.ALPHA || 0.01,
+    ].join(","));
+  });
+  const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `nist_nonoverlap_m${batch.templateLength}_${new Date().toISOString().replaceAll(":", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  addLog("SYS", `Exported ${rows.length} official m=${batch.templateLength} template results`);
 }
 
 function formatMlMetric(value) {
@@ -6300,6 +6397,7 @@ function bindEvents() {
   els.nistRunButton?.addEventListener("click", runNistTestSuite);
   els.nistClearButton?.addEventListener("click", clearNistResults);
   els.nistExportButton?.addEventListener("click", exportNistResultsCsv);
+  els.nistTemplateExportButton?.addEventListener("click", exportNistTemplateCsv);
   els.nistProfile?.addEventListener("change", () => {
     applyNistProfileDefaults();
     clearNistResults();
@@ -6309,6 +6407,10 @@ function bindEvents() {
       updateNistOverlapControls();
       clearNistResults();
     }));
+  els.nistNonOverlapMode?.addEventListener("change", () => {
+    updateNistNonOverlapControls();
+    clearNistResults();
+  });
   els.nistBitSource?.addEventListener("change", () => {
     updateNistSourceStatus();
     clearNistResults();
@@ -6393,8 +6495,11 @@ function init() {
   updateFilterUi();
   updateBitStats();
   updateEncryptionUi();
+  updateNistNonOverlapControls();
+  updateNistOverlapControls();
   updateNistSummary(null, null);
   renderNistResults([]);
+  renderNistTemplateBatch(null);
   updateMlSourceStatus();
   updateMlSummary(null, null);
   renderMlResults(null);

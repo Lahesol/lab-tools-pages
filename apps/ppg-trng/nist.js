@@ -457,13 +457,30 @@
     return true;
   }
 
-  function nonOverlappingTemplateTest(bits, template = "000000001") {
+  function buildTemplateWindowCodes(bits, templateLength) {
+    const length = Math.max(0, bits.length - templateLength + 1);
+    const codes = new Uint16Array(length);
+    if (!length) return codes;
+    let code = 0;
+    for (let offset = 0; offset < templateLength; offset += 1) code = (code << 1) | bits[offset];
+    const mask = (1 << templateLength) - 1;
+    codes[0] = code;
+    for (let start = 1; start < length; start += 1) {
+      code = ((code << 1) & mask) | bits[start + templateLength - 1];
+      codes[start] = code;
+    }
+    return codes;
+  }
+
+  function nonOverlappingTemplateTest(bits, template = "000000001", precomputedCodes = null) {
     const n = bits.length;
     const pattern = Array.from(template, (bit) => Number(bit));
     const m = pattern.length;
     const blocks = 8;
     const blockSize = Math.floor(n / blocks);
     if (blockSize < m + 1) return unavailable("Non-overlapping Template", n, `requires block size > ${m}`);
+    const templateValue = Number.parseInt(template, 2);
+    const windowCodes = precomputedCodes || buildTemplateWindowCodes(bits, m);
     const mean = (blockSize - m + 1) / (2 ** m);
     const variance = blockSize * (1 / (2 ** m) - (2 * m - 1) / (2 ** (2 * m)));
     let chi = 0;
@@ -473,7 +490,7 @@
       const end = start + blockSize;
       let count = 0;
       for (let index = start; index <= end - m;) {
-        if (matchesAt(bits, index, pattern)) {
+        if (windowCodes[index] === templateValue) {
           count += 1;
           index += m;
         } else {
@@ -484,6 +501,104 @@
       chi += (count - mean) ** 2 / variance;
     }
     return result("Non-overlapping Template", n, gammaQ(blocks / 2, chi / 2), `chi²=${chi.toFixed(3)}`, `m=${m}, B=${template}, M=${blockSize}, N=${blocks}, counts=${counts.join("/")}`);
+  }
+
+  function getOfficialNonOverlappingTemplates(templateLength) {
+    const library = typeof globalThis !== "undefined" ? globalThis.YmPpgNistTemplates : null;
+    const templates = library?.[templateLength];
+    return Array.isArray(templates) ? templates.slice() : [];
+  }
+
+  function nonOverlappingTemplateBatch(bits, templateLength = 9) {
+    const m = Math.max(2, Math.min(10, Number.parseInt(templateLength, 10) || 9));
+    const templates = getOfficialNonOverlappingTemplates(m);
+    if (!templates.length) {
+      return {
+        name: `Non-overlapping Template (official m=${m})`,
+        n: bits.length,
+        p: null,
+        value: "--",
+        detail: `Official NIST template library m=${m} is unavailable`,
+        available: false,
+        pass: false,
+        official: true,
+        templateLength: m,
+        templateCount: 0,
+        templateResults: [],
+      };
+    }
+
+    const n = bits.length;
+    const blocks = 8;
+    const blockSize = Math.floor(n / blocks);
+    if (blockSize < m + 1) {
+      return {
+        name: `Non-overlapping Template (official m=${m})`,
+        n,
+        p: null,
+        value: "--",
+        detail: `requires block size > ${m}`,
+        available: false,
+        pass: false,
+        official: true,
+        templateLength: m,
+        templateCount: templates.length,
+        templateResults: [],
+      };
+    }
+
+    const windowCodes = buildTemplateWindowCodes(bits, m);
+    const codeToTemplate = new Int16Array(1 << m);
+    codeToTemplate.fill(-1);
+    templates.forEach((template, index) => {
+      codeToTemplate[Number.parseInt(template, 2)] = index;
+    });
+    const countsByTemplate = templates.map(() => new Uint32Array(blocks));
+    const mean = (blockSize - m + 1) / (2 ** m);
+    const variance = blockSize * (1 / (2 ** m) - (2 * m - 1) / (2 ** (2 * m)));
+    for (let block = 0; block < blocks; block += 1) {
+      const start = block * blockSize;
+      const end = start + blockSize;
+      const nextAllowed = new Int32Array(1 << m);
+      nextAllowed.fill(start);
+      for (let index = start; index <= end - m; index += 1) {
+        const code = windowCodes[index];
+        const templateIndex = codeToTemplate[code];
+        if (templateIndex >= 0 && index >= nextAllowed[code]) {
+          countsByTemplate[templateIndex][block] += 1;
+          nextAllowed[code] = index + m;
+        }
+      }
+    }
+    const templateResults = templates.map((template, index) => {
+      const counts = Array.from(countsByTemplate[index]);
+      const chi = counts.reduce((sum, count) => sum + ((count - mean) ** 2 / variance), 0);
+      const test = result("Non-overlapping Template", n, gammaQ(blocks / 2, chi / 2), `chi²=${chi.toFixed(3)}`, `m=${m}, B=${template}, M=${blockSize}, N=${blocks}, counts=${counts.join("/")}`);
+      return { ...test, template, templateIndex: index + 1 };
+    });
+    const available = templateResults.every((test) => test.available);
+    const pValues = templateResults.map((test) => test.p).filter((p) => Number.isFinite(p));
+    const passCount = templateResults.filter((test) => test.available && test.pass).length;
+    const checkCount = templateResults.filter((test) => test.available && !test.pass).length;
+    const p = pValues.length ? Math.min(...pValues) : null;
+    const detail = available
+      ? `NIST STS 2.1.2 library, m=${m}, templates=${templates.length}, M=${blockSize}, N=8, pass=${passCount}, check=${checkCount}, min p=${p === null ? "--" : p.toExponential(3)}`
+      : `NIST STS 2.1.2 library, m=${m}, templates=${templates.length}; one or more template tests were unavailable`;
+    return {
+      name: `Non-overlapping Template (official m=${m})`,
+      n: bits.length,
+      p,
+      value: `${passCount}/${templates.length} pass`,
+      detail,
+      available,
+      pass: available && checkCount === 0,
+      official: true,
+      templateLength: m,
+      templateCount: templates.length,
+      passCount,
+      checkCount,
+      templateResults,
+    };
   }
 
   function normalizeOverlappingMode(value) {
@@ -808,12 +923,19 @@
     const defaultBlockSize = profile === "500k" ? 8192 : 128;
     const blockSize = Math.max(20, Number.parseInt(options.blockSize, 10) || defaultBlockSize);
     const template = /^[01]{2,10}$/.test(options.template || "") ? options.template : "000000001";
+    const nonOverlappingMode = options.nonOverlappingMode === "official10"
+      ? "official10"
+      : options.nonOverlappingMode === "single" ? "single" : "official9";
+    const nonOverlappingTemplateLength = nonOverlappingMode === "official10" ? 10 : 9;
     const approximateEntropyM = Math.max(2, Math.min(15, Number.parseInt(options.approximateEntropyM, 10) || 10));
     const serialM = Math.max(3, Math.min(16, Number.parseInt(options.serialM, 10) || (profile === "nist1m" ? 16 : 10)));
     const linearBlockSize = Math.max(500, Math.min(5000, Number.parseInt(options.linearBlockSize, 10) || 500));
     const overlappingMode = normalizeOverlappingMode(options.overlappingMode);
     const overlappingM = Math.max(2, Math.min(10, Number.parseInt(options.overlappingM, 10) || 9));
     const overlappingBlockSize = Math.max(overlappingM + 1, Math.min(50000, Number.parseInt(options.overlappingBlockSize, 10) || 1032));
+    const nonOverlapping = nonOverlappingMode === "single"
+      ? nonOverlappingTemplateTest(bits, template)
+      : nonOverlappingTemplateBatch(bits, nonOverlappingTemplateLength);
     const tests = [
       frequencyTest(bits),
       blockFrequencyTest(bits, blockSize, profile),
@@ -822,7 +944,7 @@
       longestRunOfOnesTest(bits),
       matrixRankTest(bits),
       dftTest(bits, profile),
-      nonOverlappingTemplateTest(bits, template),
+      nonOverlapping,
       overlappingTemplateTest(bits, overlappingM, profile, overlappingMode, overlappingBlockSize),
       universalTest(bits),
       approximateEntropyTest(bits, approximateEntropyM),
@@ -843,9 +965,12 @@
       checkCount: tests.filter((test) => test.available && !test.pass).length,
       unavailableCount: tests.filter((test) => !test.available).length,
       ones: bitCounts(bits).ones,
+      nonOverlappingBatch: nonOverlapping.official ? nonOverlapping : null,
       options: {
         blockSize,
         template,
+        nonOverlappingMode,
+        nonOverlappingTemplateLength,
         approximateEntropyM,
         serialM,
         linearBlockSize,
@@ -856,5 +981,5 @@
     };
   }
 
-  return { ALPHA, runAll };
+  return { ALPHA, nonOverlappingTemplateTest, nonOverlappingTemplateBatch, runAll };
 }));

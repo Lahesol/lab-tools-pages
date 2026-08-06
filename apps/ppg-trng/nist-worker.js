@@ -1,6 +1,6 @@
 /* global importScripts, self, YmPpgNist */
 
-importScripts("./nist.js");
+importScripts("./nist-templates.js", "./nist.js");
 
 self.onmessage = (event) => {
   try {

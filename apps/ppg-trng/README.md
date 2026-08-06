@@ -132,9 +132,12 @@ targets 500,000 bits and uses a Block Frequency size of 8192 so the block count
 stays below 100. `NIST STS 1M comparison` targets 1,000,000 bits and uses the
 official-software-style Block Frequency size of 128. `Bits to test` selects the
 newest N retained bits. `Block size` is the Block Frequency M,
-`Non-overlap template` is the binary pattern for the Non-overlapping Template
-test, `Approx entropy m` and `Serial m` are pattern lengths, and `Linear block
-M` is the Linear Complexity block length.
+`Non-overlap library` defaults to the official NIST STS 2.1.2 m=9 library and
+tests all 148 official patterns. The m=10 option tests all 284 official
+patterns; `Single custom pattern` keeps the binary-template check for
+exploratory use. Every official-pattern result is shown in the detail table and
+can be exported with `Templates CSV`. `Approx entropy m` and `Serial m` are
+pattern lengths, and `Linear block M` is the Linear Complexity block length.
 The separate Overlapping Template controls keep a `Strict NIST` mode (m=9,
 M=1032, all-ones template, Rev.1a reference probabilities) and an
 `Exploratory` mode. Exploratory mode recomputes the Pólya-Aeppli expected

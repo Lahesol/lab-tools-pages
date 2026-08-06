@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PPG_TRNG Control Console</title>
-    <link rel="stylesheet" href="./styles.css?v=cddf38ddfe2d" />
+    <link rel="stylesheet" href="./styles.css?v=0660631d0b83" />
   </head>
   <body>
     <div class="app-shell">
@@ -776,8 +776,16 @@
                 <input id="nistBlockSize" type="number" min="20" max="50000" step="1" value="8192" />
               </label>
               <label class="compact-field" for="nistTemplate">
-                <span>Non-overlap template</span>
+                <span>Custom template</span>
                 <input id="nistTemplate" type="text" inputmode="numeric" pattern="[01]{2,10}" value="000000001" />
+              </label>
+              <label class="compact-field" for="nistNonOverlapMode" title="Use the official NIST STS template library for m=9 or m=10, or test one custom pattern.">
+                <span>Non-overlap library</span>
+                <select id="nistNonOverlapMode">
+                  <option value="official9" selected>Official m=9 (148)</option>
+                  <option value="official10">Official m=10 (284)</option>
+                  <option value="single">Single custom pattern</option>
+                </select>
               </label>
               <label class="compact-field" for="nistApproxM">
                 <span>Approx entropy m</span>
@@ -792,6 +800,7 @@
                 <input id="nistLinearM" type="number" min="500" max="5000" step="1" value="500" />
               </label>
             </div>
+            <p id="nistNonOverlapStatus" class="nist-overlap-status" aria-live="polite">Official NIST STS 2.1.2 library: all 148 m=9 templates will be tested.</p>
 
             <div class="nist-overlap-controls">
               <label class="compact-field" for="nistOverlappingMode" title="Strict NIST keeps m=9 and M=1032. Exploratory mode allows alternate m and M values and recomputes the expected distribution.">
@@ -868,8 +877,8 @@
                   <p>Block length M for the Block Frequency test. In the 500k profile, use M=8192 or larger so the block count stays below 100. In the NIST STS comparison profile, M=128 matches the official software-style setting.</p>
                 </div>
                 <div>
-                  <strong>Non-overlap template</strong>
-                  <p>Binary pattern tested by the Non-overlapping Template test. The default <code>000000001</code> is a 9-bit pattern. Change it when checking a specific pattern.</p>
+                  <strong>Non-overlap library</strong>
+                  <p><b>Official m=9</b> tests all 148 patterns and <b>Official m=10</b> tests all 284 patterns from NIST STS 2.1.2. <b>Single custom pattern</b> keeps the direct binary-template check for exploratory use.</p>
                 </div>
                 <div>
                   <strong>Approx entropy m</strong>
@@ -926,6 +935,33 @@
                   <tr><td colspan="5" class="nist-empty">No test run yet.</td></tr>
                 </tbody>
               </table>
+            </div>
+
+            <div class="nist-template-batch-wrap">
+              <div class="nist-template-batch-toolbar">
+                <div>
+                  <h3>Official Non-overlapping Template details</h3>
+                  <p id="nistTemplateBatchSummary">Run the suite with an official m=9 or m=10 library to show every pattern.</p>
+                </div>
+                <button id="nistTemplateExportButton" class="button secondary" type="button" disabled>Templates CSV</button>
+              </div>
+              <div class="nist-results-wrap nist-template-results-wrap">
+                <table class="nist-results nist-template-results" aria-label="Official NIST non-overlapping template results">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Template</th>
+                      <th>p-value</th>
+                      <th>Statistic</th>
+                      <th>Counts / parameters</th>
+                      <th>Result</th>
+                    </tr>
+                  </thead>
+                  <tbody id="nistTemplateResultsBody">
+                    <tr><td colspan="6" class="nist-empty">No official template scan yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
 
@@ -1322,11 +1358,12 @@
     </div>
 
     <script src="./protocol.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
-    <script src="./nist.js?v=20260730-nist-v1" defer></script>
+    <script src="./nist-templates.js?v=20260806-nist-templates-v1" defer></script>
+    <script src="./nist.js?v=20260806-nist-v2" defer></script>
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
     <script src="./puf.js?v=20260806-puf-v7" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=eb3ced6dc4fa" defer></script>
+    <script src="./app.js?v=bbc9f47ca444" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>
