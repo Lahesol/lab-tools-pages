@@ -368,7 +368,7 @@ summary:focus-visible,
 }
 
 .photo-order-item__thumb img {
-  width: 100%;
+  width: 81.52%;
   height: 100%;
   object-fit: contain;
 }
@@ -532,6 +532,16 @@ summary:focus-visible,
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
+}
+
+.template-control {
+  margin-top: 14px;
+}
+
+.template-control__help {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .count-control legend {
@@ -1157,7 +1167,7 @@ summary:focus-visible,
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  grid-template-rows: 19.74% minmax(0, 1fr);
+  grid-template-rows: var(--template-label-ratio, 19.74%) minmax(0, 1fr);
   border-right: 1px solid #222;
   border-bottom: 1px solid #222;
 }
@@ -1273,6 +1283,105 @@ summary:focus-visible,
   bottom: 4.8%;
   color: #555;
   font-size: clamp(6px, 0.62vw, 9px);
+}
+
+/* 산학협력단 직접구매 양식: PDF 원본의 좁은 2열 사진 표와 하단 서명선을 반영합니다. */
+.document-sheet[data-template="sandan-direct-purchase"] {
+  padding: 4% 9.24% 3.4%;
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-tagline {
+  text-align: left;
+  font-family: var(--font-ui);
+  font-size: clamp(8px, 0.82vw, 12px);
+  font-weight: 700;
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-title-row {
+  display: block;
+  height: auto;
+  aspect-ratio: auto;
+  margin-top: 3%;
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-title-row img {
+  display: none;
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-title-row h3 {
+  font-size: clamp(16px, 2vw, 27px);
+  letter-spacing: 0.16em;
+  text-decoration: underline;
+  text-underline-offset: 0.14em;
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-photo-heading {
+  width: calc(50% - 0.5px);
+  min-height: 0;
+  overflow: hidden;
+  aspect-ratio: 85.6 / 10.2;
+  align-items: center;
+  border-color: #222;
+  background: #f7dfa7;
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-photo-heading strong {
+  font-size: clamp(8px, 0.85vw, 12px);
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-photo-heading small {
+  font-size: clamp(5px, 0.48vw, 7px);
+  font-weight: 700;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-items {
+  width: 100%;
+  aspect-ratio: var(--template-grid-aspect, 171.2 / 183);
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-item__label {
+  padding: 2px 5px;
+  font-size: clamp(7px, 0.78vw, 11px);
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-confirmation {
+  position: absolute;
+  top: var(--template-confirmation-y, 79.5%);
+  left: 9.24%;
+  width: 81.52%;
+  margin: 0;
+  font-size: clamp(8px, 0.82vw, 12px);
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-date {
+  position: absolute;
+  top: var(--template-date-y, 85.2%);
+  left: 9.24%;
+  width: 81.52%;
+  margin: 0;
+  font-size: clamp(8px, 0.82vw, 12px);
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-inspector {
+  position: absolute;
+  top: var(--template-inspector-y, 89.6%);
+  right: 9.24%;
+  left: auto;
+  width: 81.52%;
+  margin: 0;
+  font-size: clamp(8px, 0.82vw, 12px);
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-recipient {
+  right: 9.24%;
+  bottom: 3.3%;
+  left: auto;
+  font-size: clamp(12px, 1.55vw, 21px);
+  text-align: right;
+  text-decoration: underline;
+  text-underline-offset: 0.14em;
 }
 
 .preview-thumbnails {

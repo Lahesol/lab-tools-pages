@@ -189,6 +189,9 @@
                     <option value="4096">4096</option>
                   </select>
                 </label>
+                <label>HSTIA RTIA <span>ohm</span>
+                  <select id="pt3Rtia"><option value="5000">5 kΩ</option><option value="10000" selected>10 kΩ (default)</option><option value="20000">20 kΩ</option></select>
+                </label>
               </section>
             </details>
             <section class="pt3-setpoint-summary" aria-labelledby="pt3SetpointTitle">
@@ -221,7 +224,7 @@
               <button id="downloadPt3ReCalButton" class="button compact ghost" type="button" disabled>Download VRE raw CSV</button>
             </section>
             <p class="hint">V36 writes VDS/VGS only after <code>@EVT,RUNNING,PT3</code>. It does not re-run RTIA calibration or the initial 90 s gate-settling interval; following raw samples intentionally include the electrical step transient and retain their acknowledged setpoint metadata.</p>
-            <p class="hint">V39 permits a 5 ms target only after the board advertises <code>PT3_200SPS</code>. It queues up to three contiguous samples in each <code>B2</code> notification, retries after BLE TX completion, and reports actual queue overflow. The GUI breaks the trace at every indexed gap; it never fills missing current values. VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the time trace remains a SINC2 stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. HSTIA RTIA is calibrated at 10 kΩ with PGA ×9 before every RUN; source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
+            <p class="hint">V52 adds guarded 5/10/20 kΩ HSTIA RTIA selection with a fresh calibration before every RUN. 40 kΩ and above are intentionally blocked for this PGA ×9 / ±5.5 µA PT3 range. V39 permits a 5 ms target only after the board advertises <code>PT3_200SPS</code>. It queues up to three contiguous samples in each <code>B2</code> notification, retries after BLE TX completion, and reports actual queue overflow. The GUI breaks the trace at every indexed gap; it never fills missing current values. VBIAS0/CE0 uses the 6-bit DAC in PT3; VZERO0/gate uses the 12-bit DAC. These are DAC-code-derived setpoints, not ADC voltage measurements. SINC controls change the time-domain noise/bandwidth trade-off; all DSP settings are stored as CSV metadata. RTIA calibration DFT points change only the internal 1 kHz HSTIA calibration integration before RUN; the time trace remains a SINC2 stream for τ fitting. PT3 supports static step settings, not a continuous DAC waveform. Source reference remains fixed at 1.100 V. VZERO0 is intended for a high-impedance gate/base; a 200 kΩ load attenuated its DC step to about 15% in the fixture validation.</p>
           </div>
 
           <div id="pt3PulseParameters" class="parameter-set hidden">
@@ -244,6 +247,7 @@
                 <label>SINC2 OSR <span>ratio</span><select id="pt3PulseSinc2"><option value="533">533</option><option value="800" selected>800</option><option value="1067">1067</option><option value="1333">1333</option></select></label>
                 <label>SINC2 notch <span>default</span><select id="pt3PulseNotch"><option value="0">Bypass</option><option value="1" selected>Enable SINC2 notch (default)</option></select></label>
                 <label>RTIA calibration dft_num <span>points</span><select id="pt3PulseCalDft"><option value="256">256</option><option value="512">512</option><option value="1024" selected>1024 (default)</option><option value="2048">2048</option><option value="4096">4096</option></select></label>
+                <label>HSTIA RTIA <span>ohm</span><select id="pt3PulseRtia"><option value="5000">5 kΩ</option><option value="10000" selected>10 kΩ (default)</option><option value="20000">20 kΩ</option></select></label>
               </section>
             </details>
             <section class="pt3-setpoint-summary" aria-labelledby="pt3PulseSetpointTitle">
@@ -398,6 +402,6 @@
     </main>
 
     <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=ecda7a70c735"></script>
+    <script type="module" src="app.js?v=b7953172d3c7"></script>
   </body>
 </html>

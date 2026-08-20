@@ -162,12 +162,35 @@ remain `N/A` if fewer than 500 complete zero-crossing cycles are present.
 ## Machine-learning Attack Tab
 
 The `ML attack` tab evaluates next-bit predictability from a selected retained
-bit stream. It compares a majority baseline, a first-order Markov model, and a
-logistic-regression predictor using the previous `History lag` bits. The final
-chronological portion is held out for testing; adjacent bits are not randomly
-shuffled between training and test data. `ML advantage` is the logistic
-accuracy minus the majority-baseline accuracy. `Conditional H` is a first-order
-conditional entropy estimate in bits per output bit.
+bit stream. It compares a majority baseline, a first-order Markov model,
+logistic regression, a compact 1D CNN, and an RBF network using the previous
+`History lag` bits. The final chronological portion is held out for testing;
+adjacent bits are not randomly shuffled between training and test data. `ML
+advantage` is the best predictor accuracy minus the majority-baseline accuracy.
+`Conditional H` is a first-order conditional entropy estimate in bits per output
+bit. `Neural epochs` controls the compact CNN/RBF training loops and `RBF
+centers` controls the number of Gaussian basis centers. The CSV export includes
+these settings and each model's feature description.
+
+The CNN uses trainable one-dimensional convolution filters, tanh activation,
+global-average pooling, and a sigmoid output. The RBF model selects binary
+history centers, performs two lightweight k-means refinement steps, and trains
+a sigmoid output over Gaussian basis functions. These are dependency-free
+browser surrogates for nonlinear predictors, not replacements for a Python
+PyTorch/scikit-learn PUF attack.
+
+Published PUF modeling work has used 1D CNNs for nonlinear CRP-response
+modeling and RBF-kernel SVM/RBF-based classifiers as nonlinear attack models.
+The current tab adapts those model families to sequential bit prediction, so
+its results are a predictability diagnostic rather than a direct CRP-based PUF
+attack result. The TRNG monitoring reference in the root README uses a compact
+ANN on entropy-labeled bit-pattern images; it supports lightweight neural
+monitoring, but does not validate this CNN/RBF implementation.
+
+Research references: [1D CNN PUF modeling study](https://www.mdpi.com/2673-4591/56/1/187),
+[FeFET PUF ML-resilience evaluation](https://pmc.ncbi.nlm.nih.gov/articles/PMC11696573/),
+[RBF-kernel PUF modeling example](https://radar.brookes.ac.uk/radar/file/013d00ef-99f2-4239-a904-6f2fcc7d22a2/1/Attack%20resistant%20low%20overhead%20memristive%20physical%20unclonable%20function%20-%202020%20-%20Yang%20Khandelwal%20Jiang%20Jabir.pdf),
+and [hardware-aware TRNG ANN monitoring](https://doi.org/10.1109/PRIME58259.2023.10161903).
 
 The current implementation is intentionally bit-only. It does not align raw
 ADC samples to generated bits, so it is not an ADC-assisted attack. ADC0 is

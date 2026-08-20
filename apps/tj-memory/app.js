@@ -3199,7 +3199,7 @@ function bindEvents() {
 
   const deferredControls = new Set(["deviceModeSelect", "deviceSwitchSelect", "deviceTiaOverride", "layerDevices", "layerRole", "deviceParamsFileInput"]);
   document.querySelectorAll("input, select").forEach((control) => {
-    if (deferredControls.has(control.id)) return;
+    if (deferredControls.has(control.id) || control.dataset.waferControl === "true") return;
     control.addEventListener("input", () => {
       readControls();
       if (control.id.startsWith("optimizer")) {

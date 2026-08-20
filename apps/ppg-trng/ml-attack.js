@@ -156,6 +156,209 @@
     return result;
   }
 
+  function bitInput(bits, target, lag, offset) {
+    return bits[target - lag + offset] ? 1 : -1;
+  }
+
+  function logit(value) {
+    const probability = clampProbability(value);
+    return Math.log(probability / (1 - probability));
+  }
+
+  function cnnModel(bits, trainEnd, testStart, lag, maxTrainSamples, epochs, baselineAccuracy) {
+    const filterCount = 6;
+    const kernelSize = Math.min(3, lag);
+    const positionCount = lag - kernelSize + 1;
+    const kernelWeights = new Float64Array(filterCount * kernelSize);
+    const filterBias = new Float64Array(filterCount);
+    const featureCount = filterCount * positionCount;
+    const outputWeights = new Float64Array(featureCount);
+    const available = Math.max(0, trainEnd - lag);
+    const step = Math.max(1, Math.ceil(available / maxTrainSamples));
+    const sampleCount = Math.ceil(available / step);
+    let trainRatio = 0;
+    for (let index = 0; index < trainEnd; index += 1) trainRatio += bits[index] ? 1 : 0;
+    trainRatio = trainEnd ? trainRatio / trainEnd : 0.5;
+
+    for (let filter = 0; filter < filterCount; filter += 1) {
+      for (let offset = 0; offset < kernelSize; offset += 1) {
+        kernelWeights[filter * kernelSize + offset] = 0.15 * Math.sin((filter + 1) * (offset + 1));
+      }
+      for (let position = 0; position < positionCount; position += 1) {
+        outputWeights[filter * positionCount + position] = 0.15 * Math.cos(filter + position + 1);
+      }
+    }
+    let outputBias = logit(trainRatio);
+    const gradients = {
+      kernels: new Float64Array(kernelWeights.length),
+      filterBias: new Float64Array(filterBias.length),
+      outputWeights: new Float64Array(outputWeights.length),
+    };
+    const activations = new Float64Array(filterCount * positionCount);
+
+    for (let epoch = 0; epoch < epochs; epoch += 1) {
+      gradients.kernels.fill(0);
+      gradients.filterBias.fill(0);
+      gradients.outputWeights.fill(0);
+      let biasGradient = 0;
+      for (let target = lag; target < trainEnd; target += step) {
+        for (let filter = 0; filter < filterCount; filter += 1) {
+          for (let position = 0; position < positionCount; position += 1) {
+            let score = filterBias[filter];
+            for (let offset = 0; offset < kernelSize; offset += 1) {
+              score += kernelWeights[filter * kernelSize + offset] * bitInput(bits, target, lag, position + offset);
+            }
+            const activation = Math.tanh(score);
+            activations[filter * positionCount + position] = activation;
+          }
+        }
+
+        let score = outputBias;
+        for (let feature = 0; feature < featureCount; feature += 1) score += outputWeights[feature] * activations[feature];
+        const probability = sigmoid(score);
+        const error = probability - bits[target];
+        biasGradient += error;
+        for (let filter = 0; filter < filterCount; filter += 1) {
+          for (let position = 0; position < positionCount; position += 1) {
+            const feature = filter * positionCount + position;
+            const activation = activations[feature];
+            gradients.outputWeights[feature] += error * activation;
+            const gradient = error * outputWeights[feature] * (1 - activation * activation);
+            gradients.filterBias[filter] += gradient;
+            for (let offset = 0; offset < kernelSize; offset += 1) {
+              gradients.kernels[filter * kernelSize + offset] += gradient * bitInput(bits, target, lag, position + offset);
+            }
+          }
+        }
+      }
+      const scale = 0.5 / Math.max(1, sampleCount);
+      outputBias -= scale * biasGradient;
+      for (let filter = 0; filter < filterCount; filter += 1) {
+        filterBias[filter] -= scale * gradients.filterBias[filter];
+        for (let offset = 0; offset < kernelSize; offset += 1) {
+          const index = filter * kernelSize + offset;
+          kernelWeights[index] -= scale * gradients.kernels[index];
+        }
+      }
+      for (let feature = 0; feature < featureCount; feature += 1) outputWeights[feature] -= scale * gradients.outputWeights[feature];
+    }
+
+    const probabilities = new Float64Array(bits.length - testStart);
+    for (let target = testStart; target < bits.length; target += 1) {
+      for (let filter = 0; filter < filterCount; filter += 1) {
+        for (let position = 0; position < positionCount; position += 1) {
+          let score = filterBias[filter];
+          for (let offset = 0; offset < kernelSize; offset += 1) {
+            score += kernelWeights[filter * kernelSize + offset] * bitInput(bits, target, lag, position + offset);
+          }
+          activations[filter * positionCount + position] = Math.tanh(score);
+        }
+      }
+      let score = outputBias;
+      for (let feature = 0; feature < featureCount; feature += 1) score += outputWeights[feature] * activations[feature];
+      probabilities[target - testStart] = sigmoid(score);
+    }
+    const output = evaluateProbabilities("1D CNN attack", probabilities, bits, testStart, baselineAccuracy);
+    output.features = `previous ${lag} bits | ${filterCount} filters x ${kernelSize} kernel | tanh + flatten`;
+    output.trainingSamples = sampleCount;
+    output.epochs = epochs;
+    return output;
+  }
+
+  function initializeRbfCenters(bits, trainEnd, lag, centerCount) {
+    const available = Math.max(1, trainEnd - lag);
+    const sampleCount = Math.min(2048, available);
+    const centers = new Float64Array(centerCount * lag);
+    for (let center = 0; center < centerCount; center += 1) {
+      const target = lag + Math.min(available - 1, Math.floor(((center + 0.5) * available) / centerCount));
+      for (let offset = 0; offset < lag; offset += 1) centers[center * lag + offset] = bitInput(bits, target, lag, offset);
+    }
+
+    for (let iteration = 0; iteration < 2; iteration += 1) {
+      const sums = new Float64Array(centerCount * lag);
+      const counts = new Uint32Array(centerCount);
+      for (let sample = 0; sample < sampleCount; sample += 1) {
+        const target = lag + Math.min(available - 1, Math.floor((sample * available) / sampleCount));
+        let closest = 0;
+        let closestDistance = Number.POSITIVE_INFINITY;
+        for (let center = 0; center < centerCount; center += 1) {
+          let distance = 0;
+          for (let offset = 0; offset < lag; offset += 1) {
+            const difference = bitInput(bits, target, lag, offset) - centers[center * lag + offset];
+            distance += difference * difference;
+          }
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closest = center;
+          }
+        }
+        counts[closest] += 1;
+        for (let offset = 0; offset < lag; offset += 1) sums[closest * lag + offset] += bitInput(bits, target, lag, offset);
+      }
+      for (let center = 0; center < centerCount; center += 1) {
+        if (!counts[center]) continue;
+        for (let offset = 0; offset < lag; offset += 1) centers[center * lag + offset] = sums[center * lag + offset] / counts[center];
+      }
+    }
+    return centers;
+  }
+
+  function rbfModel(bits, trainEnd, testStart, lag, maxTrainSamples, centerCount, epochs, baselineAccuracy) {
+    const available = Math.max(0, trainEnd - lag);
+    const step = Math.max(1, Math.ceil(available / maxTrainSamples));
+    const sampleCount = Math.ceil(available / step);
+    const centers = initializeRbfCenters(bits, trainEnd, lag, centerCount);
+    const weights = new Float64Array(centerCount);
+    const gradients = new Float64Array(centerCount);
+    const features = new Float64Array(centerCount);
+    const sigma2 = Math.max(1, lag * 0.5);
+    let trainRatio = 0;
+    for (let index = 0; index < trainEnd; index += 1) trainRatio += bits[index] ? 1 : 0;
+    trainRatio = trainEnd ? trainRatio / trainEnd : 0.5;
+    let bias = logit(trainRatio);
+
+    function fillFeatures(target) {
+      for (let center = 0; center < centerCount; center += 1) {
+        let distance = 0;
+        for (let offset = 0; offset < lag; offset += 1) {
+          const difference = bitInput(bits, target, lag, offset) - centers[center * lag + offset];
+          distance += difference * difference;
+        }
+        features[center] = Math.exp(-distance / (2 * sigma2));
+      }
+    }
+
+    for (let epoch = 0; epoch < epochs; epoch += 1) {
+      gradients.fill(0);
+      let biasGradient = 0;
+      for (let target = lag; target < trainEnd; target += step) {
+        fillFeatures(target);
+        let score = bias;
+        for (let center = 0; center < centerCount; center += 1) score += weights[center] * features[center];
+        const error = sigmoid(score) - bits[target];
+        biasGradient += error;
+        for (let center = 0; center < centerCount; center += 1) gradients[center] += error * features[center];
+      }
+      const scale = 0.16 / Math.max(1, sampleCount);
+      bias -= scale * biasGradient;
+      for (let center = 0; center < centerCount; center += 1) weights[center] -= scale * gradients[center];
+    }
+
+    const probabilities = new Float64Array(bits.length - testStart);
+    for (let target = testStart; target < bits.length; target += 1) {
+      fillFeatures(target);
+      let score = bias;
+      for (let center = 0; center < centerCount; center += 1) score += weights[center] * features[center];
+      probabilities[target - testStart] = sigmoid(score);
+    }
+    const output = evaluateProbabilities("RBF network attack", probabilities, bits, testStart, baselineAccuracy);
+    output.features = `previous ${lag} bits | ${centerCount} Gaussian centers | sigma2=${sigma2.toFixed(2)}`;
+    output.trainingSamples = sampleCount;
+    output.centers = centerCount;
+    output.epochs = epochs;
+    return output;
+  }
+
   function conditionalEntropyMarkov(bits, trainEnd) {
     if (trainEnd < 2) return null;
     const counts = [[1, 1], [1, 1]];
@@ -209,6 +412,13 @@
       clamp(options.l2, 0, 0.1, 0.001),
       baselineAccuracy,
     );
+    const neuralEpochs = Math.floor(clamp(options.neuralEpochs, 2, 20, 8));
+    const rbfCenters = Math.floor(clamp(options.rbfCenters, 4, 32, 16));
+    const cnn = cnnModel(bits, trainEnd, testStart, lag, Math.floor(clamp(options.maxTrainSamples, 5000, 100000, 60000)), neuralEpochs, baselineAccuracy);
+    const rbf = rbfModel(bits, trainEnd, testStart, lag, Math.floor(clamp(options.maxTrainSamples, 5000, 100000, 60000)), rbfCenters, neuralEpochs, baselineAccuracy);
+    const models = [majority, markov, logistic, cnn, rbf];
+    const predictors = models.filter((model) => model.name !== "Majority baseline");
+    const best = predictors.reduce((current, model) => model.advantage > current.advantage ? model : current, predictors[0]);
 
     return {
       n,
@@ -220,14 +430,15 @@
       testOneRatio: (bits.slice(testStart).reduce((sum, bit) => sum + bit, 0)) / (n - testStart),
       conditionalEntropyBits: conditionalEntropyMarkov(bits, trainEnd),
       baselineAccuracy,
-      models: [majority, markov, logistic],
+      models,
       attack: {
-        model: logistic.name,
-        accuracy: logistic.accuracy,
-        advantage: logistic.advantage,
-        meaningful: logistic.advantage >= 0.02,
+        model: best.name,
+        accuracy: best.accuracy,
+        advantage: best.advantage,
+        meaningful: best.advantage >= 0.02,
       },
-      warning: "Chronological bit-only prediction. This does not model raw ADC features and does not prove cryptographic security.",
+      options: { neuralEpochs, rbfCenters },
+      warning: "Chronological bit-only prediction. CNN and RBF are compact browser surrogates for nonlinear predictors; this is not a CRP-based PUF attack and does not prove cryptographic security.",
     };
   }
 

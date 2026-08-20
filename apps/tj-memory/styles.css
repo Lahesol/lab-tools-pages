@@ -597,6 +597,88 @@ th {
   margin-bottom: 12px;
 }
 
+.wafer-tab {
+  min-height: 980px;
+}
+
+.wafer-disclosure {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin: 0 0 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(15, 157, 145, 0.32);
+  border-radius: var(--radius);
+  color: #28424f;
+  background: rgba(15, 157, 145, 0.06);
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+.wafer-disclosure a {
+  color: #0b61b5;
+  font-weight: 780;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.wafer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.wafer-panel {
+  min-width: 0;
+  box-shadow: none;
+}
+
+.wafer-actions {
+  margin: 12px 0;
+}
+
+.wafer-summary-list {
+  margin-top: 12px;
+}
+
+.wafer-summary-list dd {
+  max-width: 68%;
+  overflow-wrap: anywhere;
+}
+
+.wafer-analysis-grid {
+  margin-top: 12px;
+}
+
+.plot-canvas.wafer-input-plot {
+  height: 360px;
+}
+
+.plot-canvas.wafer-state-plot {
+  height: 620px;
+}
+
+.wafer-results-grid {
+  align-items: start;
+}
+
+.wafer-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wafer-metrics dd {
+  overflow-wrap: anywhere;
+}
+
+.wafer-table-card {
+  padding: 0;
+  overflow-x: auto;
+  border: 0;
+  box-shadow: none;
+}
+
 .runtime-banner {
   min-width: 0;
   display: grid;
@@ -1617,6 +1699,7 @@ th {
   .reference-grid,
   .dataset-workbench,
   .dataset-source-grid,
+  .wafer-grid,
   .term-guide-grid,
   .optimizer-grid,
   .optimizer-results,
@@ -1668,6 +1751,18 @@ th {
   }
 
   .contract-list {
+    grid-template-columns: 1fr;
+  }
+
+  .wafer-disclosure {
+    grid-template-columns: 1fr;
+  }
+
+  .wafer-disclosure a {
+    white-space: normal;
+  }
+
+  .wafer-metrics {
     grid-template-columns: 1fr;
   }
 

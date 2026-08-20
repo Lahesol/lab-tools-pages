@@ -1006,6 +1006,14 @@
                 <span>Max train samples</span>
                 <input id="mlMaxTrain" type="number" min="5000" max="100000" step="5000" value="60000" />
               </label>
+              <label class="compact-field" for="mlNeuralEpochs" title="Training epochs for the compact CNN and RBF predictors.">
+                <span>Neural epochs</span>
+                <input id="mlNeuralEpochs" type="number" min="2" max="20" step="1" value="8" />
+              </label>
+              <label class="compact-field" for="mlRbfCenters" title="Number of Gaussian centers used by the RBF predictor.">
+                <span>RBF centers</span>
+                <input id="mlRbfCenters" type="number" min="4" max="32" step="4" value="16" />
+              </label>
             </div>
 
             <div class="ml-source-status" aria-live="polite">
@@ -1019,7 +1027,8 @@
               <summary>What this attack measures</summary>
               <div class="ml-help-grid">
                 <div><strong>Attack target</strong><p>Predict the next bit from the preceding bit history. ADC0 and ADC3 are treated as non-biomedical ambient/optical noise sources in this analysis.</p></div>
-                <div><strong>Models</strong><p>Majority baseline, first-order Markov model, and logistic regression using the selected history lag. The logistic model is the ML attack.</p></div>
+                <div><strong>Models</strong><p>Majority and Markov baselines are compared with logistic regression, a compact 1D CNN, and an RBF network using the selected history lag. The best predictor is highlighted in the summary.</p></div>
+                <div><strong>Research mapping</strong><p>1D CNNs are used in published PUF modeling attacks, while RBF kernels/networks are used for nonlinear PUF modeling. Here they are adapted to a time-ordered bit stream, not presented as a direct PUF-CRP reproduction.</p></div>
                 <div><strong>Split rule</strong><p>Training uses the earlier sequence and testing uses the final chronological holdout. Adjacent samples are never randomly mixed between train and test.</p></div>
                 <div><strong>Interpretation</strong><p>Accuracy above the majority baseline indicates predictability. This is an entropy-source diagnostic, not proof of a cryptographic break or security certification.</p></div>
               </div>
@@ -1363,7 +1372,7 @@
     <script src="./ml-attack.js?v=20260730-ml-v1" defer></script>
     <script src="./puf.js?v=20260806-puf-v7" defer></script>
     <script src="./sp800-90b.js?v=20260730-90b-v2" defer></script>
-    <script src="./app.js?v=bbc9f47ca444" defer></script>
+    <script src="./app.js?v=1cc893dca764" defer></script>
     <script src="./dfu.js?v=20260716-adc0-2-3-gain-v26-concurrent-enc" defer></script>
   </body>
 </html>

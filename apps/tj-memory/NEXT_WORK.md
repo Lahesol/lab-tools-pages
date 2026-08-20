@@ -121,8 +121,36 @@ Current limitation:
 - The Architecture Optimizer is a compact proxy optimizer. It screens structures quickly but does not replace trained ANN/SNN accuracy evaluation.
 - The integrate-fire emitter and LTM latch are compact system-level transfer models. Their parameters still need extraction from measured TIA/emitter circuit behavior or a circuit-level SPICE/Python backend.
 - The Neuron Model tab is a compact hardware primitive model, not a measured closed-loop circuit yet. The next validation target is measured `I_STM -> V_TIA -> comparator fire -> LTM Vth shift -> reset` timing.
-- Public dataset download commands exist, but decoded real samples are not yet streamed into the browser-side simulation.
+- Other public dataset download commands exist, but their decoded real samples are not yet streamed into the browser-side simulation; UCR Wafer is the explicit local-upload exception described below.
 - No Python training/inference backend is connected yet.
+
+## UCR/UEA Wafer SNN extension
+
+Implemented in the static GUI:
+
+- A dedicated `Wafer SNN` tab identifies Wafer as a 1-D, two-class semiconductor
+  fabrication process-sensor benchmark (not a UV-exposure dataset).
+- Local `Wafer_TRAIN.tsv` / `Wafer_TEST.tsv` uploads are parsed in the browser
+  using the UCR `label + 152 samples` row contract. No Wafer file or mock
+  waveform is bundled with the app.
+- A selected real waveform can be normalized and rate, threshold-crossing, or
+  delta encoded. The compact model shows input spikes, membrane and STM state,
+  LTM/adaptive threshold state, output spikes, and an activity-based anomaly
+  score.
+- The built-in ablation compares fixed-threshold LIF, STM-only LIF,
+  LTM-adaptive threshold feedback, and stored LTM state with feedback disabled.
+  Noise, input jitter, and static device variation are deterministic sensitivity
+  controls rather than measured hardware variability.
+
+Current boundary:
+
+- The browser score is not a trained classifier, calibrated device model,
+  UCR test-set accuracy, or a prediction of real wafer-fabrication performance.
+- The raw UCR class token is displayed but its normal/abnormal mapping must be
+  chosen explicitly by the user after download/schema verification.
+- A reproducible train/test evaluation still needs a versioned dataset manifest,
+  split-aware Python loader, calibration dataset, baseline ANN/LIF models, and
+  fixed-test reporting outside this static GUI.
 
 ## Recommended Next Implementation Steps
 
@@ -207,27 +235,33 @@ Current limitation:
 
 Use in this order:
 
-1. Synthetic UV event dataset
-   - Best for proving device-specific STM/LTM novelty.
-   - Classes can be generated from PWM/on-off patterns:
-     - transient noise
-     - repeated anomaly
-     - sustained event
-     - sparse high-importance event
+1. UCR/UEA Wafer
+   - Main public normal/abnormal semiconductor-process time-series benchmark
+     for this temporal anomaly simulation.
+   - Use real uploaded train/test files and keep the class-token mapping,
+     normalization, encoder, and train/test boundaries explicit.
+   - It is process-sensor data, not a UV-exposure dataset; browser traces are
+     screening evidence only until a held-out evaluation is implemented.
 
-2. MNIST / Fashion-MNIST
+2. Synthetic UV event dataset
+   - Auxiliary device-specific STM/LTM ablation only, never evidence for the
+     Wafer benchmark or a published process-monitoring claim.
+   - Classes can be generated from PWM/on-off patterns: transient noise,
+     repeated anomaly, sustained event, and sparse high-importance event.
+
+3. MNIST / Fashion-MNIST
    - ANN baseline only.
    - Useful for reviewer familiarity, but weak novelty for this device.
 
-3. N-MNIST
+4. N-MNIST
    - Useful starter for event-driven SNN.
    - Needs caution: some analyses question whether N-MNIST strongly demonstrates timing advantage.
 
-4. DVS Gesture
+5. DVS Gesture
    - Better for event-driven temporal classification.
    - More relevant once CSNN/RSNN backend exists.
 
-5. SHD / SSC
+6. SHD / SSC
    - Good for temporal spike classification.
    - Strong candidate if the claim is that STM/LTM timescale improves temporal memory.
 

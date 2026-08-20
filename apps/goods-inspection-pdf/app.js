@@ -10,6 +10,64 @@
   const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
   const MAX_CROP_OUTPUT_DIMENSION = 4096;
   const PHOTO_CROP_ASPECT = 2.23;
+  const TEMPLATE_IDS = Object.freeze({
+    DEFAULT: "gachon-default",
+    SANDAN_DIRECT_PURCHASE: "sandan-direct-purchase",
+  });
+  const TEMPLATE_CONFIGS = Object.freeze({
+    [TEMPLATE_IDS.DEFAULT]: Object.freeze({
+      label: "가천대학교 기본 양식",
+      shortLabel: "기본 연속 양식",
+      tagline: "‘2027 TOP 10’ 글로벌 명문 도약",
+      title: "물품검수확인서",
+      photoHeadingTitle: "물품 사진",
+      photoHeadingNote: "(※ 거래명세서 순서대로 사진을 첨부하세요.)",
+      confirmation: "상기와 같이 신청 물품이 동일함을 확인하였습니다.",
+      recipient: "가천대학교 총장 귀하",
+      showBranding: true,
+      contentLeft: 12.7,
+      contentWidth: 184.6,
+      headingY: 48,
+      headingHeight: 17,
+      gridStartY: 65,
+      labelHeight: 10.5,
+      photoHeight: 42.7,
+      blockHeight: 53.2,
+      baseHeight: 297,
+      confirmationGap: 24,
+      dateGap: 44,
+      inspectorY: 236,
+      signatureX: 187,
+      recipientX: 18,
+      recipientY: 278,
+    }),
+    [TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE]: Object.freeze({
+      label: "산학협력단 직접구매 양식",
+      shortLabel: "산학협력단 직접구매 양식",
+      tagline: "[양식] 직접구매 검수조서",
+      title: "물 품 검 수 확 인 서",
+      photoHeadingTitle: "물품 사진",
+      photoHeadingNote: "(※ 거래명세서 순서대로 사진을 첨부하세요.)",
+      confirmation: "상기와 같이 신청 물품이 동일함을 확인하였습니다.",
+      recipient: "가천대학교 산학협력단장 귀하",
+      showBranding: false,
+      contentLeft: 15.8,
+      contentWidth: 171.2,
+      headingY: 37.8,
+      headingHeight: 10.2,
+      gridStartY: 48,
+      labelHeight: 10.2,
+      photoHeight: 81.3,
+      blockHeight: 91.5,
+      baseHeight: 297,
+      confirmationGap: 5,
+      dateGap: 18,
+      inspectorY: 263,
+      signatureX: 181,
+      recipientX: 188,
+      recipientY: 285,
+    }),
+  });
   // Rotate the browser-only key after removing previously supplied signature
   // files. Legacy entries are cleared once at startup.
   const SIGNATURE_STORAGE_PREFIX = "goods-inspection.signature.v3.";
@@ -29,6 +87,7 @@
     items: [],
     countMode: "auto",
     manualCount: 4,
+    templateId: TEMPLATE_IDS.DEFAULT,
     previewPage: 0,
     draggedPhotoId: null,
     reviewerName: "",
@@ -122,6 +181,7 @@
     autoCountStatus: document.querySelector("#autoCountStatus"),
     addItemButton: document.querySelector("#addItemButton"),
     resetButton: document.querySelector("#resetButton"),
+    templateInputs: [...document.querySelectorAll('input[name="templateId"]')],
     reviewerName: document.querySelector("#reviewerName"),
     reviewerSignaturePreview: document.querySelector("#reviewerSignaturePreview"),
     reviewerSignatureImage: document.querySelector("#reviewerSignatureImage"),
@@ -136,6 +196,14 @@
     previewDate: document.querySelector("#previewDate"),
     previewReviewerName: document.querySelector("#previewReviewerName"),
     previewSignature: document.querySelector("#previewSignature"),
+    templateTagline: document.querySelector("#templateTagline"),
+    templateLogo: document.querySelector("#templateLogo"),
+    templateTitle: document.querySelector("#templateTitle"),
+    templateSeal: document.querySelector("#templateSeal"),
+    templatePhotoHeadingTitle: document.querySelector("#templatePhotoHeadingTitle"),
+    templatePhotoHeadingNote: document.querySelector("#templatePhotoHeadingNote"),
+    templateConfirmation: document.querySelector("#templateConfirmation"),
+    templateRecipient: document.querySelector("#templateRecipient"),
     previewMeta: document.querySelector("#previewMeta"),
     previewPrevButton: document.querySelector("#previewPrevButton"),
     previewNextButton: document.querySelector("#previewNextButton"),
@@ -236,6 +304,16 @@
         ensureItemCount(state.manualCount);
         renderAll();
       }
+    });
+
+    elements.templateInputs.forEach((input) => {
+      input.addEventListener("change", (event) => {
+        if (!event.target.checked || !TEMPLATE_CONFIGS[event.target.value]) return;
+        state.templateId = event.target.value;
+        state.signaturePosition = null;
+        renderAll();
+        showToast(`${getTemplateConfig().label}로 미리보기를 변경했습니다.`);
+      });
     });
 
     elements.resetButton.addEventListener("click", () => {
@@ -1441,6 +1519,10 @@
     return Math.min(MAX_ITEMS, Math.max(minimum, numeric));
   }
 
+  function getTemplateConfig() {
+    return TEMPLATE_CONFIGS[state.templateId] || TEMPLATE_CONFIGS[TEMPLATE_IDS.DEFAULT];
+  }
+
   function getPageCount() {
     return 1;
   }
@@ -1455,8 +1537,9 @@
   }
 
   function getDocumentHeightMm() {
+    const config = getTemplateConfig();
     const extraRows = Math.max(0, getItemRowCount() - BASE_ITEM_SLOTS / ITEM_COLUMNS);
-    return BASE_DOCUMENT_HEIGHT_MM + extraRows * ITEM_CELL_HEIGHT_MM;
+    return config.baseHeight + extraRows * config.blockHeight;
   }
 
   function renderAll() {
@@ -1470,6 +1553,9 @@
   }
 
   function renderCountControls() {
+    elements.templateInputs.forEach((input) => {
+      input.checked = input.value === state.templateId;
+    });
     elements.countModeInputs.forEach((input) => {
       input.checked = input.value === state.countMode;
     });
@@ -2157,12 +2243,12 @@
   }
 
   function getDefaultSignaturePosition() {
+    const config = getTemplateConfig();
     const rowCount = getItemRowCount();
-    const blockHeight = 10.5 + 42.7;
-    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * blockHeight;
+    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * config.blockHeight;
     return {
-      x: 187 / DOCUMENT_WIDTH_MM,
-      y: (236 + extraHeight) / getDocumentHeightMm(),
+      x: config.signatureX / DOCUMENT_WIDTH_MM,
+      y: (config.inspectorY + extraHeight) / getDocumentHeightMm(),
     };
   }
 
@@ -2246,17 +2332,43 @@
   }
 
   function renderPreview() {
+    const config = getTemplateConfig();
     elements.previewItems.replaceChildren();
     state.previewPage = 0;
     const slotCount = getPreviewSlotCount();
     const rowCount = getItemRowCount();
     const documentHeightMm = getDocumentHeightMm();
+    if (state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE) {
+      const gridBottomY = config.gridStartY + rowCount * config.blockHeight;
+      const confirmationY = gridBottomY + config.confirmationGap;
+      const dateY = confirmationY + config.dateGap;
+      elements.documentPreview.style.setProperty("--template-confirmation-y", `${(confirmationY / documentHeightMm) * 100}%`);
+      elements.documentPreview.style.setProperty("--template-date-y", `${(dateY / documentHeightMm) * 100}%`);
+      elements.documentPreview.style.setProperty("--template-inspector-y", `${((config.inspectorY + Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * config.blockHeight) / documentHeightMm) * 100}%`);
+    } else {
+      elements.documentPreview.style.removeProperty("--template-confirmation-y");
+      elements.documentPreview.style.removeProperty("--template-date-y");
+      elements.documentPreview.style.removeProperty("--template-inspector-y");
+    }
     elements.documentPreview.style.aspectRatio = `${DOCUMENT_WIDTH_MM} / ${documentHeightMm}`;
     elements.previewItems.style.setProperty("--template-row-count", String(rowCount));
     elements.previewItems.style.setProperty(
       "--template-grid-aspect",
-      `${DOCUMENT_WIDTH_MM - 25.4} / ${rowCount * ITEM_CELL_HEIGHT_MM}`,
+      `${config.contentWidth} / ${rowCount * config.blockHeight}`,
     );
+    elements.previewItems.style.setProperty(
+      "--template-label-ratio",
+      `${(config.labelHeight / config.blockHeight) * 100}%`,
+    );
+    elements.documentPreview.dataset.template = state.templateId;
+    elements.templateTagline.textContent = config.tagline;
+    elements.templateLogo.hidden = !config.showBranding;
+    elements.templateSeal.hidden = !config.showBranding;
+    elements.templateTitle.textContent = config.title;
+    elements.templatePhotoHeadingTitle.textContent = config.photoHeadingTitle;
+    elements.templatePhotoHeadingNote.textContent = config.photoHeadingNote;
+    elements.templateConfirmation.textContent = config.confirmation;
+    elements.templateRecipient.textContent = config.recipient;
 
     for (let index = 0; index < slotCount; index += 1) {
       const item = state.items[index] || createItem();
@@ -2285,11 +2397,11 @@
       elements.previewItems.append(itemElement);
     }
 
-    elements.previewMeta.textContent = `연속 양식 1장 · ${state.items.length}개 품목 · ${rowCount}개 셀 행`;
+    elements.previewMeta.textContent = `${config.shortLabel} 1장 · ${state.items.length}개 품목 · ${rowCount}개 셀 행`;
     elements.previewPageIndicator.textContent = "1 / 1";
     elements.previewPrevButton.disabled = true;
     elements.previewNextButton.disabled = true;
-    elements.documentPreview.setAttribute("aria-label", `물품검수확인서 연속 양식 미리보기, ${rowCount}개 셀 행`);
+    elements.documentPreview.setAttribute("aria-label", `${config.label} 미리보기, ${rowCount}개 셀 행`);
     elements.previewPageNumber.hidden = true;
     elements.previewThumbnails.hidden = true;
     elements.previewDate.textContent = formatKoreanDate(state.inspectionDate);
@@ -2327,7 +2439,7 @@
       elements.readyStateTitle.textContent = "모든 항목이 준비되었습니다";
       elements.readyStateDetail.textContent = "PDF로 바로 내보낼 수 있습니다";
       elements.validationTitle.textContent = "내보낼 준비가 되었습니다";
-      elements.validationMessage.textContent = `${state.items.length}개 품목 · 연속 양식 1장 · ${getSelectedReviewer().name} 검수`;
+      elements.validationMessage.textContent = `${state.items.length}개 품목 · ${getTemplateConfig().shortLabel} · ${getSelectedReviewer().name} 검수`;
     } else {
       elements.readyStateTitle.textContent = "자료를 확인해 주세요";
       elements.readyStateDetail.textContent = `${uniqueIssues.join(", ")} 입력이 필요합니다`;
@@ -2355,8 +2467,9 @@
       await document.fonts?.ready;
       const { PDFDocument } = window.PDFLib;
       const pdfDocument = await PDFDocument.create();
-      pdfDocument.setTitle("물품검수확인서");
-      pdfDocument.setSubject("가천대학교 물품검수 확인 문서");
+      const template = getTemplateConfig();
+      pdfDocument.setTitle(template.title.replace(/\s+/g, ""));
+      pdfDocument.setSubject(template.label);
       pdfDocument.setCreator("물품검수 확인서 생성 정적 웹 도구");
       const documentHeightMm = getDocumentHeightMm();
       const pageHeightPoints = 595.28 * (documentHeightMm / DOCUMENT_WIDTH_MM);
@@ -2385,6 +2498,7 @@
   }
 
   async function renderDocumentCanvas() {
+    const config = getTemplateConfig();
     const width = 2480;
     const documentHeightMm = getDocumentHeightMm();
     const height = Math.round(width * (documentHeightMm / DOCUMENT_WIDTH_MM));
@@ -2408,31 +2522,39 @@
     const slotCount = getPreviewSlotCount();
     const rowCount = getItemRowCount();
     const [logo, seal, signature, ...itemImages] = await Promise.all([
-      safeLoadImage("./assets/gachon-logo.png"),
-      safeLoadImage("./assets/gachon-seal.png"),
+      config.showBranding ? safeLoadImage("./assets/gachon-logo.png") : Promise.resolve(null),
+      config.showBranding ? safeLoadImage("./assets/gachon-seal.png") : Promise.resolve(null),
       safeLoadImage(signatureDataUrl),
       ...Array.from({ length: slotCount }, (_, index) => safeLoadImage(getPhoto(state.items[index]?.photoId)?.dataUrl || "")),
     ]);
 
-    drawCenteredText(context, "‘2027 TOP 10’ 글로벌 명문 도약", mm(105), mm(17), 12, "400", scale);
+    if (state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE) {
+      drawText(context, config.tagline, mm(config.contentLeft), mm(11), 10, "700", "left", scale);
+      drawCenteredText(context, config.title, mm(105), mm(29), 22, "900", scale);
+      context.fillStyle = "#f7dfa7";
+      context.fillRect(mm(config.contentLeft), mm(config.headingY), mm(config.contentWidth / 2 - 0.5), mm(config.headingHeight));
+      context.fillStyle = "#000000";
+      context.strokeRect(mm(config.contentLeft), mm(config.headingY), mm(config.contentWidth / 2 - 0.5), mm(config.headingHeight));
+      drawCenteredText(context, config.photoHeadingTitle, mm(config.contentLeft + config.contentWidth / 4), mm(config.headingY + 3.5), 11, "700", scale);
+      drawCenteredText(context, config.photoHeadingNote, mm(config.contentLeft + config.contentWidth / 4), mm(config.headingY + 8), 8, "700", scale);
+    } else {
+      drawCenteredText(context, config.tagline, mm(105), mm(17), 12, "400", scale);
+      if (logo) drawImageContain(context, logo, mm(14), mm(23), mm(44.45), mm(11.64));
+      else drawText(context, "가천대학교", mm(14), mm(29), 12, "700", "left", scale);
+      drawCenteredText(context, config.title, mm(105), mm(31), 22, "900", scale);
+      if (seal) drawImageContain(context, seal, mm(174), mm(21), mm(21.17), mm(19.84));
+      context.strokeRect(mm(config.contentLeft), mm(config.headingY), mm(config.contentWidth), mm(config.headingHeight));
+      drawCenteredText(context, config.photoHeadingTitle, mm(105), mm(54), 12, "700", scale);
+      drawCenteredText(context, config.photoHeadingNote, mm(105), mm(60.5), 9.5, "700", scale);
+    }
 
-    if (logo) drawImageContain(context, logo, mm(14), mm(23), mm(44.45), mm(11.64));
-    else drawText(context, "가천대학교", mm(14), mm(29), 12, "700", "left", scale);
-    drawCenteredText(context, "물품검수확인서", mm(105), mm(31), 22, "900", scale);
-    if (seal) drawImageContain(context, seal, mm(174), mm(21), mm(21.17), mm(19.84));
-
-    const left = 12.7;
-    const contentWidth = 184.6;
-    const headingY = 48;
-    context.strokeRect(mm(left), mm(headingY), mm(contentWidth), mm(17));
-    drawCenteredText(context, "물품 사진", mm(105), mm(54), 12, "700", scale);
-    drawCenteredText(context, "(※ 거래명세서 순서대로 사진을 첨부하세요.)", mm(105), mm(60.5), 9.5, "700", scale);
-
+    const left = config.contentLeft;
+    const contentWidth = config.contentWidth;
     const cellWidth = contentWidth / ITEM_COLUMNS;
-    const labelHeight = 10.5;
-    const photoHeight = 42.7;
-    const blockHeight = labelHeight + photoHeight;
-    const gridStartY = 65;
+    const labelHeight = config.labelHeight;
+    const photoHeight = config.photoHeight;
+    const blockHeight = config.blockHeight;
+    const gridStartY = config.gridStartY;
 
     for (let index = 0; index < slotCount; index += 1) {
       const column = index % ITEM_COLUMNS;
@@ -2458,12 +2580,20 @@
     }
 
     const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * blockHeight;
-    drawCenteredText(context, "상기와 같이 신청 물품이 동일함을 확인하였습니다.", mm(105), mm(195 + extraHeight), 11, "400", scale);
-    drawCenteredText(context, formatKoreanDate(state.inspectionDate), mm(105), mm(215 + extraHeight), 11, "700", scale);
+    const gridBottomY = gridStartY + rowCount * blockHeight;
+    const confirmationY = state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE
+      ? gridBottomY + config.confirmationGap
+      : 195 + extraHeight;
+    const dateY = state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE
+      ? confirmationY + config.dateGap
+      : 215 + extraHeight;
+    const inspectorY = config.inspectorY + extraHeight;
+    drawCenteredText(context, config.confirmation, mm(105), mm(confirmationY), 11, "400", scale);
+    drawCenteredText(context, formatKoreanDate(state.inspectionDate), mm(105), mm(dateY), 11, "700", scale);
 
-    drawText(context, "물품 검수자:", mm(127), mm(236 + extraHeight), 11, "700", "left", scale);
-    drawText(context, reviewer?.name || "", mm(164), mm(236 + extraHeight), 11, "700", "center", scale);
-    drawText(context, "(인)", mm(187), mm(236 + extraHeight), 11, "700", "center", scale);
+    drawText(context, "물품 검수자:", mm(state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE ? 124 : 127), mm(inspectorY), 11, "700", "left", scale);
+    drawText(context, reviewer?.name || "", mm(state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE ? 158 : 164), mm(inspectorY), 11, "700", "center", scale);
+    drawText(context, "(인)", mm(state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE ? 181 : 187), mm(inspectorY), 11, "700", "center", scale);
     if (signature) {
       const signaturePosition = getSignaturePosition();
       const signatureWidthMm = 22;
@@ -2479,7 +2609,11 @@
       );
     }
 
-    drawText(context, "가천대학교 총장 귀하", mm(18), mm(278 + extraHeight), 19, "700", "left", scale);
+    if (state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE) {
+      drawText(context, config.recipient, mm(config.recipientX), mm(config.recipientY + extraHeight), 17, "700", "right", scale);
+    } else {
+      drawText(context, config.recipient, mm(config.recipientX), mm(config.recipientY + extraHeight), 19, "700", "left", scale);
+    }
     return canvas;
   }
 

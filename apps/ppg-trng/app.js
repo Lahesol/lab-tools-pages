@@ -187,6 +187,8 @@ const els = {
   mlLag: document.querySelector("#mlLag"),
   mlHoldout: document.querySelector("#mlHoldout"),
   mlMaxTrain: document.querySelector("#mlMaxTrain"),
+  mlNeuralEpochs: document.querySelector("#mlNeuralEpochs"),
+  mlRbfCenters: document.querySelector("#mlRbfCenters"),
   mlSourceName: document.querySelector("#mlSourceName"),
   mlSourceAvailable: document.querySelector("#mlSourceAvailable"),
   mlSourceTestCount: document.querySelector("#mlSourceTestCount"),
@@ -4750,14 +4752,15 @@ function renderMlResults(result = state.mlResults) {
 }
 
 function updateMlSummary(result = null, elapsedMs = null) {
-  const logistic = result?.models?.find((model) => model.name === "Logistic regression attack");
+  const best = result?.models?.filter((model) => model.name !== "Majority baseline")
+    .reduce((current, model) => !current || model.advantage > current.advantage ? model : current, null);
   if (els.mlBitCount) els.mlBitCount.textContent = String(result?.n || 0);
   if (els.mlSplitCount) {
     els.mlSplitCount.textContent = result ? `${result.trainCount} / ${result.testCount}` : "--";
   }
   if (els.mlBaselineAccuracy) els.mlBaselineAccuracy.textContent = formatMlMetric(result?.baselineAccuracy);
-  if (els.mlAccuracy) els.mlAccuracy.textContent = formatMlMetric(logistic?.accuracy);
-  if (els.mlAdvantage) els.mlAdvantage.textContent = logistic?.advantageText || "--";
+  if (els.mlAccuracy) els.mlAccuracy.textContent = formatMlMetric(best?.accuracy);
+  if (els.mlAdvantage) els.mlAdvantage.textContent = best?.advantageText || "--";
   if (els.mlConditionalEntropy) els.mlConditionalEntropy.textContent = formatMlMetric(result?.conditionalEntropyBits);
   if (els.mlCaption && result) {
     els.mlCaption.textContent = `${getMlSourceLabel()} | ${result.n.toLocaleString()} bits | train ${result.trainCount.toLocaleString()} / test ${result.testCount.toLocaleString()} | lag ${result.lag} | ${Number.isFinite(elapsedMs) ? `${(elapsedMs / 1000).toFixed(2)} s` : "complete"}`;
@@ -4777,14 +4780,15 @@ function finishMlRun(result, elapsedMs) {
   }
   updateMlSummary(result, elapsedMs);
   renderMlResults(result);
-  const logistic = result.models.find((model) => model.name === "Logistic regression attack");
+  const best = result.models.filter((model) => model.name !== "Majority baseline")
+    .reduce((current, model) => !current || model.advantage > current.advantage ? model : current, null);
   if (els.mlInterpretation) {
     els.mlInterpretation.textContent = result.attack.meaningful
-      ? `The logistic predictor exceeded the majority baseline by ${formatMlMetric(result.attack.advantage)}. This indicates measurable next-bit predictability under the selected split.`
-      : `The logistic predictor did not exceed the majority baseline by 0.02. This is not evidence of cryptographic security; repeat across independent measurement sessions.`;
+      ? `The best nonlinear/sequence predictor (${best?.name || result.attack.model}) exceeded the majority baseline by ${formatMlMetric(result.attack.advantage)}. This indicates measurable next-bit predictability under the selected split.`
+      : `No tested predictor exceeded the majority baseline by 0.02. This is not evidence of cryptographic security; repeat across independent measurement sessions.`;
   }
   if (els.mlWarning) {
-    els.mlWarning.textContent = `${result.warning} Logistic accuracy=${formatMlMetric(logistic?.accuracy)}, Markov accuracy=${formatMlMetric(result.models[1]?.accuracy)}.`;
+    els.mlWarning.textContent = `${result.warning} Best=${best?.name || "--"} accuracy=${formatMlMetric(best?.accuracy)}, Markov accuracy=${formatMlMetric(result.models.find((model) => model.name === "1st-order Markov")?.accuracy)}.`;
   }
 }
 
@@ -4818,6 +4822,8 @@ function runMlAttack() {
     lag: clampInteger(els.mlLag?.value, 2, 64, 16),
     holdoutPercent: clampInteger(els.mlHoldout?.value, 10, 50, 30),
     maxTrainSamples: clampInteger(els.mlMaxTrain?.value, 5000, 100000, 60000),
+    neuralEpochs: clampInteger(els.mlNeuralEpochs?.value, 2, 20, 8),
+    rbfCenters: clampInteger(els.mlRbfCenters?.value, 4, 32, 16),
   };
   const startedAt = performance.now();
   state.mlRunning = true;
@@ -4889,12 +4895,14 @@ function exportMlResultsCsv() {
     return;
   }
   const result = state.mlResults;
-  const rows = ["source,bits,train_count,test_count,lag,model,accuracy,balanced_accuracy,log_loss_bits,brier,advantage,true_positive,true_negative,false_positive,false_negative"];
+  const rows = ["source,bits,train_count,test_count,lag,neural_epochs,rbf_centers,model,features,training_samples,accuracy,balanced_accuracy,log_loss_bits,brier,advantage,true_positive,true_negative,false_positive,false_negative"];
   result.models.forEach((model) => {
     const confusion = model.confusion || {};
     rows.push([
       csvCell(getMlSourceLabel()), result.n, result.trainCount, result.testCount, result.lag,
-      csvCell(model.name), formatMlMetric(model.accuracy), formatMlMetric(model.balancedAccuracy),
+      result.options?.neuralEpochs || "", result.options?.rbfCenters || "",
+      csvCell(model.name), csvCell(model.features || ""), model.trainingSamples || "",
+      formatMlMetric(model.accuracy), formatMlMetric(model.balancedAccuracy),
       formatMlMetric(model.logLossBits), formatMlMetric(model.brier), formatMlMetric(model.advantage),
       confusion.truePositive || 0, confusion.trueNegative || 0, confusion.falsePositive || 0, confusion.falseNegative || 0,
     ].join(","));

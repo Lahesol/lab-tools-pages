@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UV STM/LTM Architecture Simulator</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="styles.css?v=be0d61ee77be" />
+    <link rel="stylesheet" href="styles.css?v=0599a20b786b" />
   </head>
   <body>
     <div class="app-shell">
@@ -28,6 +28,7 @@
         <button type="button" data-tab="optimizer">Optimizer</button>
         <button type="button" data-tab="ann">ANN Transient</button>
         <button type="button" data-tab="snn">SNN Spiking</button>
+        <button type="button" data-tab="wafer">Wafer SNN</button>
         <button type="button" data-tab="refs">Terms / References</button>
       </nav>
 
@@ -1058,6 +1059,146 @@ spike(t) = 1 when V_TIA,eff(t) > V_th(t)</pre>
             </div>
           </section>
 
+          <section class="tab-panel wafer-tab" id="tab-wafer">
+            <div class="section-header">
+              <div>
+                <h2>UCR Wafer Temporal Anomaly SNN</h2>
+                <p>Browser-side, untrained temporal screening model for uploaded UCR Wafer sequences. This is an inline semiconductor fabrication process-sensor time series, not a UV-exposure dataset or hardware validation result.</p>
+              </div>
+              <button id="runWaferSnnBtn" type="button" class="primary-button">Run Wafer simulation</button>
+            </div>
+
+            <div class="wafer-disclosure" role="note">
+              <span class="status-pill ok">Public dataset</span>
+              <div><strong>UCR/UEA Wafer: 2-class normal/abnormal process-sensor time series.</strong><br />Train 1,000 / test 6,164, sequence length 152, one dimension, SENSOR. Reported abnormal ratios: train 10.7%, test 12.1%. The readout below is a screening trace, not trained accuracy or an end-to-end optical monitor.</div>
+              <a href="https://www.timeseriesclassification.com/description.php?Dataset=Wafer" target="_blank" rel="noreferrer">UCR Wafer source</a>
+            </div>
+
+            <div class="wafer-grid wafer-upload-grid">
+              <div class="panel wafer-panel">
+                <div class="panel-title"><span>Real Wafer files</span><output id="waferDataStatus">no file loaded</output></div>
+                <label class="field">
+                  <span>Upload UCR Wafer TSV / CSV</span>
+                  <input id="waferFileInput" data-wafer-control="true" type="file" accept=".tsv,.csv,.txt" multiple />
+                </label>
+                <p class="compact-note">Expected UCR row format: <code>class_label, x[0], ..., x[151]</code>. Select <code>Wafer_TRAIN.tsv</code> and/or <code>Wafer_TEST.tsv</code>; files remain in this browser session and are not uploaded by this static app.</p>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Sample index</span>
+                    <input id="waferSampleIndex" data-wafer-control="true" type="number" min="1" value="1" disabled />
+                  </label>
+                  <label class="field">
+                    <span>Anomaly class label</span>
+                    <select id="waferAnomalyLabel" data-wafer-control="true" disabled><option value="">Choose after upload</option></select>
+                  </label>
+                </div>
+                <div class="inline-actions wafer-actions">
+                  <button id="waferPrevBtn" type="button" class="ghost-button light" disabled>Previous</button>
+                  <button id="waferNextBtn" type="button" class="ghost-button light" disabled>Next</button>
+                </div>
+                <dl class="summary-list wafer-summary-list">
+                  <div><dt>Selected record</dt><dd id="waferSampleSummary">upload required</dd></div>
+                  <div><dt>Parsed shape</dt><dd id="waferShapeSummary">-</dd></div>
+                  <div><dt>Class counts</dt><dd id="waferClassSummary">-</dd></div>
+                </dl>
+              </div>
+
+              <div class="panel wafer-panel">
+                <div class="panel-title"><span>Encoder and neuron ablation</span><output id="waferModelStatus">awaiting data</output></div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Spike encoder</span>
+                    <select id="waferEncoding" data-wafer-control="true">
+                      <option value="rate">Rate coding</option>
+                      <option value="threshold">Threshold crossing</option>
+                      <option value="delta">Delta spike coding</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Neuron comparison</span>
+                    <select id="waferNeuronMode" data-wafer-control="true">
+                      <option value="adaptive">LTM adaptive-threshold LIF</option>
+                      <option value="fixed">Fixed-threshold LIF</option>
+                      <option value="stm">STM-only LIF</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Encoder threshold / delta <output id="waferEncoderThresholdOut">0.20</output></span>
+                    <input id="waferEncoderThreshold" data-wafer-control="true" type="range" min="0.02" max="0.95" step="0.01" value="0.20" />
+                  </label>
+                  <label class="field">
+                    <span>Base Vth <output id="waferBaseThresholdOut">0.75</output></span>
+                    <input id="waferBaseThreshold" data-wafer-control="true" type="range" min="0.10" max="2.00" step="0.01" value="0.75" />
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Noise <output id="waferNoiseOut">0%</output></span>
+                    <input id="waferNoise" data-wafer-control="true" type="range" min="0" max="25" step="1" value="0" />
+                  </label>
+                  <label class="field">
+                    <span>Input jitter <output id="waferJitterOut">0 steps</output></span>
+                    <input id="waferJitter" data-wafer-control="true" type="range" min="0" max="3" step="1" value="0" />
+                  </label>
+                  <label class="field">
+                    <span>Device variation <output id="waferVariationOut">0%</output></span>
+                    <input id="waferVariation" data-wafer-control="true" type="range" min="0" max="25" step="1" value="0" />
+                  </label>
+                </div>
+                <label class="toggle"><input id="waferLtmFeedback" data-wafer-control="true" type="checkbox" checked /> <span>LTM feedback into adaptive Vth</span></label>
+                <p class="compact-note">Ablations vary fixed Vth, STM-only state, and LTM feedback. Noise, timing jitter, and static device gain variation are deterministic browser perturbations for sensitivity screening only.</p>
+              </div>
+            </div>
+
+            <details class="term-note" open>
+              <summary>Compact temporal model and evidence boundary</summary>
+              <pre class="equation">x[t] = normalized Wafer sensor value
+s_in[t] = selected encoder(x[t])
+V[t+1] = leak * V[t] + gain * s_in[t] - reset * s_out[t]
+m[t+1] = retention * m[t] + eta_spike * s_out[t] + eta_error * anomaly_signal[t]
+theta[t] = theta0 + alpha * m[t]
+s_out[t] = H(V[t] - theta[t])
+anomaly_score = spike-count + early-spike + threshold-excess readout</pre>
+              <p class="compact-note">The signal-to-spike and LIF/LTM equations are a conservative software model linked to the intended STM/LTM device concept. They are not fitted device parameters, not a trained classifier, and not proof of UV sensing or live wafer-fabrication performance.</p>
+            </details>
+
+            <div class="analysis-grid wafer-analysis-grid">
+              <div class="plot-frame wide">
+                <div class="plot-toolbar"><span>Uploaded Wafer waveform and encoded input spikes</span><output id="waferInputPlotLabel">upload an actual file</output></div>
+                <canvas id="waferInputCanvas" class="plot-canvas wafer-input-plot" width="980" height="360" aria-label="Wafer input waveform and encoded spikes"></canvas>
+              </div>
+              <div class="plot-frame wide">
+                <div class="plot-toolbar"><span>Membrane, STM/LTM state, adaptive Vth, and output spikes</span><output id="waferStatePlotLabel">no simulation</output></div>
+                <canvas id="waferStateCanvas" class="plot-canvas wafer-state-plot" width="980" height="620" aria-label="Wafer SNN state traces"></canvas>
+              </div>
+            </div>
+
+            <div class="wafer-grid wafer-results-grid">
+              <div class="panel wafer-panel">
+                <div class="panel-title"><span>Compact readout</span><output id="waferReadoutStatus">not run</output></div>
+                <div class="fit-metrics wafer-metrics">
+                  <div><dt>Output spikes</dt><dd id="waferOutputSpikes">-</dd></div>
+                  <div><dt>First spike</dt><dd id="waferFirstSpike">-</dd></div>
+                  <div><dt>Threshold excess</dt><dd id="waferThresholdExcess">-</dd></div>
+                  <div><dt>Anomaly score</dt><dd id="waferAnomalyScore">-</dd></div>
+                  <div><dt>Uploaded label</dt><dd id="waferUploadedLabel">unmapped</dd></div>
+                  <div><dt>Interpretation</dt><dd id="waferInterpretation">upload a real sequence</dd></div>
+                </div>
+              </div>
+              <div class="panel wafer-panel">
+                <div class="panel-title"><span>Ablation comparison</span><button id="runWaferAblationBtn" type="button" class="ghost-button light">Run ablation</button></div>
+                <div class="table-card wafer-table-card">
+                  <table>
+                    <thead><tr><th>Condition</th><th>Spikes</th><th>First</th><th>Score</th><th>Vth final</th></tr></thead>
+                    <tbody id="waferAblationBody"><tr><td colspan="5">Upload an actual Wafer TSV/CSV and run the simulation.</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section class="tab-panel" id="tab-refs">
             <div class="section-header">
               <div>
@@ -1197,6 +1338,7 @@ SNN: I_syn(t) drives LIF membrane</pre>
     <script src="device-baseline-curves.js"></script>
     <script src="device-network.js"></script>
     <script src="synaptic-graph-sim.js"></script>
-    <script src="app.js?v=8e36164cac35"></script>
+    <script src="wafer-snn.js"></script>
+    <script src="app.js?v=cb0e7533fdc2"></script>
   </body>
 </html>

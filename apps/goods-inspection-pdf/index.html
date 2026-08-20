@@ -10,11 +10,11 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=652f3b9c82c3" />
+    <link rel="stylesheet" href="./styles.css?v=158b462a38c3" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
     <script defer src="./vendor/tesseract/tesseract.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=71d364eda91a"></script>
+    <script defer src="./app.js?v=588d98752b91"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -106,6 +106,27 @@
           </div>
           <span class="item-counter" id="itemCounter">0개 · 2행</span>
         </div>
+
+        <fieldset class="count-control template-control">
+          <legend>문서 양식</legend>
+          <div class="count-mode" role="radiogroup" aria-label="문서 양식 선택">
+            <label>
+              <input type="radio" name="templateId" value="gachon-default" checked />
+              <span>
+                <strong>기본 양식</strong>
+                <small>가천대학교 총장 귀하</small>
+              </span>
+            </label>
+            <label>
+              <input type="radio" name="templateId" value="sandan-direct-purchase" />
+              <span>
+                <strong>산학협력단 양식</strong>
+                <small>직접구매 검수조서</small>
+              </span>
+            </label>
+          </div>
+          <small class="template-control__help">선택한 양식이 오른쪽 미리보기와 PDF 출력에 모두 적용됩니다.</small>
+        </fieldset>
 
         <fieldset class="count-control">
           <legend>넣을 물품 수</legend>
@@ -231,21 +252,21 @@
 
         <div class="sheet-stage">
           <article class="document-sheet" id="documentPreview" aria-label="물품검수확인서 미리보기">
-            <p class="template-tagline">‘2027 TOP 10’ 글로벌 명문 도약</p>
+            <p class="template-tagline" id="templateTagline">‘2027 TOP 10’ 글로벌 명문 도약</p>
             <div class="template-title-row">
-              <img src="./assets/gachon-logo.png" alt="가천대학교" />
-              <h3>물품검수확인서</h3>
-              <img class="template-seal" src="./assets/gachon-seal.png" alt="가천대학교 교표" />
+              <img id="templateLogo" src="./assets/gachon-logo.png" alt="가천대학교" />
+              <h3 id="templateTitle">물품검수확인서</h3>
+              <img class="template-seal" id="templateSeal" src="./assets/gachon-seal.png" alt="가천대학교 교표" />
             </div>
 
             <div class="template-photo-heading">
-              <strong>물품 사진</strong>
-              <small>(※ 거래명세서 순서대로 사진을 첨부하세요.)</small>
+              <strong id="templatePhotoHeadingTitle">물품 사진</strong>
+              <small id="templatePhotoHeadingNote">(※ 거래명세서 순서대로 사진을 첨부하세요.)</small>
             </div>
 
             <div class="template-items" id="previewItems"></div>
 
-            <p class="template-confirmation">상기와 같이 신청 물품이 동일함을 확인하였습니다.</p>
+            <p class="template-confirmation" id="templateConfirmation">상기와 같이 신청 물품이 동일함을 확인하였습니다.</p>
             <p class="template-date" id="previewDate"></p>
             <div class="template-inspector">
               <span>물품 검수자:</span>
@@ -253,7 +274,7 @@
               <span>(인)</span>
               <img id="previewSignature" alt="입력한 검수자 서명" hidden />
             </div>
-            <strong class="template-recipient">가천대학교 총장 귀하</strong>
+            <strong class="template-recipient" id="templateRecipient">가천대학교 총장 귀하</strong>
             <small class="template-page-number" id="previewPageNumber" hidden></small>
           </article>
         </div>

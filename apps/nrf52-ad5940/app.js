@@ -45,6 +45,7 @@ const state = {
   pt3Supported: false,
   pt3DspSupported: false,
   pt3CalibrationDftSupported: false,
+  pt3RtiaSelectSupported: false,
   pt3LiveDacSupported: false,
   pt3HighRateSupported: false,
   pt3VdsPulseSupported: false,
@@ -92,8 +93,8 @@ const elements = {
   browserState: $("browserState"), deviceState: $("deviceState"), deviceNameState: $("deviceNameState"), controllerVersion: $("controllerVersion"), dfuUpdateState: $("dfuUpdateState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), dpvTab: $("dpvTab"), swvTab: $("swvTab"), pt3Tab: $("pt3Tab"), pt3PulseTab: $("pt3PulseTab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), dpvParameters: $("dpvParameters"), swvParameters: $("swvParameters"), pt3Parameters: $("pt3Parameters"), pt3PulseParameters: $("pt3PulseParameters"),
   ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), dpvTimingHint: $("dpvTimingHint"), dpvCapabilityHint: $("dpvCapabilityHint"), swvTimingHint: $("swvTimingHint"), swvCapabilityHint: $("swvCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"), pt3PulseTimingHint: $("pt3PulseTimingHint"), pt3PulseCapabilityHint: $("pt3PulseCapabilityHint"),
-  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Live: $("pt3LiveButton"), pt3ReCal: $("pt3ReCalButton"), pt3ReCalRaw: $("pt3ReCalRaw"), pt3ReCalDelta: $("pt3ReCalDelta"), pt3ReCalCeResidual: $("pt3ReCalCeResidual"), pt3ReCalLeakage: $("pt3ReCalLeakage"), pt3ReCalState: $("pt3ReCalState"), downloadPt3ReCal: $("downloadPt3ReCalButton"),
-  pt3PulseLow: $("pt3PulseLow"), pt3PulseHigh: $("pt3PulseHigh"), pt3PulseVgs: $("pt3PulseVgs"), pt3PulseWidth: $("pt3PulseWidth"), pt3PulsePeriod: $("pt3PulsePeriod"), pt3PulseCount: $("pt3PulseCount"), pt3PulsePretrigger: $("pt3PulsePretrigger"), pt3PulseOutputPeriod: $("pt3PulseOutputPeriod"), pt3PulseSettle: $("pt3PulseSettle"), pt3PulseSinc3: $("pt3PulseSinc3"), pt3PulseSinc2: $("pt3PulseSinc2"), pt3PulseNotch: $("pt3PulseNotch"), pt3PulseCalDft: $("pt3PulseCalDft"), pt3PulseLowSet: $("pt3PulseLowSet"), pt3PulseHighSet: $("pt3PulseHighSet"), pt3PulseGateSet: $("pt3PulseGateSet"),
+  pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Rtia: $("pt3Rtia"), pt3Live: $("pt3LiveButton"), pt3ReCal: $("pt3ReCalButton"), pt3ReCalRaw: $("pt3ReCalRaw"), pt3ReCalDelta: $("pt3ReCalDelta"), pt3ReCalCeResidual: $("pt3ReCalCeResidual"), pt3ReCalLeakage: $("pt3ReCalLeakage"), pt3ReCalState: $("pt3ReCalState"), downloadPt3ReCal: $("downloadPt3ReCalButton"),
+  pt3PulseLow: $("pt3PulseLow"), pt3PulseHigh: $("pt3PulseHigh"), pt3PulseVgs: $("pt3PulseVgs"), pt3PulseWidth: $("pt3PulseWidth"), pt3PulsePeriod: $("pt3PulsePeriod"), pt3PulseCount: $("pt3PulseCount"), pt3PulsePretrigger: $("pt3PulsePretrigger"), pt3PulseOutputPeriod: $("pt3PulseOutputPeriod"), pt3PulseSettle: $("pt3PulseSettle"), pt3PulseSinc3: $("pt3PulseSinc3"), pt3PulseSinc2: $("pt3PulseSinc2"), pt3PulseNotch: $("pt3PulseNotch"), pt3PulseCalDft: $("pt3PulseCalDft"), pt3PulseRtia: $("pt3PulseRtia"), pt3PulseLowSet: $("pt3PulseLowSet"), pt3PulseHighSet: $("pt3PulseHighSet"), pt3PulseGateSet: $("pt3PulseGateSet"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
   probe: $("probeButton"),
   plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"), transportState: $("transportState"),
@@ -213,6 +214,7 @@ function refreshControlAvailability() {
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
   [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported || pt3Running; });
   elements.pt3CalDft.disabled = !connected || !state.pt3CalibrationDftSupported || pt3Running;
+  elements.pt3Rtia.disabled = !connected || !state.pt3RtiaSelectSupported || pt3Running;
   elements.pt3Period.min = state.pt3HighRateSupported && state.nusB2QueueSupported ? "5" : "10";
   elements.pt3PulseOutputPeriod.min = state.pt3HighRateSupported && state.nusB2QueueSupported ? "5" : "10";
   if (!connected) {
@@ -234,13 +236,15 @@ function refreshControlAvailability() {
   }
 
   const pt3PulseRunning = connected && state.running && state.mode === "PT3P";
-  const pt3PulseControls = [elements.pt3PulseLow, elements.pt3PulseHigh, elements.pt3PulseVgs, elements.pt3PulseWidth, elements.pt3PulsePeriod, elements.pt3PulseCount, elements.pt3PulsePretrigger, elements.pt3PulseOutputPeriod, elements.pt3PulseSettle, elements.pt3PulseSinc3, elements.pt3PulseSinc2, elements.pt3PulseNotch, elements.pt3PulseCalDft];
+  const pt3PulseControls = [elements.pt3PulseLow, elements.pt3PulseHigh, elements.pt3PulseVgs, elements.pt3PulseWidth, elements.pt3PulsePeriod, elements.pt3PulseCount, elements.pt3PulsePretrigger, elements.pt3PulseOutputPeriod, elements.pt3PulseSettle, elements.pt3PulseSinc3, elements.pt3PulseSinc2, elements.pt3PulseNotch, elements.pt3PulseCalDft, elements.pt3PulseRtia];
   pt3PulseControls.forEach((control) => { control.disabled = !connected || !state.pt3VdsPulseSupported || pt3PulseRunning; });
   elements.pt3PulseCapabilityHint.classList.toggle("ready", connected && state.pt3VdsPulseSupported);
   if (!connected) {
     elements.pt3PulseCapabilityHint.textContent = "Connect to check sequencer VDS-pulse capability before applying PT3P parameters.";
   } else if (state.pt3VdsPulseSupported) {
-    elements.pt3PulseCapabilityHint.textContent = "PT3_VDS_PULSE detected. The AD5940 sequencer writes CE0/VBIAS0 high and low codes with its 16 MHz clock; current samples remain the raw free-running SINC2 stream.";
+    elements.pt3PulseCapabilityHint.textContent = state.pt3RtiaSelectSupported
+      ? "PT3_VDS_PULSE + PT3_RTIA_SELECT detected. The AD5940 sequencer writes CE0/VBIAS0 high and low codes with its 16 MHz clock; 5/10/20 kΩ HSTIA is calibrated before RUN and current samples remain the raw free-running SINC2 stream."
+      : "PT3_VDS_PULSE detected. The AD5940 sequencer writes CE0/VBIAS0 high and low codes with its 16 MHz clock; current samples remain the raw free-running SINC2 stream.";
   } else if (state.mode === "PT3P") {
     elements.pt3PulseCapabilityHint.textContent = "This controller does not advertise PT3_VDS_PULSE. Install controller V41 or later before using sequencer-timed VDS pulses.";
   } else {
@@ -525,6 +529,7 @@ function handleTextLine(line) {
     state.pt3Supported = line.includes("PT3");
     state.pt3DspSupported = line.includes("PT3_DSP");
     state.pt3CalibrationDftSupported = line.includes("PT3_CAL_DFT");
+    state.pt3RtiaSelectSupported = line.includes("PT3_RTIA_SELECT");
     state.pt3LiveDacSupported = line.includes("PT3_LIVE_DAC");
     state.pt3HighRateSupported = line.includes("PT3_200SPS");
     state.pt3VdsPulseSupported = line.includes("PT3_VDS_PULSE");
@@ -537,7 +542,7 @@ function handleTextLine(line) {
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
     log(state.dpvSupported ? "DPV paired-pulse capability detected." : "DPV capability not advertised by this firmware.", state.dpvSupported ? "INFO" : "WARN");
     log(state.swvSupported ? "SWV paired-pulse capability detected." : "SWV capability not advertised by this firmware.", state.swvSupported ? "INFO" : "WARN");
-    log(state.pt3HighRateSupported && state.nusB2QueueSupported ? "PT3 200 SPS and queued B2 transport capability detected." : state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
+    log(state.pt3RtiaSelectSupported ? "PT3 5/10/20 kOhm HSTIA RTIA selection detected; firmware calibrates the selected RTIA before each RUN." : state.pt3HighRateSupported && state.nusB2QueueSupported ? "PT3 200 SPS and queued B2 transport capability detected." : state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
     if (state.pt3ReCalibrationSupported) log("PT3_RE_CAL detected: VRE0/VSE0/VCE0 raw ADC baseline is available only while idle.");
     updatePt3Preview();
     updatePt3PulsePreview();
@@ -583,7 +588,7 @@ function handleTextLine(line) {
     state.pt3Applied = { ...state.pendingPt3, updateKind: "CONFIG", acknowledgedAt: new Date().toISOString() };
     state.pt3History.push(state.pt3Applied);
     state.pendingPt3 = null;
-    elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} output SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}, cal DFT ${state.pt3Applied.calDft}`;
+    elements.pt3RouteState.textContent = `ACK: ${state.pt3Applied.rawSps.toFixed(1)} raw SPS → ${state.pt3Applied.outputSps.toFixed(1)} output SPS; S3 ${state.pt3Applied.sinc3}, S2 ${state.pt3Applied.sinc2}, cal DFT ${state.pt3Applied.calDft}, HSTIA ${(state.pt3Applied.rtia / 1000).toFixed(state.pt3Applied.rtia === 10000 ? 0 : 1)} kΩ`;
     log("PT3 configuration acknowledged; DAC/pad trace and DSP metadata updated.");
     schedulePlot();
   }
@@ -691,7 +696,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-    state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
+  state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3RtiaSelectSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -712,7 +717,7 @@ async function connectInstrument() {
 
 function onInstrumentDisconnected() {
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3RtiaSelectSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -911,7 +916,7 @@ function updatePt3Preview() {
     elements.pt3SeSet.textContent = `${formatMv(setpoints.seMv)} fixed`;
     const notch = setpoints.notch ? "SINC2 notch enabled" : "SINC2 notch bypassed";
     const transport = state.pt3HighRateSupported && state.nusB2QueueSupported ? "V39 sends up to three contiguous raw samples in each B2 notification and exposes actual queue overflow." : "Legacy firmware sends one raw sample per notification and is limited to 100 SPS.";
-    elements.pt3TimingHint.textContent = `Raw time stream ≈ ${setpoints.rawSps.toFixed(2)} samples/s; output ≈ ${setpoints.outputSps.toFixed(2)} samples/s (every ${setpoints.outputDecimation} raw conversion; requested ${setpoints.period} ms, actual ≈ ${setpoints.actualOutputPeriodMs.toFixed(2)} ms). ${notch}. ${transport} RTIA calibration uses ${setpoints.calDft}-point DFT only; it does not filter time-stream samples. Default 90 s settling applies after RUN.`;
+    elements.pt3TimingHint.textContent = `Raw time stream ≈ ${setpoints.rawSps.toFixed(2)} samples/s; output ≈ ${setpoints.outputSps.toFixed(2)} samples/s (every ${setpoints.outputDecimation} raw conversion; requested ${setpoints.period} ms, actual ≈ ${setpoints.actualOutputPeriodMs.toFixed(2)} ms). ${notch}. ${transport} HSTIA RTIA ${setpoints.rtia / 1000} kΩ is calibrated before every RUN; calibration uses ${setpoints.calDft}-point DFT only and does not filter time-stream samples. Default 90 s settling applies after RUN.`;
   } catch {
     elements.pt3VbiasSet.textContent = "Invalid PT3 input";
     elements.pt3VzeroSet.textContent = "Invalid PT3 input";
@@ -923,7 +928,7 @@ function updatePt3Preview() {
 function readPt3Config() {
   const config = {
     vds: integer("pt3Vds"), vgs: integer("pt3Vgs"), period: integer("pt3Period"), settle: integer("pt3Settle"),
-    sinc3: integer("pt3Sinc3"), sinc2: integer("pt3Sinc2"), notch: integer("pt3Notch"), calDft: integer("pt3CalDft"),
+    sinc3: integer("pt3Sinc3"), sinc2: integer("pt3Sinc2"), notch: integer("pt3Notch"), calDft: integer("pt3CalDft"), rtia: integer("pt3Rtia"),
   };
   const supportedSinc3 = [2, 4, 5];
   const supportedSinc2 = [533, 800, 1067, 1333];
@@ -933,12 +938,13 @@ function readPt3Config() {
   const minPeriodMs = highRateTransportReady ? 5 : 10;
   const timing = calculatePt3Timing(config);
   const minVds = state.pt3ZeroVdsSupported ? 0 : 100;
-  if (!Object.values(config).every(Number.isFinite) || config.vds < minVds || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < minPeriodMs || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > maxOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error(`PT3 timing or DSP settings are outside the guarded 100–800 raw SPS / ${maxOutputSps} target-output-SPS range. VDS 0 requires V42 PT3_ZERO_VDS.`);
+  if (!Object.values(config).every(Number.isFinite) || config.vds < minVds || config.vds > 1100 || config.vgs < -800 || config.vgs > 1000 || config.period < minPeriodMs || config.period > 1000 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || ![5000, 10000, 20000].includes(config.rtia) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.requestedOutputSps > maxOutputSps || timing.outputSps > timing.requestedOutputSps * 1.02) throw new Error(`PT3 timing, DSP, or guarded 5/10/20 kΩ HSTIA RTIA selection is invalid. VDS 0 requires V42 PT3_ZERO_VDS.`);
+  if (config.rtia !== 10000 && !state.pt3RtiaSelectSupported) throw new Error("5/20 kΩ HSTIA selection requires V52 PT3_RTIA_SELECT firmware.");
   return config;
 }
 
 function calculatePt3PulseSetpoints(config) {
-  const common = { vgs: config.vgs, period: config.outputPeriod, settle: config.settle, sinc3: config.sinc3, sinc2: config.sinc2, notch: config.notch, calDft: config.calDft };
+  const common = { vgs: config.vgs, period: config.outputPeriod, settle: config.settle, sinc3: config.sinc3, sinc2: config.sinc2, notch: config.notch, calDft: config.calDft, rtia: config.rtia };
   const low = calculatePt3Setpoints({ ...common, vds: config.low });
   const high = calculatePt3Setpoints({ ...common, vds: config.high });
   return { ...config, ...low, low, high, lowActualVdsMv: low.actualVdsMv, highActualVdsMv: high.actualVdsMv };
@@ -946,16 +952,17 @@ function calculatePt3PulseSetpoints(config) {
 
 function readPt3PulseConfig() {
   const config = {
-    low: integer("pt3PulseLow"), high: integer("pt3PulseHigh"), vgs: integer("pt3PulseVgs"), width: integer("pt3PulseWidth"), period: integer("pt3PulsePeriod"), count: integer("pt3PulseCount"), pretrigger: integer("pt3PulsePretrigger"), outputPeriod: integer("pt3PulseOutputPeriod"), settle: integer("pt3PulseSettle"), sinc3: integer("pt3PulseSinc3"), sinc2: integer("pt3PulseSinc2"), notch: integer("pt3PulseNotch"), calDft: integer("pt3PulseCalDft"),
+    low: integer("pt3PulseLow"), high: integer("pt3PulseHigh"), vgs: integer("pt3PulseVgs"), width: integer("pt3PulseWidth"), period: integer("pt3PulsePeriod"), count: integer("pt3PulseCount"), pretrigger: integer("pt3PulsePretrigger"), outputPeriod: integer("pt3PulseOutputPeriod"), settle: integer("pt3PulseSettle"), sinc3: integer("pt3PulseSinc3"), sinc2: integer("pt3PulseSinc2"), notch: integer("pt3PulseNotch"), calDft: integer("pt3PulseCalDft"), rtia: integer("pt3PulseRtia"),
   };
   const supportedSinc3 = [2, 4, 5]; const supportedSinc2 = [533, 800, 1067, 1333]; const supportedCalibrationDft = [256, 512, 1024, 2048, 4096];
   const highRateTransportReady = state.pt3HighRateSupported && state.nusB2QueueSupported;
   const minimumOutputPeriod = highRateTransportReady ? 5 : 10;
   const timing = calculatePt3Timing({ ...config, period: config.outputPeriod });
   const minVds = state.pt3ZeroVdsSupported ? 0 : 100;
-  if (!Object.values(config).every(Number.isFinite) || config.low < minVds || config.low > 1100 || config.high < minVds || config.high > 1100 || config.low === config.high || config.vgs < -800 || config.vgs > 1000 || config.width < 5 || config.width > 500 || config.period < 10 || config.period > 1000 || config.width >= config.period || config.count < 1 || config.count > 100 || config.pretrigger < 0 || config.pretrigger > 1000 || config.outputPeriod < minimumOutputPeriod || config.outputPeriod > 1000 || 1000 % config.outputPeriod !== 0 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.outputSps > (highRateTransportReady ? PT3.maxRequestedOutputSps : PT3.legacyMaxRequestedOutputSps) || config.width * timing.outputSps < 1000) {
+  if (!Object.values(config).every(Number.isFinite) || config.low < minVds || config.low > 1100 || config.high < minVds || config.high > 1100 || config.low === config.high || config.vgs < -800 || config.vgs > 1000 || config.width < 5 || config.width > 500 || config.period < 10 || config.period > 1000 || config.width >= config.period || config.count < 1 || config.count > 100 || config.pretrigger < 0 || config.pretrigger > 1000 || config.outputPeriod < minimumOutputPeriod || config.outputPeriod > 1000 || 1000 % config.outputPeriod !== 0 || config.settle < 1000 || config.settle > 120000 || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || ![0, 1].includes(config.notch) || !supportedCalibrationDft.includes(config.calDft) || ![5000, 10000, 20000].includes(config.rtia) || timing.rawSps < PT3.minRawSps || timing.rawSps > PT3.maxRawSps || timing.outputSps > (highRateTransportReady ? PT3.maxRequestedOutputSps : PT3.legacyMaxRequestedOutputSps) || config.width * timing.outputSps < 1000) {
     throw new Error("PT3P parameters violate the sequencer, DAC, or raw-stream guard. Use a high phase at least one acknowledged output interval long.");
   }
+  if (config.rtia !== 10000 && !state.pt3RtiaSelectSupported) throw new Error("5/20 kΩ HSTIA selection requires V52 PT3_RTIA_SELECT firmware.");
   return config;
 }
 
@@ -1014,6 +1021,7 @@ function configCommand() {
     const applied = state.pt3CalibrationDftSupported ? config : { ...config, calDft: 1024 };
     const dspApplied = state.pt3DspSupported ? applied : { ...applied, sinc3: 5, sinc2: 800, notch: 0 };
     state.pendingPt3 = calculatePt3Setpoints(dspApplied);
+    if (state.pt3RtiaSelectSupported) return `CFG,PT3,${dspApplied.vds},${dspApplied.vgs},${dspApplied.period},${dspApplied.settle},${dspApplied.sinc3},${dspApplied.sinc2},${dspApplied.notch},${dspApplied.calDft},${dspApplied.rtia}`;
     if (state.pt3CalibrationDftSupported) return `CFG,PT3,${dspApplied.vds},${dspApplied.vgs},${dspApplied.period},${dspApplied.settle},${dspApplied.sinc3},${dspApplied.sinc2},${dspApplied.notch},${dspApplied.calDft}`;
     return state.pt3DspSupported
       ? `CFG,PT3,${dspApplied.vds},${dspApplied.vgs},${dspApplied.period},${dspApplied.settle},${dspApplied.sinc3},${dspApplied.sinc2},${dspApplied.notch}`
@@ -1022,7 +1030,8 @@ function configCommand() {
   if (state.mode === "PT3P") {
     const setpoints = calculatePt3PulseSetpoints(config);
     state.pendingPt3Pulse = setpoints;
-    return `CFG,PT3P,${config.low},${config.high},${config.vgs},${config.width},${config.period},${config.count},${config.pretrigger},${config.outputPeriod},${config.settle},${config.sinc3},${config.sinc2},${config.notch},${config.calDft}`;
+    const rtiaField = state.pt3RtiaSelectSupported ? `,${config.rtia}` : "";
+    return `CFG,PT3P,${config.low},${config.high},${config.vgs},${config.width},${config.period},${config.count},${config.pretrigger},${config.outputPeriod},${config.settle},${config.sinc3},${config.sinc2},${config.notch},${config.calDft}${rtiaField}`;
   }
   return `CFG,CV,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia}`;
 }
@@ -1173,8 +1182,8 @@ function updatePlotWindow() {
 
 function downloadCsv() {
   if (!state.samples.length) return;
-  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pulse_pair_index,pulse_raw_phase,pulse_i2_minus_i1_uA,pulse_pair_gap,pulse_adi_convention,pulse_adi_vre_minus_vse_start_mV,pulse_adi_vre_minus_vse_end_mV,pulse_standard_convention,pulse_standard_ewe_minus_re_start_mV,pulse_standard_ewe_minus_re_end_mV,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_output_rate_sps,pt3_actual_output_period_ms,pt3p_low_vds_mV,pt3p_high_vds_mV,pt3p_width_ms,pt3p_period_ms,pt3p_count,pt3p_pretrigger_ms,pt3p_start_sample_index,pt3p_edge_alignment,transport_format,transport_source_frame_hex,transport_batch_count,transport_batch_offset,transport_gap_before,transport_run_boundary";
-  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pulse ? s.pulse.pairIndex : ""},${s.pulse ? s.pulse.phase : ""},${s.pulse && Number.isFinite(s.pulse.differenceUa) ? s.pulse.differenceUa : ""},${s.pulse?.pairGap ? "TRUE" : ""},${s.pulse?.potential ? "VRE_MINUS_VSE_EQUALS_VBIAS_MINUS_VZERO" : ""},${s.pulse?.potential ? s.pulse.potential.adiStartMv : ""},${s.pulse?.potential ? s.pulse.potential.adiEndMv : ""},${s.pulse?.potential ? "EWE_MINUS_RE_EQUALS_NEGATIVE_OF_VRE_MINUS_VSE" : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReStartMv : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReEndMv : ""},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.low : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.high : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.width : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.period : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.count : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.pretrigger : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.startSampleIndex : ""},${s.mode === "PT3P" && s.pt3 ? "SAMPLE_INDEX_BRACKET_NOT_ADC_TRIGGER" : ""},${s.transport?.format ?? ""},${s.transport ? `0x${s.transport.sourceFrameType.toString(16).padStart(2, "0")}` : ""},${s.transport?.batchCount ?? ""},${s.transport?.batchOffset ?? ""},${s.transport?.gapBefore ?? ""},${s.transport?.runBoundary ? "TRUE" : ""}`);
+  const header = "mode,sample_index,calculated_current_uA,received_at_iso,pulse_pair_index,pulse_raw_phase,pulse_i2_minus_i1_uA,pulse_pair_gap,pulse_adi_convention,pulse_adi_vre_minus_vse_start_mV,pulse_adi_vre_minus_vse_end_mV,pulse_standard_convention,pulse_standard_ewe_minus_re_start_mV,pulse_standard_ewe_minus_re_end_mV,pt3_setpoint_update,pt3_vbias_dac_set_mV,pt3_vzero_dac_set_mV,pt3_ce0_set_mV,pt3_se0_set_mV,pt3_re0_state,pt3_sinc3_osr,pt3_sinc2_osr,pt3_sinc2_notch_enabled,pt3_rtia_calibration_dft_points,pt3_hstia_rtia_nominal_ohm,pt3_raw_sample_rate_sps,pt3_output_decimation,pt3_output_rate_sps,pt3_actual_output_period_ms,pt3p_low_vds_mV,pt3p_high_vds_mV,pt3p_width_ms,pt3p_period_ms,pt3p_count,pt3p_pretrigger_ms,pt3p_start_sample_index,pt3p_edge_alignment,transport_format,transport_source_frame_hex,transport_batch_count,transport_batch_offset,transport_gap_before,transport_run_boundary";
+  const rows = state.samples.map((s) => `${s.mode},${s.index},${s.currentUa},${s.receivedAt},${s.pulse ? s.pulse.pairIndex : ""},${s.pulse ? s.pulse.phase : ""},${s.pulse && Number.isFinite(s.pulse.differenceUa) ? s.pulse.differenceUa : ""},${s.pulse?.pairGap ? "TRUE" : ""},${s.pulse?.potential ? "VRE_MINUS_VSE_EQUALS_VBIAS_MINUS_VZERO" : ""},${s.pulse?.potential ? s.pulse.potential.adiStartMv : ""},${s.pulse?.potential ? s.pulse.potential.adiEndMv : ""},${s.pulse?.potential ? "EWE_MINUS_RE_EQUALS_NEGATIVE_OF_VRE_MINUS_VSE" : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReStartMv : ""},${s.pulse?.potential ? s.pulse.potential.standardEweReEndMv : ""},${s.pt3 ? s.pt3.updateKind : ""},${s.pt3 ? s.pt3.vbiasMv : ""},${s.pt3 ? s.pt3.vzeroMv : ""},${s.pt3 ? s.pt3.ceMv : ""},${s.pt3 ? s.pt3.seMv : ""},${s.pt3 ? "OPEN" : ""},${s.pt3 ? s.pt3.sinc3 : ""},${s.pt3 ? s.pt3.sinc2 : ""},${s.pt3 ? s.pt3.notch : ""},${s.pt3 ? s.pt3.calDft : ""},${s.pt3 ? s.pt3.rtia : ""},${s.pt3 ? s.pt3.rawSps : ""},${s.pt3 ? s.pt3.outputDecimation : ""},${s.pt3 ? s.pt3.outputSps : ""},${s.pt3 ? s.pt3.actualOutputPeriodMs : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.low : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.high : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.width : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.period : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.count : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.pretrigger : ""},${s.mode === "PT3P" && s.pt3 ? s.pt3.startSampleIndex : ""},${s.mode === "PT3P" && s.pt3 ? "SAMPLE_INDEX_BRACKET_NOT_ADC_TRIGGER" : ""},${s.transport?.format ?? ""},${s.transport ? `0x${s.transport.sourceFrameType.toString(16).padStart(2, "0")}` : ""},${s.transport?.batchCount ?? ""},${s.transport?.batchOffset ?? ""},${s.transport?.gapBefore ?? ""},${s.transport?.runBoundary ? "TRUE" : ""}`);
   const blob = new Blob([[header, ...rows].join("\r\n")], { type: "text/csv" });
   const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `ad5940-received-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`; link.click(); URL.revokeObjectURL(link.href);
   log(`Downloaded ${state.samples.length} received frames as CSV.`);
