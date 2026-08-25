@@ -10,11 +10,11 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=158b462a38c3" />
+    <link rel="stylesheet" href="./styles.css?v=6c1962763908" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
     <script defer src="./vendor/tesseract/tesseract.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=588d98752b91"></script>
+    <script defer src="./app.js?v=36419fd404db"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -272,8 +272,8 @@
               <span>물품 검수자:</span>
               <strong id="previewReviewerName">검수자 미선택</strong>
               <span>(인)</span>
-              <img id="previewSignature" alt="입력한 검수자 서명" hidden />
             </div>
+            <img class="template-signature" id="previewSignature" alt="입력한 검수자 서명" hidden />
             <strong class="template-recipient" id="templateRecipient">가천대학교 총장 귀하</strong>
             <small class="template-page-number" id="previewPageNumber" hidden></small>
           </article>

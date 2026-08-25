@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "release": {
-    "controller_version": 44,
-    "capability": "PT3_RE_CAL+PT3_ZERO_VDS+PT3_VDS_PULSE+PT3_200SPS+NUS_B2_QUEUE+SPI0_SYNC_FALLBACK",
-    "secure_dfu_application_version": 45,
-    "package_filename": "AD5940_DFU_TEST_xxaa_s132_smoke_rc_lf_update_v44.zip",
-    "package_size_bytes": 66987,
-    "package_sha256": "19CAAC22843721196934CF1723ABAAE73518ED4A750A44A90F776848F8CC5A64"
+    "controller_version": 59,
+    "capability": "PT3_VZERO_MON+VMON3+PT3_LPDAC_STATE_TRACE+PT3_MONITOR_SETTLE_DROP5+PT3_RCAL_CHECK+PT3_RTIA_SELECT+PT3_ZERO_VDS+PT3_VDS_PULSE+PT3_200SPS+NUS_B2_QUEUE+SPI0_SYNC_FALLBACK",
+    "secure_dfu_application_version": 59,
+    "package_filename": "AD5940_DFU_TEST_xxaa_s132_smoke_rc_lf_update_v59.zip",
+    "package_size_bytes": 123699,
+    "package_sha256": "CB4F9A4680B29A5A20D03036FE9622604BC411D7C5E7D02DE50218417E687BBC"
   }
 }

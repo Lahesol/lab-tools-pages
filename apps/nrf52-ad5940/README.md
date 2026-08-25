@@ -90,11 +90,12 @@ returns `Q=<pending samples>`, `OVF=<actual queue overflows>`, and
 claiming lossless 200-SPS operation. See `docs/PT3_TRANSPORT_V39.md` for the
 on-air frame contract and physical validation procedure.
 
-V39 has a signed application-only OTA package. The catalogue in
-`firmware/latest.json` identifies it by its filename, byte size, and SHA-256.
-Choose that local ZIP in the browser's DFU panel; the browser checks the local
-file hash before it enables the DFU-entry step. The ZIP is deliberately not
-served from the static GUI deployment and no signing key is included there.
+The current signed application-only OTA package is identified by the catalogue
+in `firmware/latest.json`, including its controller release, filename, byte
+size, and SHA-256. Choose that local ZIP in the browser's DFU panel; the
+browser checks the local file hash before it enables the DFU-entry step. The
+ZIP is deliberately not served from the static GUI deployment and no signing
+key is included there.
 
 ## DPV and SWV paired-pulse boundary
 

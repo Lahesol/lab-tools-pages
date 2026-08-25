@@ -631,7 +631,7 @@ input[type="file"] {
 }
 
 .download-callout {
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .course-material-downloads {
@@ -648,16 +648,18 @@ input[type="file"] {
 
 .course-material-download-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 7px;
 }
 
 .course-material-download-button {
   width: 100%;
-  min-height: 36px;
-  border-color: var(--border-strong);
+  min-height: 34px;
+  border-color: var(--teal);
   background: #ffffff;
-  color: var(--text);
+  color: var(--teal-dark);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .library-download-row {
@@ -1626,10 +1628,6 @@ th:first-child {
 }
 
 @media (max-width: 600px) {
-  .course-material-download-row {
-    grid-template-columns: 1fr;
-  }
-
   .app-shell {
     padding: 10px;
   }

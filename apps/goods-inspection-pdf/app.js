@@ -92,6 +92,7 @@
     draggedPhotoId: null,
     reviewerName: "",
     signaturePosition: null,
+    signaturePositionContext: null,
     signatureDrag: null,
     inspectionDate: todayIso(),
     exporting: false,
@@ -311,6 +312,7 @@
         if (!event.target.checked || !TEMPLATE_CONFIGS[event.target.value]) return;
         state.templateId = event.target.value;
         state.signaturePosition = null;
+        state.signaturePositionContext = null;
         renderAll();
         showToast(`${getTemplateConfig().label}로 미리보기를 변경했습니다.`);
       });
@@ -332,6 +334,7 @@
       state.manualCount = BASE_ITEM_SLOTS;
       state.previewPage = 0;
       state.signaturePosition = null;
+      state.signaturePositionContext = null;
       resetRoiState();
       if (elements.roiDialog.open) elements.roiDialog.close();
       elements.invoiceResult.hidden = true;
@@ -349,7 +352,10 @@
       const previousReviewer = getSelectedReviewer();
       state.reviewerName = event.target.value;
       const nextReviewer = getSelectedReviewer();
-      if (previousReviewer?.id !== nextReviewer?.id) state.signaturePosition = null;
+      if (previousReviewer?.id !== nextReviewer?.id) {
+        state.signaturePosition = null;
+        state.signaturePositionContext = null;
+      }
       renderReviewerEntry();
       renderPreview();
       updateValidation();
@@ -2252,6 +2258,37 @@
     };
   }
 
+  function getSignaturePositionContext() {
+    const config = getTemplateConfig();
+    const rowCount = getItemRowCount();
+    const documentHeightMm = getDocumentHeightMm();
+    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * config.blockHeight;
+    return {
+      templateId: state.templateId,
+      rowCount,
+      documentHeightMm,
+      defaultYmm: config.inspectorY + extraHeight,
+    };
+  }
+
+  function syncSignaturePositionContext() {
+    const nextContext = getSignaturePositionContext();
+    const previousContext = state.signaturePositionContext;
+    if (state.signaturePosition && previousContext) {
+      const layoutChanged = previousContext.templateId !== nextContext.templateId
+        || previousContext.rowCount !== nextContext.rowCount
+        || previousContext.documentHeightMm !== nextContext.documentHeightMm;
+      if (layoutChanged) {
+        const offsetYmm = state.signaturePosition.y * previousContext.documentHeightMm - previousContext.defaultYmm;
+        state.signaturePosition = clampSignaturePosition({
+          x: state.signaturePosition.x,
+          y: (nextContext.defaultYmm + offsetYmm) / nextContext.documentHeightMm,
+        });
+      }
+    }
+    state.signaturePositionContext = nextContext;
+  }
+
   function clampSignaturePosition(position) {
     const fallback = getDefaultSignaturePosition();
     return {
@@ -2261,6 +2298,7 @@
   }
 
   function getSignaturePosition() {
+    syncSignaturePositionContext();
     return clampSignaturePosition(state.signaturePosition || getDefaultSignaturePosition());
   }
 
@@ -2326,6 +2364,7 @@
 
   function resetSignaturePosition() {
     state.signaturePosition = null;
+    state.signaturePositionContext = null;
     applySignaturePreviewPosition();
     elements.reviewerSignatureResetPositionButton.disabled = !getSelectedReviewer();
     showToast("전자서명을 기본 위치로 되돌렸습니다.");
@@ -2338,6 +2377,7 @@
     const slotCount = getPreviewSlotCount();
     const rowCount = getItemRowCount();
     const documentHeightMm = getDocumentHeightMm();
+    syncSignaturePositionContext();
     if (state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE) {
       const gridBottomY = config.gridStartY + rowCount * config.blockHeight;
       const confirmationY = gridBottomY + config.confirmationGap;

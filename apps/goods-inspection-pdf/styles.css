@@ -1249,13 +1249,14 @@ summary:focus-visible,
   font-weight: 700;
 }
 
-.template-inspector img {
+.template-signature {
   position: absolute;
   z-index: 4;
   left: 89.05%;
   top: 79.46%;
   width: 10.48%;
-  max-height: 5.05%;
+  height: auto;
+  max-height: 32px;
   transform: translate(-50%, -50%);
   object-fit: contain;
   opacity: 0.92;
@@ -1264,7 +1265,7 @@ summary:focus-visible,
   user-select: none;
 }
 
-.template-inspector img.is-dragging {
+.template-signature.is-dragging {
   cursor: grabbing;
   opacity: 1;
   filter: drop-shadow(0 3px 5px rgba(13, 52, 85, 0.25));
