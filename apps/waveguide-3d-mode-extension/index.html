@@ -11,7 +11,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>3D Rectangular Waveguide Mode Extension</title>
-    <link rel="stylesheet" href="styles.css?v=1266ec47b681" />
+    <link rel="stylesheet" href="styles.css?v=e52368ad6ae7" />
   </head>
   <body>
     <main>
@@ -30,10 +30,15 @@
             <option value="TE20">TE₂₀</option>
             <option value="TE30">TE₃₀</option>
             <option value="TE01">TE₀₁</option>
+            <option value="TE02">TE₀₂</option>
             <option value="TE11" selected>TE₁₁</option>
+            <option value="TE12">TE₁₂</option>
             <option value="TE21">TE₂₁</option>
+            <option value="TE22">TE₂₂</option>
             <option value="TM11">TM₁₁</option>
             <option value="TM21">TM₂₁</option>
+            <option value="TM12">TM₁₂</option>
+            <option value="TM22">TM₂₂</option>
           </select>
         </label>
         <label>Frequency <output id="frequencyLabel">20.00 GHz</output>
@@ -51,17 +56,26 @@
         <label>H-field scale
           <input id="hfieldscale" type="range" min="0" max="30" value="10" step="0.1" />
         </label>
+        <label>Vector thickness <output id="vectorThicknessLabel">1.00×</output>
+          <input id="vectorThickness" type="range" min="0.35" max="2.40" value="1" step="0.05" aria-label="Vector thickness" />
+        </label>
+        <label>Phase <output id="phaseLabel">0°</output>
+          <input id="phase" type="range" min="0" max="360" value="0" step="1" aria-label="Phase in degrees" />
+        </label>
+        <label>Slice position <output id="sliceLabel">50% · z/L = 0.50</output>
+          <input id="slice" type="range" min="0" max="100" value="50" step="1" aria-label="Cross-section position along z" />
+        </label>
         <label class="check"><input id="showE" type="checkbox" checked /> Show E field</label>
         <label class="check"><input id="showH" type="checkbox" checked /> Show H field</label>
-        <label class="check"><input id="showReflection" type="checkbox" checked /> Explain reflections</label>
-        <label>Reflection step
+        <label class="check"><input id="showReflection" type="checkbox" checked /> Show decomposition</label>
+        <label>Animated decomposition
           <select id="reflectionStep" aria-label="Reflection step selector">
             <option value="components">1 · diagonal components</option>
             <option value="boundaries">2 · wall reflection</option>
             <option value="sum" selected>3 · sum → guided mode</option>
           </select>
         </label>
-        <label class="check"><input id="freeze" type="checkbox" /> Freeze</label>
+        <label class="check"><input id="animatePhase" type="checkbox" checked /> Animate phase</label>
         <button id="resetView" type="button">Reset 3D view</button>
       </section>
 
@@ -69,13 +83,13 @@
         <section class="viewer-card" aria-labelledby="viewer-heading">
           <div class="card-heading">
             <div>
-              <p class="eyebrow">Drag to rotate · propagation along −z</p>
+              <p class="eyebrow">Drag to rotate · propagation along −z · orange plane = selected slice</p>
               <h2 id="viewer-heading">Three-dimensional field vectors</h2>
             </div>
             <span id="status" class="status">—</span>
           </div>
           <div id="webgldiv" aria-label="Interactive three-dimensional waveguide field visualizer">WebGL is required for the 3D view.</div>
-          <p class="legend"><span class="e">━</span> electric-field vectors &nbsp; <span class="h">━</span> magnetic-field vectors &nbsp; <span class="wall">▭</span> transparent conducting guide</p>
+          <p class="legend"><span class="e">━</span> electric-field vectors &nbsp; <span class="h">━</span> magnetic-field vectors &nbsp; <span class="trace">●</span> moving diagonal components &nbsp; <span class="slice">▭</span> selected slice &nbsp; <span class="wall">▭</span> transparent conducting guide</p>
         </section>
 
         <aside class="readout-card">
@@ -94,11 +108,11 @@
 
       <section class="map-card" aria-labelledby="map-heading">
         <div>
-          <p class="eyebrow">At the animated z-slice</p>
+          <p class="eyebrow">At the selected z-slice</p>
           <h2 id="map-heading">Transverse cross-section</h2>
         </div>
         <canvas id="2ddiv" width="1080" height="310" aria-label="Two-dimensional cross-section components"></canvas>
-        <p class="map-caption">Left: transverse E. Centre: transverse H. Right: axial component, where red • points out of the screen and blue × points into it.</p>
+        <p class="map-caption">Move the Slice position control to sample a different transverse plane. Left: transverse E. Centre: transverse H. Right: axial component, where red • points out of the screen and blue × points into it.</p>
       </section>
 
       <section class="reflection-card" aria-labelledby="reflection-heading">
@@ -107,12 +121,13 @@
           <h2 id="reflection-heading">Reflection explanation</h2>
         </div>
         <p id="reflectionSummary" class="reflection-summary"></p>
+        <p class="motion-readout">Moving arrowheads are phase-locked to the Phase control. Choose the first two stages to follow each component, then choose Sum to see their superposition with the guided field.</p>
         <canvas id="reflectionCanvas" width="1080" height="265" aria-label="Step-by-step plane-wave reflection explanation"></canvas>
         <p class="map-caption">The paths are a plane-wave decomposition and phase-path aid—not particle trajectories. The resulting field is the continuous eigenmode shown above.</p>
       </section>
 
       <footer>Educational analytical visualization; not a full-wave solver or a measured field map. Uses local Three.js r108 matching the original page's WebGL dependency.</footer>
     </main>
-    <script type="module" src="waveguide-3d.js?v=9"></script>
+    <script type="module" src="waveguide-3d.js?v=13"></script>
   </body>
 </html>

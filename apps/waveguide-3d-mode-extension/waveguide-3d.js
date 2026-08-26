@@ -12,29 +12,37 @@ const modes = {
   TE20: { family: 'TE', m: 2, n: 0, title: 'TE₂₀', description: 'Two-lobe TE mode across the broad-wall direction. Its axial magnetic field changes sign across the centre plane.' },
   TE30: { family: 'TE', m: 3, n: 0, title: 'TE₃₀', description: 'Three-lobe TE mode across the broad-wall direction.' },
   TE01: { family: 'TE', m: 0, n: 1, title: 'TE₀₁', description: 'TE mode with one variation across the narrow-wall dimension.' },
+  TE02: { family: 'TE', m: 0, n: 2, title: 'TE₀₂', description: 'Two-lobe TE mode across the narrow-wall dimension.' },
   TE11: { family: 'TE', m: 1, n: 1, title: 'TE₁₁', description: 'One transverse variation across both dimensions. Hᶻ has four alternating-sign lobes.' },
+  TE12: { family: 'TE', m: 1, n: 2, title: 'TE₁₂', description: 'One variation across width and two across height, with reflections from both wall pairs.' },
   TE21: { family: 'TE', m: 2, n: 1, title: 'TE₂₁', description: 'Two variations across width and one across height, yielding six Hᶻ lobes.' },
+  TE22: { family: 'TE', m: 2, n: 2, title: 'TE₂₂', description: 'Two transverse variations across both dimensions, producing a denser standing-field pattern.' },
   TM11: { family: 'TM', m: 1, n: 1, title: 'TM₁₁', description: 'Lowest TM mode. Eᶻ is nonzero inside the guide but zero at every conducting wall.' },
-  TM21: { family: 'TM', m: 2, n: 1, title: 'TM₂₁', description: 'TM mode with two opposite-sign Eᶻ lobes across the broad-wall direction.' }
+  TM21: { family: 'TM', m: 2, n: 1, title: 'TM₂₁', description: 'TM mode with two opposite-sign Eᶻ lobes across the broad-wall direction.' },
+  TM12: { family: 'TM', m: 1, n: 2, title: 'TM₁₂', description: 'TM mode with one width variation and two height variations in its longitudinal electric field.' },
+  TM22: { family: 'TM', m: 2, n: 2, title: 'TM₂₂', description: 'Higher-order TM mode with two transverse variations along both dimensions.' }
 };
 
 const ui = {
   mode: document.querySelector('#mode'), frequency: document.querySelector('#frequency'), width: document.querySelector('#width'), height: document.querySelector('#height'),
   frequencyLabel: document.querySelector('#frequencyLabel'), widthLabel: document.querySelector('#widthLabel'), heightLabel: document.querySelector('#heightLabel'),
-  eScale: document.querySelector('#efieldscale'), hScale: document.querySelector('#hfieldscale'), showE: document.querySelector('#showE'), showH: document.querySelector('#showH'), showReflection: document.querySelector('#showReflection'), reflectionStep: document.querySelector('#reflectionStep'), freeze: document.querySelector('#freeze'), reset: document.querySelector('#resetView'),
+  eScale: document.querySelector('#efieldscale'), hScale: document.querySelector('#hfieldscale'), vectorThickness: document.querySelector('#vectorThickness'), phase: document.querySelector('#phase'), slice: document.querySelector('#slice'), showE: document.querySelector('#showE'), showH: document.querySelector('#showH'), showReflection: document.querySelector('#showReflection'), reflectionStep: document.querySelector('#reflectionStep'), animatePhase: document.querySelector('#animatePhase'), reset: document.querySelector('#resetView'),
   status: document.querySelector('#status'), description: document.querySelector('#modeDescription'), equations: document.querySelector('#equations'), cutoff: document.querySelector('#cutoff'), ratio: document.querySelector('#ratio'), lambdaG: document.querySelector('#lambdaG'), axial: document.querySelector('#axial'),
+  vectorThicknessLabel: document.querySelector('#vectorThicknessLabel'), phaseLabel: document.querySelector('#phaseLabel'), sliceLabel: document.querySelector('#sliceLabel'),
   container: document.querySelector('#webgldiv'), map: document.querySelector('[id="2ddiv"]'), reflectionSummary: document.querySelector('#reflectionSummary'), reflectionCanvas: document.querySelector('#reflectionCanvas')
 };
 
-let camera, scene, renderer, group, guideGroup, arrowGroup, reflectionGroup, container;
+let camera, scene, renderer, group, guideGroup, arrowGroup, reflectionGroup, reflectionTracerGroup, sliceGroup, container;
 let fieldArrows = [];
 let reflectionPaths = [];
+let reflectionTracers = [];
 let targetRotation = -0.6, targetRotationY = 0.55;
 let targetRotationOnMouseDown = targetRotation, targetRotationOnMouseDownY = targetRotationY;
 let mouseXOnMouseDown = 0, mouseYOnMouseDown = 0;
 let phase = 0, previousAnimation = performance.now(), redraw = true;
 let wgW = 80, wgH = 36, wgL = 560;
 const arrowAxis = new THREE.Vector3(0, 1, 0);
+const arrowShaftGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
 
 function state() {
   return {
@@ -53,6 +61,23 @@ function propagation(s) {
   const fc = cutoffFrequency(s);
   const ratio = s.frequency / fc;
   return { fc, ratio, propagating: ratio > 1, betaVisual: ratio > 1 ? Math.sqrt(ratio * ratio - 1) * 0.72 : 0.16 };
+}
+
+function sliceZ() {
+  return -(Number(ui.slice.value) / 100) * wgL;
+}
+
+function updateControlLabels() {
+  const sliceFraction = Number(ui.slice.value) / 100;
+  ui.vectorThicknessLabel.value = `${Number(ui.vectorThickness.value).toFixed(2)}×`;
+  ui.sliceLabel.value = `${Math.round(sliceFraction * 100)}% · z/L = ${sliceFraction.toFixed(2)}`;
+  ui.phaseLabel.value = `${Math.round(Number(ui.phase.value))}°`;
+}
+
+function syncAnimatedPhaseControl() {
+  const degrees = ((phase * 180 / Math.PI) % 360 + 360) % 360;
+  ui.phase.value = String(Math.round(degrees));
+  ui.phaseLabel.value = `${Math.round(degrees)}°`;
 }
 
 function reflectionModel(s) {
@@ -83,6 +108,7 @@ function updateReadout() {
   ui.frequencyLabel.value = `${Number(ui.frequency.value).toFixed(2)} GHz`;
   ui.widthLabel.value = `${Number(ui.width.value).toFixed(2)} mm`;
   ui.heightLabel.value = `${Number(ui.height.value).toFixed(2)} mm`;
+  updateControlLabels();
   ui.description.textContent = s.mode.description;
   ui.status.textContent = p.propagating ? 'Propagating' : 'Below cutoff';
   ui.status.classList.toggle('below', !p.propagating);
@@ -105,11 +131,15 @@ function createArrow(color) {
   arrow.line.material.opacity = 0.88;
   arrow.cone.material.transparent = true;
   arrow.cone.material.opacity = 0.88;
+  arrow.line.visible = false;
+  const shaft = new THREE.Mesh(arrowShaftGeometry, arrow.cone.material);
+  arrow.add(shaft);
   arrow.userData = {
     direction: arrowAxis.clone(),
     targetQuaternion: new THREE.Quaternion(),
     displayedLength: 4.6,
-    initialised: false
+    initialised: false,
+    shaft
   };
   return arrow;
 }
@@ -121,12 +151,18 @@ function buildGeometry() {
   if (guideGroup) group.remove(guideGroup);
   if (arrowGroup) group.remove(arrowGroup);
   if (reflectionGroup) group.remove(reflectionGroup);
+  if (reflectionTracerGroup) group.remove(reflectionTracerGroup);
+  if (sliceGroup) group.remove(sliceGroup);
   guideGroup = new THREE.Group();
   arrowGroup = new THREE.Group();
   reflectionGroup = new THREE.Group();
+  reflectionTracerGroup = new THREE.Group();
+  sliceGroup = new THREE.Group();
   group.add(guideGroup);
   group.add(arrowGroup);
   group.add(reflectionGroup);
+  group.add(reflectionTracerGroup);
+  group.add(sliceGroup);
 
   const box = new THREE.BoxGeometry(wgW * 2, wgH * 2, wgL);
   const guide = new THREE.Mesh(box, new THREE.MeshPhongMaterial({ color: 0x587287, transparent: true, opacity: 0.10, side: THREE.DoubleSide, depthWrite: false }));
@@ -139,6 +175,7 @@ function buildGeometry() {
   const axisMaterial = new THREE.LineBasicMaterial({ color: 0x6b8799, transparent: true, opacity: 0.7 });
   const axisGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-wgW - 18, -wgH - 14, 2), new THREE.Vector3(-wgW - 18, -wgH - 14, -wgL - 18)]);
   guideGroup.add(new THREE.Line(axisGeometry, axisMaterial));
+  buildSliceMarker();
 
   fieldArrows = [];
   // Resolve the propagation direction more finely than the cross-section.
@@ -163,6 +200,23 @@ function buildGeometry() {
   buildReflectionOverlay(s);
 }
 
+function buildSliceMarker() {
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(wgW * 2, wgH * 2),
+    new THREE.MeshBasicMaterial({ color: 0xf2a13c, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false })
+  );
+  const outline = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(wgW * 2, wgH * 2)),
+    new THREE.LineBasicMaterial({ color: 0xc77718, transparent: true, opacity: 0.82, depthTest: false })
+  );
+  sliceGroup.add(plane, outline);
+  updateSliceMarker();
+}
+
+function updateSliceMarker() {
+  if (sliceGroup) sliceGroup.position.z = sliceZ();
+}
+
 function triangleFold(value) {
   const wrapped = value - Math.floor(value);
   return 1 - 4 * Math.abs(wrapped - 0.5);
@@ -174,9 +228,81 @@ function makeReflectionLine(points, color) {
   return new THREE.Line(geometry, material);
 }
 
+function diagonalSigns(model) {
+  return model.componentCount === 2 ? [[-1, 0], [1, 0]] : [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+}
+
+function componentPathPoint(s, index, t, bounced) {
+  const model = reflectionModel(s);
+  const [signX, signY] = diagonalSigns(model)[index];
+  const z = -t * wgL;
+  if (model.componentCount === 2) {
+    const variesX = model.transverseAxis === 'x';
+    const fold = bounced ? triangleFold((variesX ? s.mode.m : s.mode.n || 1) * t) : t;
+    return new THREE.Vector3(
+      variesX ? signX * wgW * fold : 0,
+      variesX ? 0 : signX * wgH * fold,
+      z
+    );
+  }
+  return new THREE.Vector3(
+    signX * wgW * (bounced ? triangleFold(Math.max(1, s.mode.m) * t) : t),
+    signY * wgH * (bounced ? triangleFold(Math.max(1, s.mode.n) * t + (index % 2) * 0.5) : t),
+    z
+  );
+}
+
+function createReflectionTracer(color) {
+  const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 20, color, 5.5, 2.8);
+  arrow.line.material.transparent = true;
+  arrow.cone.material.transparent = true;
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(2.9, 12, 8),
+    new THREE.MeshBasicMaterial({ color, transparent: true })
+  );
+  arrow.add(marker);
+  return { arrow, marker };
+}
+
+function setTracerOpacity(tracer, opacity) {
+  tracer.arrow.line.material.opacity = opacity;
+  tracer.arrow.cone.material.opacity = opacity;
+  tracer.marker.material.opacity = opacity;
+}
+
+function buildReflectionTracers(s) {
+  reflectionTracers = [];
+  const colors = [0xf2a13c, 0x16749a, 0xd85e3c, 0x459ac0];
+  diagonalSigns(reflectionModel(s)).forEach((_, index) => {
+    const tracer = createReflectionTracer(colors[index % colors.length]);
+    reflectionTracerGroup.add(tracer.arrow);
+    reflectionTracers.push(tracer);
+  });
+}
+
+function updateReflectionTracers(s, step, visible) {
+  if (!reflectionTracerGroup) return;
+  reflectionTracerGroup.visible = visible;
+  const bounced = step !== 'components';
+  const baseProgress = ((phase / (Math.PI * 2)) % 1 + 1) % 1;
+  reflectionTracers.forEach((tracer, index) => {
+    tracer.arrow.visible = visible;
+    if (!visible) return;
+    const progress = (baseProgress + index * 0.19) % 1;
+    const point = componentPathPoint(s, index, progress, bounced);
+    const ahead = componentPathPoint(s, index, Math.min(1, progress + 0.009), bounced);
+    const behind = componentPathPoint(s, index, Math.max(0, progress - 0.009), bounced);
+    const direction = (progress > 0.988 ? point.clone().sub(behind) : ahead.clone().sub(point)).normalize();
+    tracer.arrow.position.copy(point);
+    tracer.arrow.setDirection(direction);
+    tracer.arrow.setLength(20, 5.5, 2.8);
+    setTracerOpacity(tracer, step === 'sum' ? 0.42 : 0.96);
+  });
+}
+
 function buildReflectionOverlay(s) {
   const model = reflectionModel(s);
-  const signs = model.componentCount === 2 ? [[-1, 0], [1, 0]] : [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  const signs = diagonalSigns(model);
   reflectionPaths = [];
   for (let index = 0; index < signs.length; index += 1) {
     const [signX, signY] = signs[index];
@@ -207,6 +333,7 @@ function buildReflectionOverlay(s) {
     reflectionGroup.add(incident, reflected);
     reflectionPaths.push({ incident, reflected });
   }
+  buildReflectionTracers(s);
   updateReflectionOverlay(s);
 }
 
@@ -221,6 +348,7 @@ function updateReflectionOverlay(s) {
     path.reflected.visible = visible && step !== 'components';
     path.reflected.material.opacity = step === 'sum' ? 0.26 : 0.88;
   }
+  updateReflectionTracers(s, step, visible);
   if (visible && step === 'boundaries') {
     ui.status.textContent = `${reflectionModel(s).componentCount}-wave wall reflection`;
   }
@@ -279,11 +407,14 @@ function updateArrow(arrow, vector, scale, show, delta) {
   // short, translucent arrow near a field null lets the reversal read as a
   // continuous rotation/fade rather than a disappearing, reappearing glyph.
   const headLength = Math.min(3.8, Math.max(1.5, data.displayedLength * 0.42));
-  const headWidth = Math.min(2.1, Math.max(0.9, data.displayedLength * 0.22));
+  const thickness = Number(ui.vectorThickness.value);
+  const headWidth = Math.min(5.0, Math.max(0.45, data.displayedLength * 0.22 * thickness));
   const opacity = 0.12 + 0.76 * Math.min(1, magnitude / 0.11);
-  arrow.line.material.opacity = opacity;
   arrow.cone.material.opacity = opacity;
   arrow.setLength(data.displayedLength, headLength, headWidth);
+  const shaftLength = Math.max(0.05, data.displayedLength - headLength);
+  data.shaft.scale.set(thickness * 1.25, shaftLength, thickness * 1.25);
+  data.shaft.position.y = shaftLength / 2;
 }
 
 function drawArrow2D(ctx, x, y, vx, vy, color) {
@@ -300,12 +431,14 @@ function drawArrow2D(ctx, x, y, vx, vy, color) {
 function drawCrossSection(s, p) {
   const canvas = ui.map, ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height, gap = 24, panelW = (W - gap * 4) / 3, panelH = H - 68;
+  const z = sliceZ();
+  const sliceText = `z/L = ${(Math.abs(z) / wgL).toFixed(2)}`;
   const showAxial = (s.mode.family === 'TE' && ui.showH.checked) || (s.mode.family === 'TM' && ui.showE.checked);
   ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#fafcfd'; ctx.fillRect(0, 0, W, H);
   ctx.textBaseline = 'alphabetic';
   const aspect = Math.min(2.7, Math.max(.65, s.a / s.b));
   const mapW = Math.min(panelW - 42, panelH * aspect), mapH = mapW / aspect;
-  const headings = ['Transverse E', 'Transverse H', `${s.mode.family === 'TE' ? 'Hᶻ' : 'Eᶻ'} sign`];
+  const headings = [`Transverse E · ${sliceText}`, `Transverse H · ${sliceText}`, `${s.mode.family === 'TE' ? 'Hᶻ' : 'Eᶻ'} sign · ${sliceText}`];
   for (let panel = 0; panel < 3; panel += 1) {
     const px = gap + panel * (panelW + gap), gx = px + (panelW - mapW) / 2, gy = 38 + (panelH - mapH) / 2;
     ctx.fillStyle = '#405d70'; ctx.font = '600 15px Segoe UI, Arial, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(headings[panel], px, 23);
@@ -315,7 +448,7 @@ function drawCrossSection(s, p) {
       for (let col = 0; col < cols; col += 1) {
         const x = -wgW + (col + .5) / cols * wgW * 2;
         const y = -wgH + (row + .5) / rows * wgH * 2;
-        const f = fieldAt(x, y, 0, s, p);
+        const f = fieldAt(x, y, z, s, p);
         if (panel === 2 && showAxial) {
           const alpha = Math.min(.68, Math.abs(f.axial) * .42);
           ctx.fillStyle = f.axial >= 0 ? `rgba(215,48,50,${alpha})` : `rgba(23,111,193,${alpha})`;
@@ -329,7 +462,7 @@ function drawCrossSection(s, p) {
         const x = -wgW + (col + .5) / cols * wgW * 2;
         const y = -wgH + (row + .5) / rows * wgH * 2;
         const sx = gx + (col + .5) / cols * mapW, sy = gy + (row + .5) / rows * mapH;
-        const f = fieldAt(x, y, 0, s, p);
+        const f = fieldAt(x, y, z, s, p);
         if (panel === 0 && ui.showE.checked) drawArrow2D(ctx, sx, sy, f.e.x, -f.e.y, '#d73032');
         if (panel === 1 && ui.showH.checked) drawArrow2D(ctx, sx, sy, f.h.x, -f.h.y, '#176fc1');
         if (panel === 2 && showAxial && Math.abs(f.axial) > .09 && col % 2 === 0 && row % 2 === 0) {
@@ -347,6 +480,13 @@ function drawCanvasSegment(ctx, x1, y1, x2, y2, color, width = 2) {
   ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
   ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - ux * 8 - uy * 4, y2 - uy * 8 + ux * 4); ctx.lineTo(x2 - ux * 8 + uy * 4, y2 - uy * 8 - ux * 4); ctx.closePath(); ctx.fill();
+}
+
+function drawMotionMarker(ctx, x, y, color) {
+  ctx.fillStyle = 'rgba(255,255,255,.92)';
+  ctx.beginPath(); ctx.arc(x, y, 6.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, 3.9, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawReflectionLesson(s) {
@@ -375,7 +515,10 @@ function drawReflectionLesson(s) {
       rays.forEach((offset, index) => {
         const startY = gy + gh / 2 + offset * gh * 0.12;
         const endY = gy + gh / 2 + offset * gh * 0.42;
-        drawCanvasSegment(ctx, gx + 16, startY, gx + gw - 18, endY, index % 2 ? '#f2a13c' : '#d27721', 2);
+        const color = index % 2 ? '#16749a' : '#f2a13c';
+        drawCanvasSegment(ctx, gx + 16, startY, gx + gw - 18, endY, color, 2);
+        const progress = ((phase / (Math.PI * 2) + index * .19) % 1 + 1) % 1;
+        drawMotionMarker(ctx, gx + 16 + (gw - 34) * progress, startY + (endY - startY) * progress, color);
       });
       ctx.fillStyle = '#6a808e'; ctx.font = '12px Segoe UI, Arial, sans-serif';
       ctx.fillText(`${model.componentCount} components: ${model.componentCount === 2 ? '±k' + model.transverseAxis : '±kx, ±ky'}`, gx + 7, gy + gh - 8);
@@ -394,6 +537,9 @@ function drawReflectionLesson(s) {
           if (point === 0) ctx.moveTo(localX, localY); else ctx.lineTo(localX, localY);
         }
         ctx.stroke();
+        const progress = ((phase / (Math.PI * 2) + ray * .19) % 1 + 1) % 1;
+        const markerY = gy + gh / 2 + (ray % 2 ? -1 : 1) * gh * .43 * triangleFold((model.componentCount === 2 ? 1 : 1.6) * progress + (ray > 1 ? .5 : 0));
+        drawMotionMarker(ctx, gx + 8 + progress * (gw - 16), markerY, ray % 2 ? '#16749a' : '#f2a13c');
       }
       ctx.fillStyle = '#b7353f'; ctx.font = '700 12px Segoe UI, Arial, sans-serif'; ctx.fillText(s.mode.family === 'TM' ? 'Eᶻ = 0 at PEC wall' : 'Eₜ = 0 at PEC wall', gx + 8, gy + 18);
     }
@@ -407,7 +553,12 @@ function drawReflectionLesson(s) {
       }
       ctx.strokeStyle = '#365a70'; ctx.lineWidth = 1; ctx.strokeRect(gx, gy + 10, gw, gh - 20);
       drawCanvasSegment(ctx, gx + 28, gy + gh / 2, gx + gw - 24, gy + gh / 2, '#168445', 3);
+      const combinedFront = ((phase / (Math.PI * 2)) % 1 + 1) % 1;
+      const frontX = gx + combinedFront * gw;
+      ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(frontX, gy + 13); ctx.lineTo(frontX, gy + gh - 13); ctx.stroke();
       ctx.fillStyle = '#168445'; ctx.font = '700 12px Segoe UI, Arial, sans-serif'; ctx.fillText('⟨Sᶻ⟩: forward power', gx + 8, gy + gh - 8);
+      ctx.fillStyle = '#406073'; ctx.font = '12px Segoe UI, Arial, sans-serif'; ctx.fillText(`φ = ${Math.round(((phase * 180 / Math.PI) % 360 + 360) % 360)}°`, gx + gw - 48, gy + 25);
     }
   }
 }
@@ -470,7 +621,11 @@ function render() { group.rotation.y = targetRotation; group.rotation.x = target
 function animate(timestamp) {
   requestAnimationFrame(animate);
   const delta = timestamp - previousAnimation; previousAnimation = timestamp;
-  if (!ui.freeze.checked) { phase = (phase + delta * .0018) % (Math.PI * 2); redraw = true; }
+  if (ui.animatePhase.checked) {
+    phase = (phase + delta * .0018) % (Math.PI * 2);
+    syncAnimatedPhaseControl();
+    redraw = true;
+  }
   if (!redraw) return;
   redraw = false;
   const s = state(), p = propagation(s);
@@ -489,8 +644,28 @@ function animate(timestamp) {
 function updateGeometryAndReadout() { updateReadout(); buildGeometry(); redraw = true; }
 function updateReadoutAndDraw() { updateReadout(); redraw = true; }
 
-[ui.frequency, ui.eScale, ui.hScale, ui.showE, ui.showH, ui.showReflection, ui.reflectionStep, ui.freeze].forEach((item) => item.addEventListener('input', updateReadoutAndDraw));
-[ui.mode, ui.width, ui.height].forEach((item) => item.addEventListener('input', updateGeometryAndReadout));
+function bindControlEvents(items, handler) {
+  items.forEach((item) => {
+    item.addEventListener('input', handler);
+    item.addEventListener('change', handler);
+  });
+}
+
+bindControlEvents([ui.frequency, ui.eScale, ui.hScale, ui.vectorThickness, ui.showE, ui.showH, ui.showReflection, ui.reflectionStep, ui.animatePhase], updateReadoutAndDraw);
+bindControlEvents([ui.mode, ui.width, ui.height], updateGeometryAndReadout);
+const setManualPhase = () => {
+  phase = Number(ui.phase.value) * Math.PI / 180;
+  ui.animatePhase.checked = false;
+  updateControlLabels();
+  redraw = true;
+};
+const setSlicePosition = () => {
+  updateReadout();
+  updateSliceMarker();
+  redraw = true;
+};
+bindControlEvents([ui.phase], setManualPhase);
+bindControlEvents([ui.slice], setSlicePosition);
 ui.reset.addEventListener('click', () => { targetRotation = -0.6; targetRotationY = 0.55; redraw = true; });
 
 updateReadout();
