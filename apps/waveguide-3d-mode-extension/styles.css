@@ -1,5 +1,6 @@
 :root { --ink:#102131; --blue:#176fc1; --red:#d73032; --wall:#476379; --soft:#eaf1f5; --line:#b7c9d5; --cyan:#007a99; font-family: Inter, "Segoe UI", Arial, sans-serif; color:var(--ink); }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }
 body { margin:0; background:#dce6ec; }
 main { width:min(1420px,100%); min-height:100vh; margin:0 auto; padding:24px; background:#fff; }
 header { display:flex; align-items:end; justify-content:space-between; gap:24px; padding:6px 4px 20px; border-bottom:2px solid var(--ink); }

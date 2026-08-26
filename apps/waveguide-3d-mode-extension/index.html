@@ -3,27 +3,33 @@
   3D extension based on the interaction structure of PA3FWM's waveguide.html:
   https://pa3fwm.nl/tools/waveguide.html
   The original page's 3D WebGL guide, red/blue E/H convention, and drag rotation
-  are retained conceptually. This implementation evaluates rectangular-guide
-  eigenmode fields so that TE11 and TM modes are physically represented.
+  are retained conceptually. This implementation evaluates rectangular and
+  circular-guide eigenmode fields so that TE/TM mode shapes are represented.
 -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>3D Rectangular Waveguide Mode Extension</title>
-    <link rel="stylesheet" href="styles.css?v=df2a91a99726" />
+    <title>3D Waveguide Mode Viewer</title>
+    <link rel="stylesheet" href="styles.css?v=4a52c3680f8b" />
   </head>
   <body>
     <main>
       <header>
         <div>
           <p class="eyebrow">Analytical 3D field viewer</p>
-          <h1>Rectangular waveguide modes</h1>
+          <h1 id="pageTitle">Waveguide modes</h1>
         </div>
         <a href="https://pa3fwm.nl/tools/waveguide.html" target="_blank" rel="noreferrer">Based on PA3FWM's original 3D waveguide page ↗</a>
       </header>
 
       <section class="controls" aria-label="Field controls">
+        <label>Guide geometry
+          <select id="geometry" aria-label="Guide geometry">
+            <option value="rectangular" selected>Rectangular</option>
+            <option value="circular">Circular</option>
+          </select>
+        </label>
         <label>Mode
           <select id="mode" aria-label="Mode selector">
             <option value="TE10">TE₁₀</option>
@@ -44,11 +50,14 @@
         <label>Frequency <output id="frequencyLabel">20.00 GHz</output>
           <input id="frequency" type="range" min="1" max="45" value="20" step="0.01" />
         </label>
-        <label>Width <i>a</i> <output id="widthLabel">22.86 mm</output>
+        <label id="widthControl">Width <i>a</i> <output id="widthLabel">22.86 mm</output>
           <input id="width" type="range" min="8" max="80" value="22.86" step="0.01" />
         </label>
-        <label>Height <i>b</i> <output id="heightLabel">10.16 mm</output>
+        <label id="heightControl">Height <i>b</i> <output id="heightLabel">10.16 mm</output>
           <input id="height" type="range" min="4" max="45" value="10.16" step="0.01" />
+        </label>
+        <label id="radiusControl" hidden>Radius <i>a</i> <output id="radiusLabel">12.00 mm</output>
+          <input id="radius" type="range" min="4" max="40" value="12" step="0.01" />
         </label>
         <label>E-field scale
           <input id="efieldscale" type="range" min="0" max="30" value="12" step="0.1" />
@@ -67,8 +76,8 @@
         </label>
         <label class="check"><input id="showE" type="checkbox" checked /> Show E field</label>
         <label class="check"><input id="showH" type="checkbox" checked /> Show H field</label>
-        <label class="check"><input id="showReflection" type="checkbox" checked /> Show decomposition</label>
-        <label>Animated decomposition
+        <label id="showDecompositionControl" class="check"><input id="showReflection" type="checkbox" checked /> Show decomposition</label>
+        <label id="decompositionStageControl">Animated decomposition
           <select id="reflectionStep" aria-label="Reflection step selector">
             <option value="components">1 · diagonal components</option>
             <option value="boundaries">2 · wall reflection</option>
@@ -89,7 +98,7 @@
             <span id="status" class="status">—</span>
           </div>
           <div id="webgldiv" aria-label="Interactive three-dimensional waveguide field visualizer">WebGL is required for the 3D view.</div>
-          <p class="legend"><span class="e">━</span> electric-field vectors &nbsp; <span class="h">━</span> magnetic-field vectors &nbsp; <span class="trace">●</span> moving diagonal components &nbsp; <span class="slice">▭</span> selected slice &nbsp; <span class="wall">▭</span> transparent conducting guide</p>
+          <p class="legend"><span class="e">━</span> electric-field vectors &nbsp; <span class="h">━</span> magnetic-field vectors &nbsp; <span id="traceLegend"><span class="trace">●</span> moving diagonal components &nbsp;</span><span class="slice">▭</span> selected slice &nbsp; <span class="wall">▭</span> transparent conducting guide</p>
         </section>
 
         <aside class="readout-card">
@@ -102,7 +111,7 @@
             <div><dt>Guide wavelength</dt><dd id="lambdaG">—</dd></div>
             <div><dt>Axial component</dt><dd id="axial">—</dd></div>
           </dl>
-          <p class="caveat">The original two-diagonal-wave construction applies to the TE<sub>m0</sub> family. TE<sub>11</sub> and TM modes require reflections from both wall pairs and/or a longitudinal electric field, so this extension renders the analytical eigenmode directly.</p>
+          <p id="modeCaveat" class="caveat">The original two-diagonal-wave construction applies to the TE<sub>m0</sub> family. TE<sub>11</sub> and TM modes require reflections from both wall pairs and/or a longitudinal electric field, so this extension renders the analytical eigenmode directly.</p>
         </aside>
       </section>
 
@@ -117,6 +126,6 @@
 
       <footer>Educational analytical visualization; not a full-wave solver or a measured field map. Uses local Three.js r108 matching the original page's WebGL dependency.</footer>
     </main>
-    <script type="module" src="waveguide-3d.js?v=14"></script>
+    <script type="module" src="waveguide-3d.js?v=15"></script>
   </body>
 </html>
