@@ -11,7 +11,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>3D Rectangular Waveguide Mode Extension</title>
-    <link rel="stylesheet" href="styles.css?v=e52368ad6ae7" />
+    <link rel="stylesheet" href="styles.css?v=df2a91a99726" />
   </head>
   <body>
     <main>
@@ -115,19 +115,8 @@
         <p class="map-caption">Move the Slice position control to sample a different transverse plane. Left: transverse E. Centre: transverse H. Right: axial component, where red • points out of the screen and blue × points into it.</p>
       </section>
 
-      <section class="reflection-card" aria-labelledby="reflection-heading">
-        <div>
-          <p class="eyebrow">How the guided mode is constructed</p>
-          <h2 id="reflection-heading">Reflection explanation</h2>
-        </div>
-        <p id="reflectionSummary" class="reflection-summary"></p>
-        <p class="motion-readout">Moving arrowheads are phase-locked to the Phase control. Choose the first two stages to follow each component, then choose Sum to see their superposition with the guided field.</p>
-        <canvas id="reflectionCanvas" width="1080" height="265" aria-label="Step-by-step plane-wave reflection explanation"></canvas>
-        <p class="map-caption">The paths are a plane-wave decomposition and phase-path aid—not particle trajectories. The resulting field is the continuous eigenmode shown above.</p>
-      </section>
-
       <footer>Educational analytical visualization; not a full-wave solver or a measured field map. Uses local Three.js r108 matching the original page's WebGL dependency.</footer>
     </main>
-    <script type="module" src="waveguide-3d.js?v=13"></script>
+    <script type="module" src="waveguide-3d.js?v=14"></script>
   </body>
 </html>

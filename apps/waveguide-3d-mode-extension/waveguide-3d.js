@@ -29,7 +29,7 @@ const ui = {
   eScale: document.querySelector('#efieldscale'), hScale: document.querySelector('#hfieldscale'), vectorThickness: document.querySelector('#vectorThickness'), phase: document.querySelector('#phase'), slice: document.querySelector('#slice'), showE: document.querySelector('#showE'), showH: document.querySelector('#showH'), showReflection: document.querySelector('#showReflection'), reflectionStep: document.querySelector('#reflectionStep'), animatePhase: document.querySelector('#animatePhase'), reset: document.querySelector('#resetView'),
   status: document.querySelector('#status'), description: document.querySelector('#modeDescription'), equations: document.querySelector('#equations'), cutoff: document.querySelector('#cutoff'), ratio: document.querySelector('#ratio'), lambdaG: document.querySelector('#lambdaG'), axial: document.querySelector('#axial'),
   vectorThicknessLabel: document.querySelector('#vectorThicknessLabel'), phaseLabel: document.querySelector('#phaseLabel'), sliceLabel: document.querySelector('#sliceLabel'),
-  container: document.querySelector('#webgldiv'), map: document.querySelector('[id="2ddiv"]'), reflectionSummary: document.querySelector('#reflectionSummary'), reflectionCanvas: document.querySelector('#reflectionCanvas')
+  container: document.querySelector('#webgldiv'), map: document.querySelector('[id="2ddiv"]')
 };
 
 let camera, scene, renderer, group, guideGroup, arrowGroup, reflectionGroup, reflectionTracerGroup, sliceGroup, container;
@@ -104,7 +104,6 @@ function reflectionModel(s) {
 function updateReadout() {
   const s = state();
   const p = propagation(s);
-  const model = reflectionModel(s);
   ui.frequencyLabel.value = `${Number(ui.frequency.value).toFixed(2)} GHz`;
   ui.widthLabel.value = `${Number(ui.width.value).toFixed(2)} mm`;
   ui.heightLabel.value = `${Number(ui.height.value).toFixed(2)} mm`;
@@ -119,7 +118,6 @@ function updateReadout() {
   ui.equations.innerHTML = s.mode.family === 'TE'
     ? `<b>TE mode:</b> <i>E</i><sub>z</sub> = 0<br><i>H</i><sub>z</sub> ∝ cos(${s.mode.m}π<i>x</i>/<i>a</i>) cos(${s.mode.n}π<i>y</i>/<i>b</i>)`
     : `<b>TM mode:</b> <i>H</i><sub>z</sub> = 0<br><i>E</i><sub>z</sub> ∝ sin(${s.mode.m}π<i>x</i>/<i>a</i>) sin(${s.mode.n}π<i>y</i>/<i>b</i>)`;
-  ui.reflectionSummary.textContent = model.summary;
 }
 
 function createArrow(color) {
@@ -473,96 +471,6 @@ function drawCrossSection(s, p) {
   }
 }
 
-function drawCanvasSegment(ctx, x1, y1, x2, y2, color, width = 2) {
-  const dx = x2 - x1, dy = y2 - y1, length = Math.hypot(dx, dy);
-  if (length < 1) return;
-  const ux = dx / length, uy = dy / length;
-  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
-  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - ux * 8 - uy * 4, y2 - uy * 8 + ux * 4); ctx.lineTo(x2 - ux * 8 + uy * 4, y2 - uy * 8 - ux * 4); ctx.closePath(); ctx.fill();
-}
-
-function drawMotionMarker(ctx, x, y, color) {
-  ctx.fillStyle = 'rgba(255,255,255,.92)';
-  ctx.beginPath(); ctx.arc(x, y, 6.1, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = color;
-  ctx.beginPath(); ctx.arc(x, y, 3.9, 0, Math.PI * 2); ctx.fill();
-}
-
-function drawReflectionLesson(s) {
-  const canvas = ui.reflectionCanvas, ctx = canvas.getContext('2d');
-  const model = reflectionModel(s);
-  const W = canvas.width, H = canvas.height, gap = 18, panelW = (W - gap * 4) / 3;
-  const activePanel = { components: 0, boundaries: 1, sum: 2 }[ui.reflectionStep.value];
-  const labels = ['1  Diagonal components', '2  PEC-wall reflection', '3  Sum = guided mode'];
-  ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
-  ctx.textBaseline = 'alphabetic';
-
-  for (let panel = 0; panel < 3; panel += 1) {
-    const px = gap + panel * (panelW + gap), py = 18, pw = panelW, ph = H - 36;
-    const active = ui.showReflection.checked && panel === activePanel;
-    ctx.fillStyle = active ? '#edf8fb' : '#f8fbfc'; ctx.fillRect(px, py, pw, ph);
-    ctx.strokeStyle = active ? '#1680a2' : '#c7d7df'; ctx.lineWidth = active ? 2 : 1; ctx.strokeRect(px, py, pw, ph);
-    ctx.fillStyle = active ? '#075d79' : '#466276'; ctx.font = '700 14px Segoe UI, Arial, sans-serif'; ctx.fillText(labels[panel], px + 14, py + 23);
-
-    const gx = px + 28, gy = py + 54, gw = pw - 56, gh = ph - 92;
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(gx, gy, gw, gh);
-    ctx.strokeStyle = '#365a70'; ctx.lineWidth = 1.5; ctx.strokeRect(gx, gy, gw, gh);
-    ctx.fillStyle = '#5d7584'; ctx.font = '12px Segoe UI, Arial, sans-serif'; ctx.fillText('−z →', gx + gw - 32, gy + gh + 22);
-
-    if (panel === 0) {
-      const rays = model.componentCount === 2 ? [-1, 1] : [-1, -0.35, 0.35, 1];
-      rays.forEach((offset, index) => {
-        const startY = gy + gh / 2 + offset * gh * 0.12;
-        const endY = gy + gh / 2 + offset * gh * 0.42;
-        const color = index % 2 ? '#16749a' : '#f2a13c';
-        drawCanvasSegment(ctx, gx + 16, startY, gx + gw - 18, endY, color, 2);
-        const progress = ((phase / (Math.PI * 2) + index * .19) % 1 + 1) % 1;
-        drawMotionMarker(ctx, gx + 16 + (gw - 34) * progress, startY + (endY - startY) * progress, color);
-      });
-      ctx.fillStyle = '#6a808e'; ctx.font = '12px Segoe UI, Arial, sans-serif';
-      ctx.fillText(`${model.componentCount} components: ${model.componentCount === 2 ? '±k' + model.transverseAxis : '±kx, ±ky'}`, gx + 7, gy + gh - 8);
-    }
-
-    if (panel === 1) {
-      ctx.strokeStyle = '#172f42'; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx + gw, gy); ctx.moveTo(gx, gy + gh); ctx.lineTo(gx + gw, gy + gh); ctx.stroke();
-      const rayCount = model.componentCount === 2 ? 2 : 4;
-      for (let ray = 0; ray < rayCount; ray += 1) {
-        ctx.strokeStyle = ray % 2 ? '#16749a' : '#f2a13c'; ctx.lineWidth = 2; ctx.beginPath();
-        for (let point = 0; point <= 12; point += 1) {
-          const t = point / 12;
-          const localY = gy + gh / 2 + (ray % 2 ? -1 : 1) * gh * .43 * triangleFold((model.componentCount === 2 ? 1 : 1.6) * t + (ray > 1 ? .5 : 0));
-          const localX = gx + 8 + t * (gw - 16);
-          if (point === 0) ctx.moveTo(localX, localY); else ctx.lineTo(localX, localY);
-        }
-        ctx.stroke();
-        const progress = ((phase / (Math.PI * 2) + ray * .19) % 1 + 1) % 1;
-        const markerY = gy + gh / 2 + (ray % 2 ? -1 : 1) * gh * .43 * triangleFold((model.componentCount === 2 ? 1 : 1.6) * progress + (ray > 1 ? .5 : 0));
-        drawMotionMarker(ctx, gx + 8 + progress * (gw - 16), markerY, ray % 2 ? '#16749a' : '#f2a13c');
-      }
-      ctx.fillStyle = '#b7353f'; ctx.font = '700 12px Segoe UI, Arial, sans-serif'; ctx.fillText(s.mode.family === 'TM' ? 'Eᶻ = 0 at PEC wall' : 'Eₜ = 0 at PEC wall', gx + 8, gy + 18);
-    }
-
-    if (panel === 2) {
-      const bands = 34;
-      for (let band = 0; band < bands; band += 1) {
-        const value = Math.sin((band / (bands - 1)) * Math.PI * Math.max(1, s.mode.m));
-        ctx.fillStyle = value >= 0 ? `rgba(215,48,50,${.13 + Math.abs(value) * .48})` : `rgba(23,111,193,${.13 + Math.abs(value) * .48})`;
-        ctx.fillRect(gx + band / bands * gw, gy + 10, gw / bands + 1, gh - 20);
-      }
-      ctx.strokeStyle = '#365a70'; ctx.lineWidth = 1; ctx.strokeRect(gx, gy + 10, gw, gh - 20);
-      drawCanvasSegment(ctx, gx + 28, gy + gh / 2, gx + gw - 24, gy + gh / 2, '#168445', 3);
-      const combinedFront = ((phase / (Math.PI * 2)) % 1 + 1) % 1;
-      const frontX = gx + combinedFront * gw;
-      ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(frontX, gy + 13); ctx.lineTo(frontX, gy + gh - 13); ctx.stroke();
-      ctx.fillStyle = '#168445'; ctx.font = '700 12px Segoe UI, Arial, sans-serif'; ctx.fillText('⟨Sᶻ⟩: forward power', gx + 8, gy + gh - 8);
-      ctx.fillStyle = '#406073'; ctx.font = '12px Segoe UI, Arial, sans-serif'; ctx.fillText(`φ = ${Math.round(((phase * 180 / Math.PI) % 360 + 360) % 360)}°`, gx + gw - 48, gy + 25);
-    }
-  }
-}
-
 function init() {
   container = ui.container;
   scene = new THREE.Scene();
@@ -637,7 +545,6 @@ function animate(timestamp) {
     updateArrow(sample.h, f.h, hScale, ui.showH.checked, delta);
   }
   drawCrossSection(s, p);
-  drawReflectionLesson(s);
   render();
 }
 
