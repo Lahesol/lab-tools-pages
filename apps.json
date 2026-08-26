@@ -94,5 +94,13 @@
         "group":  "Optics",
         "status":  "Ready",
         "accent":  "#c47a21"
+    },
+    {
+        "name":  "Waveguide 3D Mode Explorer",
+        "description":  "Static WebGL explorer for rectangular waveguide TE/TM mode field vectors, cutoff, guide wavelength, and impedance.",
+        "url":  "apps/waveguide-3d-mode-extension/",
+        "group":  "RF",
+        "status":  "Ready",
+        "accent":  "#4c6f91"
     }
 ]

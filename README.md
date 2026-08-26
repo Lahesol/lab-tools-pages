@@ -16,5 +16,6 @@ Open index.html through GitHub Pages, not directly from the filesystem.
 - nRF52 BLE UART Plotter: pps/nrf52-ble-uart-plotter/
 - UV STM/LTM Architecture Simulator: pps/tj-memory/
 - SMKang Light DAC/ADC Control: pps/smkang-light/
+- Waveguide 3D Mode Explorer: pps/waveguide-3d-mode-extension/
 
 Generated from server-ops/scripts/build-github-pages.ps1.
