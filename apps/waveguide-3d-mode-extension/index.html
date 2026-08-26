@@ -11,7 +11,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>3D Rectangular Waveguide Mode Extension</title>
-    <link rel="stylesheet" href="styles.css?v=5d9fb750cf3c" />
+    <link rel="stylesheet" href="styles.css?v=1266ec47b681" />
   </head>
   <body>
     <main>
@@ -25,21 +25,15 @@
 
       <section class="controls" aria-label="Field controls">
         <label>Mode
-          <select id="mode">
-            <optgroup label="Original TE m0 family">
-              <option value="TE10">TE₁₀</option>
-              <option value="TE20">TE₂₀</option>
-              <option value="TE30">TE₃₀</option>
-            </optgroup>
-            <optgroup label="Added TE modes">
-              <option value="TE01">TE₀₁</option>
-              <option value="TE11" selected>TE₁₁</option>
-              <option value="TE21">TE₂₁</option>
-            </optgroup>
-            <optgroup label="Added TM modes">
-              <option value="TM11">TM₁₁</option>
-              <option value="TM21">TM₂₁</option>
-            </optgroup>
+          <select id="mode" aria-label="Mode selector">
+            <option value="TE10">TE₁₀</option>
+            <option value="TE20">TE₂₀</option>
+            <option value="TE30">TE₃₀</option>
+            <option value="TE01">TE₀₁</option>
+            <option value="TE11" selected>TE₁₁</option>
+            <option value="TE21">TE₂₁</option>
+            <option value="TM11">TM₁₁</option>
+            <option value="TM21">TM₂₁</option>
           </select>
         </label>
         <label>Frequency <output id="frequencyLabel">20.00 GHz</output>
@@ -59,6 +53,14 @@
         </label>
         <label class="check"><input id="showE" type="checkbox" checked /> Show E field</label>
         <label class="check"><input id="showH" type="checkbox" checked /> Show H field</label>
+        <label class="check"><input id="showReflection" type="checkbox" checked /> Explain reflections</label>
+        <label>Reflection step
+          <select id="reflectionStep" aria-label="Reflection step selector">
+            <option value="components">1 · diagonal components</option>
+            <option value="boundaries">2 · wall reflection</option>
+            <option value="sum" selected>3 · sum → guided mode</option>
+          </select>
+        </label>
         <label class="check"><input id="freeze" type="checkbox" /> Freeze</label>
         <button id="resetView" type="button">Reset 3D view</button>
       </section>
@@ -99,8 +101,18 @@
         <p class="map-caption">Left: transverse E. Centre: transverse H. Right: axial component, where red • points out of the screen and blue × points into it.</p>
       </section>
 
+      <section class="reflection-card" aria-labelledby="reflection-heading">
+        <div>
+          <p class="eyebrow">How the guided mode is constructed</p>
+          <h2 id="reflection-heading">Reflection explanation</h2>
+        </div>
+        <p id="reflectionSummary" class="reflection-summary"></p>
+        <canvas id="reflectionCanvas" width="1080" height="265" aria-label="Step-by-step plane-wave reflection explanation"></canvas>
+        <p class="map-caption">The paths are a plane-wave decomposition and phase-path aid—not particle trajectories. The resulting field is the continuous eigenmode shown above.</p>
+      </section>
+
       <footer>Educational analytical visualization; not a full-wave solver or a measured field map. Uses local Three.js r108 matching the original page's WebGL dependency.</footer>
     </main>
-    <script type="module" src="waveguide-3d.js?v=6"></script>
+    <script type="module" src="waveguide-3d.js?v=9"></script>
   </body>
 </html>

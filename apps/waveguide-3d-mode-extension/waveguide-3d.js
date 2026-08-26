@@ -8,9 +8,9 @@ import * as THREE from './three.module.js';
 
 const C0 = 299792458;
 const modes = {
-  TE10: { family: 'TE', m: 1, n: 0, title: 'TE₁₀', description: 'Original dominant-mode family. One transverse variation across the broad wall and no variation across height.' },
-  TE20: { family: 'TE', m: 2, n: 0, title: 'TE₂₀', description: 'Original higher-order two-lobe TE family. Its axial magnetic field changes sign across the centre plane.' },
-  TE30: { family: 'TE', m: 3, n: 0, title: 'TE₃₀', description: 'Original higher-order three-lobe TE family across the broad wall.' },
+  TE10: { family: 'TE', m: 1, n: 0, title: 'TE₁₀', description: 'Dominant mode for the usual a > b guide. It varies once across the broad wall and not across height.' },
+  TE20: { family: 'TE', m: 2, n: 0, title: 'TE₂₀', description: 'Two-lobe TE mode across the broad-wall direction. Its axial magnetic field changes sign across the centre plane.' },
+  TE30: { family: 'TE', m: 3, n: 0, title: 'TE₃₀', description: 'Three-lobe TE mode across the broad-wall direction.' },
   TE01: { family: 'TE', m: 0, n: 1, title: 'TE₀₁', description: 'TE mode with one variation across the narrow-wall dimension.' },
   TE11: { family: 'TE', m: 1, n: 1, title: 'TE₁₁', description: 'One transverse variation across both dimensions. Hᶻ has four alternating-sign lobes.' },
   TE21: { family: 'TE', m: 2, n: 1, title: 'TE₂₁', description: 'Two variations across width and one across height, yielding six Hᶻ lobes.' },
@@ -21,18 +21,20 @@ const modes = {
 const ui = {
   mode: document.querySelector('#mode'), frequency: document.querySelector('#frequency'), width: document.querySelector('#width'), height: document.querySelector('#height'),
   frequencyLabel: document.querySelector('#frequencyLabel'), widthLabel: document.querySelector('#widthLabel'), heightLabel: document.querySelector('#heightLabel'),
-  eScale: document.querySelector('#efieldscale'), hScale: document.querySelector('#hfieldscale'), showE: document.querySelector('#showE'), showH: document.querySelector('#showH'), freeze: document.querySelector('#freeze'), reset: document.querySelector('#resetView'),
+  eScale: document.querySelector('#efieldscale'), hScale: document.querySelector('#hfieldscale'), showE: document.querySelector('#showE'), showH: document.querySelector('#showH'), showReflection: document.querySelector('#showReflection'), reflectionStep: document.querySelector('#reflectionStep'), freeze: document.querySelector('#freeze'), reset: document.querySelector('#resetView'),
   status: document.querySelector('#status'), description: document.querySelector('#modeDescription'), equations: document.querySelector('#equations'), cutoff: document.querySelector('#cutoff'), ratio: document.querySelector('#ratio'), lambdaG: document.querySelector('#lambdaG'), axial: document.querySelector('#axial'),
-  container: document.querySelector('#webgldiv'), map: document.querySelector('[id="2ddiv"]')
+  container: document.querySelector('#webgldiv'), map: document.querySelector('[id="2ddiv"]'), reflectionSummary: document.querySelector('#reflectionSummary'), reflectionCanvas: document.querySelector('#reflectionCanvas')
 };
 
-let camera, scene, renderer, group, guideGroup, arrowGroup, container;
+let camera, scene, renderer, group, guideGroup, arrowGroup, reflectionGroup, container;
 let fieldArrows = [];
+let reflectionPaths = [];
 let targetRotation = -0.6, targetRotationY = 0.55;
 let targetRotationOnMouseDown = targetRotation, targetRotationOnMouseDownY = targetRotationY;
 let mouseXOnMouseDown = 0, mouseYOnMouseDown = 0;
 let phase = 0, previousAnimation = performance.now(), redraw = true;
 let wgW = 80, wgH = 36, wgL = 560;
+const arrowAxis = new THREE.Vector3(0, 1, 0);
 
 function state() {
   return {
@@ -53,9 +55,31 @@ function propagation(s) {
   return { fc, ratio, propagating: ratio > 1, betaVisual: ratio > 1 ? Math.sqrt(ratio * ratio - 1) * 0.72 : 0.16 };
 }
 
+function reflectionModel(s) {
+  const singleTransverseAxis = s.mode.family === 'TE' && (s.mode.m === 0 || s.mode.n === 0);
+  const transverseAxis = s.mode.m === 0 ? 'y' : 'x';
+  if (singleTransverseAxis) {
+    return {
+      componentCount: 2,
+      transverseAxis,
+      wallText: transverseAxis === 'x' ? 'left/right x walls' : 'top/bottom y walls',
+      boundaryText: 'The reflected component cancels tangential E at the conducting wall.',
+      summary: `Two diagonal plane-wave components reflect between the ${transverseAxis === 'x' ? 'left/right' : 'top/bottom'} walls. Their sum forms a transverse standing pattern while phase still advances along −z.`
+    };
+  }
+  return {
+    componentCount: 4,
+    transverseAxis: 'xy',
+    wallText: 'both x- and y-wall pairs',
+    boundaryText: s.mode.family === 'TM' ? 'The four components must cancel Eᶻ at every conducting wall.' : 'The four components cancel tangential E at both wall pairs.',
+    summary: `${s.mode.family === 'TM' ? 'TM' : 'TE'} ${s.mode.title} uses four diagonal components: all sign combinations of transverse kx and ky. They reflect from both wall pairs, while the total mode carries average power along −z.`
+  };
+}
+
 function updateReadout() {
   const s = state();
   const p = propagation(s);
+  const model = reflectionModel(s);
   ui.frequencyLabel.value = `${Number(ui.frequency.value).toFixed(2)} GHz`;
   ui.widthLabel.value = `${Number(ui.width.value).toFixed(2)} mm`;
   ui.heightLabel.value = `${Number(ui.height.value).toFixed(2)} mm`;
@@ -69,6 +93,7 @@ function updateReadout() {
   ui.equations.innerHTML = s.mode.family === 'TE'
     ? `<b>TE mode:</b> <i>E</i><sub>z</sub> = 0<br><i>H</i><sub>z</sub> ∝ cos(${s.mode.m}π<i>x</i>/<i>a</i>) cos(${s.mode.n}π<i>y</i>/<i>b</i>)`
     : `<b>TM mode:</b> <i>H</i><sub>z</sub> = 0<br><i>E</i><sub>z</sub> ∝ sin(${s.mode.m}π<i>x</i>/<i>a</i>) sin(${s.mode.n}π<i>y</i>/<i>b</i>)`;
+  ui.reflectionSummary.textContent = model.summary;
 }
 
 function createArrow(color) {
@@ -80,6 +105,12 @@ function createArrow(color) {
   arrow.line.material.opacity = 0.88;
   arrow.cone.material.transparent = true;
   arrow.cone.material.opacity = 0.88;
+  arrow.userData = {
+    direction: arrowAxis.clone(),
+    targetQuaternion: new THREE.Quaternion(),
+    displayedLength: 4.6,
+    initialised: false
+  };
   return arrow;
 }
 
@@ -89,10 +120,13 @@ function buildGeometry() {
   wgL = wgW * 7;
   if (guideGroup) group.remove(guideGroup);
   if (arrowGroup) group.remove(arrowGroup);
+  if (reflectionGroup) group.remove(reflectionGroup);
   guideGroup = new THREE.Group();
   arrowGroup = new THREE.Group();
+  reflectionGroup = new THREE.Group();
   group.add(guideGroup);
   group.add(arrowGroup);
+  group.add(reflectionGroup);
 
   const box = new THREE.BoxGeometry(wgW * 2, wgH * 2, wgL);
   const guide = new THREE.Mesh(box, new THREE.MeshPhongMaterial({ color: 0x587287, transparent: true, opacity: 0.10, side: THREE.DoubleSide, depthWrite: false }));
@@ -107,8 +141,10 @@ function buildGeometry() {
   guideGroup.add(new THREE.Line(axisGeometry, axisMaterial));
 
   fieldArrows = [];
-  // Keep the 3D view responsive: each sample owns one E and one H ArrowHelper.
-  const xCount = 5, yCount = 3, zCount = 8;
+  // Resolve the propagation direction more finely than the cross-section.
+  // Each sample owns one E and one H ArrowHelper, so retain a deliberately
+  // modest transverse grid while using 22 longitudinal samples.
+  const xCount = 5, yCount = 3, zCount = 22;
   for (let iz = 0; iz < zCount; iz += 1) {
     for (let iy = 0; iy < yCount; iy += 1) {
       for (let ix = 0; ix < xCount; ix += 1) {
@@ -123,6 +159,70 @@ function buildGeometry() {
         fieldArrows.push({ x, y, z, e, h });
       }
     }
+  }
+  buildReflectionOverlay(s);
+}
+
+function triangleFold(value) {
+  const wrapped = value - Math.floor(value);
+  return 1 - 4 * Math.abs(wrapped - 0.5);
+}
+
+function makeReflectionLine(points, color) {
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85, depthTest: false });
+  return new THREE.Line(geometry, material);
+}
+
+function buildReflectionOverlay(s) {
+  const model = reflectionModel(s);
+  const signs = model.componentCount === 2 ? [[-1, 0], [1, 0]] : [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  reflectionPaths = [];
+  for (let index = 0; index < signs.length; index += 1) {
+    const [signX, signY] = signs[index];
+    const direct = [];
+    const bounced = [];
+    for (let point = 0; point <= 60; point += 1) {
+      const t = point / 60;
+      const z = -t * wgL;
+      if (model.componentCount === 2) {
+        const variesX = model.transverseAxis === 'x';
+        direct.push(new THREE.Vector3(variesX ? signX * wgW * t : 0, variesX ? 0 : signX * wgH * t, z));
+        bounced.push(new THREE.Vector3(
+          variesX ? signX * wgW * triangleFold((s.mode.m || 1) * t) : 0,
+          variesX ? 0 : signX * wgH * triangleFold((s.mode.n || 1) * t),
+          z
+        ));
+      } else {
+        direct.push(new THREE.Vector3(signX * wgW * t, signY * wgH * t, z));
+        bounced.push(new THREE.Vector3(
+          signX * wgW * triangleFold(Math.max(1, s.mode.m) * t),
+          signY * wgH * triangleFold(Math.max(1, s.mode.n) * t + (index % 2) * 0.5),
+          z
+        ));
+      }
+    }
+    const incident = makeReflectionLine(direct, 0xf2a13c);
+    const reflected = makeReflectionLine(bounced, 0x16749a);
+    reflectionGroup.add(incident, reflected);
+    reflectionPaths.push({ incident, reflected });
+  }
+  updateReflectionOverlay(s);
+}
+
+function updateReflectionOverlay(s) {
+  if (!reflectionGroup || !arrowGroup) return;
+  const visible = ui.showReflection.checked;
+  const step = ui.reflectionStep.value;
+  reflectionGroup.visible = visible;
+  arrowGroup.visible = !visible || step === 'sum';
+  for (const path of reflectionPaths) {
+    path.incident.visible = visible && step === 'components';
+    path.reflected.visible = visible && step !== 'components';
+    path.reflected.material.opacity = step === 'sum' ? 0.26 : 0.88;
+  }
+  if (visible && step === 'boundaries') {
+    ui.status.textContent = `${reflectionModel(s).componentCount}-wave wall reflection`;
   }
 }
 
@@ -153,13 +253,37 @@ function fieldAt(x, y, z, s, p) {
   };
 }
 
-function updateArrow(arrow, vector, scale, show) {
+function updateArrow(arrow, vector, scale, show, delta) {
   const magnitude = vector.length();
-  arrow.visible = show && magnitude > 0.013 && scale > 0;
+  arrow.visible = show && scale > 0;
   if (!arrow.visible) return;
-  arrow.setDirection(vector.clone().normalize());
-  // ArrowHelper r108 collapses its line to zero when length <= headLength.
-  arrow.setLength(Math.min(25, Math.max(4.6, magnitude * scale)), 3.8, 2.1);
+
+  const data = arrow.userData;
+  const smoothing = 1 - Math.exp(-Math.min(delta, 80) / 52);
+  const targetLength = Math.min(25, Math.max(4.6, magnitude * scale));
+  if (magnitude > 0.004) data.direction.copy(vector).multiplyScalar(1 / magnitude);
+  data.targetQuaternion.setFromUnitVectors(arrowAxis, data.direction);
+
+  if (!data.initialised) {
+    arrow.quaternion.copy(data.targetQuaternion);
+    data.displayedLength = targetLength;
+    data.initialised = true;
+  } else {
+    // Spherical interpolation gives a visible rotation through a reversal
+    // instead of an instantaneous 180-degree orientation jump.
+    arrow.quaternion.slerp(data.targetQuaternion, smoothing);
+    data.displayedLength += (targetLength - data.displayedLength) * smoothing;
+  }
+
+  // ArrowHelper r108 collapses its line when length <= headLength. Keeping a
+  // short, translucent arrow near a field null lets the reversal read as a
+  // continuous rotation/fade rather than a disappearing, reappearing glyph.
+  const headLength = Math.min(3.8, Math.max(1.5, data.displayedLength * 0.42));
+  const headWidth = Math.min(2.1, Math.max(0.9, data.displayedLength * 0.22));
+  const opacity = 0.12 + 0.76 * Math.min(1, magnitude / 0.11);
+  arrow.line.material.opacity = opacity;
+  arrow.cone.material.opacity = opacity;
+  arrow.setLength(data.displayedLength, headLength, headWidth);
 }
 
 function drawArrow2D(ctx, x, y, vx, vy, color) {
@@ -212,6 +336,78 @@ function drawCrossSection(s, p) {
           ctx.fillStyle = f.axial >= 0 ? '#bd262b' : '#176fc1'; ctx.font = '700 16px Segoe UI, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(f.axial >= 0 ? '•' : '×', sx, sy);
         }
       }
+    }
+  }
+}
+
+function drawCanvasSegment(ctx, x1, y1, x2, y2, color, width = 2) {
+  const dx = x2 - x1, dy = y2 - y1, length = Math.hypot(dx, dy);
+  if (length < 1) return;
+  const ux = dx / length, uy = dy / length;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - ux * 8 - uy * 4, y2 - uy * 8 + ux * 4); ctx.lineTo(x2 - ux * 8 + uy * 4, y2 - uy * 8 - ux * 4); ctx.closePath(); ctx.fill();
+}
+
+function drawReflectionLesson(s) {
+  const canvas = ui.reflectionCanvas, ctx = canvas.getContext('2d');
+  const model = reflectionModel(s);
+  const W = canvas.width, H = canvas.height, gap = 18, panelW = (W - gap * 4) / 3;
+  const activePanel = { components: 0, boundaries: 1, sum: 2 }[ui.reflectionStep.value];
+  const labels = ['1  Diagonal components', '2  PEC-wall reflection', '3  Sum = guided mode'];
+  ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = 'alphabetic';
+
+  for (let panel = 0; panel < 3; panel += 1) {
+    const px = gap + panel * (panelW + gap), py = 18, pw = panelW, ph = H - 36;
+    const active = ui.showReflection.checked && panel === activePanel;
+    ctx.fillStyle = active ? '#edf8fb' : '#f8fbfc'; ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = active ? '#1680a2' : '#c7d7df'; ctx.lineWidth = active ? 2 : 1; ctx.strokeRect(px, py, pw, ph);
+    ctx.fillStyle = active ? '#075d79' : '#466276'; ctx.font = '700 14px Segoe UI, Arial, sans-serif'; ctx.fillText(labels[panel], px + 14, py + 23);
+
+    const gx = px + 28, gy = py + 54, gw = pw - 56, gh = ph - 92;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(gx, gy, gw, gh);
+    ctx.strokeStyle = '#365a70'; ctx.lineWidth = 1.5; ctx.strokeRect(gx, gy, gw, gh);
+    ctx.fillStyle = '#5d7584'; ctx.font = '12px Segoe UI, Arial, sans-serif'; ctx.fillText('−z →', gx + gw - 32, gy + gh + 22);
+
+    if (panel === 0) {
+      const rays = model.componentCount === 2 ? [-1, 1] : [-1, -0.35, 0.35, 1];
+      rays.forEach((offset, index) => {
+        const startY = gy + gh / 2 + offset * gh * 0.12;
+        const endY = gy + gh / 2 + offset * gh * 0.42;
+        drawCanvasSegment(ctx, gx + 16, startY, gx + gw - 18, endY, index % 2 ? '#f2a13c' : '#d27721', 2);
+      });
+      ctx.fillStyle = '#6a808e'; ctx.font = '12px Segoe UI, Arial, sans-serif';
+      ctx.fillText(`${model.componentCount} components: ${model.componentCount === 2 ? '±k' + model.transverseAxis : '±kx, ±ky'}`, gx + 7, gy + gh - 8);
+    }
+
+    if (panel === 1) {
+      ctx.strokeStyle = '#172f42'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx + gw, gy); ctx.moveTo(gx, gy + gh); ctx.lineTo(gx + gw, gy + gh); ctx.stroke();
+      const rayCount = model.componentCount === 2 ? 2 : 4;
+      for (let ray = 0; ray < rayCount; ray += 1) {
+        ctx.strokeStyle = ray % 2 ? '#16749a' : '#f2a13c'; ctx.lineWidth = 2; ctx.beginPath();
+        for (let point = 0; point <= 12; point += 1) {
+          const t = point / 12;
+          const localY = gy + gh / 2 + (ray % 2 ? -1 : 1) * gh * .43 * triangleFold((model.componentCount === 2 ? 1 : 1.6) * t + (ray > 1 ? .5 : 0));
+          const localX = gx + 8 + t * (gw - 16);
+          if (point === 0) ctx.moveTo(localX, localY); else ctx.lineTo(localX, localY);
+        }
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#b7353f'; ctx.font = '700 12px Segoe UI, Arial, sans-serif'; ctx.fillText(s.mode.family === 'TM' ? 'Eᶻ = 0 at PEC wall' : 'Eₜ = 0 at PEC wall', gx + 8, gy + 18);
+    }
+
+    if (panel === 2) {
+      const bands = 34;
+      for (let band = 0; band < bands; band += 1) {
+        const value = Math.sin((band / (bands - 1)) * Math.PI * Math.max(1, s.mode.m));
+        ctx.fillStyle = value >= 0 ? `rgba(215,48,50,${.13 + Math.abs(value) * .48})` : `rgba(23,111,193,${.13 + Math.abs(value) * .48})`;
+        ctx.fillRect(gx + band / bands * gw, gy + 10, gw / bands + 1, gh - 20);
+      }
+      ctx.strokeStyle = '#365a70'; ctx.lineWidth = 1; ctx.strokeRect(gx, gy + 10, gw, gh - 20);
+      drawCanvasSegment(ctx, gx + 28, gy + gh / 2, gx + gw - 24, gy + gh / 2, '#168445', 3);
+      ctx.fillStyle = '#168445'; ctx.font = '700 12px Segoe UI, Arial, sans-serif'; ctx.fillText('⟨Sᶻ⟩: forward power', gx + 8, gy + gh - 8);
     }
   }
 }
@@ -278,21 +474,23 @@ function animate(timestamp) {
   if (!redraw) return;
   redraw = false;
   const s = state(), p = propagation(s);
+  updateReflectionOverlay(s);
   const eScale = Number(ui.eScale.value), hScale = Number(ui.hScale.value);
   for (const sample of fieldArrows) {
     const f = fieldAt(sample.x, sample.y, sample.z, s, p);
-    updateArrow(sample.e, f.e, eScale, ui.showE.checked);
-    updateArrow(sample.h, f.h, hScale, ui.showH.checked);
+    updateArrow(sample.e, f.e, eScale, ui.showE.checked, delta);
+    updateArrow(sample.h, f.h, hScale, ui.showH.checked, delta);
   }
   drawCrossSection(s, p);
+  drawReflectionLesson(s);
   render();
 }
 
 function updateGeometryAndReadout() { updateReadout(); buildGeometry(); redraw = true; }
 function updateReadoutAndDraw() { updateReadout(); redraw = true; }
 
-[ui.mode, ui.frequency, ui.eScale, ui.hScale, ui.showE, ui.showH, ui.freeze].forEach((item) => item.addEventListener('input', updateReadoutAndDraw));
-[ui.width, ui.height].forEach((item) => item.addEventListener('input', updateGeometryAndReadout));
+[ui.frequency, ui.eScale, ui.hScale, ui.showE, ui.showH, ui.showReflection, ui.reflectionStep, ui.freeze].forEach((item) => item.addEventListener('input', updateReadoutAndDraw));
+[ui.mode, ui.width, ui.height].forEach((item) => item.addEventListener('input', updateGeometryAndReadout));
 ui.reset.addEventListener('click', () => { targetRotation = -0.6; targetRotationY = 0.55; redraw = true; });
 
 updateReadout();
