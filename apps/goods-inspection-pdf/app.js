@@ -255,6 +255,24 @@
       event.target.value = "";
     });
 
+    window.addEventListener("paste", (event) => {
+      if (elements.roiDialog.open || elements.cropDialog.open) return;
+      const activeElement = document.activeElement;
+      if (activeElement?.matches("input:not(#photoInput), textarea, select, [contenteditable='true']")) return;
+      const clipboard = event.clipboardData;
+      if (!clipboard) return;
+      let imageFiles = [...clipboard.files].filter((file) => file.type.startsWith("image/"));
+      if (!imageFiles.length) {
+        imageFiles = [...clipboard.items]
+          .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+          .map((item) => item.getAsFile())
+          .filter(Boolean);
+      }
+      if (!imageFiles.length) return;
+      event.preventDefault();
+      handlePhotoFiles(imageFiles, { source: "clipboard" });
+    });
+
     attachDropzone(elements.invoiceDropzone, (files) => {
       const file = files.find((entry) => isPdfFile(entry) || isInvoiceImageFile(entry));
       if (!file) {
@@ -1393,8 +1411,8 @@
       ? `${state.roiRects.length}개 ROI 위치를 전체 PDF 페이지에 적용했습니다.`
       : `${state.roiRects.length}개 ROI를 적용했습니다.`;
     elements.roiCandidateMessage.textContent = state.roiCandidateSource === "ocr"
-      ? `${scopeLabel} 인식 원문과 품목명을 최종 확인해 주세요.`
-      : `${scopeLabel} PDF 텍스트 좌표 추출 결과입니다.`;
+      ? `${scopeLabel} 숫자형 품번을 포함한 인식 원문과 품목명을 최종 확인해 주세요.`
+      : `${scopeLabel} 품명·품번을 포함한 PDF 텍스트 좌표 추출 결과입니다.`;
 
     candidates.forEach((candidate, index) => {
       const label = document.createElement("label");
@@ -1465,7 +1483,7 @@
     syncItemsToPhotoOrder();
   }
 
-  async function handlePhotoFiles(files) {
+  async function handlePhotoFiles(files, options = {}) {
     const availableSlots = MAX_ITEMS - state.photos.length;
     const accepted = files.slice(0, availableSlots);
 
@@ -1478,26 +1496,32 @@
       showToast(`최대 ${MAX_ITEMS}장까지만 추가되어 나머지 사진은 제외했습니다.`, "error");
     }
 
-    for (const file of accepted) {
+    let addedCount = 0;
+    for (const [index, file] of accepted.entries()) {
       if (!file.type.startsWith("image/")) continue;
       if (file.size > MAX_IMAGE_BYTES) {
         showToast(`${file.name}은 20MB를 초과해 제외했습니다.`, "error");
         continue;
       }
       const dataUrl = await fileToDataUrl(file);
+      const fileName = file.name || `clipboard-image-${Date.now()}-${index + 1}.png`;
       state.photos.push({
         id: cryptoRandomId(),
-        name: file.name,
+        name: fileName,
         type: file.type,
         originalDataUrl: dataUrl,
         dataUrl,
         crop: null,
       });
+      addedCount += 1;
     }
 
     if (state.countMode === "auto" && !state.invoiceCandidates.length) syncAutomaticItemCount();
     syncItemsToPhotoOrder();
     renderAll();
+    if (options.source === "clipboard" && addedCount) {
+      showToast(`${addedCount}장의 클립보드 사진을 추가했습니다.`);
+    }
   }
 
   function syncItemsToPhotoOrder() {

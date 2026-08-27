@@ -10,11 +10,11 @@
     />
     <title>물품검수 확인서 생성</title>
     <link rel="icon" href="./assets/gachon-seal.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=6c1962763908" />
+    <link rel="stylesheet" href="./styles.css?v=2b49b3251e02" />
     <script defer src="./vendor/pdf-lib/pdf-lib.min.js"></script>
     <script defer src="./vendor/tesseract/tesseract.min.js"></script>
     <script defer src="./invoice-parser.js"></script>
-    <script defer src="./app.js?v=36419fd404db"></script>
+    <script defer src="./app.js?v=1775f3e3f285"></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">본문으로 이동</a>
@@ -71,11 +71,11 @@
               </svg>
               <span>
                 <strong>사진을 선택하거나 놓으세요</strong>
-                <small>JPG, PNG, WEBP · 여러 장 선택 가능</small>
+                <small>JPG, PNG, WEBP · 여러 장 선택/붙여넣기 가능</small>
               </span>
               <input id="photoInput" type="file" accept="image/jpeg,image/png,image/webp" multiple />
             </label>
-            <p class="photo-order-help">아래 목록의 순서가 품목 1, 2, 3…의 사진 순서로 반영됩니다.</p>
+            <p class="photo-order-help">이미지를 복사한 뒤 이 화면에서 Ctrl+V로 추가할 수 있습니다. 아래 목록의 순서가 품목 1, 2, 3…의 사진 순서로 반영됩니다.</p>
             <div class="photo-strip" id="photoStrip" aria-live="polite"></div>
           </div>
         </section>

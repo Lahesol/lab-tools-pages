@@ -13,6 +13,7 @@
   const NUMERIC_TOKEN = /^(?:(?:KRW|USD|EUR|JPY|CNY|₩|\$|€|¥)\s*)?[-+]?\d[\d,.]*(?:%|원|개|ea|pcs?)?$/i;
   const COLUMN_UNIT_TOKEN = /^(?:ea|pcs?|개|box|set|lot|unit|units|원|krw|usd|eur|jpy|cny)$/i;
   const MEANINGFUL_TEXT = /[가-힣A-Za-z]/;
+  const NUMERIC_CODE = /^\d[\d._/-]{5,}$/;
 
   const METADATA_PATTERNS = [
     /^(?:invoice|receipt|credit\s*card\s*receipt|tax\s*invoice|quotation|estimate)(?:\s|[-:：]|$)/i,
@@ -70,6 +71,11 @@
     return looksLikePhoneNumber(text) || METADATA_PATTERNS.some((pattern) => pattern.test(text));
   }
 
+  function looksLikeNumericCode(text) {
+    const compact = normalizeText(text).replace(/\s+/g, "");
+    return NUMERIC_CODE.test(compact) && (compact.match(/\d/g) || []).length >= 6;
+  }
+
   function stripTrailingColumns(text, inTable) {
     const tokens = text.split(/\s+/);
     let cursor = tokens.length - 1;
@@ -99,14 +105,19 @@
     };
   }
 
-  function parseCandidateLine(line, inTable) {
+  function parseCandidateLine(line, inTable, options = {}) {
     const original = normalizeText(line.text);
     if (!original || original.length < 3 || original.length > 180) return null;
-    if (isTableHeader(original) || isTableEnd(original) || isMetadataLine(original) || STANDALONE_COLUMN_HEADER.test(original)) return null;
+    const allowNumericCode = Boolean(options.allowNumericCode);
+    const originalNumericCode = allowNumericCode && looksLikeNumericCode(original);
+    if (isTableHeader(original) || isTableEnd(original) || (isMetadataLine(original) && !originalNumericCode) || STANDALONE_COLUMN_HEADER.test(original)) return null;
 
     const leadingMatch = original.match(LEADING_ROW_NUMBER);
     let working = leadingMatch ? original.slice(leadingMatch[0].length) : original;
-    const trailing = stripTrailingColumns(working, inTable);
+    const preserveNumericCode = allowNumericCode && looksLikeNumericCode(working);
+    const trailing = preserveNumericCode
+      ? { text: working, numericColumnCount: 0 }
+      : stripTrailingColumns(working, inTable);
     working = normalizeText(trailing.text)
       .replace(/^[-•·:|]+\s*/, "")
       .replace(/\s*[-•·:|]+$/, "")
@@ -116,7 +127,9 @@
     const codeLike = /^[A-Za-z0-9][A-Za-z0-9._\/-]{4,}$/.test(working)
       && /\d/.test(working)
       && /[._\/-]/.test(working);
-    if ((!MEANINGFUL_TEXT.test(working) && !codeLike) || isMetadataLine(working)) return null;
+    const numericCodeLike = allowNumericCode && looksLikeNumericCode(working);
+    const metadataLine = isMetadataLine(working);
+    if ((!MEANINGFUL_TEXT.test(working) && !codeLike && !numericCodeLike) || (metadataLine && !numericCodeLike)) return null;
     if (/^[A-Za-z가-힣 ]{1,3}$/.test(working)) return null;
     if (/^(?:of|page|no|item)\s*\d*$/i.test(working)) return null;
     if (/^[^:：]{1,24}[:：]\s*/.test(working) && trailing.numericColumnCount === 0) return null;
@@ -200,7 +213,7 @@
       .filter((line) => line.text);
 
     for (const line of lines) {
-      const candidate = parseCandidateLine(line, true);
+      const candidate = parseCandidateLine(line, true, { allowNumericCode: true });
       if (candidate) addUniqueCandidate(candidates, candidate, maxItems);
       if (candidates.length >= maxItems) break;
     }

@@ -164,7 +164,7 @@ summary:focus-visible,
 .workspace {
   display: grid;
   min-height: calc(100vh - 159px);
-  grid-template-columns: 310px minmax(480px, 1.12fr) minmax(420px, 0.88fr);
+  grid-template-columns: 360px minmax(480px, 1.08fr) minmax(420px, 0.92fr);
   background: var(--surface-subtle);
 }
 
@@ -305,8 +305,8 @@ summary:focus-visible,
 
 .photo-strip {
   display: grid;
-  max-height: 290px;
-  gap: 6px;
+  max-height: 360px;
+  gap: 8px;
   margin-top: 10px;
   overflow-y: auto;
   padding-right: 2px;
@@ -322,10 +322,10 @@ summary:focus-visible,
 .photo-order-item {
   display: grid;
   min-width: 0;
-  grid-template-columns: 25px 48px minmax(0, 1fr) auto;
+  grid-template-columns: 25px 62px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 7px;
-  padding: 6px;
+  gap: 8px;
+  padding: 7px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #fff;
@@ -360,8 +360,8 @@ summary:focus-visible,
 .photo-order-item__thumb {
   position: relative;
   overflow: hidden;
-  width: 48px;
-  height: 48px;
+  width: 62px;
+  height: 62px;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--surface-subtle);
@@ -2274,7 +2274,7 @@ summary:focus-visible,
 
 @media (max-width: 1320px) {
   .workspace {
-    grid-template-columns: 290px minmax(470px, 1fr) 390px;
+    grid-template-columns: 320px minmax(470px, 1fr) 390px;
   }
 
   .editor {
