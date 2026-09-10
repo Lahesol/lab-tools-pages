@@ -96,6 +96,14 @@
         "accent":  "#c47a21"
     },
     {
+        "name":  "Birdcage Field Analyzer",
+        "description":  "Static RF tool for digitizing birdcage field images, estimating circular polarization balance, and comparing Bx/By phase behavior.",
+        "url":  "apps/birdcage-field-analyzer/",
+        "group":  "RF",
+        "status":  "Ready",
+        "accent":  "#446f7c"
+    },
+    {
         "name":  "Waveguide 3D Mode Explorer",
         "description":  "Static WebGL explorer for rectangular waveguide TE/TM mode field vectors, cutoff, guide wavelength, and impedance.",
         "url":  "apps/waveguide-3d-mode-extension/",
