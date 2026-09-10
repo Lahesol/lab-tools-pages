@@ -1,0 +1,134 @@
+/* Additive theme layer. styles.css remains the original dark-theme baseline. */
+:root {
+  --plot-bg: #061321;
+  --plot-grid: #1d3d59;
+  --plot-tick: #8da9bd;
+  --plot-empty: #7892a7;
+  --plot-label: #c9dce9;
+  --plot-current: #3fd0e6;
+  --plot-optical: #63d67d;
+  --plot-pulse: #ffbd57;
+  --plot-swv: #5d8dff;
+  --plot-reference: #3182f6;
+  --plot-guide-fill: rgba(255, 189, 87, 0.12);
+  --plot-guide-line: rgba(255, 189, 87, 0.85);
+  --plot-guide-label: #ffcf78;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1f5f9;
+  --panel: #ffffff;
+  --panel-2: #f6f8fb;
+  --line: #ced9e3;
+  --text: #182c42;
+  --muted: #4b6278;
+  --cyan: #087489;
+  --blue: #1c63ca;
+  --green: #237640;
+  --amber: #875300;
+  --red: #b63042;
+  --shadow: 0 6px 20px #182c420a;
+  --plot-bg: #ffffff;
+  --plot-grid: #dbe3ec;
+  --plot-tick: #4b6278;
+  --plot-empty: #4b6278;
+  --plot-label: #293f56;
+  --plot-current: #087489;
+  --plot-optical: #237640;
+  --plot-pulse: #875300;
+  --plot-swv: #345dc0;
+  --plot-reference: #1c63ca;
+  --plot-guide-fill: rgba(169, 102, 0, 0.10);
+  --plot-guide-line: rgba(135, 83, 0, 0.85);
+  --plot-guide-label: #875300;
+}
+
+.topbar { flex-wrap: wrap; row-gap: 12px; }
+.top-status { flex-wrap: wrap; }
+.theme-toggle { flex-shrink: 0; font-size: .78rem; min-height: 36px; }
+button:focus-visible, a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+
+[data-theme="light"] body { background: var(--bg); }
+[data-theme="light"] .topbar { background: #ffffff; }
+[data-theme="light"] .panel { background: var(--panel); }
+[data-theme="light"] .mode-tab { background: #f6f8fb; color: #375269; }
+[data-theme="light"] .mode-tab.active {
+  color: #164b90;
+  border-color: var(--blue);
+  background: #e8f1ff;
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+[data-theme="light"] .parameter-group,
+[data-theme="light"] .advanced-parameters {
+  background: #f8fafc;
+  border-color: var(--line);
+}
+[data-theme="light"] .parameter-group h2,
+[data-theme="light"] .pt3-setpoint-summary h2 { color: #293f56; }
+[data-theme="light"] .advanced-parameters summary { color: #375269; }
+[data-theme="light"] .advanced-parameters[open] summary { border-color: var(--line); }
+[data-theme="light"] .advanced-group { background: transparent; }
+[data-theme="light"] label { color: #375269; }
+[data-theme="light"] input, [data-theme="light"] select {
+  color: var(--text);
+  background: #ffffff;
+  border-color: #8193a6;
+}
+[data-theme="light"] input::placeholder { color: #52687b; }
+[data-theme="light"] input:focus, [data-theme="light"] select:focus {
+  outline-color: #1c63ca66;
+  border-color: var(--blue);
+}
+[data-theme="light"] input:disabled, [data-theme="light"] select:disabled {
+  color: #596d80;
+  background: #edf2f7;
+  opacity: 1;
+}
+[data-theme="light"] .button { color: #293f56; background: #e7edf4; }
+[data-theme="light"] .button.primary { color: #ffffff; background: #1d5bbf; border-color: #1d5bbf; }
+[data-theme="light"] .button.secondary { color: #164b90; background: #e6f0ff; border-color: #809ac0; }
+[data-theme="light"] .button.danger { color: #9f2333; background: #fbecef; border-color: #ce7181; }
+[data-theme="light"] .button.ghost { color: #345570; background: transparent; border-color: #8193a6; }
+[data-theme="light"] .button:hover:not(:disabled) { filter: brightness(.96); }
+[data-theme="light"] .button:disabled { color: #66788a; background: #edf2f7; border-color: #c7d4e0; opacity: 1; }
+[data-theme="light"] .potential-convention,
+[data-theme="light"] .pt3-setpoint-summary,
+[data-theme="light"] .pulse-legend { background: #f0f7fb; border-color: #bfd3e0; }
+[data-theme="light"] .potential-convention p,
+[data-theme="light"] .pulse-legend dt,
+[data-theme="light"] .setpoint-grid dt { color: #4b6278; }
+[data-theme="light"] .potential-convention span,
+[data-theme="light"] .pulse-legend dd,
+[data-theme="light"] .setpoint-grid dd { color: #293f56; }
+[data-theme="light"] .setpoint-grid dd:last-child { color: var(--amber); }
+[data-theme="light"] .pt3-re-calibration { background: #f0f9f3; border-color: #b5d5c0; }
+[data-theme="light"] .pt3-re-calibration h2,
+[data-theme="light"] .pt3-re-calibration-grid dd { color: #24623c; }
+[data-theme="light"] .pulse-diagram-panel,
+[data-theme="light"] .pt3-settings-panel { border-color: #bfd3e0; }
+[data-theme="light"] .pulse-schematic,
+[data-theme="light"] #plotCanvas,
+[data-theme="light"] #pt3SettingsCanvas { background: #ffffff; border-color: var(--line); }
+[data-theme="light"] .pulse-axis { stroke: #627c93; }
+[data-theme="light"] .pulse-axis-label,
+[data-theme="light"] .pulse-label,
+[data-theme="light"] .pulse-annotation { fill: #4b6278; }
+[data-theme="light"] .pulse-delay { stroke: #627c93; }
+[data-theme="light"] .pulse-dot, [data-theme="light"] .muted-dot { stroke: #ffffff; }
+[data-theme="light"] .table-wrap,
+[data-theme="light"] th, [data-theme="light"] td { border-color: #d8e1e9; }
+[data-theme="light"] th { color: #40586e; background: #edf2f7; }
+[data-theme="light"] #eventLog { color: #344e63; background: #f8fafc; border-color: var(--line); }
+[data-theme="light"] .connection-grid dd { color: #293f56; }
+[data-theme="light"] .dfu-step > span { border-color: #8193a6; }
+[data-theme="light"] .dfu-step.is-current > span { border-color: var(--blue); color: var(--blue); box-shadow: 0 0 0 3px #1c63ca14; }
+[data-theme="light"] .dfu-step.is-complete > span { border-color: var(--green); color: #ffffff; background: var(--green); }
+[data-theme="light"] .dfu-name-field span { color: #4b6278; }
+[data-theme="light"] .progress-bar { background: #dfe8f0; }
+[data-theme="light"] .warning { background: #fff8e8; border-color: #d5b77a; }
+[data-theme="light"] .warning p { color: #73541a; }
+[data-theme="light"] footer { color: #52687b; }

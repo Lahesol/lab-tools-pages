@@ -1,5 +1,87 @@
 # AD5940 Lab Console
 
+## V2.4 BLE + USB CDC (2026-09-10)
+
+The header now offers **Connect BLE** and **Connect USB**. BLE NUS remains
+compatible with existing boards. USB requires the new nRF52840/AD5941 **V71**
+firmware and the board's native USB-C data connector, not the J-Link USB port.
+Use a secure HTTPS desktop Chrome/Edge origin with Web Serial support.
+
+**Check the module VDD/VDDH power topology before connecting USB.** The supplied
+netlist ties USB Vbus to both VDDH and VBUS and supplies VDD externally; the
+module's internal circuit is still unverified. Firmware cannot establish that
+this power arrangement is safe.
+
+USB opening performs only INFO/STATUS checks. A valid `USB_CDC_U1` identity is
+required before measurement controls unlock. Configuration ACK gating and
+CA/RUN/STOP are shared with BLE. Only one transport owns the controller at a
+time; disconnect it before switching. USB is for measurement, **not USB DFU**.
+This board still uses J-Link updates; older boards retain their BLE DFU path.
+
+The USB client saves each exact received byte chunk in the raw JSONL buffer
+before checking the U1 envelope CRC/sequence and passing its unchanged B2/text
+payload to the existing decoder. A corrupted/missing/replayed envelope closes
+the USB session; it is not interpolated or treated as a configuration ACK.
+Reader/writer locks and DTR are released on close. Save raw JSONL before CSV
+and before closing the page. Data are buffered in memory, not auto-saved.
+
+Include `usb_serial.js` in the static deployment alongside the existing theme
+and application assets. Firmware/SES paths, protocol, wiring and offline
+validation details: `../docs/NRF52840_AD5941_V71_USB_KO.md`.
+No server, deployment, actual browser session, flashing or device measurement
+was performed for this change.
+
+## V2.3 light / dark appearance (2026-09-10)
+
+`index.html` now starts in a light theme. Use the header's **어두운 테마** /
+**밝은 테마** button to switch; the browser remembers only that appearance
+preference under `ad5940-console-theme-v1`. If local storage is unavailable,
+switching still works for the current page. A `?theme=light` or `?theme=dark`
+query selects the initial theme without overwriting the stored preference.
+
+Panels, inputs, warning states, tables, logs, pulse diagrams and both canvas
+plots use matching colors. The original `styles.css` remains unchanged;
+`theme.css` is an additive layer and `theme.js` is appearance-only. Neither
+switching nor repainting sends a BLE/AFE command or changes received samples,
+raw JSONL, CSV conversion, ACK guards, CA timing or DFU behavior. The separate
+`optical_lab.html/css/js` console is unchanged.
+
+Deploy `theme.js` and `theme.css` together with `index.html`, `app.js`,
+`styles.css` and the existing static assets/catalogue. This source-only update
+does not replace the GUI snapshot inside the frozen V70 J-Link package or
+change any firmware HEX. See `../docs/WEB_GUI_THEME_V23_QA.md` for offline test
+results, remaining browser visual QA and the deployment/backup handoff.
+
+## Three-electrode electrochemistry source preflight (V69 source)
+
+`AMP`, `CV`, `DPV`, and `SWV` are independent 3-electrode modes. The board
+schematic routes **CE0 to PAD3, RE0 to PAD4, and SE0 to PAD5**; its internal
+`RCAL0–RCAL1` reference resistor is 200 ohm. PT3 is a separate optical
+fixture path and must not be wired or interpreted as a three-electrode mode.
+See `../docs/THREE_ELECTRODE_ELECTROCHEM_PREFLIGHT.md` for the verified net
+mapping, AD5940 potentiostat/TIA path, and evidence boundary.
+
+The V69 **source** contract adds `CVX`, `DPVX`, `SWVX`, and
+`EC_CFG_ACK_GATE`. After reset, a mode needs a successful `@ACK,CFG,...`
+before its `RUN` command is accepted. The static GUI also waits for that ACK
+before it queues `RUN`, so it cannot race a configuration command through the
+firmware's single command buffer. `@SAT` is an ADC rail diagnostic only: it
+never changes received raw frames, but makes that run non-quantitative until
+the range is corrected.
+
+The currently catalogued signed DFU ZIP remains a V68 release; no V69 build,
+flash, DFU transfer, electrode drive, or live measurement is implied by this
+source preflight. On V68 or older the GUI retains legacy AMP/CV/DPV/SWV
+configuration fields and keeps extended three-electrode PGA/RCAL/ADC-reference/
+calibration-DFT controls disabled rather than silently ignoring them. The DFT
+selector controls only the pre-RUN internal RTIA calibration integration; it
+does not select a FIFO source or alter raw C1/D1/E1 frames.
+
+Before decoding a notification as a current or text line, the GUI keeps an
+exact hex/base64 record in memory and exposes **Download raw JSONL**. Download
+that file first; the current CSV, DPV/SWV `I2 - I1` view, and plot are derived
+artifacts and are not a replacement for it.
+
 ## Dual-BLE optical experiment console
 
 `optical_lab.html` is a separate static entry point for a 6-color LED board

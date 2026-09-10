@@ -1,23 +1,27 @@
 ﻿<!doctype html>
-<html lang="ko">
+<html lang="ko" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#071525" />
+    <meta name="theme-color" content="#ffffff" />
     <title>AD5940 Lab Console</title>
+    <script src="theme.js"></script>
     <link rel="stylesheet" href="styles.css?v=dfbff4938429" />
+    <link rel="stylesheet" href="theme.css" />
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">BLE ELECTROCHEMISTRY CONSOLE</p>
-        <h1>AD5940 Lab Console <span>v2.1</span></h1>
+        <h1>AD5940 Lab Console <span>v2.4 BLE / USB</span></h1>
       </div>
       <div class="top-status">
+        <button id="themeToggle" class="button ghost theme-toggle" type="button" aria-label="어두운 테마 사용" aria-pressed="false">어두운 테마</button>
         <span id="connectionDot" class="status-dot"></span>
         <span id="connectionLabel">Instrument disconnected</span>
         <a class="button ghost" href="optical_lab.html">Optical response lab</a>
-        <button id="connectButton" class="button primary">Connect instrument</button>
+        <button id="connectButton" class="button primary">Connect BLE</button>
+        <button id="connectUsbButton" class="button secondary" type="button" title="nRF52840 V71+ USB CDC 가상 COM 포트. J-Link USB 포트가 아닙니다.">Connect USB</button>
         <button id="disconnectButton" class="button ghost" disabled>Disconnect</button>
       </div>
     </header>
@@ -43,6 +47,10 @@
               <label>Vzero <span>mV</span><input id="ampVzero" type="number" min="200" max="2200" step="1" value="200" required /></label>
               <label>Sensor bias <span>mV</span><input id="ampBias" type="number" min="-750" max="750" step="1" value="0" required /></label>
               <label>Acquisition period <span>ms</span><input id="ampPeriod" type="number" min="100" max="10000" step="1" value="1000" required /></label>
+              <div id="caControls" class="hidden">
+                <label>CA auto-stop <span>ms; 0 = continuous AMP</span><input id="caDuration" type="number" min="0" max="600000" step="100" value="10000" /></label>
+                <p class="hint">nRF52840/AD5941: 단일 전위에서 I–t 측정. 시간은 보드에서 제한하며 최소 2 × acquisition period입니다. 입력 bias = VRE − VWE, 통상 EWE−RE는 반대 부호입니다. 표본 시간은 명목값이며 빠른 초기 과도응답/다중 step CA는 지원하지 않습니다.</p>
+              </div>
               <label>Internal RTIA <span>Ω</span>
                 <select id="ampRtia">
                   <option value="1000">1 kΩ</option><option value="4000" selected>4 kΩ</option>
@@ -81,11 +89,12 @@
                 <label>FIFO threshold <span>words</span><input id="ampFifo" type="number" min="4" max="512" step="4" value="4" required /></label>
                 <label>RCAL resistor <span>Ω</span><input id="ampRcal" type="number" min="100" max="100000" step="1" value="200" required /></label>
                 <label>ADC reference <span>mV</span><input id="ampAdcRef" type="number" min="1500" max="2100" step="1" value="1816" required /></label>
+                <label>RTIA calibration DFT <span>points</span><select id="ampCalDft"><option value="256">256</option><option value="512">512</option><option value="1024" selected>1024 (default)</option><option value="2048">2048</option><option value="4096">4096</option></select></label>
               </section>
             </details>
             <p id="ampTimingHint" class="hint"></p>
             <p id="ampCapabilityHint" class="hint capability-hint">AMPX-capable controller firmware is checked after connection.</p>
-            <p class="hint">RLOAD is fixed at 100 Ω because the ADI RTIA calibration routine uses that path. RCAL defaults to the 200 Ω resistor populated on this schematic; enter a measured value only after confirming the resistor.</p>
+            <p id="ecBoardHint" class="hint">RLOAD is fixed at 100 Ω. RCAL is 200 Ω on the original board; the nRF52840/AD5941 board advertises 10 kΩ. Confirm the board before applying parameters.</p>
           </div>
 
           <div id="cvParameters" class="parameter-set hidden">
@@ -106,7 +115,18 @@
                 </select>
               </label>
             </section>
-            <p class="hint">펌웨어는 Vzero + start/vertex가 200–2200 mV를 넘는 설정을 거부합니다.</p>
+            <details class="advanced-parameters" open>
+              <summary>Receive path &amp; RTIA calibration</summary>
+              <section class="parameter-group advanced-group">
+                <label>ADC PGA gain <span>×</span><select id="cvPga"><option value="10" selected>1</option><option value="15">1.5</option><option value="20">2</option><option value="40">4</option><option value="90">9</option></select></label>
+                <label>SINC3 OSR <span>ratio</span><select id="cvSinc3"><option value="2" selected>2</option><option value="4">4</option><option value="5">5</option></select></label>
+                <label>RCAL resistor <span>Ω</span><input id="cvRcal" type="number" min="100" max="100000" step="1" value="200" required /></label>
+                <label>ADC reference <span>mV</span><input id="cvAdcRef" type="number" min="1500" max="2100" step="1" value="1816" required /></label>
+                <label>RTIA calibration DFT <span>points</span><select id="cvCalDft"><option value="256">256</option><option value="512">512</option><option value="1024">1024</option><option value="2048" selected>2048 (default)</option><option value="4096">4096</option></select></label>
+              </section>
+            </details>
+            <p id="cvCapabilityHint" class="hint capability-hint">Connect to check extended CV receive-path control.</p>
+            <p class="hint">펌웨어는 Vzero + start/vertex가 200–2200 mV를 넘는 설정을 거부합니다. 표시되는 scan rate는 한 방향 ramp의 명목값입니다. DFT는 RUN 전 RTIA calibration 적분 길이만 정하며 CV current stream은 SINC3 경로 그대로입니다.</p>
           </div>
 
           <div id="dpvParameters" class="parameter-set hidden">
@@ -124,6 +144,15 @@
               </label>
               <label>SINC3 OSR <span>ratio</span><select id="dpvSinc3"><option value="2">2</option><option value="4" selected>4</option><option value="5">5</option></select></label>
             </section>
+            <details class="advanced-parameters" open>
+              <summary>Receive path &amp; RTIA calibration</summary>
+              <section class="parameter-group advanced-group">
+                <label>ADC PGA gain <span>×</span><select id="dpvPga"><option value="10" selected>1</option><option value="15">1.5</option><option value="20">2</option><option value="40">4</option><option value="90">9</option></select></label>
+                <label>RCAL resistor <span>Ω</span><input id="dpvRcal" type="number" min="100" max="100000" step="1" value="200" required /></label>
+                <label>ADC reference <span>mV</span><input id="dpvAdcRef" type="number" min="1500" max="2100" step="1" value="1816" required /></label>
+                <label>RTIA calibration DFT <span>points</span><select id="dpvCalDft"><option value="256">256</option><option value="512">512</option><option value="1024">1024</option><option value="2048" selected>2048 (default)</option><option value="4096">4096</option></select></label>
+              </section>
+            </details>
             <section class="potential-convention" aria-label="DPV potential convention">
               <p><strong>Firmware / ADI sweep</strong><span id="dpvAdiPotential">V<sub>RE</sub> − V<sub>SE</sub> = −500 → +500 mV</span></p>
               <p><strong>Standard comparison</strong><span id="dpvStandardPotential">E<sub>WE−RE</sub> = V<sub>SE</sub> − V<sub>RE</sub> = +500 → −500 mV</span></p>
@@ -131,7 +160,7 @@
             </section>
             <p id="dpvTimingHint" class="hint"></p>
             <p id="dpvCapabilityHint" class="hint capability-hint">Connect to check DPV firmware capability.</p>
-            <p class="hint">The controller emits both raw paired current samples as D1 frames. The GUI separately plots the explicitly labelled <code>I₂ − I₁</code> pair difference; it never overwrites the raw frames or CSV values.</p>
+            <p class="hint">The controller emits both raw paired current samples as D1 frames. The GUI separately plots the explicitly labelled <code>I₂ − I₁</code> pair difference; it never overwrites the raw frames or CSV values. SINC3 is the measurement filter; calibration DFT changes only the pre-RUN RTIA-calibration integration and cannot replace this raw paired stream.</p>
           </div>
 
           <div id="swvParameters" class="parameter-set hidden">
@@ -149,6 +178,15 @@
               </label>
               <label>SINC3 OSR <span>ratio</span><select id="swvSinc3"><option value="2">2</option><option value="4" selected>4</option><option value="5">5</option></select></label>
             </section>
+            <details class="advanced-parameters" open>
+              <summary>Receive path &amp; RTIA calibration</summary>
+              <section class="parameter-group advanced-group">
+                <label>ADC PGA gain <span>×</span><select id="swvPga"><option value="10" selected>1</option><option value="15">1.5</option><option value="20">2</option><option value="40">4</option><option value="90">9</option></select></label>
+                <label>RCAL resistor <span>Ω</span><input id="swvRcal" type="number" min="100" max="100000" step="1" value="200" required /></label>
+                <label>ADC reference <span>mV</span><input id="swvAdcRef" type="number" min="1500" max="2100" step="1" value="1816" required /></label>
+                <label>RTIA calibration DFT <span>points</span><select id="swvCalDft"><option value="256">256</option><option value="512">512</option><option value="1024">1024</option><option value="2048" selected>2048 (default)</option><option value="4096">4096</option></select></label>
+              </section>
+            </details>
             <section class="potential-convention" aria-label="SWV potential convention">
               <p><strong>Firmware / ADI sweep</strong><span id="swvAdiPotential">V<sub>RE</sub> − V<sub>SE</sub> = −500 → +500 mV</span></p>
               <p><strong>Standard comparison</strong><span id="swvStandardPotential">E<sub>WE−RE</sub> = V<sub>SE</sub> − V<sub>RE</sub> = +500 → −500 mV</span></p>
@@ -156,7 +194,7 @@
             </section>
             <p id="swvTimingHint" class="hint"></p>
             <p id="swvCapabilityHint" class="hint capability-hint">Connect to check SWV firmware capability.</p>
-            <p class="hint">Raw E1 frames remain in acquisition order. The displayed differential curve is a browser-side <code>I₂ − I₁</code> view only; retain the phase-labelled raw frames for electrochemical validation.</p>
+            <p class="hint">Raw E1 frames remain in acquisition order. The displayed differential curve is a browser-side <code>I₂ − I₁</code> view only; retain the phase-labelled raw frames for electrochemical validation. SINC3 is the measurement filter; calibration DFT changes only the pre-RUN RTIA-calibration integration and cannot replace this raw paired stream.</p>
           </div>
 
           <div id="pt3Parameters" class="parameter-set hidden">
@@ -349,11 +387,12 @@
         </section>
 
         <section class="panel data-panel">
-          <div class="panel-heading">
+            <div class="panel-heading">
             <div><p class="eyebrow">RAW RECEIVED FRAMES</p><h2>Latest samples</h2></div>
             <div id="transportState" class="metric transport-metric">Awaiting binary frames</div>
             <div id="sampleCount" class="metric">0 samples</div>
-          </div>
+            <div id="rawNotificationCount" class="metric">0 raw notifications</div>
+            </div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Mode</th><th>Index</th><th>Current (µA)</th><th>Method metadata</th><th>Received at</th></tr></thead>
@@ -363,7 +402,7 @@
         </section>
 
         <section class="panel log-panel">
-          <div class="panel-heading"><div><p class="eyebrow">EVENT LOG</p><h2>Protocol and safety events</h2></div><button id="clearLogButton" class="button compact ghost">Clear</button></div>
+          <div class="panel-heading"><div><p class="eyebrow">EVENT LOG</p><h2>Protocol and safety events</h2></div><button id="downloadRawNotificationsButton" class="button compact ghost" disabled>Download raw JSONL</button><button id="clearLogButton" class="button compact ghost">Clear</button></div>
           <pre id="eventLog" aria-live="polite"></pre>
         </section>
       </section>
@@ -401,7 +440,8 @@
       </aside>
     </main>
 
-    <footer>HTTPS Chromium browser required for Web Bluetooth. No browser action can replace SWD recovery.</footer>
-    <script type="module" src="app.js?v=b7953172d3c7"></script>
+    <footer>HTTPS desktop Chrome/Edge: BLE or USB CDC (nRF52840 V71+). Verify module VDD/VDDH power wiring before connecting USB. USB measurement is not USB DFU; updates remain J-Link for this board.</footer>
+    <script src="usb_serial.js"></script>
+    <script type="module" src="app.js?v=0bd3a14c2291"></script>
   </body>
 </html>

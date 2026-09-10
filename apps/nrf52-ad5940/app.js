@@ -32,6 +32,13 @@ const PT3 = {
 const state = {
   mode: "AMP",
   device: null,
+  transport: null,
+  connecting: false,
+  connectionEpoch: 0,
+  usb: null,
+  usbVerified: false,
+  usbInfoAwaiter: null,
+  usbSessionId: null,
   server: null,
   nusRx: null,
   nusTx: null,
@@ -40,6 +47,10 @@ const state = {
   textCarry: "",
   running: false,
   ampxSupported: false,
+  ecExtendedSupported: false,
+  caTimerSupported: false,
+  ec840Board: false,
+  ecPreviousFields: null,
   dpvSupported: false,
   swvSupported: false,
   pt3Supported: false,
@@ -79,6 +90,9 @@ const state = {
   firmwareQueueDepth: null,
   firmwareOverflowSamples: null,
   firmwareBackpressureEvents: null,
+  rawNotifications: [],
+  rawCaptureStartedAt: new Date().toISOString(),
+  configAwaiter: null,
   plotWindowSamples: 256,
   expectDfuDisconnect: false,
   plotDrawPending: false,
@@ -92,14 +106,17 @@ const elements = {
   connectionDot: $("connectionDot"), connectionLabel: $("connectionLabel"), connect: $("connectButton"), disconnect: $("disconnectButton"),
   browserState: $("browserState"), deviceState: $("deviceState"), deviceNameState: $("deviceNameState"), controllerVersion: $("controllerVersion"), dfuUpdateState: $("dfuUpdateState"), lastStatus: $("lastStatus"),
   ampTab: $("ampTab"), cvTab: $("cvTab"), dpvTab: $("dpvTab"), swvTab: $("swvTab"), pt3Tab: $("pt3Tab"), pt3PulseTab: $("pt3PulseTab"), ampParameters: $("ampParameters"), cvParameters: $("cvParameters"), dpvParameters: $("dpvParameters"), swvParameters: $("swvParameters"), pt3Parameters: $("pt3Parameters"), pt3PulseParameters: $("pt3PulseParameters"),
-  ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), dpvTimingHint: $("dpvTimingHint"), dpvCapabilityHint: $("dpvCapabilityHint"), swvTimingHint: $("swvTimingHint"), swvCapabilityHint: $("swvCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"), pt3PulseTimingHint: $("pt3PulseTimingHint"), pt3PulseCapabilityHint: $("pt3PulseCapabilityHint"),
+  ampTimingHint: $("ampTimingHint"), ampCapabilityHint: $("ampCapabilityHint"), cvCapabilityHint: $("cvCapabilityHint"), dpvTimingHint: $("dpvTimingHint"), dpvCapabilityHint: $("dpvCapabilityHint"), swvTimingHint: $("swvTimingHint"), swvCapabilityHint: $("swvCapabilityHint"), pt3TimingHint: $("pt3TimingHint"), pt3CapabilityHint: $("pt3CapabilityHint"), pt3PulseTimingHint: $("pt3PulseTimingHint"), pt3PulseCapabilityHint: $("pt3PulseCapabilityHint"),
   pt3VbiasSet: $("pt3VbiasSet"), pt3VzeroSet: $("pt3VzeroSet"), pt3CeSet: $("pt3CeSet"), pt3SeSet: $("pt3SeSet"), pt3SettingsPanel: $("pt3SettingsPanel"), pt3SettingsPlot: $("pt3SettingsCanvas"), pt3RouteState: $("pt3RouteState"), pt3Vds: $("pt3Vds"), pt3Vgs: $("pt3Vgs"), pt3Period: $("pt3Period"), pt3Settle: $("pt3Settle"), pt3Sinc3: $("pt3Sinc3"), pt3Sinc2: $("pt3Sinc2"), pt3Notch: $("pt3Notch"), pt3CalDft: $("pt3CalDft"), pt3Rtia: $("pt3Rtia"), pt3Live: $("pt3LiveButton"), pt3ReCal: $("pt3ReCalButton"), pt3ReCalRaw: $("pt3ReCalRaw"), pt3ReCalDelta: $("pt3ReCalDelta"), pt3ReCalCeResidual: $("pt3ReCalCeResidual"), pt3ReCalLeakage: $("pt3ReCalLeakage"), pt3ReCalState: $("pt3ReCalState"), downloadPt3ReCal: $("downloadPt3ReCalButton"),
   pt3PulseLow: $("pt3PulseLow"), pt3PulseHigh: $("pt3PulseHigh"), pt3PulseVgs: $("pt3PulseVgs"), pt3PulseWidth: $("pt3PulseWidth"), pt3PulsePeriod: $("pt3PulsePeriod"), pt3PulseCount: $("pt3PulseCount"), pt3PulsePretrigger: $("pt3PulsePretrigger"), pt3PulseOutputPeriod: $("pt3PulseOutputPeriod"), pt3PulseSettle: $("pt3PulseSettle"), pt3PulseSinc3: $("pt3PulseSinc3"), pt3PulseSinc2: $("pt3PulseSinc2"), pt3PulseNotch: $("pt3PulseNotch"), pt3PulseCalDft: $("pt3PulseCalDft"), pt3PulseRtia: $("pt3PulseRtia"), pt3PulseLowSet: $("pt3PulseLowSet"), pt3PulseHighSet: $("pt3PulseHighSet"), pt3PulseGateSet: $("pt3PulseGateSet"),
   form: $("experimentForm"), apply: $("applyButton"), run: $("runButton"), stop: $("stopButton"),
+  ampCalDft: $("ampCalDft"), cvPga: $("cvPga"), cvSinc3: $("cvSinc3"), cvRcal: $("cvRcal"), cvAdcRef: $("cvAdcRef"), cvCalDft: $("cvCalDft"),
+  dpvPga: $("dpvPga"), dpvRcal: $("dpvRcal"), dpvAdcRef: $("dpvAdcRef"), dpvCalDft: $("dpvCalDft"),
+  swvPga: $("swvPga"), swvRcal: $("swvRcal"), swvAdcRef: $("swvAdcRef"), swvCalDft: $("swvCalDft"),
   probe: $("probeButton"),
-  plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"), transportState: $("transportState"),
+  plot: $("plotCanvas"), plotTitle: $("plotTitle"), plotCaption: $("plotCaption"), sampleRows: $("sampleRows"), sampleCount: $("sampleCount"), rawNotificationCount: $("rawNotificationCount"), transportState: $("transportState"),
   pulseDiagramPanel: $("pulseDiagramPanel"), pulseDiagramTitle: $("pulseDiagramTitle"), pulseDiagramMetric: $("pulseDiagramMetric"), dpvWaveform: $("dpvWaveform"), swvWaveform: $("swvWaveform"), pulseTermOne: $("pulseTermOne"), pulseTermOneValue: $("pulseTermOneValue"), pulseTermTwo: $("pulseTermTwo"), pulseTermTwoValue: $("pulseTermTwoValue"), pulseTermFrequency: $("pulseTermFrequency"), pulseTermDelay: $("pulseTermDelay"), pulseAdiPotential: $("pulseAdiPotential"), pulseStandardPotential: $("pulseStandardPotential"), dpvAdiPotential: $("dpvAdiPotential"), dpvStandardPotential: $("dpvStandardPotential"), swvAdiPotential: $("swvAdiPotential"), swvStandardPotential: $("swvStandardPotential"), pulseDiagramCaption: $("pulseDiagramCaption"),
-  clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), plotWindow: $("plotWindowSamples"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
+  clearData: $("clearDataButton"), downloadCsv: $("downloadCsvButton"), downloadRawNotifications: $("downloadRawNotificationsButton"), plotWindow: $("plotWindowSamples"), eventLog: $("eventLog"), clearLog: $("clearLogButton"),
   dfuFile: $("dfuFile"), dfuPackageState: $("dfuPackageState"), dfuDeviceName: $("dfuDeviceName"), dfuDeviceNameState: $("dfuDeviceNameState"), applyDeviceName: $("applyDeviceNameButton"), enterDfu: $("enterDfuButton"), transferDfu: $("transferDfuButton"),
   dfuProgress: $("dfuProgress"), dfuProgressBar: $("dfuProgressBar"), dfuProgressPercent: $("dfuProgressPercent"), dfuProgressText: $("dfuProgressText"), verifyApp: $("verifyAppButton"),
   dfuStages: { package: $("dfuStagePackage"), entry: $("dfuStageEntry"), transfer: $("dfuStageTransfer"), verify: $("dfuStageVerify") },
@@ -112,7 +129,9 @@ function log(message, level = "INFO") {
   elements.eventLog.scrollTop = elements.eventLog.scrollHeight;
 }
 
-function isInstrumentConnected() { return Boolean(state.device?.gatt?.connected); }
+function isInstrumentConnected() {
+  return state.transport === "usb" ? Boolean(state.usb?.connected && state.usbVerified) : Boolean(state.device?.gatt?.connected);
+}
 
 function validateReleaseManifest(value) {
   const release = value?.release;
@@ -131,6 +150,11 @@ function validateReleaseManifest(value) {
 }
 
 function refreshReleaseState() {
+  if (state.ec840Board) {
+    elements.controllerVersion.textContent = `V${state.controllerVersion ?? 70} / nRF52840 AD5941`;
+    elements.dfuUpdateState.textContent = "J-Link-only board: do not use the nRF52832 DFU packages listed below.";
+    return;
+  }
   elements.controllerVersion.textContent = state.controllerVersion === null ? "Awaiting @INFO" : `V${state.controllerVersion}`;
   const release = state.releaseManifest;
   if (!release) {
@@ -166,12 +190,15 @@ async function loadReleaseManifest() {
 
 function refreshControlAvailability() {
   const connected = isInstrumentConnected();
+  $("caControls").classList.toggle("hidden", !state.caTimerSupported);
+  $("caDuration").disabled = !connected || state.running || Boolean(state.configAwaiter);
+  const awaitingConfigAck = Boolean(state.configAwaiter);
   const modeReady = state.mode === "AMP" ? state.ampxSupported
     : state.mode === "DPV" ? state.dpvSupported
       : state.mode === "SWV" ? state.swvSupported
         : state.mode === "PT3" ? state.pt3Supported
           : state.mode === "PT3P" ? state.pt3VdsPulseSupported : true;
-  const canConfigure = connected && !state.running && modeReady;
+  const canConfigure = connected && !state.running && modeReady && !awaitingConfigAck;
   const pt3Running = connected && state.running && state.mode === "PT3";
   const canLivePt3Dac = pt3Running && state.pt3LiveDacSupported && state.pt3LiveReady && Boolean(state.pt3Applied) && !state.pendingPt3Live;
   elements.apply.disabled = !canConfigure;
@@ -181,6 +208,7 @@ function refreshControlAvailability() {
   elements.pt3Live.disabled = !canLivePt3Dac;
   elements.pt3ReCal.disabled = !connected || !state.pt3ReCalibrationSupported || state.running || state.pt3ReCalibrationPending;
   elements.downloadPt3ReCal.disabled = state.pt3ReCalibrationHistory.length === 0;
+  elements.downloadRawNotifications.disabled = state.rawNotifications.length === 0;
   [elements.ampTab, elements.cvTab, elements.dpvTab, elements.swvTab, elements.pt3Tab, elements.pt3PulseTab].forEach((tab) => { tab.disabled = connected && state.running; });
   [elements.pt3Vds, elements.pt3Vgs].forEach((control) => { control.disabled = pt3Running && !canLivePt3Dac; });
   [elements.pt3Period, elements.pt3Settle].forEach((control) => { control.disabled = pt3Running; });
@@ -210,6 +238,15 @@ function refreshControlAvailability() {
   };
   refreshPulseCapability("DPV", state.dpvSupported, elements.dpvCapabilityHint);
   refreshPulseCapability("SWV", state.swvSupported, elements.swvCapabilityHint);
+
+  const extendedEcControls = [elements.ampCalDft, elements.cvPga, elements.cvSinc3, elements.cvRcal, elements.cvAdcRef, elements.cvCalDft, elements.dpvPga, elements.dpvRcal, elements.dpvAdcRef, elements.dpvCalDft, elements.swvPga, elements.swvRcal, elements.swvAdcRef, elements.swvCalDft];
+  extendedEcControls.forEach((control) => { control.disabled = !connected || !state.ecExtendedSupported || state.running || awaitingConfigAck; });
+  elements.cvCapabilityHint.classList.toggle("ready", connected && state.ecExtendedSupported);
+  elements.cvCapabilityHint.textContent = !connected
+    ? "Connect to check extended CV receive-path control."
+    : state.ecExtendedSupported
+      ? "CVX + ACK gate detected. PGA, SINC3, RCAL, and ADC reference are acknowledged together before RUN."
+      : "Legacy CV detected. PGA ×1, SINC3=2, RCAL=200 Ω, and ADC reference=1816 mV stay fixed; install V69 source or later for CVX.";
 
   elements.pt3CapabilityHint.classList.toggle("ready", connected && state.pt3Supported);
   [elements.pt3Sinc3, elements.pt3Sinc2, elements.pt3Notch].forEach((control) => { control.disabled = !connected || !state.pt3DspSupported || pt3Running; });
@@ -257,28 +294,24 @@ function refreshControlAvailability() {
 function setConnection(connected, text = "Instrument disconnected") {
   elements.connectionDot.classList.toggle("connected", connected);
   elements.connectionLabel.textContent = text;
-  elements.deviceState.textContent = connected && state.device ? (state.device.name || "Unnamed NUS peripheral") : "—";
-  elements.connect.disabled = connected || !navigator.bluetooth;
+  elements.deviceState.textContent = connected ? (state.transport === "usb" ? "AD5941 / USB CDC U1" : (state.device?.name || "Unnamed NUS peripheral")) : "—";
+  elements.connect.disabled = connected || state.connecting || !navigator.bluetooth || !window.isSecureContext;
+  $("connectUsbButton").disabled = connected || state.connecting || !navigator.serial || !window.isSecureContext;
   elements.disconnect.disabled = !connected;
   refreshControlAvailability();
   refreshReleaseState();
-  elements.enterDfu.disabled = !connected || !state.dfu.pkg || state.dfu.transferring || state.dfu.completed;
+  elements.enterDfu.disabled = state.transport === "usb" || state.ec840Board || !connected || !state.dfu.pkg || state.dfu.transferring || state.dfu.completed;
 }
 
 function browserReady() {
   const secure = window.isSecureContext;
   const supported = Boolean(navigator.bluetooth);
-  if (supported && secure) {
-    elements.browserState.textContent = "Web Bluetooth available (secure context)";
-    elements.dfuFile.disabled = false;
-    elements.connect.disabled = false;
-    log("Web Bluetooth is available. Device choosers require a direct user click.");
-  } else {
-    elements.browserState.textContent = !secure ? "HTTPS secure context required" : "Web Bluetooth unavailable in this browser";
-    elements.dfuFile.disabled = true;
-    elements.connect.disabled = true;
-    log("Web Bluetooth is unavailable. Use HTTPS in a Chromium browser.", "WARN");
-  }
+  const serial = Boolean(navigator.serial);
+  elements.browserState.textContent = !secure ? "HTTPS secure context required" : `BLE: ${supported ? "available" : "unavailable"} / USB Serial: ${serial ? "available" : "unavailable"}`;
+  elements.dfuFile.disabled = !secure || !supported;
+  elements.connect.disabled = !secure || !supported;
+  $("connectUsbButton").disabled = !secure || !serial;
+  log("Choose BLE or USB explicitly. USB needs V71+ and verified VDD/VDDH wiring; no automatic connection.");
 }
 
 function queueGatt(operation) {
@@ -299,10 +332,105 @@ async function writeCharacteristic(characteristic, bytes, withResponse = true) {
 }
 
 async function sendNusCommand(command) {
-  if (!state.nusRx || !state.device?.gatt?.connected) throw new Error("Instrument is not connected.");
+  const epoch = state.connectionEpoch;
+  if (state.transport === "usb") {
+    const link = state.usb;
+    if (!link?.connected || (!state.usbVerified && command !== "INFO?")) throw new Error("USB board identity has not been verified.");
+    await queueGatt(() => {
+      if (state.usb !== link || epoch !== state.connectionEpoch) throw new Error("USB session changed; command cancelled.");
+      return link.write(command);
+    });
+    log(`USB TX: ${command}`);
+    return;
+  }
+  const rx = state.nusRx;
+  if (!rx || !state.device?.gatt?.connected) throw new Error("Instrument is not connected.");
   const bytes = enc.encode(`${command}\r\n`);
-  await queueGatt(() => writeCharacteristic(state.nusRx, bytes, true));
+  await queueGatt(() => {
+    if (state.nusRx !== rx || epoch !== state.connectionEpoch) throw new Error("BLE session changed; command cancelled.");
+    return writeCharacteristic(rx, bytes, true);
+  });
   log(`NUS TX: ${command}`);
+}
+
+function configAckPrefix(command) {
+  if (command.startsWith("CFG,CA,")) return "@ACK,CFG,CA,";
+  if (command.startsWith("CFG,AMPX,")) return "@ACK,CFG,AMPX";
+  if (command.startsWith("CFG,CVX,")) return "@ACK,CFG,CVX";
+  if (command.startsWith("CFG,CV,")) return "@ACK,CFG,CV,";
+  if (command.startsWith("CFG,DPVX,")) return "@ACK,CFG,DPVX";
+  if (command.startsWith("CFG,DPV,")) return "@ACK,CFG,DPV";
+  if (command.startsWith("CFG,SWVX,")) return "@ACK,CFG,SWVX";
+  if (command.startsWith("CFG,SWV,")) return "@ACK,CFG,SWV";
+  if (command.startsWith("CFG,PT3P,")) return "@ACK,CFG,PT3P";
+  if (command.startsWith("CFG,PT3,")) return "@ACK,CFG,PT3,";
+  throw new Error("The selected configuration has no ACK contract.");
+}
+
+function clearConfigAwaiter(error = null, line = null) {
+  const pending = state.configAwaiter;
+  if (!pending) return;
+  state.configAwaiter = null;
+  window.clearTimeout(pending.timeout);
+  refreshControlAvailability();
+  if (error) pending.reject(error);
+  else pending.resolve(line);
+}
+
+async function sendConfigurationAndWaitForAck(overrideCommand = null) {
+  if (state.configAwaiter) throw new Error("Another AFE configuration transaction is already awaiting a board reply.");
+  const command = overrideCommand || configCommand();
+  const ackPrefix = configAckPrefix(command);
+  const acknowledged = new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      clearConfigAwaiter(new Error(`No ${ackPrefix} reply within 5 s; RUN was not sent.`));
+    }, 5000);
+    state.configAwaiter = { ackPrefix, command, resolve, reject, timeout };
+  });
+  acknowledged.catch(() => {}); // A transport fault may reject before write() settles.
+  refreshControlAvailability();
+  try {
+    await sendNusCommand(command);
+    const line = await acknowledged;
+    log(`Configuration acknowledged: ${line}`);
+    return line;
+  } catch (error) {
+    clearConfigAwaiter(error);
+    throw error;
+  }
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  bytes.forEach((value) => { binary += String.fromCharCode(value); });
+  return btoa(binary);
+}
+
+function captureRawNotification(bytes, receivedAt) {
+  state.rawNotifications.push({
+    received_at_iso: receivedAt,
+    direction: "NUS_TX_NOTIFICATION",
+    length_bytes: bytes.length,
+    hex: bytesToHex(bytes),
+    base64: bytesToBase64(bytes),
+  });
+  elements.rawNotificationCount.textContent = `${state.rawNotifications.length} raw notification${state.rawNotifications.length === 1 ? "" : "s"}`;
+  elements.downloadRawNotifications.disabled = false;
+}
+
+function captureRawUsbChunk(bytes, receivedAt) {
+  state.rawNotifications.push({
+    received_at_iso: receivedAt, direction: "USB_CDC_RX_CHUNK", transport: "USB_CDC_U1",
+    session_id: state.usbSessionId, controller_version: state.controllerVersion,
+    usb_info: state.usb?.port?.getInfo() || {},
+    length_bytes: bytes.length, hex: bytesToHex(bytes), base64: bytesToBase64(bytes),
+  });
+  elements.rawNotificationCount.textContent = `${state.rawNotifications.length} raw RX records`;
+  elements.downloadRawNotifications.disabled = false;
 }
 
 function normalizedDeviceName(value = elements.dfuDeviceName.value) {
@@ -499,8 +627,19 @@ function updateFirmwareTransportStatus(line) {
 }
 
 function handleTextLine(line) {
-  log(`NUS RX: ${line}`);
+  log(`${state.transport === "usb" ? "USB" : "NUS"} RX: ${line}`);
+  if (state.usbInfoAwaiter && (line.startsWith("@INFO,") || line.startsWith("@ERR,"))) {
+    const pending = state.usbInfoAwaiter;
+    state.usbInfoAwaiter = null;
+    if (/^@INFO,AD5940_CTRL,V\d+,/.test(line) && line.includes("USB_CDC_U1") && line.includes("BOARD=NRF52840_AD5941_R1")) pending.resolve(line);
+    else pending.reject(new Error(`USB identity/ownership rejected: ${line}`));
+  }
   elements.lastStatus.textContent = line;
+  if (state.configAwaiter && line.startsWith(state.configAwaiter.ackPrefix)) {
+    clearConfigAwaiter(null, line);
+  } else if (state.configAwaiter && line.startsWith("@ERR,")) {
+    clearConfigAwaiter(new Error(`Board rejected ${state.configAwaiter.command}: ${line}`));
+  }
   if (line.startsWith("@EVT,RUNNING")) {
     const mode = line.match(/^@EVT,RUNNING,(AMP|CV|DPV|SWV|PT3P|PT3)(?:,|$)/)?.[1];
     state.running = true;
@@ -519,11 +658,24 @@ function handleTextLine(line) {
   if (line.startsWith("@ERR,DPV")) state.pendingPulse.DPV = null;
   if (line.startsWith("@ERR,SWV")) state.pendingPulse.SWV = null;
   if (line.startsWith("@STATUS,")) updateFirmwareTransportStatus(line);
+  if (line.startsWith("@SAT,")) log(`ADC saturation evidence: ${line}. Preserve raw frames; do not treat this run as quantitative.`, "WARN");
   if (line.startsWith("@INFO,")) {
+    const wasEc840 = state.ec840Board;
+    state.caTimerSupported = line.includes("CA_TIMER");
+    state.ec840Board = line.includes("BOARD=NRF52840_AD5941_R1");
+    if (state.ec840Board && !wasEc840) {
+      state.ecPreviousFields = Object.fromEntries(["ampRcal", "cvRcal", "dpvRcal", "swvRcal", "ampVzero", "ampBias"].map((id) => [id, $(id).value]));
+      for (const id of ["ampRcal", "cvRcal", "dpvRcal", "swvRcal"]) $(id).value = "10000";
+      $("ampVzero").value = "1200";
+      $("ampBias").value = "0";
+      $("ecBoardHint").textContent = `nRF52840 + AD5941: R3 RCAL = 10 kΩ (accepted measured range 9–11 kΩ). J9: 1 CE / 2 WE(SE0) / 3 RE. Sensor bias = VRE − VWE. J-Link-only update. ${line.includes("USB_CDC_U1") ? "BLE + USB CDC measurement; verify VDD/VDDH power wiring before USB use." : "This firmware has no USB serial measurement support; use V71+."}`;
+      log("New-board profile applied: RCAL 10 kΩ, Vzero 1200 mV, bias 0 mV. Review all parameters before RUN.");
+    }
     const versionMatch = line.match(/^@INFO,AD5940_CTRL,V(\d+)(?:,|$)/);
     if (versionMatch) state.controllerVersion = Number(versionMatch[1]);
     else if (line.startsWith("@INFO,AD5940_CTRL")) state.controllerVersion = null;
     state.ampxSupported = line.includes("AMPX");
+    state.ecExtendedSupported = line.includes("EC_CFG_ACK_GATE") && line.includes("CVX") && line.includes("DPVX") && line.includes("SWVX");
     state.dpvSupported = line.includes("DPV");
     state.swvSupported = line.includes("SWV");
     state.pt3Supported = line.includes("PT3");
@@ -540,6 +692,7 @@ function handleTextLine(line) {
     refreshReleaseState();
     if (line.startsWith("@INFO,AD5940_CTRL") && state.controllerVersion === null) log("Controller @INFO did not include a parseable AD5940_CTRL release.", "WARN");
     log(state.ampxSupported ? "AMPX capability detected." : "AMPX capability not advertised by this firmware.", state.ampxSupported ? "INFO" : "WARN");
+    log(state.ecExtendedSupported ? "Three-electrode extended configuration + ACK-gate capability detected." : "Extended CVX/DPVX/SWVX control is not advertised; PGA/RCAL/ADC-reference fields remain fixed in legacy three-electrode profiles.", state.ecExtendedSupported ? "INFO" : "WARN");
     log(state.dpvSupported ? "DPV paired-pulse capability detected." : "DPV capability not advertised by this firmware.", state.dpvSupported ? "INFO" : "WARN");
     log(state.swvSupported ? "SWV paired-pulse capability detected." : "SWV capability not advertised by this firmware.", state.swvSupported ? "INFO" : "WARN");
     log(state.pt3RtiaSelectSupported ? "PT3 5/10/20 kOhm HSTIA RTIA selection detected; firmware calibrates the selected RTIA before each RUN." : state.pt3HighRateSupported && state.nusB2QueueSupported ? "PT3 200 SPS and queued B2 transport capability detected." : state.pt3LiveDacSupported ? "PT3 DSP, RTIA-calibration DFT, and live VDS/VGS capability detected." : state.pt3CalibrationDftSupported ? "PT3 DSP and RTIA-calibration DFT capability detected; live VDS/VGS requires V36." : state.pt3DspSupported ? "PT3 DSP capability detected; calibration DFT control requires V35." : state.pt3Supported ? "Basic PT3 capability detected; DSP controls require V34." : "PT3 capability not advertised by this firmware.", state.pt3Supported ? "INFO" : "WARN");
@@ -644,7 +797,14 @@ function receiveMeasurementSamples(samples) {
 }
 
 function handleNusNotification(event) {
-  const bytes = new Uint8Array(event.target.value.buffer.slice(0));
+  const value = event.target.value;
+  const bytes = new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  const receivedAt = new Date().toISOString();
+  captureRawNotification(bytes, receivedAt);
+  decodeReceivedPayload(bytes, receivedAt);
+}
+
+function decodeReceivedPayload(bytes, receivedAt) {
   const sourceMode = modeForSourceFrame(bytes[0]);
   if (bytes.length === 9 && sourceMode) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -653,7 +813,7 @@ function handleNusNotification(event) {
       mode: sourceMode,
       index: view.getUint32(1, true),
       currentUa: view.getFloat32(5, true),
-      receivedAt: new Date().toISOString(),
+      receivedAt,
       pt3: sourceMode === "PT3P" && state.pt3PulseApplied ? { ...state.pt3PulseApplied } : sourceMode === "PT3" && state.pt3Applied ? { ...state.pt3Applied } : null,
       transport: { format: "legacy", sourceFrameType: bytes[0], batchCount: 1, batchOffset: 0 },
     }]);
@@ -670,7 +830,6 @@ function handleNusNotification(event) {
     }
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const startIndex = view.getUint32(3, true);
-    const receivedAt = new Date().toISOString();
     const samples = Array.from({ length: batchCount }, (_, batchOffset) => ({
       mode,
       index: (startIndex + batchOffset) >>> 0,
@@ -687,7 +846,9 @@ function handleNusNotification(event) {
 }
 
 async function connectInstrument() {
-  if (!navigator.bluetooth || !window.isSecureContext) return;
+  if (!navigator.bluetooth || !window.isSecureContext || state.connecting || isInstrumentConnected() || state.usb) return;
+  state.connecting = true; state.transport = "ble"; ++state.connectionEpoch;
+  setConnection(false, "Select BLE instrument…");
   try {
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [UUID.nusService] }],
@@ -696,7 +857,7 @@ async function connectInstrument() {
     device.removeEventListener("gattserverdisconnected", onInstrumentDisconnected);
     device.addEventListener("gattserverdisconnected", onInstrumentDisconnected);
     state.device = device;
-  state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3RtiaSelectSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
+  state.ampxSupported = false; state.ecExtendedSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3RtiaSelectSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.deviceName = device.name || null; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
     setConnection(false, "Connecting…");
     state.server = await device.gatt.connect();
     const service = await state.server.getPrimaryService(UUID.nusService);
@@ -705,19 +866,35 @@ async function connectInstrument() {
     await state.nusTx.startNotifications();
     state.nusTx.removeEventListener("characteristicvaluechanged", handleNusNotification);
     state.nusTx.addEventListener("characteristicvaluechanged", handleNusNotification);
-    setConnection(true, `Connected: ${device.name || "NUS peripheral"}`);
+    state.connecting = false;
+    setConnection(true, `BLE: ${device.name || "NUS peripheral"}`);
     log(`Connected to ${device.name || "unnamed NUS peripheral"}.`);
     await sendNusCommand("INFO?");
     await sendNusCommand("STATUS?");
   } catch (error) {
+    state.connecting = false;
+    if (state.device?.gatt?.connected) state.device.gatt.disconnect();
     setConnection(false);
     log(`Connection failed: ${error.message}`, "ERROR");
   }
 }
 
-function onInstrumentDisconnected() {
+function onInstrumentDisconnected(event) {
+  if (event?.target && (state.transport === "usb" || event.target !== state.device)) return;
+  ++state.connectionEpoch;
+  state.transport = null; state.connecting = false; state.usbVerified = false;
+  state.textCarry = ""; state.gattQueue = Promise.resolve();
+  if (state.usbInfoAwaiter) { state.usbInfoAwaiter.reject(new Error("USB disconnected before INFO verification.")); state.usbInfoAwaiter = null; }
+  if (state.ec840Board && state.ecPreviousFields) {
+    for (const [id, value] of Object.entries(state.ecPreviousFields)) $(id).value = value;
+  }
+  state.ecPreviousFields = null;
+  state.ec840Board = false;
+  state.caTimerSupported = false;
+  $("ecBoardHint").textContent = "RLOAD is fixed at 100 Ω. RCAL: original board 200 Ω; nRF52840/AD5941 R3 10 kΩ. Confirm board identity before RUN.";
   const wasDfuTransition = state.expectDfuDisconnect;
-  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3RtiaSelectSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
+  clearConfigAwaiter(new Error("Instrument disconnected before configuration ACK; RUN was not sent."));
+  state.nusRx = null; state.nusTx = null; state.server = null; state.running = false; state.ampxSupported = false; state.ecExtendedSupported = false; state.dpvSupported = false; state.swvSupported = false; state.pt3Supported = false; state.pt3DspSupported = false; state.pt3CalibrationDftSupported = false; state.pt3RtiaSelectSupported = false; state.pt3LiveDacSupported = false; state.pt3HighRateSupported = false; state.pt3VdsPulseSupported = false; state.pt3ZeroVdsSupported = false; state.pt3ReCalibrationSupported = false; state.pt3ReCalibrationPending = false; state.nusB2QueueSupported = false; state.pt3LiveReady = false; state.deviceNameSupported = false; state.nameUpdatePending = null; state.pendingPulse = { DPV: null, SWV: null }; state.pulseApplied = { DPV: null, SWV: null }; state.pulsePairs = { DPV: null, SWV: null }; state.pendingPt3Live = null; state.pendingPt3Pulse = null; state.pt3PulseApplied = null; state.controllerVersion = null;
   setConnection(false, wasDfuTransition ? "Application disconnected; select DfuTarg" : "Instrument disconnected");
   log(wasDfuTransition ? "DFU transition disconnect observed." : "Instrument disconnected.", wasDfuTransition ? "INFO" : "WARN");
   if (wasDfuTransition) {
@@ -742,7 +919,44 @@ function allowDfuTargetSelection(message) {
 }
 
 async function disconnectInstrument() {
+  if (state.usb) { await state.usb.close(); return; }
   if (state.device?.gatt?.connected) state.device.gatt.disconnect();
+}
+
+async function connectUsbInstrument() {
+  if (!navigator.serial || !window.isSecureContext || state.connecting || isInstrumentConnected() || state.usb) return;
+  state.connecting = true; state.transport = "usb"; state.device = null;
+  state.usbVerified = false; state.textCarry = ""; ++state.connectionEpoch;
+  state.usbSessionId = new Date().toISOString();
+  setConnection(false, "Select AD5941 USB COM port…");
+  const link = new EcUsbSerial.SerialLink({
+    onRaw: captureRawUsbChunk,
+    onPacket: (bytes, receivedAt) => decodeReceivedPayload(bytes, receivedAt),
+    onError: error => { log(error.message, "ERROR"); clearConfigAwaiter(error); },
+    onClose: () => { if (state.usb === link) { state.usb = null; onInstrumentDisconnected(); } },
+  });
+  state.usb = link;
+  let timer;
+  try {
+    await link.open();
+    const info = new Promise((resolve, reject) => {
+      state.usbInfoAwaiter = { resolve, reject };
+      timer = window.setTimeout(() => reject(new Error("No V71+ USB_CDC_U1 identity within 5 s; controls remain locked.")), 5000);
+    });
+    info.catch(() => {}); // Disconnect may reject before the write promise settles.
+    await sendNusCommand("INFO?");
+    await info;
+    if (!link.connected || state.usb !== link) throw new Error("USB disconnected during identity verification.");
+    state.usbVerified = true; state.connecting = false;
+    setConnection(true, "USB: AD5941 nRF52840");
+    log("USB identity verified. Raw chunks are saved before CRC/sequence checking. No AFE configuration or RUN has been sent.");
+    await sendNusCommand("STATUS?");
+  } catch (error) {
+    log(`USB connection failed: ${error.message}`, "ERROR");
+    await link.close();
+  } finally {
+    window.clearTimeout(timer); state.usbInfoAwaiter = null;
+  }
 }
 
 function switchMode(mode) {
@@ -800,6 +1014,7 @@ function readPulseConfig(mode) {
     mode,
     start: integer(`${prefix}Start`), end: integer(`${prefix}End`), vzero: integer(`${prefix}Vzero`), step: integer(`${prefix}Step`),
     pulse: integer(`${prefix}Pulse`), frequency: integer(`${prefix}Frequency`), delay: integer(`${prefix}Delay`), rtia: integer(`${prefix}Rtia`), sinc3: integer(`${prefix}Sinc3`),
+    pgaX10: integer(`${prefix}Pga`), rcal: integer(`${prefix}Rcal`), adcRefMv: integer(`${prefix}AdcRef`), calDft: integer(`${prefix}CalDft`),
   };
   const span = config.end - config.start;
   const fullSteps = span / config.step;
@@ -811,7 +1026,8 @@ function readPulseConfig(mode) {
     || config.start < -900 || config.start > 900 || config.end < -900 || config.end > 900 || config.end <= config.start
     || config.vzero < 200 || config.vzero > 2200 || config.step < 1 || config.step > 25 || span % config.step
     || config.pulse < 1 || config.pulse > 200 || config.frequency < 1 || config.frequency > 100 || config.delay < 1 || config.delay > 100
-    || !supportedRtia.includes(config.rtia) || !supportedSinc3.includes(config.sinc3) || rawSamples < 4 || rawSamples > 512
+    || !supportedRtia.includes(config.rtia) || !supportedSinc3.includes(config.sinc3) || ![10, 15, 20, 40, 90].includes(config.pgaX10)
+    || config.rcal < 100 || config.rcal > 100000 || config.adcRefMv < 1500 || config.adcRefMv > 2100 || ![256, 512, 1024, 2048, 4096].includes(config.calDft) || rawSamples < 4 || rawSamples > 512
     || config.delay >= halfPeriodMs - 1 || config.vzero + config.start - config.pulse < 200 || config.vzero + config.end + config.pulse > 2200) {
     throw new Error(`${mode} parameters violate the guarded potential, sequence-length, or sample-timing range.`);
   }
@@ -843,7 +1059,7 @@ function updatePulsePreview(mode) {
     elements.pulseTermOne.textContent = termOne; elements.pulseTermOneValue.textContent = `${config.step} mV`;
     elements.pulseTermTwo.textContent = termTwo; elements.pulseTermTwoValue.textContent = `${config.pulse} mV`;
     elements.pulseTermFrequency.textContent = `f — paired-pulse frequency: ${config.frequency} Hz (${config.halfPeriodMs.toFixed(2)} ms half-period)`;
-    elements.pulseTermDelay.textContent = `tₛ — sample delay after each phase: ${config.delay} ms; Vzero: ${config.vzero} mV; RTIA: ${(config.rtia / 1000).toFixed(config.rtia < 10000 ? 0 : 1)} kΩ; SINC3: ${config.sinc3}`;
+    elements.pulseTermDelay.textContent = `tₛ — sample delay after each phase: ${config.delay} ms; Vzero: ${config.vzero} mV; RTIA: ${(config.rtia / 1000).toFixed(config.rtia < 10000 ? 0 : 1)} kΩ; SINC3: ${config.sinc3}; cal DFT: ${config.calDft}`;
     elements.pulseAdiPotential.textContent = adiTrace; elements.pulseStandardPotential.textContent = standardTrace;
     (isDpv ? elements.dpvAdiPotential : elements.swvAdiPotential).textContent = adiTrace;
     (isDpv ? elements.dpvStandardPotential : elements.swvStandardPotential).textContent = standardTrace;
@@ -985,7 +1201,7 @@ function readConfig() {
     const config = {
       vzero: integer("ampVzero"), bias: integer("ampBias"), period: integer("ampPeriod"), rtia: integer("ampRtia"),
       rf: integer("ampRf"), pgaX10: integer("ampPga"), sinc3: integer("ampSinc3"), sinc2: integer("ampSinc2"),
-      fifoWords: integer("ampFifo"), rcal: integer("ampRcal"), adcRefMv: integer("ampAdcRef"),
+      fifoWords: integer("ampFifo"), rcal: integer("ampRcal"), adcRefMv: integer("ampAdcRef"), calDft: integer("ampCalDft"),
     };
     const supportedRtia = [1000, 4000, 10000, 20000, 40000, 100000, 160000];
     const supportedRf = [20000, 100000, 200000, 400000, 600000, 1000000];
@@ -993,7 +1209,7 @@ function readConfig() {
     const supportedSinc3 = [2, 4, 5];
     const supportedSinc2 = [22, 44, 89, 178, 267, 533, 640, 667, 800, 889, 1067, 1333];
     const finite = Object.values(config).every(Number.isFinite);
-    if (!finite || config.vzero < 200 || config.vzero > 2200 || config.bias < -750 || config.bias > 750 || config.vzero + config.bias < 200 || config.vzero + config.bias > 2200 || config.period < 100 || config.period > 10000 || !supportedRtia.includes(config.rtia) || !supportedRf.includes(config.rf) || !supportedPga.includes(config.pgaX10) || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || config.fifoWords < 4 || config.fifoWords > 512 || config.fifoWords % 4 || config.rcal < 100 || config.rcal > 100000 || config.adcRefMv < 1500 || config.adcRefMv > 2100) throw new Error("Amperometry parameters are outside the firmware guard range.");
+    if (!finite || config.vzero < 200 || config.vzero > 2200 || config.bias < -750 || config.bias > 750 || config.vzero + config.bias < 200 || config.vzero + config.bias > 2200 || config.period < 100 || config.period > 10000 || !supportedRtia.includes(config.rtia) || !supportedRf.includes(config.rf) || !supportedPga.includes(config.pgaX10) || !supportedSinc3.includes(config.sinc3) || !supportedSinc2.includes(config.sinc2) || config.fifoWords < 4 || config.fifoWords > 512 || config.fifoWords % 4 || config.rcal < 100 || config.rcal > 100000 || config.adcRefMv < 1500 || config.adcRefMv > 2100 || ![256, 512, 1024, 2048, 4096].includes(config.calDft)) throw new Error("Amperometry parameters are outside the firmware guard range.");
     return config;
   }
   if (state.mode === "PT3") return readPt3Config();
@@ -1003,19 +1219,27 @@ function readConfig() {
     if (!supported) throw new Error(`${state.mode} controls require controller V37 or later.`);
     return readPulseConfig(state.mode);
   }
-  const config = { start: integer("cvStart"), vertex: integer("cvVertex"), vzero: integer("cvVzero"), steps: integer("cvSteps"), duration: integer("cvDuration"), settle: integer("cvSettle"), rtia: integer("cvRtia") };
+  const config = { start: integer("cvStart"), vertex: integer("cvVertex"), vzero: integer("cvVzero"), steps: integer("cvSteps"), duration: integer("cvDuration"), settle: integer("cvSettle"), rtia: integer("cvRtia"), pgaX10: integer("cvPga"), sinc3: integer("cvSinc3"), rcal: integer("cvRcal"), adcRefMv: integer("cvAdcRef"), calDft: integer("cvCalDft") };
   const pointPeriod = config.duration / config.steps;
-  if (config.start === config.vertex || config.start < -1000 || config.start > 1000 || config.vertex < -1000 || config.vertex > 1000 || config.vzero < 200 || config.vzero > 2200 || config.vzero + config.start < 200 || config.vzero + config.start > 2200 || config.vzero + config.vertex < 200 || config.vzero + config.vertex > 2200 || config.steps < 2 || config.steps > 4095 || config.duration < 10 || config.duration > 600000 || config.settle < 2 || config.settle > 1000 || pointPeriod < config.settle + 1 || pointPeriod < 3) throw new Error("CV parameters violate the firmware guard range or timing relation.");
+  if (config.start === config.vertex || config.start < -1000 || config.start > 1000 || config.vertex < -1000 || config.vertex > 1000 || config.vzero < 200 || config.vzero > 2200 || config.vzero + config.start < 200 || config.vzero + config.start > 2200 || config.vzero + config.vertex < 200 || config.vzero + config.vertex > 2200 || config.steps < 2 || config.steps > 4095 || config.duration < 10 || config.duration > 600000 || config.settle < 2 || config.settle > 1000 || pointPeriod < config.settle + 1 || pointPeriod < 3 || ![10, 15, 20, 40, 90].includes(config.pgaX10) || ![2, 4, 5].includes(config.sinc3) || config.rcal < 100 || config.rcal > 100000 || config.adcRefMv < 1500 || config.adcRefMv > 2100 || ![256, 512, 1024, 2048, 4096].includes(config.calDft)) throw new Error("CV parameters violate the firmware guard range or timing relation.");
   return config;
 }
 
 function configCommand() {
   const config = readConfig();
-  if (state.mode === "AMP") return `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`;
+  if (state.ec840Board && ["AMP", "CV", "DPV", "SWV"].includes(state.mode)) {
+    if (config.rcal < 9000 || config.rcal > 11000) throw new Error("This board has R3 = 10 kΩ; RCAL must be a verified 9–11 kΩ value.");
+    if (state.mode === "AMP" && config.fifoWords * config.period > 60000) throw new Error("FIFO × period must not exceed 60 seconds on this board.");
+  }
+  if (state.mode === "AMP") return state.ecExtendedSupported
+    ? `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv},${config.calDft}`
+    : `CFG,AMPX,${config.vzero},${config.bias},${config.period},${config.rtia},${config.rf},${config.pgaX10},${config.sinc3},${config.sinc2},${config.fifoWords},${config.rcal},${config.adcRefMv}`;
   if (state.mode === "DPV" || state.mode === "SWV") {
     state.pendingPulse[state.mode] = config;
     state.pulseApplied[state.mode] = null;
-    return `CFG,${state.mode},${config.start},${config.end},${config.vzero},${config.step},${config.pulse},${config.frequency},${config.delay},${config.rtia},${config.sinc3}`;
+    return state.ecExtendedSupported
+      ? `CFG,${state.mode}X,${config.start},${config.end},${config.vzero},${config.step},${config.pulse},${config.frequency},${config.delay},${config.rtia},${config.sinc3},${config.pgaX10},${config.rcal},${config.adcRefMv},${config.calDft}`
+      : `CFG,${state.mode},${config.start},${config.end},${config.vzero},${config.step},${config.pulse},${config.frequency},${config.delay},${config.rtia},${config.sinc3}`;
   }
   if (state.mode === "PT3") {
     const applied = state.pt3CalibrationDftSupported ? config : { ...config, calDft: 1024 };
@@ -1033,20 +1257,45 @@ function configCommand() {
     const rtiaField = state.pt3RtiaSelectSupported ? `,${config.rtia}` : "";
     return `CFG,PT3P,${config.low},${config.high},${config.vgs},${config.width},${config.period},${config.count},${config.pretrigger},${config.outputPeriod},${config.settle},${config.sinc3},${config.sinc2},${config.notch},${config.calDft}${rtiaField}`;
   }
-  return `CFG,CV,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia}`;
+  return state.ecExtendedSupported
+    ? `CFG,CVX,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia},${config.pgaX10},${config.sinc3},${config.rcal},${config.adcRefMv},${config.calDft}`
+    : `CFG,CV,${config.start},${config.vertex},${config.vzero},${config.steps},${config.duration},${config.settle},${config.rtia}`;
 }
 
 async function applyConfig(event) {
   event?.preventDefault();
-  try { await sendNusCommand(configCommand()); } catch (error) { log(error.message, "ERROR"); }
+  try { await configureSelectedMeasurement(); } catch (error) { log(error.message, "ERROR"); }
+}
+
+async function configureSelectedMeasurement() {
+  const mode = state.mode;
+  let duration = null;
+  if (mode === "AMP" && state.caTimerSupported) {
+    duration = integer("caDuration");
+    const period = integer("ampPeriod");
+    if (!Number.isInteger(duration) || duration < 0 || duration > 600000 ||
+        (duration !== 0 && duration < period * 2)) throw new Error("CA duration must be 0 or between 2 × period and 600000 ms.");
+  }
+  await sendConfigurationAndWaitForAck();
+  if (state.mode !== mode) throw new Error("Mode changed during configuration; RUN cancelled.");
+  if (duration !== null) await sendConfigurationAndWaitForAck(`CFG,CA,${duration}`);
+  return mode;
 }
 
 async function startMeasurement() {
   try {
-    await sendNusCommand(configCommand());
-    await sendNusCommand(state.mode === "PT3P" ? "RUN,PT3P" : `RUN,${state.mode}`);
-    log("RUN queued. The board will acknowledge or reject after its AFE preflight.");
-  } catch (error) { log(error.message, "ERROR"); }
+    const mode = await configureSelectedMeasurement();
+    if (state.mode !== mode) throw new Error("Mode changed before RUN; cancelled.");
+    if (state.ec840Board) {
+      state.running = true; /* Enable STOP during device-side calibration. */
+      refreshControlAvailability();
+    }
+    await sendNusCommand(`RUN,${mode}`);
+    log("Configuration ACK received; RUN queued. The board will now acknowledge or reject its AFE preflight.");
+  } catch (error) {
+    if (state.ec840Board) { state.running = false; refreshControlAvailability(); }
+    log(error.message, "ERROR");
+  }
 }
 
 async function stopMeasurement() {
@@ -1189,26 +1438,54 @@ function downloadCsv() {
   log(`Downloaded ${state.samples.length} received frames as CSV.`);
 }
 
+function downloadRawNotifications() {
+  if (!state.rawNotifications.length) return;
+  const blob = new Blob([state.rawNotifications.map((record) => JSON.stringify(record)).join("\n") + "\n"], { type: "application/x-ndjson" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `ad5940-raw-notifications-${state.rawCaptureStartedAt.replace(/[:.]/g, "-")}.jsonl`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  log(`Downloaded ${state.rawNotifications.length} immutable inbound RX record(s) as JSONL (BLE notifications / USB chunks) before any derived CSV interpretation.`);
+}
+
+function plotPalette() {
+  // Canvas does not inherit CSS colors. Read appearance tokens at draw time.
+  const css = window.getComputedStyle?.(document.documentElement);
+  const color = (name, fallback) => css?.getPropertyValue(`--plot-${name}`).trim() || fallback;
+  return {
+    background: color("bg", "#061321"), grid: color("grid", "#1d3d59"),
+    tick: color("tick", "#8da9bd"), empty: color("empty", "#7892a7"),
+    label: color("label", "#c9dce9"), current: color("current", "#3fd0e6"),
+    optical: color("optical", "#63d67d"), pulse: color("pulse", "#ffbd57"),
+    swv: color("swv", "#5d8dff"), reference: color("reference", "#3182f6"),
+    guideFill: color("guide-fill", "rgba(255, 189, 87, 0.12)"),
+    guideLine: color("guide-line", "rgba(255, 189, 87, 0.85)"),
+    guideLabel: color("guide-label", "#ffcf78"),
+  };
+}
+
 function drawPlot() {
+  const colors = plotPalette();
   const canvas = elements.plot; const rect = canvas.getBoundingClientRect(); const ratio = window.devicePixelRatio || 1;
   if (!rect.width || !rect.height) return;
   canvas.width = Math.round(rect.width * ratio); canvas.height = Math.round(rect.height * ratio);
   const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio); const width = rect.width; const height = rect.height;
   const margin = { left: 58, right: 18, top: 18, bottom: 34 }; const chartW = width - margin.left - margin.right; const chartH = height - margin.top - margin.bottom;
-  ctx.fillStyle = "#061321"; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = "#1d3d59"; ctx.lineWidth = 1;
-  ctx.font = "11px system-ui"; ctx.fillStyle = "#8da9bd";
+  ctx.fillStyle = colors.background; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = colors.grid; ctx.lineWidth = 1;
+  ctx.font = "11px system-ui"; ctx.fillStyle = colors.tick;
   for (let i = 0; i <= 5; i += 1) { const y = margin.top + chartH * i / 5; ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(width - margin.right, y); ctx.stroke(); }
   for (let i = 0; i <= 6; i += 1) { const x = margin.left + chartW * i / 6; ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, height - margin.bottom); ctx.stroke(); }
   const pulseMode = state.mode === "DPV" || state.mode === "SWV";
   const allPoints = pulseMode ? state.pulseDerived.filter((s) => s.mode === state.mode) : state.samples.filter((s) => s.mode === state.mode);
   const points = state.plotWindowSamples === null ? allPoints : allPoints.slice(-state.plotWindowSamples);
-  if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText(pulseMode ? "Awaiting a complete raw I₁ / I₂ pair" : "Awaiting received device data", width / 2, height / 2); if (state.mode === "PT3") drawPt3SettingsPlot(); return; }
+  if (!points.length) { ctx.fillStyle = colors.empty; ctx.textAlign = "center"; ctx.fillText(pulseMode ? "Awaiting a complete raw I₁ / I₂ pair" : "Awaiting received device data", width / 2, height / 2); if (state.mode === "PT3") drawPt3SettingsPlot(); return; }
   let minX = Math.min(...points.map((p) => p.index)); let maxX = Math.max(...points.map((p) => p.index)); let minY = Math.min(...points.map((p) => p.currentUa)); let maxY = Math.max(...points.map((p) => p.currentUa));
   if (minX === maxX) { minX -= 1; maxX += 1; } if (minY === maxY) { minY -= 1; maxY += 1; } const padding = (maxY - minY) * .12; minY -= padding; maxY += padding;
   const px = (x) => margin.left + (x - minX) / (maxX - minX) * chartW; const py = (y) => margin.top + (maxY - y) / (maxY - minY) * chartH;
   ctx.textAlign = "right"; for (let i = 0; i <= 5; i += 1) { const value = maxY - (maxY - minY) * i / 5; ctx.fillText(value.toPrecision(4), margin.left - 7, margin.top + chartH * i / 5 + 4); }
   ctx.textAlign = "center"; for (let i = 0; i <= 6; i += 1) { const value = minX + (maxX - minX) * i / 6; ctx.fillText(Math.round(value), margin.left + chartW * i / 6, height - 12); }
-  ctx.strokeStyle = state.mode === "PT3" ? "#63d67d" : state.mode === "PT3P" ? "#ffbd57" : state.mode === "SWV" ? "#5d8dff" : "#3fd0e6"; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => {
+  ctx.strokeStyle = state.mode === "PT3" ? colors.optical : state.mode === "PT3P" ? colors.pulse : state.mode === "SWV" ? colors.swv : colors.current; ctx.lineWidth = 1.5; ctx.beginPath(); points.forEach((p, index) => {
     const previous = points[index - 1];
     const contiguous = index && p.index === previous.index + 1 && !p.transport?.gapBefore && !p.transport?.runBoundary;
     if (contiguous) ctx.lineTo(px(p.index), py(p.currentUa)); else ctx.moveTo(px(p.index), py(p.currentUa));
@@ -1219,8 +1496,8 @@ function drawPlot() {
     const firstHighIndex = pulse.startSampleIndex + (pulse.pretrigger / samplePeriod);
     const periodSamples = pulse.period / samplePeriod;
     const widthSamples = pulse.width / samplePeriod;
-    ctx.fillStyle = "rgba(255, 189, 87, 0.12)";
-    ctx.strokeStyle = "rgba(255, 189, 87, 0.85)";
+    ctx.fillStyle = colors.guideFill;
+    ctx.strokeStyle = colors.guideLine;
     ctx.lineWidth = 1;
     for (let index = 0; index < pulse.count; index += 1) {
       const highStart = firstHighIndex + index * periodSamples;
@@ -1230,13 +1507,14 @@ function drawPlot() {
       ctx.fillRect(left, margin.top, Math.max(1, right - left), chartH);
       ctx.beginPath(); ctx.moveTo(left, margin.top); ctx.lineTo(left, height - margin.bottom); ctx.stroke();
     }
-    ctx.fillStyle = "#ffcf78"; ctx.textAlign = "left"; ctx.fillText("VDS high guides: sample-index bracket, not ADC-trigger timestamps", margin.left + 4, margin.top + 13);
+    ctx.fillStyle = colors.guideLabel; ctx.textAlign = "left"; ctx.fillText("VDS high guides: sample-index bracket, not ADC-trigger timestamps", margin.left + 4, margin.top + 13);
   }
-  ctx.fillStyle = "#c9dce9"; ctx.textAlign = "left"; ctx.fillText(pulseMode ? "I₂ − I₁ (µA)" : "Current (µA)", margin.left, 12); ctx.textAlign = "right"; ctx.fillText(pulseMode ? "staircase pair index" : "sample index", width - margin.right, height - 12);
+  ctx.fillStyle = colors.label; ctx.textAlign = "left"; ctx.fillText(pulseMode ? "I₂ − I₁ (µA)" : "Current (µA)", margin.left, 12); ctx.textAlign = "right"; ctx.fillText(pulseMode ? "staircase pair index" : "sample index", width - margin.right, height - 12);
   if (state.mode === "PT3") drawPt3SettingsPlot();
 }
 
 function drawPt3SettingsPlot() {
+  const colors = plotPalette();
   const canvas = elements.pt3SettingsPlot;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
@@ -1245,25 +1523,25 @@ function drawPt3SettingsPlot() {
   const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio);
   const width = rect.width; const height = rect.height;
   const margin = { left: 58, right: 18, top: 27, bottom: 31 }; const chartW = width - margin.left - margin.right; const chartH = height - margin.top - margin.bottom;
-  ctx.fillStyle = "#061321"; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = "#1d3d59"; ctx.lineWidth = 1; ctx.font = "11px system-ui"; ctx.fillStyle = "#8da9bd";
+  ctx.fillStyle = colors.background; ctx.fillRect(0, 0, width, height); ctx.strokeStyle = colors.grid; ctx.lineWidth = 1; ctx.font = "11px system-ui"; ctx.fillStyle = colors.tick;
   for (let i = 0; i <= 5; i += 1) { const y = margin.top + chartH * i / 5; ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(width - margin.right, y); ctx.stroke(); const mv = 2400 - 2200 * i / 5; ctx.textAlign = "right"; ctx.fillText((mv / 1000).toFixed(2), margin.left - 7, y + 4); }
   const points = state.pt3History;
-  if (!points.length) { ctx.fillStyle = "#7892a7"; ctx.textAlign = "center"; ctx.fillText("Awaiting @ACK,CFG,PT3 before drawing calculated setpoints", width / 2, height / 2); return; }
+  if (!points.length) { ctx.fillStyle = colors.empty; ctx.textAlign = "center"; ctx.fillText("Awaiting @ACK,CFG,PT3 before drawing calculated setpoints", width / 2, height / 2); return; }
   let minX = Math.min(...points.map((p) => Date.parse(p.acknowledgedAt))); let maxX = Math.max(...points.map((p) => Date.parse(p.acknowledgedAt)));
   if (minX === maxX) { minX -= 1000; maxX += 1000; }
   const px = (x) => margin.left + (x - minX) / (maxX - minX) * chartW; const py = (mv) => margin.top + (2400 - mv) / 2200 * chartH;
   const traces = [
-    { key: "ceMv", label: "CE0 / VBIAS", color: "#3fd0e6" },
-    { key: "seMv", label: "SE0", color: "#3182f6" },
-    { key: "gateMv", label: "Gate / VZERO", color: "#63d67d" },
+    { key: "ceMv", label: "CE0 / VBIAS", color: colors.current },
+    { key: "seMv", label: "SE0", color: colors.reference },
+    { key: "gateMv", label: "Gate / VZERO", color: colors.optical },
   ];
   traces.forEach((trace) => {
     ctx.strokeStyle = trace.color; ctx.lineWidth = 1.7; ctx.beginPath();
     points.forEach((point, index) => { const x = px(Date.parse(point.acknowledgedAt)); if (index) { ctx.lineTo(x, py(points[index - 1][trace.key])); ctx.lineTo(x, py(point[trace.key])); } else ctx.moveTo(x, py(point[trace.key])); }); ctx.lineTo(width - margin.right, py(points.at(-1)[trace.key])); ctx.stroke();
   });
   ctx.textAlign = "left"; ctx.font = "11px system-ui"; let legendX = margin.left;
-  traces.forEach((trace) => { ctx.fillStyle = trace.color; ctx.fillRect(legendX, 9, 9, 3); ctx.fillStyle = "#c9dce9"; ctx.fillText(trace.label, legendX + 14, 13); legendX += ctx.measureText(trace.label).width + 32; });
-  ctx.fillStyle = "#c9dce9"; ctx.textAlign = "left"; ctx.fillText("Calculated setpoint (V)", margin.left, height - 10); ctx.textAlign = "right"; ctx.fillText("configuration time", width - margin.right, height - 10);
+  traces.forEach((trace) => { ctx.fillStyle = trace.color; ctx.fillRect(legendX, 9, 9, 3); ctx.fillStyle = colors.label; ctx.fillText(trace.label, legendX + 14, 13); legendX += ctx.measureText(trace.label).width + 32; });
+  ctx.fillStyle = colors.label; ctx.textAlign = "left"; ctx.fillText("Calculated setpoint (V)", margin.left, height - 10); ctx.textAlign = "right"; ctx.fillText("configuration time", width - margin.right, height - 10);
 }
 
 function crc32(bytes) {
@@ -1360,6 +1638,8 @@ async function onDfuFile() {
 }
 
 async function enterDfu() {
+  if (state.transport === "usb") { log("USB is for measurement only; this board uses J-Link firmware updates.", "ERROR"); return; }
+  if (state.ec840Board) { log("Use the nRF52840 AD5941 J-Link package for this board.", "ERROR"); return; }
   if (!state.dfu.pkg || !state.nusRx) return;
   let requestedName;
   try {
@@ -1461,8 +1741,11 @@ async function selectDfuAndTransfer() {
   finally { state.dfu.transferring = false; elements.transferDfu.disabled = !state.dfu.pkg || state.dfu.completed; elements.enterDfu.disabled = !state.device?.gatt?.connected || !state.dfu.pkg || state.dfu.completed; }
 }
 
-elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.dpvTab.addEventListener("click", () => switchMode("DPV")); elements.swvTab.addEventListener("click", () => switchMode("SWV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.pt3PulseTab.addEventListener("click", () => switchMode("PT3P")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.pt3ReCal.addEventListener("click", runPt3ReCalibration); elements.downloadPt3ReCal.addEventListener("click", downloadPt3ReCalibrationCsv); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.applyDeviceName.addEventListener("click", applyDeviceNameNow); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
+elements.connect.addEventListener("click", connectInstrument); elements.disconnect.addEventListener("click", disconnectInstrument); elements.ampTab.addEventListener("click", () => switchMode("AMP")); elements.cvTab.addEventListener("click", () => switchMode("CV")); elements.dpvTab.addEventListener("click", () => switchMode("DPV")); elements.swvTab.addEventListener("click", () => switchMode("SWV")); elements.pt3Tab.addEventListener("click", () => switchMode("PT3")); elements.pt3PulseTab.addEventListener("click", () => switchMode("PT3P")); elements.form.addEventListener("submit", applyConfig); elements.run.addEventListener("click", startMeasurement); elements.stop.addEventListener("click", stopMeasurement); elements.pt3Live.addEventListener("click", applyPt3LiveDac); elements.pt3ReCal.addEventListener("click", runPt3ReCalibration); elements.downloadPt3ReCal.addEventListener("click", downloadPt3ReCalibrationCsv); elements.probe.addEventListener("click", runAfeProbe); elements.clearData.addEventListener("click", clearSamples); elements.downloadCsv.addEventListener("click", downloadCsv); elements.downloadRawNotifications.addEventListener("click", downloadRawNotifications); elements.plotWindow.addEventListener("change", updatePlotWindow); elements.clearLog.addEventListener("click", () => { elements.eventLog.textContent = ""; }); elements.dfuFile.addEventListener("change", onDfuFile); elements.applyDeviceName.addEventListener("click", applyDeviceNameNow); elements.enterDfu.addEventListener("click", enterDfu); elements.transferDfu.addEventListener("click", selectDfuAndTransfer); elements.verifyApp.addEventListener("click", connectInstrument); window.addEventListener("resize", schedulePlot);
+window.addEventListener("ad5940:themechange", () => { drawPlot(); if (state.mode !== "PT3") drawPt3SettingsPlot(); });
+$("connectUsbButton").addEventListener("click", connectUsbInstrument);
 document.querySelectorAll("#ampParameters input, #ampParameters select").forEach((control) => control.addEventListener("input", updateAmpTimingHint));
+document.querySelectorAll("#cvParameters input, #cvParameters select").forEach((control) => { control.addEventListener("input", refreshControlAvailability); control.addEventListener("change", refreshControlAvailability); });
 document.querySelectorAll("#dpvParameters input, #dpvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("DPV")); control.addEventListener("change", () => updatePulsePreview("DPV")); });
 document.querySelectorAll("#swvParameters input, #swvParameters select").forEach((control) => { control.addEventListener("input", () => updatePulsePreview("SWV")); control.addEventListener("change", () => updatePulsePreview("SWV")); });
 document.querySelectorAll("#pt3Parameters input, #pt3Parameters select").forEach((control) => { control.addEventListener("input", updatePt3Preview); control.addEventListener("change", updatePt3Preview); });
