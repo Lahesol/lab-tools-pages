@@ -16,6 +16,14 @@ import {
   selectReadPoint,
   validateFinitePlan,
 } from "./protocol.js";
+import {
+  DEFAULT_CONTACTS_PER_RAIL,
+  PAD_LAYOUT_VERSION,
+  PAD_RAILS,
+  formatPadSelection,
+  makePadSelection,
+  normalizeContactsPerRail,
+} from "./pad-map.js";
 import { RunStore, downloadText, runToCsv } from "./storage.js";
 import { Legacy2400SerialTransport } from "./serial.js";
 
@@ -32,7 +40,11 @@ const state = {
   storageError: null,
   connected: false,
   instrumentId: null,
+  padSelection: null,
+  historyFilters: { dieId: "*", padKey: "*" },
 };
+
+const PLOT_COLORS = ["#087f74", "#2369aa", "#9a5d00", "#8f3f91", "#c04d21", "#3c748a", "#64811c", "#6c5a9e"];
 
 function number(id) {
   return asFiniteNumber($(id).value, id);
@@ -247,12 +259,86 @@ function setRunLocked(locked) {
 function currentMetadata() {
   return {
     dutId: text("dut-id") || "미기록",
+    dieId: text("die-id") || "미기록",
+    padSelection: state.padSelection ? { ...state.padSelection } : null,
     operator: text("operator"),
     note: text("run-note"),
     appVersion: APP_VERSION,
     communication: serialConfig(),
     maxLimits: safetySettings(),
   };
+}
+
+function padCountPerRail() {
+  return normalizeContactsPerRail($("pad-count-per-rail").value);
+}
+
+function selectionForRun(run) {
+  return run?.metadata?.padSelection ?? null;
+}
+
+function runDieId(run) {
+  return run?.metadata?.dieId || "미기록";
+}
+
+function updatePadSelectionUi() {
+  $("pad-selected-value").textContent = formatPadSelection(state.padSelection);
+  $("pad-map-state").textContent = state.padSelection
+    ? `${state.padSelection.key}를 다음 실행 metadata에 저장합니다. layout=${state.padSelection.layoutVersion}, rail당 alias ${state.padSelection.contactsPerRail}개.`
+    : `도면에는 개별 pad 번호가 표시되지 않았습니다. layout=${PAD_LAYOUT_VERSION}의 기본 ${padCountPerRail()}개는 수정 가능한 저장용 번호입니다.`;
+}
+
+function renderPadMap() {
+  const count = padCountPerRail();
+  $("pad-count-per-rail").value = count;
+  if (state.padSelection && state.padSelection.contactsPerRail !== count) state.padSelection = null;
+  const map = $("pad-map");
+  map.replaceChildren();
+  const sections = [...new Set(PAD_RAILS.map((rail) => rail.section))];
+  sections.forEach((sectionName) => {
+    const section = document.createElement("section");
+    section.className = "pad-section";
+    const header = document.createElement("div");
+    header.className = "pad-section-header";
+    const heading = document.createElement("h3");
+    heading.textContent = `${sectionName} pad rail`;
+    const railCount = PAD_RAILS.filter((rail) => rail.section === sectionName).length;
+    const detail = document.createElement("span");
+    detail.textContent = `${railCount} rail · alias ${count}개/rail`;
+    header.append(heading, detail);
+    const rails = document.createElement("div");
+    rails.className = "pad-section-rails";
+    PAD_RAILS.filter((rail) => rail.section === sectionName).forEach((rail) => {
+      const railRow = document.createElement("div");
+      railRow.className = "pad-rail";
+      const label = document.createElement("span");
+      label.className = "pad-rail-label";
+      label.textContent = rail.rail;
+      const pads = document.createElement("div");
+      pads.className = "pad-button-grid";
+      for (let index = 1; index <= count; index += 1) {
+        const selection = makePadSelection(rail.key, index, count);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "pad-button";
+        button.textContent = String(index).padStart(2, "0");
+        button.title = `${formatPadSelection(selection)} (${selection.key})`;
+        button.setAttribute("aria-label", `${formatPadSelection(selection)} 선택`);
+        button.classList.toggle("selected", state.padSelection?.key === selection.key);
+        button.addEventListener("click", () => {
+          state.padSelection = selection;
+          renderPadMap();
+          showToast(`${formatPadSelection(selection)} alias를 다음 run에 저장합니다.`);
+        });
+        pads.append(button);
+      }
+      railRow.append(label, pads);
+      rails.append(railRow);
+    });
+    section.append(header, rails);
+    map.append(section);
+  });
+  updatePadSelectionUi();
 }
 
 async function onRawEvent(event) {
@@ -338,8 +424,10 @@ function confirmRun(kind, plan) {
   const dialog = $("run-confirm-dialog");
   const phrase = kind === "forming" ? "FORM" : kind === "read" ? "READ" : "SWEEP";
   const kindLabel = kind === "forming" ? "Forming" : kind === "read" ? "저전압 Read" : "Sweep";
+  const metadata = currentMetadata();
+  const locationLabel = `저장 라벨: Die ${metadata.dieId} · ${formatPadSelection(metadata.padSelection)}`;
   $("dialog-title").textContent = `${kindLabel} 유한 실행 확인`;
-  $("dialog-message").textContent = `${plan.points.length} 점, CC ${formatEngineering(plan.complianceA, "A")}, source delay ${plan.sourceDelayMs} ms의 유한 장비 실행을 시작합니다. OUTPUT ON 명령은 직접 보내지 않지만, :INIT가 auto output-off 모드에서 source-measure를 시작할 수 있습니다. 계속하려면 ${phrase}을 입력하세요.`;
+  $("dialog-message").textContent = `${plan.points.length} 점, CC ${formatEngineering(plan.complianceA, "A")}, source delay ${plan.sourceDelayMs} ms의 유한 장비 실행을 시작합니다. ${locationLabel}. OUTPUT ON 명령은 직접 보내지 않지만, :INIT가 auto output-off 모드에서 source-measure를 시작할 수 있습니다. 계속하려면 ${phrase}을 입력하세요.`;
   const input = $("dialog-phrase");
   const confirm = $("dialog-confirm");
   input.value = "";
@@ -439,15 +527,24 @@ async function renderHistory({ preserveSelection = true } = {}) {
   if (!state.store) return;
   const runs = await state.store.list();
   const list = $("run-list");
+  populateHistoryFilters(runs);
+  const filteredRuns = filterHistoryRuns(runs);
+  renderDieOverlay(filteredRuns);
   if (!runs.length) {
+    state.selectedRun = null;
     list.innerHTML = '<p class="empty-state">저장된 try가 없습니다.</p>';
     return;
   }
-  if (!state.selectedRun || !preserveSelection) state.selectedRun = runs[0];
-  list.innerHTML = runs.map((run) => {
+  if (!preserveSelection) state.selectedRun = filteredRuns[0] ?? null;
+  else if (!state.selectedRun || !runs.some((run) => run.id === state.selectedRun.id)) state.selectedRun = filteredRuns[0] ?? runs[0];
+  if (!filteredRuns.length) {
+    list.innerHTML = '<p class="empty-state">선택한 Die / Pad alias에 맞는 try가 없습니다.</p>';
+    return;
+  }
+  list.innerHTML = filteredRuns.map((run) => {
     const isSelected = state.selectedRun?.id === run.id;
     const label = run.synthetic ? '<span class="synthetic-label">합성 예시 · 실측 아님</span>' : `<span>${escapeHtml(run.kind)} · ${escapeHtml(run.endReason ?? "진행 중")}</span>`;
-    return `<button class="run-item ${isSelected ? "selected" : ""}" type="button" data-run-id="${escapeHtml(run.id)}"><strong>${escapeHtml(run.metadata?.dutId ?? "DUT 미기록")}</strong>${label}<span>${escapeHtml(shortDate(run.startedAt))}</span><span>${escapeHtml(run.id)}</span></button>`;
+    return `<button class="run-item ${isSelected ? "selected" : ""}" type="button" data-run-id="${escapeHtml(run.id)}"><strong>Die ${escapeHtml(runDieId(run))} · ${escapeHtml(run.metadata?.dutId ?? "DUT 미기록")}</strong><span>${escapeHtml(formatPadSelection(selectionForRun(run)))}</span>${label}<span>${escapeHtml(shortDate(run.startedAt))}</span><span>${escapeHtml(run.id)}</span></button>`;
   }).join("");
   $$(".run-item").forEach((button) => button.addEventListener("click", async () => {
     state.selectedRun = await state.store.get(button.dataset.runId);
@@ -456,20 +553,60 @@ async function renderHistory({ preserveSelection = true } = {}) {
   }));
 }
 
-function clearPlot(message) {
-  const svg = $("iv-plot");
+function populateHistoryFilters(runs) {
+  const dieSelect = $("history-die-filter");
+  const padSelect = $("history-pad-filter");
+  const dieIds = [...new Set(runs.map(runDieId))].sort((a, b) => a.localeCompare(b, "ko"));
+  const pads = [...new Map(runs
+    .map(selectionForRun)
+    .filter(Boolean)
+    .map((selection) => [selection.key, selection])).values()]
+    .sort((a, b) => formatPadSelection(a).localeCompare(formatPadSelection(b), "ko"));
+  const hasUnselectedPad = runs.some((run) => !selectionForRun(run));
+  if (!dieIds.includes(state.historyFilters.dieId)) state.historyFilters.dieId = "*";
+  if (state.historyFilters.padKey !== "*" && state.historyFilters.padKey !== "__none__" && !pads.some((selection) => selection.key === state.historyFilters.padKey)) state.historyFilters.padKey = "*";
+  if (state.historyFilters.padKey === "__none__" && !hasUnselectedPad) state.historyFilters.padKey = "*";
+  dieSelect.replaceChildren(new Option("전체 Die", "*"), ...dieIds.map((dieId) => new Option(`Die ${dieId}`, dieId)));
+  padSelect.replaceChildren(
+    new Option("전체 Pad", "*"),
+    ...(hasUnselectedPad ? [new Option("Pad alias 미선택", "__none__")] : []),
+    ...pads.map((selection) => new Option(formatPadSelection(selection), selection.key)),
+  );
+  dieSelect.value = state.historyFilters.dieId;
+  padSelect.value = state.historyFilters.padKey;
+}
+
+function filterHistoryRuns(runs) {
+  return runs.filter((run) => {
+    const dieMatches = state.historyFilters.dieId === "*" || runDieId(run) === state.historyFilters.dieId;
+    const padKey = selectionForRun(run)?.key ?? "__none__";
+    const padMatches = state.historyFilters.padKey === "*" || padKey === state.historyFilters.padKey;
+    return dieMatches && padMatches;
+  });
+}
+
+function clearPlot(svgId, message) {
+  const svg = $(svgId);
   svg.replaceChildren();
   const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
   label.setAttribute("x", "410"); label.setAttribute("y", "165"); label.setAttribute("text-anchor", "middle"); label.textContent = message;
   svg.append(label);
 }
 
-function drawIvPlot(rows) {
-  const points = rows.filter((row) => Number.isFinite(row.voltageV) && Number.isFinite(row.currentA) && Math.abs(row.voltageV) < 1e36 && Math.abs(row.currentA) < 1e36);
-  if (!points.length) return clearPlot("유효한 I–V 점이 없습니다.");
-  const svg = $("iv-plot");
+function drawSeriesPlot(svgId, series, { emptyMessage = "유효한 I–V 점이 없습니다.", markWarnings = false } = {}) {
+  const prepared = series.map((item, index) => ({
+    ...item,
+    color: item.color ?? PLOT_COLORS[index % PLOT_COLORS.length],
+    points: (item.rows ?? []).filter((row) => Number.isFinite(row.voltageV) && Number.isFinite(row.currentA) && Math.abs(row.voltageV) < 1e36 && Math.abs(row.currentA) < 1e36),
+  })).filter((item) => item.points.length);
+  if (!prepared.length) {
+    clearPlot(svgId, emptyMessage);
+    return [];
+  }
+  const svg = $(svgId);
   svg.replaceChildren();
   const width = 820; const height = 330; const margin = { top: 20, right: 24, bottom: 42, left: 68 };
+  const points = prepared.flatMap((item) => item.points);
   const xValues = points.map((point) => point.voltageV); const yValues = points.map((point) => point.currentA * 1000);
   const domain = (values) => {
     let min = Math.min(...values, 0); let max = Math.max(...values, 0);
@@ -483,13 +620,29 @@ function drawIvPlot(rows) {
   const make = (name, attributes = {}) => { const node = document.createElementNS("http://www.w3.org/2000/svg", name); Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value)); return node; };
   svg.append(make("line", { x1: margin.left, y1: y(0), x2: width - margin.right, y2: y(0), stroke: "#a9b8c5", "stroke-width": 1 }));
   svg.append(make("line", { x1: x(0), y1: margin.top, x2: x(0), y2: height - margin.bottom, stroke: "#a9b8c5", "stroke-width": 1 }));
-  const path = points.map((point, index) => `${index ? "L" : "M"}${x(point.voltageV).toFixed(2)},${y(point.currentA * 1000).toFixed(2)}`).join(" ");
-  svg.append(make("path", { d: path, fill: "none", stroke: "#087f74", "stroke-width": 2.3, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-  points.forEach((point) => svg.append(make("circle", { cx: x(point.voltageV), cy: y(point.currentA * 1000), r: 2.2, fill: point.warnings?.length ? "#b42318" : "#087f74" })));
+  prepared.forEach((item) => {
+    const path = item.points.map((point, index) => `${index ? "L" : "M"}${x(point.voltageV).toFixed(2)},${y(point.currentA * 1000).toFixed(2)}`).join(" ");
+    svg.append(make("path", { d: path, fill: "none", stroke: item.color, "stroke-width": 2.3, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    item.points.forEach((point) => svg.append(make("circle", { cx: x(point.voltageV), cy: y(point.currentA * 1000), r: 2.2, fill: markWarnings && point.warnings?.length ? "#b42318" : item.color })));
+  });
   [[margin.left, height - margin.bottom, `${xMin.toPrecision(3)} V`], [width - margin.right, height - margin.bottom, `${xMax.toPrecision(3)} V`]].forEach(([tx, ty, value]) => { const node = make("text", { x: tx, y: ty + 20, "text-anchor": tx === margin.left ? "start" : "end" }); node.textContent = value; svg.append(node); });
   [[margin.left - 8, y(yMax), `${yMax.toPrecision(3)} mA`], [margin.left - 8, y(yMin), `${yMin.toPrecision(3)} mA`]].forEach(([tx, ty, value]) => { const node = make("text", { x: tx, y: ty + 4, "text-anchor": "end" }); node.textContent = value; svg.append(node); });
   const xTitle = make("text", { x: width / 2, y: height - 6, "text-anchor": "middle" }); xTitle.textContent = "Voltage (V)"; svg.append(xTitle);
   const yTitle = make("text", { x: 14, y: height / 2, transform: `rotate(-90 14 ${height / 2})`, "text-anchor": "middle" }); yTitle.textContent = "Current (mA)"; svg.append(yTitle);
+  return prepared;
+}
+
+function drawIvPlot(rows) {
+  drawSeriesPlot("iv-plot", [{ rows }], { markWarnings: true });
+}
+
+function renderDieOverlay(runs) {
+  const series = runs.map((run) => ({
+    rows: run.derivedRows,
+    label: `${run.synthetic ? "합성 · " : ""}Die ${runDieId(run)} · ${formatPadSelection(selectionForRun(run))} · ${run.id}`,
+  }));
+  const visibleSeries = drawSeriesPlot("die-plot", series, { emptyMessage: "선택한 Die / Pad alias에 유효한 I–V 점이 없습니다." });
+  $("die-plot-legend").innerHTML = visibleSeries.map((item) => `<span class="plot-legend-item"><i class="plot-legend-swatch" style="background:${item.color}"></i>${escapeHtml(item.label)}</span>`).join("");
 }
 
 function renderSelectedRun() {
@@ -500,7 +653,7 @@ function renderSelectedRun() {
     $("analysis-metrics").innerHTML = '<div><span>Read R</span><strong>—</strong></div><div><span>상태 후보</span><strong>—</strong></div><div><span>Compliance</span><strong>—</strong></div><div><span>전환 후보</span><strong>—</strong></div>';
     $("derived-table").innerHTML = '<tr><td colspan="6" class="empty-cell">선택된 데이터가 없습니다.</td></tr>';
     $("raw-log").textContent = "선택된 run이 없습니다.";
-    clearPlot("실측 데이터가 없습니다.");
+    clearPlot("iv-plot", "실측 데이터가 없습니다.");
     $("export-json").disabled = true; $("export-csv").disabled = true;
     return;
   }
@@ -510,7 +663,7 @@ function renderSelectedRun() {
   const candidates = analysis.candidates ?? [];
   const compliance = run.deviceComplianceTripped ? "장비 trip = 1" : derived.some((row) => row.warnings?.some((warning) => warning.includes("compliance"))) ? "근접 추정" : "미검출";
   $("selected-run-kind").textContent = run.synthetic ? "합성 예시 · 실측 아님" : `${run.kind} · ${run.endReason ?? "진행 중"}`;
-  $("analysis-subtitle").textContent = `${run.id} · DUT ${run.metadata?.dutId ?? "미기록"} · ${shortDate(run.startedAt)}`;
+  $("analysis-subtitle").textContent = `${run.id} · Die ${runDieId(run)} · ${formatPadSelection(selectionForRun(run))} · DUT ${run.metadata?.dutId ?? "미기록"} · ${shortDate(run.startedAt)}`;
   $("analysis-metrics").innerHTML = [
     ["Read R", read ? formatEngineering(read.resistanceOhm, "Ω") : "판정 불가"],
     ["상태 후보", read?.state ?? "—"],
@@ -565,6 +718,26 @@ function bindEvents() {
   ["forming-wiring-check", "forming-limit-check", "forming-output-check", "sweep-wiring-check"].forEach((id) => $(id).addEventListener("change", syncRunButtons));
   $("refresh-history").addEventListener("click", () => renderHistory().then(renderSelectedRun));
   $("seed-demo").addEventListener("click", () => seedSyntheticRun().catch((error) => showToast(error.message, "error")));
+  $("render-pad-map").addEventListener("click", () => {
+    const previous = state.padSelection?.contactsPerRail;
+    renderPadMap();
+    showToast(previous && previous !== padCountPerRail() ? "Pad alias 수가 바뀌어 기존 선택을 해제했습니다." : "Pad map alias를 갱신했습니다.");
+  });
+  $("clear-pad-selection").addEventListener("click", () => {
+    state.padSelection = null;
+    renderPadMap();
+    showToast("다음 run의 Pad alias 선택을 해제했습니다.");
+  });
+  $("history-die-filter").addEventListener("change", async (event) => {
+    state.historyFilters.dieId = event.target.value;
+    await renderHistory({ preserveSelection: false });
+    renderSelectedRun();
+  });
+  $("history-pad-filter").addEventListener("change", async (event) => {
+    state.historyFilters.padKey = event.target.value;
+    await renderHistory({ preserveSelection: false });
+    renderSelectedRun();
+  });
   $("export-json").addEventListener("click", () => {
     if (!state.selectedRun) return;
     downloadText(`${state.selectedRun.id}.json`, JSON.stringify(state.selectedRun, null, 2), "application/json");
@@ -577,6 +750,7 @@ function bindEvents() {
 
 async function init() {
   bindTabs(); bindEvents();
+  renderPadMap();
   const serialSupported = "serial" in navigator;
   const secure = window.isSecureContext;
   $("webserial-support").textContent = serialSupported && secure ? "Web Serial 사용 가능" : serialSupported ? "Secure Context 필요" : "이 브라우저 미지원";

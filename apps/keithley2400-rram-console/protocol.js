@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.1.0";
+export const APP_VERSION = "0.2.0";
 export const MAX_2400_BUFFER_POINTS = 2500;
 export const ABSOLUTE_APP_MAX_VOLTAGE_V = 10;
 export const ABSOLUTE_APP_MAX_COMPLIANCE_A = 0.01;
@@ -227,7 +227,7 @@ export function selectReadPoint(rows, readVoltageV) {
     .sort((a, b) => Math.abs(a.voltageV - readVoltageV) - Math.abs(b.voltageV - readVoltageV))[0] ?? null;
 }
 
-export function makeSyntheticRun({ runId = makeRunId(), now = new Date().toISOString(), dutId = "SYNTHETIC-DEMO" } = {}) {
+export function makeSyntheticRun({ runId = makeRunId(), now = new Date().toISOString(), dutId = "SYNTHETIC-DEMO", dieId = "SYNTHETIC" } = {}) {
   const points = buildProfilePoints({ startV: 0, positiveV: 1, negativeV: -1, endV: 0, stepV: 0.1, repeats: 1 });
   const rawRows = points.map((voltageV, index) => {
     const isLrs = index > 5 && index < 22;
@@ -242,7 +242,7 @@ export function makeSyntheticRun({ runId = makeRunId(), now = new Date().toISOSt
     kind: "synthetic-demo",
     synthetic: true,
     endReason: "사용자 요청 합성 예시",
-    metadata: { dutId, operator: "", note: "합성 데이터: 장비/DUT 실측이 아님", appVersion: APP_VERSION },
+    metadata: { dutId, dieId, padSelection: null, operator: "", note: "합성 데이터: 장비/DUT 실측이 아님", appVersion: APP_VERSION },
     plan: { points, complianceA: 0.001, sourceDelayMs: 20, nplc: 1, measurementRangeA: 0.001 },
     rawEvents: [{ at: now, direction: "SYSTEM", text: "SYNTHETIC DATA — no instrument communication" }],
     rawRows,
