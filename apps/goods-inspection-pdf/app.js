@@ -233,6 +233,8 @@
   let cropImage = null;
   let cropRenderToken = 0;
   let cropResizeTimer = null;
+  let itemLayoutCache = null;
+  let itemMeasureContext = null;
 
   initialize();
 
@@ -241,6 +243,36 @@
     elements.inspectionDate.value = state.inspectionDate;
     bindEvents();
     renderAll();
+    initializeDocumentSizing();
+  }
+
+  function resizeNameInput(input) {
+    input.style.height = "auto";
+    input.style.height = `${Math.max(38, input.scrollHeight + 2)}px`;
+  }
+
+  function updatePreviewScale() {
+    const width = elements.documentPreview.getBoundingClientRect().width;
+    if (width > 0) elements.documentPreview.style.setProperty("--document-mm", `${width / DOCUMENT_WIDTH_MM}px`);
+  }
+
+  function initializeDocumentSizing() {
+    const resizeInputs = () => elements.itemRows.querySelectorAll('[data-field="name"]').forEach(resizeNameInput);
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(updatePreviewScale).observe(elements.documentPreview);
+      let previousWidth = -1;
+      new ResizeObserver(([entry]) => {
+        if (entry.contentRect.width === previousWidth) return;
+        previousWidth = entry.contentRect.width;
+        resizeInputs();
+      }).observe(elements.itemRows);
+    }
+    window.addEventListener("resize", () => { updatePreviewScale(); resizeInputs(); });
+    document.fonts?.ready.then(() => {
+      itemLayoutCache = null;
+      renderPreview();
+      resizeInputs();
+    });
   }
 
   function bindEvents() {
@@ -1567,9 +1599,33 @@
   }
 
   function getDocumentHeightMm() {
+    return getItemLayout().documentHeight;
+  }
+
+  function getItemLayout() {
+    const key = JSON.stringify([state.templateId, state.items.map((item) => [item.name, item.quantity])]);
+    if (itemLayoutCache?.key === key) return itemLayoutCache.layout;
+    if (!itemMeasureContext) itemMeasureContext = document.createElement("canvas").getContext("2d");
+    const metrics = window.ItemLabelLayout;
+    const measure = (text, pointSize, weight) => {
+      itemMeasureContext.font = `${weight} ${pointSize * metrics.PT_TO_MM * 10}px ${metrics.FONT_FAMILY}`;
+      return itemMeasureContext.measureText(text).width / 10;
+    };
+    const layout = metrics.build(state.items, getTemplateConfig(), measure, ITEM_COLUMNS, BASE_ITEM_SLOTS);
+    itemLayoutCache = { key, layout };
+    return layout;
+  }
+
+  function getDocumentFooter(layout = getItemLayout()) {
     const config = getTemplateConfig();
-    const extraRows = Math.max(0, getItemRowCount() - BASE_ITEM_SLOTS / ITEM_COLUMNS);
-    return config.baseHeight + extraRows * config.blockHeight;
+    const sandan = state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE;
+    const confirmationY = sandan ? config.gridStartY + layout.gridHeight + config.confirmationGap : 195 + layout.extraHeight;
+    return {
+      confirmationY,
+      dateY: sandan ? confirmationY + config.dateGap : 215 + layout.extraHeight,
+      inspectorY: config.inspectorY + layout.extraHeight,
+      recipientY: config.recipientY + layout.extraHeight,
+    };
   }
 
   function renderAll() {
@@ -2134,7 +2190,7 @@
         <span class="item-row__number" role="cell">${index + 1}</span>
         <label role="cell">
           <span class="visually-hidden">${index + 1}번 품목명</span>
-          <input class="field" data-field="name" type="text" maxlength="70" placeholder="Invoice 품목명 입력" />
+          <textarea class="field item-name-input" data-field="name" rows="1" placeholder="Invoice 품목명 입력 (줄바꿈 가능)"></textarea>
         </label>
         <label role="cell">
           <span class="visually-hidden">${index + 1}번 수량</span>
@@ -2156,6 +2212,7 @@
       nameInput.value = item.name;
       nameInput.addEventListener("input", (event) => {
         item.name = event.target.value;
+        resizeNameInput(event.target);
         renderPreview();
         updateValidation();
       });
@@ -2200,6 +2257,7 @@
       });
 
       elements.itemRows.append(row);
+      resizeNameInput(nameInput);
     });
   }
 
@@ -2274,24 +2332,20 @@
 
   function getDefaultSignaturePosition() {
     const config = getTemplateConfig();
-    const rowCount = getItemRowCount();
-    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * config.blockHeight;
     return {
       x: config.signatureX / DOCUMENT_WIDTH_MM,
-      y: (config.inspectorY + extraHeight) / getDocumentHeightMm(),
+      y: getDocumentFooter().inspectorY / getDocumentHeightMm(),
     };
   }
 
   function getSignaturePositionContext() {
-    const config = getTemplateConfig();
     const rowCount = getItemRowCount();
     const documentHeightMm = getDocumentHeightMm();
-    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * config.blockHeight;
     return {
       templateId: state.templateId,
       rowCount,
       documentHeightMm,
-      defaultYmm: config.inspectorY + extraHeight,
+      defaultYmm: getDocumentFooter().inspectorY,
     };
   }
 
@@ -2315,9 +2369,15 @@
 
   function clampSignaturePosition(position) {
     const fallback = getDefaultSignaturePosition();
+    // A percentage bottom margin grows with a long document and can pull the
+    // signature back into the photo table. Clamp by its physical size instead.
+    const marginX = 12 / DOCUMENT_WIDTH_MM;
+    const marginY = 7 / getDocumentHeightMm();
+    const x = Number(position?.x);
+    const y = Number(position?.y);
     return {
-      x: Math.min(0.92, Math.max(0.08, Number(position?.x) || fallback.x)),
-      y: Math.min(0.94, Math.max(0.08, Number(position?.y) || fallback.y)),
+      x: Math.min(1 - marginX, Math.max(marginX, Number.isFinite(x) ? x : fallback.x)),
+      y: Math.min(1 - marginY, Math.max(marginY, Number.isFinite(y) ? y : fallback.y)),
     };
   }
 
@@ -2396,34 +2456,30 @@
 
   function renderPreview() {
     const config = getTemplateConfig();
+    const layout = getItemLayout();
+    const footer = getDocumentFooter(layout);
     elements.previewItems.replaceChildren();
     state.previewPage = 0;
     const slotCount = getPreviewSlotCount();
     const rowCount = getItemRowCount();
     const documentHeightMm = getDocumentHeightMm();
     syncSignaturePositionContext();
-    if (state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE) {
-      const gridBottomY = config.gridStartY + rowCount * config.blockHeight;
-      const confirmationY = gridBottomY + config.confirmationGap;
-      const dateY = confirmationY + config.dateGap;
-      elements.documentPreview.style.setProperty("--template-confirmation-y", `${(confirmationY / documentHeightMm) * 100}%`);
-      elements.documentPreview.style.setProperty("--template-date-y", `${(dateY / documentHeightMm) * 100}%`);
-      elements.documentPreview.style.setProperty("--template-inspector-y", `${((config.inspectorY + Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * config.blockHeight) / documentHeightMm) * 100}%`);
-    } else {
-      elements.documentPreview.style.removeProperty("--template-confirmation-y");
-      elements.documentPreview.style.removeProperty("--template-date-y");
-      elements.documentPreview.style.removeProperty("--template-inspector-y");
-    }
+    const sheetStyle = elements.documentPreview.style;
+    const setY = (name, value) => sheetStyle.setProperty(name, `${value / documentHeightMm * 100}%`);
+    setY("--template-confirmation-y", footer.confirmationY);
+    setY("--template-date-y", footer.dateY);
+    setY("--template-inspector-y", footer.inspectorY);
+    setY("--template-recipient-y", footer.recipientY);
+    setY("--template-grid-y", config.gridStartY);
+    setY("--template-grid-height", layout.gridHeight);
+    setY("--template-heading-y", config.headingY);
+    setY("--template-heading-height", config.headingHeight);
+    sheetStyle.setProperty("--template-content-left", `${config.contentLeft / DOCUMENT_WIDTH_MM * 100}%`);
+    sheetStyle.setProperty("--template-content-width", `${config.contentWidth / DOCUMENT_WIDTH_MM * 100}%`);
+    sheetStyle.setProperty("--template-heading-width", `${(config.showBranding ? config.contentWidth : config.contentWidth / 2 - 0.5) / DOCUMENT_WIDTH_MM * 100}%`);
+    sheetStyle.setProperty("--template-recipient-left", `${config.recipientX / DOCUMENT_WIDTH_MM * 100}%`);
     elements.documentPreview.style.aspectRatio = `${DOCUMENT_WIDTH_MM} / ${documentHeightMm}`;
-    elements.previewItems.style.setProperty("--template-row-count", String(rowCount));
-    elements.previewItems.style.setProperty(
-      "--template-grid-aspect",
-      `${config.contentWidth} / ${rowCount * config.blockHeight}`,
-    );
-    elements.previewItems.style.setProperty(
-      "--template-label-ratio",
-      `${(config.labelHeight / config.blockHeight) * 100}%`,
-    );
+    elements.previewItems.style.gridTemplateRows = layout.rows.map((row) => `minmax(0, ${row.blockHeight}fr)`).join(" ");
     elements.documentPreview.dataset.template = state.templateId;
     elements.templateTagline.textContent = config.tagline;
     elements.templateLogo.hidden = !config.showBranding;
@@ -2436,14 +2492,20 @@
 
     for (let index = 0; index < slotCount; index += 1) {
       const item = state.items[index] || createItem();
+      const labelLayout = layout.labels[index];
+      const rowLayout = layout.rows[Math.floor(index / ITEM_COLUMNS)];
       const itemElement = document.createElement("div");
       itemElement.className = "template-item";
+      itemElement.style.gridTemplateRows = `minmax(0, ${rowLayout.labelHeight}fr) minmax(0, ${config.photoHeight}fr)`;
       const label = document.createElement("div");
       label.className = "template-item__label";
       const name = document.createElement("span");
-      name.textContent = `${index + 1}. 품명${item.name.trim() ? `: ${item.name.trim()}` : ""}`;
+      name.textContent = labelLayout.lines.join("\n");
+      name.style.fontSize = `calc(var(--document-mm) * ${labelLayout.fontPt * window.ItemLabelLayout.PT_TO_MM})`;
+      name.style.lineHeight = String(window.ItemLabelLayout.LINE_HEIGHT);
+      name.setAttribute("aria-label", labelLayout.text);
       const quantity = document.createElement("small");
-      quantity.textContent = item.name.trim() ? `수량 ${clampQuantity(item.quantity)}` : "";
+      quantity.textContent = labelLayout.quantity;
       label.append(name, quantity);
 
       const photoBox = document.createElement("div");
@@ -2481,6 +2543,7 @@
     }
 
     applySignaturePreviewPosition();
+    updatePreviewScale();
     elements.previewThumbnails.replaceChildren();
   }
 
@@ -2563,10 +2626,14 @@
 
   async function renderDocumentCanvas() {
     const config = getTemplateConfig();
-    const width = 2480;
+    const layout = getItemLayout();
     const documentHeightMm = getDocumentHeightMm();
-    const height = Math.round(width * (documentHeightMm / DOCUMENT_WIDTH_MM));
-    const scale = width / 210;
+    const aspect = documentHeightMm / DOCUMENT_WIDTH_MM;
+    // Keep a continuous form export within common canvas dimension/memory
+    // limits when many long labels are entered. Physical point sizes do not change.
+    const width = Math.max(1, Math.floor(Math.min(2480, 28000 / aspect, Math.sqrt(48000000 / aspect))));
+    const height = Math.round(width * aspect);
+    const scale = width / DOCUMENT_WIDTH_MM;
     const mm = (value) => value * scale;
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -2584,7 +2651,6 @@
     const reviewer = getSelectedReviewer();
     const signatureDataUrl = reviewer ? readStoredSignature(reviewer.id) : "";
     const slotCount = getPreviewSlotCount();
-    const rowCount = getItemRowCount();
     const [logo, seal, signature, ...itemImages] = await Promise.all([
       config.showBranding ? safeLoadImage("./assets/gachon-logo.png") : Promise.resolve(null),
       config.showBranding ? safeLoadImage("./assets/gachon-seal.png") : Promise.resolve(null),
@@ -2615,17 +2681,16 @@
     const left = config.contentLeft;
     const contentWidth = config.contentWidth;
     const cellWidth = contentWidth / ITEM_COLUMNS;
-    const labelHeight = config.labelHeight;
     const photoHeight = config.photoHeight;
-    const blockHeight = config.blockHeight;
     const gridStartY = config.gridStartY;
 
     for (let index = 0; index < slotCount; index += 1) {
       const column = index % ITEM_COLUMNS;
       const row = Math.floor(index / ITEM_COLUMNS);
+      const { labelHeight, blockHeight, y: rowY } = layout.rows[row];
+      const labelLayout = layout.labels[index];
       const x = left + column * cellWidth;
-      const y = gridStartY + row * blockHeight;
-      const item = state.items[index] || createItem();
+      const y = gridStartY + rowY;
 
       context.strokeRect(mm(x), mm(y), mm(cellWidth), mm(blockHeight));
       context.beginPath();
@@ -2633,9 +2698,11 @@
       context.lineTo(mm(x + cellWidth), mm(y + labelHeight));
       context.stroke();
 
-      const labelText = `${index + 1}. 품명${item.name.trim() ? `: ${item.name.trim()}` : ""}`;
-      drawFitText(context, labelText, mm(x + 3), mm(y + labelHeight / 2), mm(cellWidth - 24), 10.5, 7, "700", "left", scale);
-      if (item.name.trim()) drawText(context, `수량 ${clampQuantity(item.quantity)}`, mm(x + cellWidth - 3), mm(y + labelHeight / 2), 8.5, "400", "right", scale);
+      const firstLineY = y + labelHeight / 2 - (labelLayout.lines.length - 1) * labelLayout.lineHeight / 2;
+      labelLayout.lines.forEach((line, lineIndex) => {
+        drawText(context, line, mm(x + 3), mm(firstLineY + lineIndex * labelLayout.lineHeight), labelLayout.fontPt, "700", "left", scale);
+      });
+      if (labelLayout.quantity) drawText(context, labelLayout.quantity, mm(x + cellWidth - 3), mm(y + labelHeight / 2), 8.5, "400", "right", scale);
 
       const image = itemImages[index];
       if (image) {
@@ -2643,15 +2710,7 @@
       }
     }
 
-    const extraHeight = Math.max(0, rowCount - BASE_ITEM_SLOTS / ITEM_COLUMNS) * blockHeight;
-    const gridBottomY = gridStartY + rowCount * blockHeight;
-    const confirmationY = state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE
-      ? gridBottomY + config.confirmationGap
-      : 195 + extraHeight;
-    const dateY = state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE
-      ? confirmationY + config.dateGap
-      : 215 + extraHeight;
-    const inspectorY = config.inspectorY + extraHeight;
+    const { confirmationY, dateY, inspectorY, recipientY } = getDocumentFooter(layout);
     drawCenteredText(context, config.confirmation, mm(105), mm(confirmationY), 11, "400", scale);
     drawCenteredText(context, formatKoreanDate(state.inspectionDate), mm(105), mm(dateY), 11, "700", scale);
 
@@ -2674,9 +2733,9 @@
     }
 
     if (state.templateId === TEMPLATE_IDS.SANDAN_DIRECT_PURCHASE) {
-      drawText(context, config.recipient, mm(config.recipientX), mm(config.recipientY + extraHeight), 17, "700", "right", scale);
+      drawText(context, config.recipient, mm(config.recipientX), mm(recipientY), 17, "700", "right", scale);
     } else {
-      drawText(context, config.recipient, mm(config.recipientX), mm(config.recipientY + extraHeight), 19, "700", "left", scale);
+      drawText(context, config.recipient, mm(config.recipientX), mm(recipientY), 19, "700", "left", scale);
     }
     return canvas;
   }
@@ -2692,26 +2751,6 @@
 
   function drawCenteredText(context, text, x, y, pointSize, weight, scale) {
     drawText(context, text, x, y, pointSize, weight, "center", scale);
-  }
-
-  function drawFitText(context, text, x, y, maxWidth, startPointSize, minPointSize, weight, align, scale) {
-    context.save();
-    context.textAlign = align;
-    context.fillStyle = "#000000";
-    let pointSize = startPointSize;
-    do {
-      context.font = `${weight} ${pointSize * 0.352778 * scale}px "Malgun Gothic", "맑은 고딕", sans-serif`;
-      if (context.measureText(text).width <= maxWidth) break;
-      pointSize -= 0.5;
-    } while (pointSize > minPointSize);
-
-    let renderedText = text;
-    if (context.measureText(renderedText).width > maxWidth) {
-      while (renderedText.length > 1 && context.measureText(`${renderedText}…`).width > maxWidth) renderedText = renderedText.slice(0, -1);
-      renderedText = `${renderedText}…`;
-    }
-    context.fillText(renderedText, x, y);
-    context.restore();
   }
 
   function drawImageContain(context, image, x, y, width, height, alpha = 1) {

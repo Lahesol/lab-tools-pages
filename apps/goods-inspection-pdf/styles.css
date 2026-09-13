@@ -45,6 +45,7 @@ body {
 
 button,
 input,
+textarea,
 select {
   font: inherit;
 }
@@ -57,6 +58,7 @@ select {
 
 button:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 select:focus-visible,
 summary:focus-visible,
 .dropzone:focus-within {
@@ -765,6 +767,15 @@ summary:focus-visible,
   width: 100%;
 }
 
+.item-name-input {
+  display: block;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
 .visually-hidden {
   position: absolute !important;
   width: 1px !important;
@@ -1186,9 +1197,7 @@ summary:focus-visible,
 
 .template-item__label span:first-child {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre;
 }
 
 .template-item__label small {
@@ -1383,6 +1392,109 @@ summary:focus-visible,
   text-align: right;
   text-decoration: underline;
   text-underline-offset: 0.14em;
+}
+
+/* Shared millimetre layout: row growth never reduces the photo area, and all
+   footer anchors follow the same coordinates as the exported PDF. */
+.document-sheet[data-template] .template-photo-heading {
+  position: absolute;
+  left: var(--template-content-left);
+  top: var(--template-heading-y);
+  width: var(--template-heading-width);
+  height: var(--template-heading-height);
+  aspect-ratio: auto;
+}
+
+.document-sheet[data-template] .template-items {
+  position: absolute;
+  left: var(--template-content-left);
+  top: var(--template-grid-y);
+  width: var(--template-content-width);
+  height: var(--template-grid-height);
+  aspect-ratio: auto;
+  border: 0;
+  outline: 1px solid #222;
+}
+
+.document-sheet[data-template] .template-item {
+  border: 0;
+  box-shadow: inset -1px -1px #222;
+}
+
+.document-sheet[data-template] .template-item__label {
+  gap: calc(var(--document-mm, 2px) * 2);
+  padding: 0 calc(var(--document-mm, 2px) * 3);
+  border: 0;
+  box-shadow: inset 0 -1px #222;
+  letter-spacing: 0;
+}
+
+.document-sheet[data-template] .template-item__label span:first-child {
+  flex: 1 1 auto;
+  white-space: pre;
+}
+
+.document-sheet[data-template] .template-item__label small {
+  font-size: calc(var(--document-mm, 2px) * 2.998613);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.document-sheet[data-template] .template-item__photo {
+  padding: calc(var(--document-mm, 2px) * 2) calc(var(--document-mm, 2px) * 3);
+}
+
+.document-sheet[data-template] .template-confirmation,
+.document-sheet[data-template] .template-date {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  transform: translateY(-50%);
+  font-size: calc(var(--document-mm, 2px) * 3.880558);
+}
+
+.document-sheet[data-template] .template-confirmation { top: var(--template-confirmation-y); }
+.document-sheet[data-template] .template-date { top: var(--template-date-y); }
+
+.document-sheet[data-template] .template-inspector {
+  position: absolute;
+  top: var(--template-inspector-y);
+  left: 0;
+  right: auto;
+  width: 100%;
+  height: 0;
+  margin: 0;
+  font-size: calc(var(--document-mm, 2px) * 3.880558);
+  white-space: nowrap;
+}
+
+.template-inspector > * { position: absolute; top: 0; transform: translate(-50%, -50%); }
+.template-inspector > :first-child { left: 60.47619%; transform: translateY(-50%); }
+.template-inspector > :nth-child(2) { left: 78.09524%; }
+.template-inspector > :last-child { left: 89.04762%; }
+[data-template="sandan-direct-purchase"] .template-inspector > :first-child { left: 59.04762%; }
+[data-template="sandan-direct-purchase"] .template-inspector > :nth-child(2) { left: 75.2381%; }
+[data-template="sandan-direct-purchase"] .template-inspector > :last-child { left: 86.19048%; }
+
+.document-sheet[data-template] .template-signature {
+  height: calc(var(--document-mm, 2px) * 12);
+  max-height: none;
+}
+
+.document-sheet[data-template] .template-recipient {
+  top: var(--template-recipient-y);
+  left: var(--template-recipient-left);
+  right: auto;
+  bottom: auto;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: calc(var(--document-mm, 2px) * 6.702782);
+}
+
+.document-sheet[data-template="sandan-direct-purchase"] .template-recipient {
+  transform: translate(-100%, -50%);
+  font-size: calc(var(--document-mm, 2px) * 5.997226);
 }
 
 .preview-thumbnails {
@@ -2593,6 +2705,7 @@ summary:focus-visible,
   }
 
   .document-sheet {
+    --document-mm: 1mm !important;
     width: 210mm;
     height: auto;
     min-height: 297mm;

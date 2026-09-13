@@ -48,6 +48,14 @@
         "accent":  "#2e6f95"
     },
     {
+        "name":  "Keithley 2400 RRAM Console",
+        "description":  "Web Serial console for legacy Keithley 2400 RRAM forming, state-check, and finite I-V sweep workflows.",
+        "url":  "apps/keithley2400-rram-console/",
+        "group":  "Instrumentation",
+        "status":  "Ready",
+        "accent":  "#5b6f42"
+    },
+    {
         "name":  "KETI Lab Console",
         "description":  "Web Serial ADC acquisition, filtering, plotting, recording, and helper-based flashing console for Arduino Nano 33 BLE Rev2.",
         "url":  "apps/keti-platform/",

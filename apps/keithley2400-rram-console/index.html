@@ -1,0 +1,314 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Legacy Keithley 2400 SourceMeter를 위한 안전 우선 RRAM forming 및 I-V 측정 콘솔"
+    />
+    <title>Keithley 2400 RRAM Console</title>
+    <link rel="stylesheet" href="./styles.css?v=c4c35599fcd2" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="주요 화면">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">K</span>
+          <div>
+            <strong>Keithley 2400</strong>
+            <span>RRAM Console <span class="version-label">v0.1.0</span></span>
+          </div>
+        </div>
+
+        <nav class="primary-nav" aria-label="작업 영역">
+          <button class="nav-item active" type="button" data-tab="connection" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">⌁</span>연결 · 상태
+          </button>
+          <button class="nav-item" type="button" data-tab="forming">
+            <span class="nav-icon" aria-hidden="true">↗</span>Forming
+          </button>
+          <button class="nav-item" type="button" data-tab="sweep">
+            <span class="nav-icon" aria-hidden="true">∿</span>Sweep / Read
+          </button>
+          <button class="nav-item" type="button" data-tab="history">
+            <span class="nav-icon" aria-hidden="true">▤</span>이력 · 분석
+          </button>
+          <button class="nav-item" type="button" data-tab="settings">
+            <span class="nav-icon" aria-hidden="true">⚙</span>설정
+          </button>
+        </nav>
+
+        <section class="sidebar-footnote" aria-label="실측 경계">
+          <strong>실측 경계</strong>
+          <p>현재 화면은 연결 전입니다. 실제 측정 데이터가 아직 없습니다.</p>
+        </section>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div class="instrument-state" aria-live="polite">
+            <span id="connection-dot" class="status-dot offline"></span>
+            <span id="connection-state">미연결</span>
+            <span class="muted-separator">/</span>
+            <span id="instrument-id">장비 식별 전</span>
+          </div>
+          <div class="output-state off" id="output-state" aria-live="polite">
+            <span class="output-indicator" aria-hidden="true"></span>
+            OUTPUT OFF
+          </div>
+        </header>
+
+        <main id="main-content" class="main-content">
+          <section class="tab-panel active" id="tab-connection" data-panel="connection">
+            <div class="page-heading">
+              <div>
+                <h1>연결 · 상태</h1>
+                <p>브라우저 권한으로 RS232–USB 어댑터 포트를 선택합니다. COM 번호는 브라우저가 노출하지 않을 수 있습니다.</p>
+              </div>
+              <span class="evidence-tag">연결 전 · 출력 OFF</span>
+            </div>
+
+            <div class="two-column connection-layout">
+              <section class="panel">
+                <div class="panel-heading">
+                  <div>
+                    <h2>통신 열기</h2>
+                    <p>Chrome/Edge 데스크톱의 Web Serial과 사용자 포트 선택이 필요합니다.</p>
+                  </div>
+                  <span id="webserial-support" class="status-text">지원 확인 중</span>
+                </div>
+                <div class="form-grid compact-grid">
+                  <label>Baud rate
+                    <select id="baud-rate">
+                      <option value="9600" selected>9600 (2400 공장 기본값)</option>
+                      <option value="57600">57600</option>
+                      <option value="38400">38400</option>
+                      <option value="19200">19200</option>
+                      <option value="4800">4800</option>
+                      <option value="2400">2400</option>
+                      <option value="1200">1200</option>
+                      <option value="600">600</option>
+                      <option value="300">300</option>
+                    </select>
+                  </label>
+                  <label>Data bits
+                    <select id="data-bits"><option value="8" selected>8</option><option value="7">7</option></select>
+                  </label>
+                  <label>Parity
+                    <select id="parity"><option value="none" selected>None</option><option value="even">Even</option><option value="odd">Odd</option></select>
+                  </label>
+                  <label>Stop bits
+                    <select id="stop-bits"><option value="1" selected>1</option><option value="2">2</option></select>
+                  </label>
+                  <label>2400 flow control
+                    <select id="flow-control">
+                      <option value="none" selected>None</option>
+                      <option value="xonxoff">XON/XOFF (앱 처리)</option>
+                    </select>
+                  </label>
+                  <label>명령 종료문자
+                    <select id="terminator">
+                      <option value="cr" selected>CR (2400 수신 기준)</option>
+                      <option value="crlf">CR + LF</option>
+                      <option value="lf">LF</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button class="button primary" id="connect-button" type="button">포트 선택 · 연결</button>
+                  <button class="button secondary" id="disconnect-button" type="button" disabled>연결 해제</button>
+                  <button class="button quiet" id="identify-button" type="button" disabled>식별 · 오류 조회</button>
+                </div>
+                <p class="form-note">2400 전면 COMMUNICATION 설정과 PC 설정이 일치해야 합니다. XON/XOFF는 장비 설정과 일치할 때만 선택하세요. Hardware RTS/CTS는 2400에서 지원하지 않습니다.</p>
+              </section>
+
+              <section class="panel safety-panel">
+                <div class="panel-heading">
+                  <div><h2>연결 체크리스트</h2><p>통신 성공은 DUT 안전이나 출력 차단을 증명하지 않습니다.</p></div>
+                </div>
+                <ul class="checklist static-checklist">
+                  <li><span>1</span>2400 후면 RS-232 DB-9 ↔ USB-serial 어댑터가 <strong>straight-through</strong> 케이블인지 확인 (null-modem 금지)</li>
+                  <li><span>2</span>TXD/RXD/GND, 케이블·프로브·절연 상태를 출력 OFF에서 점검</li>
+                  <li><span>3</span>2400 COMMUNICATION 메뉴의 baud, 7/8 bit, parity, terminator, XON/XOFF와 일치 확인</li>
+                  <li><span>4</span>프로브 스테이션의 수동 접촉, DUT ID, 극성·공통단·허용 전압/전류를 별도로 확인</li>
+                  <li><span>5</span>OUTPUT 표시가 꺼져 있는지 장비 전면에서 확인한 뒤에만 포트 연결</li>
+                </ul>
+              </section>
+            </div>
+
+            <section class="panel status-panel-wide">
+              <div class="panel-heading"><div><h2>장비 · 안전 상태</h2><p>명령과 실제 수신 원문은 실행 시 자동 보존 대상입니다.</p></div></div>
+              <div class="status-grid">
+                <div><span>장비 ID</span><strong id="status-id">미확인</strong></div>
+                <div><span>마지막 오류</span><strong id="status-error">미확인</strong></div>
+                <div><span>통신 상태</span><strong id="status-transport">포트 미선택</strong></div>
+                <div><span>저장소</span><strong id="storage-state">IndexedDB 확인 중</strong></div>
+              </div>
+            </section>
+          </section>
+
+          <section class="tab-panel" id="tab-forming" data-panel="forming">
+            <div class="page-heading">
+              <div>
+                <h1>Forming</h1>
+                <p>요청된 계획: 0 → +3 V, current compliance 1 mA. 이는 알 수 없는 DUT에 대한 안전 보증이나 즉시 실행 지시가 아닙니다.</p>
+              </div>
+              <span class="evidence-tag warning">안전 확인 필요</span>
+            </div>
+            <div class="two-column form-run-layout">
+              <section class="panel">
+                <div class="panel-heading"><div><h2>유한 forming 계획</h2><p>전압·전류·시간 한계를 통과해야 시작할 수 있습니다.</p></div></div>
+                <div class="form-grid">
+                  <label>시작 전압 (V)<input id="forming-start" type="number" value="0" step="0.01" /></label>
+                  <label>끝 전압 (V)<input id="forming-stop" type="number" value="3" step="0.01" /></label>
+                  <label>간격 (V)<input id="forming-step" type="number" value="0.05" min="0.001" step="0.001" /></label>
+                  <label>점 대기 / source delay (ms)<input id="forming-dwell" type="number" value="50" min="0" step="1" /></label>
+                  <label>반복 횟수<input id="forming-repeats" type="number" value="1" min="1" max="10" step="1" /></label>
+                  <label>Current compliance (mA)<input id="forming-compliance" type="number" value="1" min="0.001" step="0.001" /></label>
+                  <label>Current range<input id="forming-range" type="number" value="1" min="0.001" step="0.001" /><span class="unit">mA, auto 가능</span></label>
+                  <label>NPLC<input id="forming-nplc" type="number" value="1" min="0.01" max="10" step="0.01" /></label>
+                </div>
+                <div class="inline-status" id="forming-estimate">계획을 계산 중입니다.</div>
+                <div class="button-row">
+                  <button class="button primary" id="forming-preview" type="button">명령 · 점 목록 미리보기</button>
+                  <button class="button danger" id="forming-start-button" type="button" disabled>배선 확인 후 forming 시작</button>
+                  <button class="button secondary stop-button" type="button" disabled>Stop · Abort · OUTPUT OFF</button>
+                </div>
+              </section>
+              <aside class="panel safety-panel critical-note">
+                <h2>실행 전 필수 확인</h2>
+                <label class="check-row"><input id="forming-wiring-check" type="checkbox" /> DUT 배선, 극성, 공통단과 프로브 접촉을 출력 OFF에서 직접 확인했습니다.</label>
+                <label class="check-row"><input id="forming-limit-check" type="checkbox" /> DUT별 허용 범위와 이 화면의 V/I/시간 한계를 확인했습니다.</label>
+                <label class="check-row"><input id="forming-output-check" type="checkbox" /> 장비 전면 OUTPUT 상태와 비상 차단 절차를 확인했습니다.</label>
+                <p>연결 끊김·브라우저 종료·호스트 timeout이 실제 출력을 OFF로 만든다고 소프트웨어가 보증할 수 없습니다. 전면 패널과 독립 안전 절차를 사용하세요.</p>
+              </aside>
+            </div>
+            <section class="panel command-panel">
+              <div class="panel-heading"><div><h2>실행 전 SCPI 미리보기</h2><p>실행 전에는 장비로 전송되지 않습니다. legacy 2400 SCPI만 사용합니다.</p></div><button class="button quiet copy-button" data-copy-target="forming-command-preview" type="button">복사</button></div>
+              <pre id="forming-command-preview">계획을 미리보기 하면 유한 sweep 명령이 표시됩니다.</pre>
+            </section>
+          </section>
+
+          <section class="tab-panel" id="tab-sweep" data-panel="sweep">
+            <div class="page-heading">
+              <div><h1>Sweep / Read</h1><p>기본 상태 확인: 0 → +1 → −1 → 0 V, 20 mV step, 20 ms delay, 2회 반복, compliance 1 mA.</p></div>
+              <span class="evidence-tag">기본값 · 사용자 조정 가능</span>
+            </div>
+            <div class="two-column form-run-layout">
+              <section class="panel">
+                <div class="panel-heading"><div><h2>양·음 전압 I–V sweep</h2><p>20 ms는 source delay 요청값입니다. 실제 점 주기는 NPLC·range·firmware와 다릅니다.</p></div></div>
+                <div class="form-grid">
+                  <label>시작 (V)<input id="sweep-start" type="number" value="0" step="0.01" /></label>
+                  <label>양의 꼭짓점 (V)<input id="sweep-positive" type="number" value="1" step="0.01" /></label>
+                  <label>음의 꼭짓점 (V)<input id="sweep-negative" type="number" value="-1" step="0.01" /></label>
+                  <label>끝 (V)<input id="sweep-end" type="number" value="0" step="0.01" /></label>
+                  <label>간격 (mV)<input id="sweep-step-mv" type="number" value="20" min="1" step="1" /></label>
+                  <label>점 대기 / source delay (ms)<input id="sweep-dwell" type="number" value="20" min="0" step="1" /></label>
+                  <label>반복 횟수<input id="sweep-repeats" type="number" value="2" min="1" max="10" step="1" /></label>
+                  <label>Current compliance (mA)<input id="sweep-compliance" type="number" value="1" min="0.001" step="0.001" /></label>
+                  <label>Current range<input id="sweep-range" type="number" value="1" min="0.001" step="0.001" /><span class="unit">mA, auto 가능</span></label>
+                  <label>NPLC<input id="sweep-nplc" type="number" value="1" min="0.01" max="10" step="0.01" /></label>
+                </div>
+                <div class="inline-status" id="sweep-estimate">계획을 계산 중입니다.</div>
+                <div class="button-row">
+                  <button class="button primary" id="sweep-preview" type="button">명령 · 점 목록 미리보기</button>
+                  <button class="button danger" id="sweep-start-button" type="button" disabled>배선 확인 후 sweep 시작</button>
+                  <button class="button secondary stop-button" type="button" disabled>Stop · Abort · OUTPUT OFF</button>
+                </div>
+              </section>
+              <aside class="panel safety-panel">
+                <h2>Read · 상태 판정</h2>
+                <label>Read voltage (V)<input id="read-voltage" type="number" value="0.1" min="-1" max="1" step="0.01" /></label>
+                <label>LRS 후보 상한 (Ω)<input id="lrs-max-ohm" type="number" value="10000" min="0" step="100" /></label>
+                <label>HRS 후보 하한 (Ω)<input id="hrs-min-ohm" type="number" value="100000" min="0" step="1000" /></label>
+                <label>최소 |I| 분모 (A)<input id="min-current-a" type="number" value="0.000000001" min="0" step="0.000000001" /></label>
+                <label>상태 전환 후보 (decades)<input id="switch-decades" type="number" value="1" min="0.1" max="6" step="0.1" /></label>
+                <label class="check-row"><input id="sweep-wiring-check" type="checkbox" /> 수동 프로브 접촉·DUT ID·극성과 장비 전면 OUTPUT OFF를 확인했습니다.</label>
+                <button class="button secondary" id="read-start-button" type="button" disabled>저전압 1점 read: 0 → Vread → 0</button>
+                <p>이 기준은 사용자 설정 분석 기준입니다. compliance, overflow, 작은 전류 분모에서는 HRS/LRS·SET/RESET을 확정하지 않습니다.</p>
+              </aside>
+            </div>
+            <section class="panel command-panel">
+              <div class="panel-heading"><div><h2>실행 전 SCPI 미리보기</h2><p>Microsecond 펄스 정밀도는 브라우저 타이머로 보장하지 않습니다.</p></div><button class="button quiet copy-button" data-copy-target="sweep-command-preview" type="button">복사</button></div>
+              <pre id="sweep-command-preview">계획을 미리보기 하면 유한 list-sweep 명령이 표시됩니다.</pre>
+            </section>
+          </section>
+
+          <section class="tab-panel" id="tab-history" data-panel="history">
+            <div class="page-heading"><div><h1>이력 · 분석</h1><p>원시 수신/송신 로그와 파생 I–V 데이터를 분리하여 보관합니다.</p></div><span id="selected-run-kind" class="evidence-tag">실측 이력 없음</span></div>
+            <div class="history-layout">
+              <aside class="panel run-list-panel">
+                <div class="panel-heading"><div><h2>Try 이력</h2><p>DUT ID 변경은 물리적 프로브 이동을 뜻하지 않습니다.</p></div></div>
+                <div class="run-controls"><button id="refresh-history" class="button quiet" type="button">새로고침</button><button id="seed-demo" class="button quiet" type="button">합성 예시 불러오기</button></div>
+                <div id="run-list" class="run-list" aria-live="polite"><p class="empty-state">저장된 try가 없습니다.</p></div>
+              </aside>
+              <div class="analysis-column">
+                <section class="panel analysis-summary">
+                  <div class="panel-heading"><div><h2>선택 try 분석</h2><p id="analysis-subtitle">실측 run을 선택하면 분석 결과가 표시됩니다.</p></div><div class="button-row"><button id="export-json" class="button quiet" type="button" disabled>JSON</button><button id="export-csv" class="button quiet" type="button" disabled>CSV</button></div></div>
+                  <div class="metric-grid" id="analysis-metrics">
+                    <div><span>Read R</span><strong>—</strong></div><div><span>상태 후보</span><strong>—</strong></div><div><span>Compliance</span><strong>—</strong></div><div><span>전환 후보</span><strong>—</strong></div>
+                  </div>
+                  <div class="plot-wrap"><svg id="iv-plot" viewBox="0 0 820 330" role="img" aria-label="I-V plot"><text x="410" y="165" text-anchor="middle">실측 데이터가 없습니다.</text></svg></div>
+                </section>
+                <section class="panel">
+                  <div class="panel-heading"><div><h2>파생 데이터</h2><p>표시값은 원시 응답을 보존한 뒤 계산한 결과입니다.</p></div></div>
+                  <div class="table-wrap"><table><thead><tr><th>순서</th><th>V</th><th>I</th><th>R (Ω)</th><th>상태</th><th>경고</th></tr></thead><tbody id="derived-table"><tr><td colspan="6" class="empty-cell">선택된 데이터가 없습니다.</td></tr></tbody></table></div>
+                </section>
+                <section class="panel raw-log-panel"><div class="panel-heading"><div><h2>원시 송신 · 수신</h2><p>명령/수신 문자열을 변경하지 않고 보존합니다.</p></div></div><pre id="raw-log">선택된 run이 없습니다.</pre></section>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-settings" data-panel="settings">
+            <div class="page-heading"><div><h1>설정</h1><p>국소 실행 한계와 메타데이터를 설정합니다. 기기 사양 또는 DUT 안전한계를 대체하지 않습니다.</p></div></div>
+            <div class="two-column">
+              <section class="panel">
+                <div class="panel-heading"><div><h2>실행 상한</h2><p>앱은 이 값 밖의 forming/sweep 계획을 거부합니다.</p></div></div>
+                <div class="form-grid compact-grid">
+                  <label>최대 |V| (V)<input id="max-voltage-v" type="number" value="3" min="0.01" max="10" step="0.01" /></label>
+                  <label>최대 compliance (mA)<input id="max-compliance-ma" type="number" value="1" min="0.001" max="10" step="0.001" /></label>
+                  <label>최대 run 시간 (s)<input id="max-run-seconds" type="number" value="120" min="1" max="600" step="1" /></label>
+                  <label>AC line frequency (Hz)<select id="line-frequency"><option value="60" selected>60</option><option value="50">50</option></select></label>
+                  <label>Query 기본 timeout (s)<input id="query-timeout-s" type="number" value="10" min="1" max="120" step="1" /></label>
+                </div>
+                <p class="form-note">실제 장비 모델/옵션, DUT stack, probe station, 케이블, 환경에 맞춘 한계는 책임자가 별도로 설정해야 합니다. 이 앱의 10 V/10 mA 입력 상한도 장비·DUT 보증이 아닙니다.</p>
+              </section>
+              <section class="panel">
+                <div class="panel-heading"><div><h2>DUT · try 메타데이터</h2><p>자동 MUX/프로브 위치 제어는 제공되지 않습니다.</p></div></div>
+                <div class="form-grid compact-grid">
+                  <label>DUT ID<input id="dut-id" type="text" placeholder="예: W01-D03" maxlength="80" /></label>
+                  <label>Operator<input id="operator" type="text" placeholder="선택" maxlength="80" /></label>
+                  <label class="span-all">메모<textarea id="run-note" rows="4" placeholder="수동 프로브 상태, 접촉, 시편 조건 등을 기록합니다."></textarea></label>
+                </div>
+                <p class="form-note">DUT ID를 변경해도 물리적으로 다른 소자에 프로빙되었음을 앱이 확인할 수 없습니다.</p>
+              </section>
+            </div>
+            <section class="panel reference-panel">
+              <h2>근거 · 한계</h2>
+              <ul>
+                <li>legacy Series 2400 User’s Manual Rev. K: 8N1 기본 RS-232, factory 9600 baud, straight-through DB-9, XON/XOFF 또는 None, `:SENS:CURR:PROT`, `:SOUR:CLE:AUTO`, finite sweep/trace 명령을 구현 근거로 사용.</li>
+                <li>Web Serial은 Secure Context와 사용자 클릭 기반 포트 권한이 필요하며, Chrome 데스크톱에서 지원됩니다. Firefox/Safari 등 비지원 브라우저에서는 연결할 수 없습니다.</li>
+                <li>Nature Communications 논문은 자체 TaOₓ/Ta₂O₅ 소자·조건의 관측을 보고한 것이며, 이 앱의 3 V/1 mA 요청 기본값을 다른 DUT에 보장하지 않습니다.</li>
+                <li>브라우저 IndexedDB 보존은 best effort입니다. 브라우저 데이터 삭제·quota·private mode·쓰기 실패는 별도로 표시하며, 실측 원본은 JSON으로 즉시 내보내 보조 보관하세요.</li>
+              </ul>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="run-confirm-dialog" class="confirm-dialog">
+      <form method="dialog">
+        <h2 id="dialog-title">출력 동작 확인</h2>
+        <p id="dialog-message"></p>
+        <label>아래 확인문을 입력하세요.<input id="dialog-phrase" type="text" autocomplete="off" /></label>
+        <p class="dialog-note">호스트 통신 손실 뒤 실제 OUTPUT OFF 여부는 전면 패널에서 확인해야 합니다.</p>
+        <div class="button-row"><button class="button secondary" value="cancel">취소</button><button id="dialog-confirm" class="button danger" value="confirm" disabled>유한 실행 시작</button></div>
+      </form>
+    </dialog>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="./app.js?v=31642628d02d"></script>
+  </body>
+</html>
