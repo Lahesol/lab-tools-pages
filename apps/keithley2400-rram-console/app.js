@@ -17,12 +17,14 @@ import {
   validateFinitePlan,
 } from "./protocol.js";
 import {
-  DEFAULT_CONTACTS_PER_RAIL,
-  PAD_LAYOUT_VERSION,
-  PAD_RAILS,
-  formatPadSelection,
-  makePadSelection,
-  normalizeContactsPerRail,
+  DEVICE_LAYOUT_VERSION,
+  DEVICE_ROWS,
+  filterDeviceRuns,
+  formatDeviceSelection,
+  getRunDeviceIdentity,
+  makeDeviceSelection,
+  normalizeDevicesPerRow,
+  runDieId,
 } from "./pad-map.js";
 import { RunStore, downloadText, runToCsv } from "./storage.js";
 import { Legacy2400SerialTransport } from "./serial.js";
@@ -40,8 +42,9 @@ const state = {
   storageError: null,
   connected: false,
   instrumentId: null,
-  padSelection: null,
-  historyFilters: { dieId: "*", padKey: "*" },
+  deviceSelection: null,
+  historyFilters: { dieId: "", deviceKey: "" },
+  measurementTab: "sweep",
 };
 
 const PLOT_COLORS = ["#087f74", "#2369aa", "#9a5d00", "#8f3f91", "#c04d21", "#3c748a", "#64811c", "#6c5a9e"];
@@ -253,6 +256,8 @@ function setRunLocked(locked) {
   state.busy = locked;
   $$("#tab-forming input, #tab-forming select, #tab-forming .button:not(.stop-button), #tab-sweep input, #tab-sweep select, #tab-sweep .button:not(.stop-button)")
     .forEach((element) => { element.disabled = locked; });
+  $$("#device-selector input, #device-selector button").forEach((element) => { element.disabled = locked; });
+  $("use-run-device").disabled = locked || !restorableRunDevice(state.selectedRun);
   syncRunButtons();
 }
 
@@ -260,7 +265,7 @@ function currentMetadata() {
   return {
     dutId: text("dut-id") || "미기록",
     dieId: text("die-id") || "미기록",
-    padSelection: state.padSelection ? { ...state.padSelection } : null,
+    deviceSelection: state.deviceSelection ? structuredClone(state.deviceSelection) : null,
     operator: text("operator"),
     note: text("run-note"),
     appVersion: APP_VERSION,
@@ -269,76 +274,72 @@ function currentMetadata() {
   };
 }
 
-function padCountPerRail() {
-  return normalizeContactsPerRail($("pad-count-per-rail").value);
+function updateDeviceSelectionUi() {
+  const label = `Die ${text("die-id") || "미기록"} · ${formatDeviceSelection(state.deviceSelection)}`;
+  $("device-selected-value").textContent = label;
+  $$("[data-measurement-target]").forEach((element) => { element.textContent = label; });
+  $$(".device-button").forEach((button) => {
+    const selected = button.dataset.deviceKey === state.deviceSelection?.key;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+    button.disabled = state.busy;
+  });
 }
 
-function selectionForRun(run) {
-  return run?.metadata?.padSelection ?? null;
-}
-
-function runDieId(run) {
-  return run?.metadata?.dieId || "미기록";
-}
-
-function updatePadSelectionUi() {
-  $("pad-selected-value").textContent = formatPadSelection(state.padSelection);
-  $("pad-map-state").textContent = state.padSelection
-    ? `${state.padSelection.key}를 다음 실행 metadata에 저장합니다. layout=${state.padSelection.layoutVersion}, rail당 alias ${state.padSelection.contactsPerRail}개.`
-    : `도면에는 개별 pad 번호가 표시되지 않았습니다. layout=${PAD_LAYOUT_VERSION}의 기본 ${padCountPerRail()}개는 수정 가능한 저장용 번호입니다.`;
-}
-
-function renderPadMap() {
-  const count = padCountPerRail();
-  $("pad-count-per-rail").value = count;
-  if (state.padSelection && state.padSelection.contactsPerRail !== count) state.padSelection = null;
-  const map = $("pad-map");
+function renderDeviceMap() {
+  const count = normalizeDevicesPerRow($("devices-per-row").value);
+  $("devices-per-row").value = count;
+  if (state.deviceSelection && state.deviceSelection.devicesPerRow !== count) state.deviceSelection = null;
+  const map = $("device-map");
+  map.style.setProperty("--device-count", count);
   map.replaceChildren();
-  const sections = [...new Set(PAD_RAILS.map((rail) => rail.section))];
-  sections.forEach((sectionName) => {
-    const section = document.createElement("section");
-    section.className = "pad-section";
-    const header = document.createElement("div");
-    header.className = "pad-section-header";
-    const heading = document.createElement("h3");
-    heading.textContent = `${sectionName} pad rail`;
-    const railCount = PAD_RAILS.filter((rail) => rail.section === sectionName).length;
-    const detail = document.createElement("span");
-    detail.textContent = `${railCount} rail · alias ${count}개/rail`;
-    header.append(heading, detail);
-    const rails = document.createElement("div");
-    rails.className = "pad-section-rails";
-    PAD_RAILS.filter((rail) => rail.section === sectionName).forEach((rail) => {
-      const railRow = document.createElement("div");
-      railRow.className = "pad-rail";
-      const label = document.createElement("span");
-      label.className = "pad-rail-label";
-      label.textContent = rail.rail;
-      const pads = document.createElement("div");
-      pads.className = "pad-button-grid";
-      for (let index = 1; index <= count; index += 1) {
-        const selection = makePadSelection(rail.key, index, count);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "pad-button";
-        button.textContent = String(index).padStart(2, "0");
-        button.title = `${formatPadSelection(selection)} (${selection.key})`;
-        button.setAttribute("aria-label", `${formatPadSelection(selection)} 선택`);
-        button.classList.toggle("selected", state.padSelection?.key === selection.key);
-        button.addEventListener("click", () => {
-          state.padSelection = selection;
-          renderPadMap();
-          showToast(`${formatPadSelection(selection)} alias를 다음 run에 저장합니다.`);
-        });
-        pads.append(button);
-      }
-      railRow.append(label, pads);
-      rails.append(railRow);
-    });
-    section.append(header, rails);
+  DEVICE_ROWS.forEach((row) => {
+    const section = document.createElement("div");
+    section.className = `device-row ${row.key.startsWith("MID-") ? "middle-device-row" : ""}`;
+    const label = document.createElement("div");
+    label.className = "device-row-label";
+    label.innerHTML = `<strong>${row.label}</strong><span>${row.contacts}</span>`;
+    const devices = document.createElement("div");
+    devices.className = "device-button-grid";
+    devices.style.setProperty("--device-count", count);
+    for (let index = 1; index <= count; index += 1) {
+      const selection = makeDeviceSelection(row.key, index, count);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "device-button";
+      button.dataset.deviceKey = selection.key;
+      button.title = `${formatDeviceSelection(selection)} · TE ${selection.te.key} / BE ${selection.be.key}`;
+      button.setAttribute("aria-label", `${formatDeviceSelection(selection)} 선택`);
+      button.innerHTML = `<span class="device-contact">TE</span><strong>${String(index).padStart(2, "0")}</strong><span class="device-contact">BE</span>`;
+      button.addEventListener("click", () => {
+        if (state.busy) return;
+        state.deviceSelection = selection;
+        updateDeviceSelectionUi();
+      });
+      devices.append(button);
+    }
+    section.append(label, devices);
     map.append(section);
   });
-  updatePadSelectionUi();
+  updateDeviceSelectionUi();
+}
+
+function restorableRunDevice(run) {
+  const selection = run?.metadata?.deviceSelection;
+  if (selection?.layoutVersion !== DEVICE_LAYOUT_VERSION) return null;
+  const restored = makeDeviceSelection(selection.rowKey, selection.index, selection.devicesPerRow);
+  return restored?.key === selection.key ? restored : null;
+}
+
+function useSelectedRunDevice() {
+  const device = restorableRunDevice(state.selectedRun);
+  if (state.busy || !device) return;
+  state.deviceSelection = device;
+  $("devices-per-row").value = device.devicesPerRow;
+  $("die-id").value = state.selectedRun.metadata.dieId ?? "";
+  $("dut-id").value = state.selectedRun.metadata.dutId ?? "";
+  renderDeviceMap();
+  activateTab(state.measurementTab);
 }
 
 async function onRawEvent(event) {
@@ -420,12 +421,11 @@ async function stopMeasurement(reason = "사용자 Stop") {
   }
 }
 
-function confirmRun(kind, plan) {
+function confirmRun(kind, plan, metadata) {
   const dialog = $("run-confirm-dialog");
   const phrase = kind === "forming" ? "FORM" : kind === "read" ? "READ" : "SWEEP";
   const kindLabel = kind === "forming" ? "Forming" : kind === "read" ? "저전압 Read" : "Sweep";
-  const metadata = currentMetadata();
-  const locationLabel = `저장 라벨: Die ${metadata.dieId} · ${formatPadSelection(metadata.padSelection)}`;
+  const locationLabel = `측정 대상: Die ${metadata.dieId} · ${formatDeviceSelection(metadata.deviceSelection)}`;
   $("dialog-title").textContent = `${kindLabel} 유한 실행 확인`;
   $("dialog-message").textContent = `${plan.points.length} 점, CC ${formatEngineering(plan.complianceA, "A")}, source delay ${plan.sourceDelayMs} ms의 유한 장비 실행을 시작합니다. ${locationLabel}. OUTPUT ON 명령은 직접 보내지 않지만, :INIT가 auto output-off 모드에서 source-measure를 시작할 수 있습니다. 계속하려면 ${phrase}을 입력하세요.`;
   const input = $("dialog-phrase");
@@ -461,9 +461,9 @@ async function executeRun(kind) {
   if (kind === "forming" && !formingChecklistComplete()) throw new Error("Forming 실행 전 세 가지 배선·한계·OUTPUT 확인을 모두 완료하세요.");
   if ((kind === "sweep" || kind === "read") && !$("sweep-wiring-check").checked) throw new Error("Sweep/Read 실행 전 수동 프로브·극성·OUTPUT OFF 확인을 완료하세요.");
   const plan = formPlan(kind);
-  const permitted = await confirmRun(kind, plan);
-  if (!permitted) return;
   const metadata = currentMetadata();
+  const permitted = await confirmRun(kind, plan, metadata);
+  if (!permitted) return;
   const run = {
     id: makeRunId(), startedAt: nowIso(), endedAt: null, kind, synthetic: false, endReason: "진행 중",
     metadata, plan, rawEvents: [], rawRows: [], derivedRows: [], deviceComplianceTripped: false, storageState: "ok",
@@ -502,7 +502,7 @@ async function executeRun(kind) {
       deviceComplianceTripped, stopAttempt: stopResult,
     };
     await persistOrReport(() => state.store.update(run.id, (stored) => ({ ...stored, ...finish })), "run 결과");
-    state.selectedRun = await state.store.get(run.id);
+    selectNewRunInHistory(await state.store.get(run.id));
     await renderHistory();
     renderSelectedRun();
     showToast(`${kind === "forming" ? "Forming" : kind === "read" ? "저전압 Read" : "Sweep"} run을 저장했습니다. 실제 OUTPUT 상태를 전면에서 확인하세요.`, deviceComplianceTripped ? "warn" : "");
@@ -512,7 +512,7 @@ async function executeRun(kind) {
     const failure = { endedAt: nowIso(), endReason: `오류: ${error.name}: ${error.message}`, error: { name: error.name, message: error.message }, stopAttempt: stopResult };
     try {
       await persistOrReport(() => state.store.update(run.id, (stored) => ({ ...stored, ...failure })), "실패 run 상태");
-      state.selectedRun = await state.store.get(run.id);
+      selectNewRunInHistory(await state.store.get(run.id));
       await renderHistory();
       renderSelectedRun();
     } catch { /* storage failure already remains visible */ }
@@ -523,12 +523,17 @@ async function executeRun(kind) {
   }
 }
 
+function selectNewRunInHistory(run) {
+  state.selectedRun = run;
+  state.historyFilters = { dieId: runDieId(run), deviceKey: getRunDeviceIdentity(run).filterKey };
+}
+
 async function renderHistory({ preserveSelection = true } = {}) {
   if (!state.store) return;
   const runs = await state.store.list();
   const list = $("run-list");
   populateHistoryFilters(runs);
-  const filteredRuns = filterHistoryRuns(runs);
+  const filteredRuns = filterDeviceRuns(runs, state.historyFilters);
   renderDieOverlay(filteredRuns);
   if (!runs.length) {
     state.selectedRun = null;
@@ -536,15 +541,15 @@ async function renderHistory({ preserveSelection = true } = {}) {
     return;
   }
   if (!preserveSelection) state.selectedRun = filteredRuns[0] ?? null;
-  else if (!state.selectedRun || !runs.some((run) => run.id === state.selectedRun.id)) state.selectedRun = filteredRuns[0] ?? runs[0];
+  else if (!state.selectedRun || !filteredRuns.some((run) => run.id === state.selectedRun.id)) state.selectedRun = filteredRuns[0] ?? null;
   if (!filteredRuns.length) {
-    list.innerHTML = '<p class="empty-state">선택한 Die / Pad alias에 맞는 try가 없습니다.</p>';
+    list.innerHTML = '<p class="empty-state">선택한 Die / 소자에 맞는 try가 없습니다.</p>';
     return;
   }
   list.innerHTML = filteredRuns.map((run) => {
     const isSelected = state.selectedRun?.id === run.id;
     const label = run.synthetic ? '<span class="synthetic-label">합성 예시 · 실측 아님</span>' : `<span>${escapeHtml(run.kind)} · ${escapeHtml(run.endReason ?? "진행 중")}</span>`;
-    return `<button class="run-item ${isSelected ? "selected" : ""}" type="button" data-run-id="${escapeHtml(run.id)}"><strong>Die ${escapeHtml(runDieId(run))} · ${escapeHtml(run.metadata?.dutId ?? "DUT 미기록")}</strong><span>${escapeHtml(formatPadSelection(selectionForRun(run)))}</span>${label}<span>${escapeHtml(shortDate(run.startedAt))}</span><span>${escapeHtml(run.id)}</span></button>`;
+    return `<button class="run-item ${isSelected ? "selected" : ""}" type="button" data-run-id="${escapeHtml(run.id)}"><strong>Die ${escapeHtml(runDieId(run))} · ${escapeHtml(run.metadata?.dutId ?? "DUT 미기록")}</strong><span>${escapeHtml(getRunDeviceIdentity(run).label)}</span>${label}<span>${escapeHtml(shortDate(run.startedAt))}</span><span>${escapeHtml(run.id)}</span></button>`;
   }).join("");
   $$(".run-item").forEach((button) => button.addEventListener("click", async () => {
     state.selectedRun = await state.store.get(button.dataset.runId);
@@ -555,34 +560,22 @@ async function renderHistory({ preserveSelection = true } = {}) {
 
 function populateHistoryFilters(runs) {
   const dieSelect = $("history-die-filter");
-  const padSelect = $("history-pad-filter");
-  const dieIds = [...new Set(runs.map(runDieId))].sort((a, b) => a.localeCompare(b, "ko"));
-  const pads = [...new Map(runs
-    .map(selectionForRun)
-    .filter(Boolean)
-    .map((selection) => [selection.key, selection])).values()]
-    .sort((a, b) => formatPadSelection(a).localeCompare(formatPadSelection(b), "ko"));
-  const hasUnselectedPad = runs.some((run) => !selectionForRun(run));
-  if (!dieIds.includes(state.historyFilters.dieId)) state.historyFilters.dieId = "*";
-  if (state.historyFilters.padKey !== "*" && state.historyFilters.padKey !== "__none__" && !pads.some((selection) => selection.key === state.historyFilters.padKey)) state.historyFilters.padKey = "*";
-  if (state.historyFilters.padKey === "__none__" && !hasUnselectedPad) state.historyFilters.padKey = "*";
-  dieSelect.replaceChildren(new Option("전체 Die", "*"), ...dieIds.map((dieId) => new Option(`Die ${dieId}`, dieId)));
-  padSelect.replaceChildren(
-    new Option("전체 Pad", "*"),
-    ...(hasUnselectedPad ? [new Option("Pad alias 미선택", "__none__")] : []),
-    ...pads.map((selection) => new Option(formatPadSelection(selection), selection.key)),
+  const deviceSelect = $("history-device-filter");
+  const dieIds = [...new Set(runs.map(runDieId))].sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
+  if (!dieIds.includes(state.historyFilters.dieId)) state.historyFilters.dieId = "";
+  const dieRuns = filterDeviceRuns(runs, { dieId: state.historyFilters.dieId });
+  const devices = [...new Map(dieRuns.map((run) => {
+    const identity = getRunDeviceIdentity(run);
+    return [identity.filterKey, identity];
+  })).values()].sort((a, b) => a.label.localeCompare(b.label, "ko", { numeric: true }));
+  if (!devices.some((device) => device.filterKey === state.historyFilters.deviceKey)) state.historyFilters.deviceKey = "";
+  dieSelect.replaceChildren(new Option("전체 Die", ""), ...dieIds.map((dieId) => new Option(`Die ${dieId}`, dieId)));
+  deviceSelect.replaceChildren(
+    new Option("전체 소자", ""),
+    ...devices.map((device) => new Option(device.label, device.filterKey)),
   );
   dieSelect.value = state.historyFilters.dieId;
-  padSelect.value = state.historyFilters.padKey;
-}
-
-function filterHistoryRuns(runs) {
-  return runs.filter((run) => {
-    const dieMatches = state.historyFilters.dieId === "*" || runDieId(run) === state.historyFilters.dieId;
-    const padKey = selectionForRun(run)?.key ?? "__none__";
-    const padMatches = state.historyFilters.padKey === "*" || padKey === state.historyFilters.padKey;
-    return dieMatches && padMatches;
-  });
+  deviceSelect.value = state.historyFilters.deviceKey;
 }
 
 function clearPlot(svgId, message) {
@@ -639,14 +632,15 @@ function drawIvPlot(rows) {
 function renderDieOverlay(runs) {
   const series = runs.map((run) => ({
     rows: run.derivedRows,
-    label: `${run.synthetic ? "합성 · " : ""}Die ${runDieId(run)} · ${formatPadSelection(selectionForRun(run))} · ${run.id}`,
+    label: `${run.synthetic ? "합성 · " : ""}Die ${runDieId(run)} · ${getRunDeviceIdentity(run).label} · ${run.id}`,
   }));
-  const visibleSeries = drawSeriesPlot("die-plot", series, { emptyMessage: "선택한 Die / Pad alias에 유효한 I–V 점이 없습니다." });
+  const visibleSeries = drawSeriesPlot("die-plot", series, { emptyMessage: "선택한 Die / 소자에 유효한 I–V 점이 없습니다." });
   $("die-plot-legend").innerHTML = visibleSeries.map((item) => `<span class="plot-legend-item"><i class="plot-legend-swatch" style="background:${item.color}"></i>${escapeHtml(item.label)}</span>`).join("");
 }
 
 function renderSelectedRun() {
   const run = state.selectedRun;
+  $("use-run-device").disabled = state.busy || !restorableRunDevice(run);
   if (!run) {
     $("selected-run-kind").textContent = "실측 이력 없음";
     $("analysis-subtitle").textContent = "실측 run을 선택하면 분석 결과가 표시됩니다.";
@@ -663,7 +657,7 @@ function renderSelectedRun() {
   const candidates = analysis.candidates ?? [];
   const compliance = run.deviceComplianceTripped ? "장비 trip = 1" : derived.some((row) => row.warnings?.some((warning) => warning.includes("compliance"))) ? "근접 추정" : "미검출";
   $("selected-run-kind").textContent = run.synthetic ? "합성 예시 · 실측 아님" : `${run.kind} · ${run.endReason ?? "진행 중"}`;
-  $("analysis-subtitle").textContent = `${run.id} · Die ${runDieId(run)} · ${formatPadSelection(selectionForRun(run))} · DUT ${run.metadata?.dutId ?? "미기록"} · ${shortDate(run.startedAt)}`;
+  $("analysis-subtitle").textContent = `${run.id} · Die ${runDieId(run)} · ${getRunDeviceIdentity(run).label} · DUT ${run.metadata?.dutId ?? "미기록"} · ${shortDate(run.startedAt)}`;
   $("analysis-metrics").innerHTML = [
     ["Read R", read ? formatEngineering(read.resistanceOhm, "Ω") : "판정 불가"],
     ["상태 후보", read?.state ?? "—"],
@@ -684,16 +678,28 @@ async function seedSyntheticRun() {
   synthetic.derivedRows = deriveRows(synthetic.rawRows, rules, false);
   synthetic.analysis = { rules, candidates: findSwitchCandidates(synthetic.derivedRows, rules), readPoint: selectReadPoint(synthetic.derivedRows, rules.readVoltageV), parseWarnings: [] };
   await persistOrReport(() => state.store.put(synthetic), "합성 예시");
-  state.selectedRun = synthetic;
+  selectNewRunInHistory(synthetic);
   await renderHistory(); renderSelectedRun();
   showToast("합성 예시를 불러왔습니다. 이는 장비/DUT 실측이 아닙니다.", "warn");
 }
 
+function activateTab(tabName) {
+  $$(".nav-item").forEach((item) => {
+    const active = item.dataset.tab === tabName;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === tabName));
+  if (tabName === "forming" || tabName === "sweep") {
+    state.measurementTab = tabName;
+    $(`${tabName}-device-host`).append($("device-selector"));
+    updateDeviceSelectionUi();
+  }
+}
+
 function bindTabs() {
-  $$(".nav-item").forEach((button) => button.addEventListener("click", () => {
-    $$(".nav-item").forEach((item) => { item.classList.toggle("active", item === button); item.toggleAttribute("aria-current", item === button); });
-    $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === button.dataset.tab));
-  }));
+  $$(".nav-item").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.tab)));
 }
 
 function bindEvents() {
@@ -718,23 +724,26 @@ function bindEvents() {
   ["forming-wiring-check", "forming-limit-check", "forming-output-check", "sweep-wiring-check"].forEach((id) => $(id).addEventListener("change", syncRunButtons));
   $("refresh-history").addEventListener("click", () => renderHistory().then(renderSelectedRun));
   $("seed-demo").addEventListener("click", () => seedSyntheticRun().catch((error) => showToast(error.message, "error")));
-  $("render-pad-map").addEventListener("click", () => {
-    const previous = state.padSelection?.contactsPerRail;
-    renderPadMap();
-    showToast(previous && previous !== padCountPerRail() ? "Pad alias 수가 바뀌어 기존 선택을 해제했습니다." : "Pad map alias를 갱신했습니다.");
+  $("die-id").addEventListener("input", updateDeviceSelectionUi);
+  $("render-device-map").addEventListener("click", () => {
+    if (state.busy) return;
+    const previous = state.deviceSelection;
+    renderDeviceMap();
+    if (previous && !state.deviceSelection) showToast("행당 소자 수가 바뀌었습니다. 측정할 소자를 다시 선택하세요.");
   });
-  $("clear-pad-selection").addEventListener("click", () => {
-    state.padSelection = null;
-    renderPadMap();
-    showToast("다음 run의 Pad alias 선택을 해제했습니다.");
+  $("clear-device-selection").addEventListener("click", () => {
+    if (state.busy) return;
+    state.deviceSelection = null;
+    updateDeviceSelectionUi();
   });
+  $("use-run-device").addEventListener("click", useSelectedRunDevice);
   $("history-die-filter").addEventListener("change", async (event) => {
     state.historyFilters.dieId = event.target.value;
     await renderHistory({ preserveSelection: false });
     renderSelectedRun();
   });
-  $("history-pad-filter").addEventListener("change", async (event) => {
-    state.historyFilters.padKey = event.target.value;
+  $("history-device-filter").addEventListener("change", async (event) => {
+    state.historyFilters.deviceKey = event.target.value;
     await renderHistory({ preserveSelection: false });
     renderSelectedRun();
   });
@@ -750,7 +759,7 @@ function bindEvents() {
 
 async function init() {
   bindTabs(); bindEvents();
-  renderPadMap();
+  renderDeviceMap();
   const serialSupported = "serial" in navigator;
   const secure = window.isSecureContext;
   $("webserial-support").textContent = serialSupported && secure ? "Web Serial 사용 가능" : serialSupported ? "Secure Context 필요" : "이 브라우저 미지원";

@@ -1,3 +1,5 @@
+import { getRunDeviceIdentity } from "./pad-map.js";
+
 const DATABASE_NAME = "keithley2400-rram-console";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "runs";
@@ -103,10 +105,14 @@ export function downloadText(filename, text, mimeType) {
 export function runToCsv(run) {
   const rows = run.derivedRows ?? [];
   const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-  const header = ["run_id", "kind", "synthetic", "point", "voltage_V", "current_A", "resistance_ohm", "state", "warnings"];
+  const metadata = run.metadata ?? {};
+  const device = metadata.deviceSelection;
+  const header = ["run_id", "kind", "synthetic", "point", "voltage_V", "current_A", "resistance_ohm", "state", "warnings", "die_id", "dut_id", "device_id", "device_label", "TE_pad", "BE_pad", "legacy_pad", "device_layout", "devices_per_row"];
   const body = rows.map((row) => [
     run.id, run.kind, Boolean(run.synthetic), row.index, row.voltageV, row.currentA,
     row.resistanceOhm ?? "", row.state ?? "", (row.warnings ?? []).join(" | "),
+    metadata.dieId, metadata.dutId, device?.key, getRunDeviceIdentity(run).label,
+    device?.te?.key, device?.be?.key, metadata.padSelection?.key, device?.layoutVersion, device?.devicesPerRow,
   ].map(quote).join(","));
   return `\uFEFF${header.join(",")}\n${body.join("\n")}\n`;
 }

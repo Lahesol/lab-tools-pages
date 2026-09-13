@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.2.0";
+export const APP_VERSION = "0.3.0";
 export const MAX_2400_BUFFER_POINTS = 2500;
 export const ABSOLUTE_APP_MAX_VOLTAGE_V = 10;
 export const ABSOLUTE_APP_MAX_COMPLIANCE_A = 0.01;
@@ -242,7 +242,7 @@ export function makeSyntheticRun({ runId = makeRunId(), now = new Date().toISOSt
     kind: "synthetic-demo",
     synthetic: true,
     endReason: "사용자 요청 합성 예시",
-    metadata: { dutId, dieId, padSelection: null, operator: "", note: "합성 데이터: 장비/DUT 실측이 아님", appVersion: APP_VERSION },
+    metadata: { dutId, dieId, deviceSelection: null, operator: "", note: "합성 데이터: 장비/DUT 실측이 아님", appVersion: APP_VERSION },
     plan: { points, complianceA: 0.001, sourceDelayMs: 20, nplc: 1, measurementRangeA: 0.001 },
     rawEvents: [{ at: now, direction: "SYSTEM", text: "SYNTHETIC DATA — no instrument communication" }],
     rawRows,

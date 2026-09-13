@@ -1,52 +1,62 @@
-export const PAD_LAYOUT_VERSION = "die-pad-layout-v1";
-export const DEFAULT_CONTACTS_PER_RAIL = 17;
-export const MIN_CONTACTS_PER_RAIL = 1;
-export const MAX_CONTACTS_PER_RAIL = 32;
+export const DEVICE_LAYOUT_VERSION = "die-te-be-pairs-v2";
+export const DEFAULT_DEVICES_PER_ROW = 17;
 
-// This is a storage/indexing map, not a dimensional reconstruction of the die.
-// The supplied layout identifies rail placement and labels but does not label pad numbers.
-export const PAD_RAILS = Object.freeze([
-  Object.freeze({ key: "TOP-TE", section: "상단", rail: "TE" }),
-  Object.freeze({ key: "TOP-BE", section: "상단", rail: "BE" }),
-  Object.freeze({ key: "MID-TE", section: "중앙", rail: "TE" }),
-  Object.freeze({ key: "MID-BE-TE", section: "중앙", rail: "BE/TE" }),
-  Object.freeze({ key: "MID-BE", section: "중앙", rail: "BE" }),
-  Object.freeze({ key: "BOTTOM-TE", section: "하단", rail: "TE" }),
-  Object.freeze({ key: "BOTTOM-BE", section: "하단", rail: "BE" }),
+// One device spans adjacent TE/BE contacts at the same horizontal position.
+// The middle contact row is BE for MID-UPPER and TE for MID-LOWER.
+export const DEVICE_ROWS = Object.freeze([
+  Object.freeze({ key: "TOP", label: "상단", teRail: "TOP-TE", beRail: "TOP-BE", contacts: "TE ↔ BE" }),
+  Object.freeze({ key: "MID-UPPER", label: "중앙 위", teRail: "MID-TE", beRail: "MID-BE-TE", contacts: "TE ↔ 공통 BE/TE" }),
+  Object.freeze({ key: "MID-LOWER", label: "중앙 아래", teRail: "MID-BE-TE", beRail: "MID-BE", contacts: "공통 BE/TE ↔ BE" }),
+  Object.freeze({ key: "BOTTOM", label: "하단", teRail: "BOTTOM-TE", beRail: "BOTTOM-BE", contacts: "TE ↔ BE" }),
 ]);
 
-export function normalizeContactsPerRail(value) {
+export function normalizeDevicesPerRow(value) {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return DEFAULT_CONTACTS_PER_RAIL;
-  return Math.max(MIN_CONTACTS_PER_RAIL, Math.min(MAX_CONTACTS_PER_RAIL, Math.round(parsed)));
+  if (!Number.isFinite(parsed)) return DEFAULT_DEVICES_PER_ROW;
+  return Math.max(1, Math.min(32, Math.round(parsed)));
 }
 
-export function makePadSelection(railKey, index, contactsPerRail = DEFAULT_CONTACTS_PER_RAIL) {
-  const rail = PAD_RAILS.find((candidate) => candidate.key === railKey);
-  const count = normalizeContactsPerRail(contactsPerRail);
-  const normalizedIndex = Number(index);
-  if (!rail || !Number.isInteger(normalizedIndex) || normalizedIndex < 1 || normalizedIndex > count) return null;
-  const ordinal = String(normalizedIndex).padStart(2, "0");
+export function makeDeviceSelection(rowKey, index, devicesPerRow = DEFAULT_DEVICES_PER_ROW) {
+  const row = DEVICE_ROWS.find((candidate) => candidate.key === rowKey);
+  const count = normalizeDevicesPerRow(devicesPerRow);
+  const position = Number(index);
+  if (!row || !Number.isInteger(position) || position < 1 || position > count) return null;
+  const ordinal = String(position).padStart(2, "0");
   return {
-    layoutVersion: PAD_LAYOUT_VERSION,
-    contactsPerRail: count,
-    railKey: rail.key,
-    section: rail.section,
-    rail: rail.rail,
-    index: normalizedIndex,
-    key: `${rail.key}-${ordinal}`,
+    layoutVersion: DEVICE_LAYOUT_VERSION,
+    devicesPerRow: count,
+    rowKey: row.key,
+    rowLabel: row.label,
+    index: position,
+    key: `${row.key}-${ordinal}`,
+    te: { railKey: row.teRail, index: position, key: `${row.teRail}-${ordinal}` },
+    be: { railKey: row.beRail, index: position, key: `${row.beRail}-${ordinal}` },
   };
 }
 
-export function buildPadAliases(contactsPerRail = DEFAULT_CONTACTS_PER_RAIL) {
-  const count = normalizeContactsPerRail(contactsPerRail);
-  return PAD_RAILS.flatMap((rail) => Array.from(
-    { length: count },
-    (_, offset) => makePadSelection(rail.key, offset + 1, count),
-  ));
+export function formatDeviceSelection(selection) {
+  if (!selection?.key) return "소자 미선택";
+  return `${selection.rowLabel} · 소자 ${String(selection.index).padStart(2, "0")} (TE–BE)`;
 }
 
-export function formatPadSelection(selection, fallback = "Pad alias 미선택") {
-  if (!selection?.key) return fallback;
-  return `${selection.section} · ${selection.rail} · Pad ${String(selection.index).padStart(2, "0")}`;
+// v1 recorded only one contact, which cannot unambiguously identify a device.
+// Read it without migrating or rewriting stored measurement metadata.
+export function getRunDeviceIdentity(run) {
+  const device = run?.metadata?.deviceSelection;
+  if (device?.key) return { filterKey: `device:${device.layoutVersion}:${device.key}`, label: formatDeviceSelection(device) };
+  const pad = run?.metadata?.padSelection;
+  if (pad?.key) return {
+    filterKey: `legacy-pad:${pad.key}`,
+    label: `구버전 단일 pad · ${pad.section} · ${pad.rail} · ${String(pad.index).padStart(2, "0")}`,
+  };
+  return { filterKey: "unassigned", label: "소자 미기록" };
+}
+
+export function runDieId(run) {
+  return run?.metadata?.dieId || "미기록";
+}
+
+export function filterDeviceRuns(runs, { dieId = "", deviceKey = "" } = {}) {
+  return runs.filter((run) => (!dieId || runDieId(run) === dieId)
+    && (!deviceKey || getRunDeviceIdentity(run).filterKey === deviceKey));
 }
