@@ -8,7 +8,7 @@
       content="Legacy Keithley 2400 SourceMeter를 위한 안전 우선 RRAM forming 및 I-V 측정 콘솔"
     />
     <title>Keithley 2400 RRAM Console</title>
-    <link rel="stylesheet" href="./styles.css?v=14127e516a00" />
+    <link rel="stylesheet" href="./styles.css?v=b5e69a8492db" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
@@ -18,7 +18,7 @@
           <span class="brand-mark" aria-hidden="true">K</span>
           <div>
             <strong>Keithley 2400</strong>
-            <span>RRAM Console <span class="version-label">v0.3.0</span></span>
+            <span>RRAM Console <span class="version-label">v0.3.2</span></span>
           </div>
         </div>
 
@@ -153,9 +153,9 @@
             <div class="page-heading">
               <div>
                 <h1>Forming</h1>
-                <p>요청된 계획: 0 → +3 V, current compliance 1 mA. 이는 알 수 없는 DUT에 대한 안전 보증이나 즉시 실행 지시가 아닙니다.</p>
+                <p>기본 계획: 0 → +3 V, current compliance 1 mA. 소자와 조건을 선택하고 시작하세요.</p>
               </div>
-              <span class="evidence-tag warning">안전 확인 필요</span>
+              <span class="evidence-tag">유한 sweep</span>
             </div>
             <div id="forming-device-host" class="device-selector-host">
               <section id="device-selector" class="panel device-selector-panel">
@@ -178,7 +178,7 @@
                 </details>
               </section>
             </div>
-            <div class="two-column form-run-layout">
+            <div class="forming-run-layout">
               <section class="panel">
                 <div class="panel-heading"><div><h2>유한 forming 계획</h2><p>전압·전류·시간 한계를 통과해야 시작할 수 있습니다.</p></div></div>
                 <div class="form-grid">
@@ -195,17 +195,10 @@
                 <p class="measurement-target" data-measurement-target>Die 미기록 · 소자 미선택</p>
                 <div class="button-row">
                   <button class="button primary" id="forming-preview" type="button">명령 · 점 목록 미리보기</button>
-                  <button class="button danger" id="forming-start-button" type="button" disabled>배선 확인 후 forming 시작</button>
+                  <button class="button danger" id="forming-start-button" type="button" disabled>Forming 시작</button>
                   <button class="button secondary stop-button" type="button" disabled>Stop · Abort · OUTPUT OFF</button>
                 </div>
               </section>
-              <aside class="panel safety-panel critical-note">
-                <h2>실행 전 필수 확인</h2>
-                <label class="check-row"><input id="forming-wiring-check" type="checkbox" /> DUT 배선, 극성, 공통단과 프로브 접촉을 출력 OFF에서 직접 확인했습니다.</label>
-                <label class="check-row"><input id="forming-limit-check" type="checkbox" /> DUT별 허용 범위와 이 화면의 V/I/시간 한계를 확인했습니다.</label>
-                <label class="check-row"><input id="forming-output-check" type="checkbox" /> 장비 전면 OUTPUT 상태와 비상 차단 절차를 확인했습니다.</label>
-                <p>연결 끊김·브라우저 종료·호스트 timeout이 실제 출력을 OFF로 만든다고 소프트웨어가 보증할 수 없습니다. 전면 패널과 독립 안전 절차를 사용하세요.</p>
-              </aside>
             </div>
             <section class="panel command-panel">
               <div class="panel-heading"><div><h2>실행 전 SCPI 미리보기</h2><p>실행 전에는 장비로 전송되지 않습니다. legacy 2400 SCPI만 사용합니다.</p></div><button class="button quiet copy-button" data-copy-target="forming-command-preview" type="button">복사</button></div>
@@ -238,7 +231,7 @@
                 <p class="measurement-target" data-measurement-target>Die 미기록 · 소자 미선택</p>
                 <div class="button-row">
                   <button class="button primary" id="sweep-preview" type="button">명령 · 점 목록 미리보기</button>
-                  <button class="button danger" id="sweep-start-button" type="button" disabled>배선 확인 후 sweep 시작</button>
+                  <button class="button danger" id="sweep-start-button" type="button" disabled>Sweep 시작</button>
                   <button class="button secondary stop-button" type="button" disabled>Stop · Abort · OUTPUT OFF</button>
                 </div>
               </section>
@@ -249,9 +242,8 @@
                 <label>HRS 후보 하한 (Ω)<input id="hrs-min-ohm" type="number" value="100000" min="0" step="1000" /></label>
                 <label>최소 |I| 분모 (A)<input id="min-current-a" type="number" value="0.000000001" min="0" step="0.000000001" /></label>
                 <label>상태 전환 후보 (decades)<input id="switch-decades" type="number" value="1" min="0.1" max="6" step="0.1" /></label>
-                <label class="check-row"><input id="sweep-wiring-check" type="checkbox" /> 수동 프로브 접촉·DUT ID·극성과 장비 전면 OUTPUT OFF를 확인했습니다.</label>
                 <p class="measurement-target" data-measurement-target>Die 미기록 · 소자 미선택</p>
-                <button class="button secondary" id="read-start-button" type="button" disabled>저전압 1점 read: 0 → Vread → 0</button>
+                <button class="button secondary" id="read-start-button" type="button" disabled>Read 시작 · 0 → Vread → 0</button>
                 <p>이 기준은 사용자 설정 분석 기준입니다. compliance, overflow, 작은 전류 분모에서는 HRS/LRS·SET/RESET을 확정하지 않습니다.</p>
               </aside>
             </div>
@@ -332,16 +324,7 @@
       </div>
     </div>
 
-    <dialog id="run-confirm-dialog" class="confirm-dialog">
-      <form method="dialog">
-        <h2 id="dialog-title">출력 동작 확인</h2>
-        <p id="dialog-message"></p>
-        <label>아래 확인문을 입력하세요.<input id="dialog-phrase" type="text" autocomplete="off" /></label>
-        <p class="dialog-note">호스트 통신 손실 뒤 실제 OUTPUT OFF 여부는 전면 패널에서 확인해야 합니다.</p>
-        <div class="button-row"><button class="button secondary" value="cancel">취소</button><button id="dialog-confirm" class="button danger" value="confirm" disabled>유한 실행 시작</button></div>
-      </form>
-    </dialog>
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <script type="module" src="./app.js?v=9f69a72c0759"></script>
+    <script type="module" src="./app.js?v=f10818d4e4b3"></script>
   </body>
 </html>

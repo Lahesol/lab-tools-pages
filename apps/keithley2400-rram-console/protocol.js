@@ -1,5 +1,8 @@
-export const APP_VERSION = "0.3.0";
+export const APP_VERSION = "0.3.2";
 export const MAX_2400_BUFFER_POINTS = 2500;
+// Rev. K, 18-91/18-92: LIST and LIST:APPend accept <=100 values per command.
+// Multiple APPend commands can build one continuous list of up to 2500 points.
+export const MAX_2400_LIST_VALUES_PER_COMMAND = 100;
 export const ABSOLUTE_APP_MAX_VOLTAGE_V = 10;
 export const ABSOLUTE_APP_MAX_COMPLIANCE_A = 0.01;
 export const ABSOLUTE_APP_MAX_SECONDS = 600;
@@ -109,9 +112,22 @@ export function formatDuration(milliseconds) {
   return `${(milliseconds / 1000).toFixed(milliseconds < 10000 ? 2 : 1)} s`;
 }
 
+export function buildVoltageListCommands(points) {
+  if (!Array.isArray(points) || points.length < 1 || points.length > MAX_2400_BUFFER_POINTS) {
+    throw new Error(`전압 목록은 1~${MAX_2400_BUFFER_POINTS}점이어야 합니다.`);
+  }
+  const commands = [];
+  for (let offset = 0; offset < points.length; offset += MAX_2400_LIST_VALUES_PER_COMMAND) {
+    const values = points.slice(offset, offset + MAX_2400_LIST_VALUES_PER_COMMAND).map(formatScpiNumber);
+    const command = offset === 0 ? ":SOUR:LIST:VOLT" : ":SOUR:LIST:VOLT:APP";
+    commands.push(`${command} ${values.join(",")}`);
+  }
+  return commands;
+}
+
 export function buildLegacy2400SweepCommands(plan) {
   const points = plan.points;
-  const list = points.map(formatScpiNumber).join(",");
+  const listCommands = buildVoltageListCommands(points);
   const delaySeconds = asFiniteNumber(plan.sourceDelayMs, "source delay") / 1000;
   const measurementRangeA = asFiniteNumber(plan.measurementRangeA, "current range");
   const commandLines = [
@@ -128,7 +144,7 @@ export function buildLegacy2400SweepCommands(plan) {
     ":TRAC:FEED SENS",
     `:TRAC:POIN ${points.length}`,
     ":TRAC:FEED:CONT NEXT",
-    `:SOUR:LIST:VOLT ${list}`,
+    ...listCommands,
     ":SOUR:VOLT:MODE LIST",
     ":SOUR:SWE:RANG FIX",
     ":SOUR:SWE:CAB EARLY",
@@ -138,19 +154,65 @@ export function buildLegacy2400SweepCommands(plan) {
   ];
   return {
     configure: commandLines,
+    verify: [":SOUR:LIST:VOLT:POIN?", ":SYST:ERR?"],
     initiate: [":INIT"],
     collect: ["*OPC?", ":TRAC:DATA?", ":SENS:CURR:PROT:TRIP?", ":OUTP?", ":SYST:ERR?"],
     emergency: [":ABOR", ":OUTP OFF"],
   };
 }
 
+export async function configureLegacy2400Sweep(transport, plan, { timeoutMs = 10000, assertActive = () => {} } = {}) {
+  const groups = buildLegacy2400SweepCommands(plan);
+  const verification = { expectedPoints: plan.points.length, checks: [], lastCommand: null, verified: false };
+  const checkError = async (command) => {
+    assertActive();
+    const response = await transport.query(":SYST:ERR?", timeoutMs);
+    verification.checks.push({ command, response });
+    assertActive();
+    const match = /^\s*([+-]?\d+)\s*,/.exec(String(response));
+    if (!match || Number(match[1]) !== 0) {
+      const label = command.split(" ")[0];
+      const error = new Error(`설정 검증 실패 (${label}): ${response}. 측정을 시작하지 않았습니다.`);
+      error.name = "InstrumentConfigurationError";
+      throw error;
+    }
+  };
+  try {
+    for (const command of groups.configure) {
+      assertActive();
+      verification.lastCommand = command;
+      await transport.writeCommand(command, timeoutMs);
+      await checkError(command);
+    }
+    assertActive();
+    verification.lastCommand = groups.verify[0];
+    verification.listPointsResponse = await transport.query(groups.verify[0], timeoutMs);
+    await checkError(groups.verify[0]);
+    const actual = Number(String(verification.listPointsResponse).trim());
+    if (!Number.isInteger(actual) || actual !== plan.points.length) {
+      const error = new Error(`전압 목록 점 수 불일치: 요청 ${plan.points.length}, 장비 응답 ${verification.listPointsResponse}. 측정을 시작하지 않았습니다.`);
+      error.name = "InstrumentConfigurationError";
+      throw error;
+    }
+    verification.actualPoints = actual;
+    verification.verified = true;
+    return verification;
+  } catch (error) {
+    error.configurationCheck = verification;
+    throw error;
+  }
+}
+
 export function commandPreview(plan) {
   const groups = buildLegacy2400SweepCommands(plan);
   return [
-    "# configure: confirmation 전에는 전송되지 않음",
-    ...groups.configure,
+    "# configure: 시작 버튼을 누르면 전송 / LIST 한 명령당 최대 100점",
+    ...groups.configure.flatMap((command) => [command, ":SYST:ERR?"]),
     "",
-    "# user-confirmed initiate: 이 행부터 instrument source-measure 시작",
+    "# verify: 각 설정 응답이 0이고 업로드한 점 수가 일치해야 INIT 허용",
+    ...groups.verify,
+    "",
+    "# initiate: 설정 검증 완료 후 instrument source-measure 시작",
     ...groups.initiate,
     "",
     "# complete / fetch (query responses read before next command)",

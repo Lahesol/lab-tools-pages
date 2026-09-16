@@ -5,6 +5,7 @@ import {
   buildLegacy2400SweepCommands,
   buildProfilePoints,
   commandPreview,
+  configureLegacy2400Sweep,
   deriveRows,
   estimateDuration,
   findSwitchCandidates,
@@ -237,17 +238,12 @@ function updateEstimates() {
   syncRunButtons();
 }
 
-function formingChecklistComplete() {
-  return ["forming-wiring-check", "forming-limit-check", "forming-output-check"].every((id) => $(id).checked);
-}
-
 function syncRunButtons() {
   for (const kind of ["forming", "sweep", "read"]) {
     const startButton = kind === "read" ? $("read-start-button") : $(`${kind}-start-button`);
     let valid = false;
     try { formPlan(kind); valid = true; } catch { valid = false; }
-    const checklist = kind === "forming" ? formingChecklistComplete() : $("sweep-wiring-check").checked;
-    startButton.disabled = !state.connected || state.busy || !valid || !checklist;
+    startButton.disabled = !state.connected || state.busy || !valid;
   }
   $$(".stop-button").forEach((button) => { button.disabled = !state.busy && !state.connected; });
 }
@@ -408,6 +404,7 @@ async function connect() {
 
 async function stopMeasurement(reason = "사용자 Stop") {
   const activeId = state.activeRun?.id;
+  if (state.activeRun) state.activeRun.stopRequested = true;
   const result = await state.transport.safeStop();
   if (result.errors.length) {
     updateOutputUi("on", "OUTPUT 상태 미확인");
@@ -421,31 +418,6 @@ async function stopMeasurement(reason = "사용자 Stop") {
   }
 }
 
-function confirmRun(kind, plan, metadata) {
-  const dialog = $("run-confirm-dialog");
-  const phrase = kind === "forming" ? "FORM" : kind === "read" ? "READ" : "SWEEP";
-  const kindLabel = kind === "forming" ? "Forming" : kind === "read" ? "저전압 Read" : "Sweep";
-  const locationLabel = `측정 대상: Die ${metadata.dieId} · ${formatDeviceSelection(metadata.deviceSelection)}`;
-  $("dialog-title").textContent = `${kindLabel} 유한 실행 확인`;
-  $("dialog-message").textContent = `${plan.points.length} 점, CC ${formatEngineering(plan.complianceA, "A")}, source delay ${plan.sourceDelayMs} ms의 유한 장비 실행을 시작합니다. ${locationLabel}. OUTPUT ON 명령은 직접 보내지 않지만, :INIT가 auto output-off 모드에서 source-measure를 시작할 수 있습니다. 계속하려면 ${phrase}을 입력하세요.`;
-  const input = $("dialog-phrase");
-  const confirm = $("dialog-confirm");
-  input.value = "";
-  confirm.disabled = true;
-  return new Promise((resolve) => {
-    const validate = () => { confirm.disabled = input.value.trim().toUpperCase() !== phrase; };
-    const close = () => {
-      input.removeEventListener("input", validate);
-      dialog.removeEventListener("close", close);
-      resolve(dialog.returnValue === "confirm" && input.value.trim().toUpperCase() === phrase);
-    };
-    input.addEventListener("input", validate);
-    dialog.addEventListener("close", close);
-    dialog.showModal();
-    setTimeout(() => input.focus(), 0);
-  });
-}
-
 async function drainErrors(timeoutMs, limit = 8) {
   const errors = [];
   for (let index = 0; index < limit; index += 1) {
@@ -457,26 +429,34 @@ async function drainErrors(timeoutMs, limit = 8) {
 }
 
 async function executeRun(kind) {
+  if (state.busy) return;
   if (!state.connected || !state.transport?.connected) throw new Error("포트 연결과 식별을 먼저 완료하세요.");
-  if (kind === "forming" && !formingChecklistComplete()) throw new Error("Forming 실행 전 세 가지 배선·한계·OUTPUT 확인을 모두 완료하세요.");
-  if ((kind === "sweep" || kind === "read") && !$("sweep-wiring-check").checked) throw new Error("Sweep/Read 실행 전 수동 프로브·극성·OUTPUT OFF 확인을 완료하세요.");
   const plan = formPlan(kind);
   const metadata = currentMetadata();
-  const permitted = await confirmRun(kind, plan, metadata);
-  if (!permitted) return;
   const run = {
     id: makeRunId(), startedAt: nowIso(), endedAt: null, kind, synthetic: false, endReason: "진행 중",
     metadata, plan, rawEvents: [], rawRows: [], derivedRows: [], deviceComplianceTripped: false, storageState: "ok",
+  };
+  const assertRunActive = () => {
+    if (run.stopRequested || state.activeRun?.id !== run.id) {
+      const error = new Error("사용자 정지 요청으로 실행을 중단했습니다.");
+      error.name = "RunCancelledError";
+      throw error;
+    }
   };
   state.activeRun = run;
   setRunLocked(true);
   try {
     await persistOrReport(() => state.store.put(run), "run 시작 메타데이터");
-    await onRawEvent({ direction: "SYSTEM", text: `RUN START: ${kind}; no direct OUTP ON command; user typed confirmation.` });
+    await onRawEvent({ direction: "SYSTEM", text: `RUN START: ${kind}; start button clicked; Die ${metadata.dieId}; device ${metadata.deviceSelection?.key ?? "unassigned"}.` });
     const groups = buildLegacy2400SweepCommands(plan);
     const safety = safetySettings();
-    for (const command of groups.configure) await state.transport.writeCommand(command, safety.queryTimeoutMs);
-    await onRawEvent({ direction: "SYSTEM", text: "CONFIGURE COMPLETE: compliance is configured once and held fixed through this finite run." });
+    const configurationCheck = await configureLegacy2400Sweep(state.transport, plan, {
+      timeoutMs: safety.queryTimeoutMs, assertActive: assertRunActive,
+    });
+    await persistOrReport(() => state.store.update(run.id, (stored) => ({ ...stored, configurationCheck })), "설정 검증 결과");
+    await onRawEvent({ direction: "SYSTEM", text: `CONFIGURE VERIFIED: ${configurationCheck.actualPoints} list points, all configuration error checks zero; compliance fixed through this finite run.` });
+    assertRunActive();
     await state.transport.writeCommand(groups.initiate[0], safety.queryTimeoutMs);
     updateOutputUi("on", "SOURCE-MEASURE 진행 / 전면 확인");
     const totalQueryTimeout = Math.min(120000, Math.max(safety.queryTimeoutMs, plan.duration.lowerBoundTotalMs + 10000));
@@ -510,6 +490,10 @@ async function executeRun(kind) {
     const stopResult = await state.transport.safeStop().catch((stopError) => ({ attempted: [], errors: [stopError.message] }));
     updateOutputUi(stopResult.errors?.length ? "on" : "off", stopResult.errors?.length ? "OUTPUT 상태 미확인" : "OUTPUT OFF 명령 전송");
     const failure = { endedAt: nowIso(), endReason: `오류: ${error.name}: ${error.message}`, error: { name: error.name, message: error.message }, stopAttempt: stopResult };
+    if (error.configurationCheck) {
+      failure.configurationCheck = error.configurationCheck;
+      $("status-error").textContent = error.message;
+    }
     try {
       await persistOrReport(() => state.store.update(run.id, (stored) => ({ ...stored, ...failure })), "실패 run 상태");
       selectNewRunInHistory(await state.store.get(run.id));
@@ -721,7 +705,6 @@ function bindEvents() {
     try { await navigator.clipboard.writeText($(button.dataset.copyTarget).textContent); showToast("SCPI 미리보기를 클립보드에 복사했습니다."); } catch { showToast("클립보드 권한이 없어 복사하지 못했습니다.", "warn"); }
   }));
   $$("#tab-forming input, #tab-sweep input, #tab-settings input, #line-frequency").forEach((input) => input.addEventListener("input", updateEstimates));
-  ["forming-wiring-check", "forming-limit-check", "forming-output-check", "sweep-wiring-check"].forEach((id) => $(id).addEventListener("change", syncRunButtons));
   $("refresh-history").addEventListener("click", () => renderHistory().then(renderSelectedRun));
   $("seed-demo").addEventListener("click", () => seedSyntheticRun().catch((error) => showToast(error.message, "error")));
   $("die-id").addEventListener("input", updateDeviceSelectionUi);

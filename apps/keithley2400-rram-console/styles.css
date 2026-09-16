@@ -115,9 +115,6 @@ input:disabled, select:disabled { color: #75818c; background: #f5f6f8; }
 .status-grid strong { overflow-wrap: anywhere; color: var(--navy); font-size: 13px; }
 
 .inline-status { min-height: 38px; padding: 10px 11px; margin-top: 16px; color: #355269; background: var(--blue-pale); border: 1px solid #c5ddeb; border-radius: 5px; font-size: 12px; }
-.check-row { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; color: #5d4d31; font-size: 12px; font-weight: 600; line-height: 1.5; }
-.check-row input { flex: 0 0 auto; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--teal); }
-.critical-note p { padding-top: 11px; border-top: 1px solid #efdbb3; }
 .command-panel { margin-top: 20px; }
 pre { max-height: 310px; padding: 14px; margin: 0; overflow: auto; color: #d7e8f3; background: #102c40; border-radius: 7px; font: 12px/1.62 Consolas, "Cascadia Mono", monospace; white-space: pre-wrap; word-break: break-word; }
 
@@ -187,12 +184,6 @@ td { color: #334554; }
 .device-count-controls label { width: 150px; }
 .measurement-target { color: var(--teal) !important; font-size: 12px; font-weight: 700; }
 
-.confirm-dialog { width: min(500px, calc(100vw - 32px)); padding: 0; color: var(--ink); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 20px 60px rgba(4, 25, 42, .28); }
-.confirm-dialog::backdrop { background: rgba(13, 31, 47, .58); }
-.confirm-dialog form { padding: 23px; }
-.confirm-dialog h2 { margin: 0; color: var(--navy); }
-.confirm-dialog p { color: #4d5d6a; }
-.dialog-note { padding: 10px; color: #8b4d00 !important; background: var(--amber-pale); border: 1px solid #efd092; border-radius: 5px; font-size: 12px; }
 .toast-region { position: fixed; z-index: 20; right: 22px; bottom: 22px; display: grid; gap: 8px; max-width: min(390px, calc(100vw - 44px)); }
 .toast { padding: 10px 13px; color: #fff; background: var(--navy); border-radius: 6px; box-shadow: 0 8px 24px rgba(15,45,68,.24); font-size: 12px; }
 .toast.warn { background: #8a5100; }
