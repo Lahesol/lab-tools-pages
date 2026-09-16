@@ -190,6 +190,8 @@ export class Legacy2400SerialTransport {
     if (useBreak) attempts.push(() => this.sendControlByte(3)); // Manual: ^C clears pending operation/output queue.
     attempts.push(() => this.writeCommand(":ABOR"));
     attempts.push(() => this.writeCommand(":OUTP OFF"));
+    // Stop storage without clearing any readings; interrupted runs may leave NEXT active.
+    attempts.push(() => this.writeCommand(":TRAC:FEED:CONT NEV"));
     for (const attempt of attempts) {
       try {
         await attempt();

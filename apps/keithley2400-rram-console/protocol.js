@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.3.2";
+export const APP_VERSION = "0.3.3";
 export const MAX_2400_BUFFER_POINTS = 2500;
 // Rev. K, 18-91/18-92: LIST and LIST:APPend accept <=100 values per command.
 // Multiple APPend commands can build one continuous list of up to 2500 points.
@@ -132,6 +132,11 @@ export function buildLegacy2400SweepCommands(plan) {
   const measurementRangeA = asFiniteNumber(plan.measurementRangeA, "current range");
   const commandLines = [
     "*CLS",
+    ":ABOR",
+    ":OUTP OFF",
+    // A stopped/failed sweep may leave storage enabled (error +800).
+    // Disable storage before changing any measurement or trace settings.
+    ":TRAC:FEED:CONT NEV",
     ":SOUR:FUNC VOLT",
     ":SENS:FUNC 'CURR'",
     `:SENS:CURR:RANG ${formatScpiNumber(measurementRangeA)}`,
@@ -143,7 +148,6 @@ export function buildLegacy2400SweepCommands(plan) {
     ":TRAC:CLE",
     ":TRAC:FEED SENS",
     `:TRAC:POIN ${points.length}`,
-    ":TRAC:FEED:CONT NEXT",
     ...listCommands,
     ":SOUR:VOLT:MODE LIST",
     ":SOUR:SWE:RANG FIX",
@@ -155,9 +159,10 @@ export function buildLegacy2400SweepCommands(plan) {
   return {
     configure: commandLines,
     verify: [":SOUR:LIST:VOLT:POIN?", ":SYST:ERR?"],
+    arm: [":TRAC:FEED:CONT NEXT"],
     initiate: [":INIT"],
     collect: ["*OPC?", ":TRAC:DATA?", ":SENS:CURR:PROT:TRIP?", ":OUTP?", ":SYST:ERR?"],
-    emergency: [":ABOR", ":OUTP OFF"],
+    emergency: [":ABOR", ":OUTP OFF", ":TRAC:FEED:CONT NEV"],
   };
 }
 
@@ -172,7 +177,8 @@ export async function configureLegacy2400Sweep(transport, plan, { timeoutMs = 10
     const match = /^\s*([+-]?\d+)\s*,/.exec(String(response));
     if (!match || Number(match[1]) !== 0) {
       const label = command.split(" ")[0];
-      const error = new Error(`설정 검증 실패 (${label}): ${response}. 측정을 시작하지 않았습니다.`);
+      const hint = match && Number(match[1]) === 800 ? " 버퍼 저장이 활성화되어 설정 변경이 거부되었습니다." : "";
+      const error = new Error(`설정 검증 실패 (${label}): ${response}.${hint} 측정을 시작하지 않았습니다.`);
       error.name = "InstrumentConfigurationError";
       throw error;
     }
@@ -195,6 +201,13 @@ export async function configureLegacy2400Sweep(transport, plan, { timeoutMs = 10
       throw error;
     }
     verification.actualPoints = actual;
+    // Arm only after the complete configuration/list has passed verification.
+    for (const command of groups.arm) {
+      assertActive();
+      verification.lastCommand = command;
+      await transport.writeCommand(command, timeoutMs);
+      await checkError(command);
+    }
     verification.verified = true;
     return verification;
   } catch (error) {
@@ -211,6 +224,9 @@ export function commandPreview(plan) {
     "",
     "# verify: 각 설정 응답이 0이고 업로드한 점 수가 일치해야 INIT 허용",
     ...groups.verify,
+    "",
+    "# arm: 설정/점 수 검증 후에만 버퍼 저장 활성화",
+    ...groups.arm.flatMap((command) => [command, ":SYST:ERR?"]),
     "",
     "# initiate: 설정 검증 완료 후 instrument source-measure 시작",
     ...groups.initiate,

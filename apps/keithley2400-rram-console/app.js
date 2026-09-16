@@ -411,7 +411,7 @@ async function stopMeasurement(reason = "사용자 Stop") {
     showToast(`정지 명령 일부 실패: ${result.errors.join(" / ")}. 전면 OUTPUT을 확인하세요.`, "error");
   } else {
     updateOutputUi("off", "OUTPUT OFF 명령 전송");
-    showToast("^C, ABOR, OUTP OFF를 순서대로 전송했습니다. 실제 상태는 전면에서 확인하세요.", "warn");
+    showToast("^C, ABOR, OUTP OFF, 버퍼 저장 해제를 순서대로 전송했습니다. 실제 상태는 전면에서 확인하세요.", "warn");
   }
   if (activeId) {
     await persistOrReport(() => state.store.update(activeId, (run) => ({ ...run, endReason: reason, stopAttempt: result, endedAt: nowIso() })), "정지 상태");
