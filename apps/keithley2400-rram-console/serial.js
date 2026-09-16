@@ -5,6 +5,8 @@ function sleep(milliseconds) {
 function makeTimeoutError(command, timeoutMs) {
   const error = new Error(`응답 timeout (${timeoutMs} ms): ${command}`);
   error.name = "QueryTimeoutError";
+  error.command = command;
+  error.timeoutMs = timeoutMs;
   return error;
 }
 

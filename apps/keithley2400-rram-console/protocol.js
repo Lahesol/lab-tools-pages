@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.3.3";
+export const APP_VERSION = "0.3.4";
 export const MAX_2400_BUFFER_POINTS = 2500;
 // Rev. K, 18-91/18-92: LIST and LIST:APPend accept <=100 values per command.
 // Multiple APPend commands can build one continuous list of up to 2500 points.
@@ -83,6 +83,25 @@ export function estimateDuration({ pointCount, sourceDelayMs, nplc, lineFrequenc
   };
 }
 
+export function buildRunTimeouts(plan, safety, communication) {
+  const completionTimeoutMs = asFiniteNumber(safety.maxRunSeconds, "최대 run 시간") * 1000;
+  const queryTimeoutMs = asFiniteNumber(safety.queryTimeoutMs, "query timeout");
+  const baudRate = asFiniteNumber(communication.baudRate, "baud rate");
+  const bitsPerCharacter = 1 + asFiniteNumber(communication.dataBits, "data bits")
+    + asFiniteNumber(communication.stopBits, "stop bits") + (communication.parity === "none" ? 0 : 1);
+  if (completionTimeoutMs <= 0 || completionTimeoutMs > ABSOLUTE_APP_MAX_SECONDS * 1000 || queryTimeoutMs <= 0 || baudRate <= 0) {
+    throw new Error("측정/통신 대기 시간 설정이 유효하지 않습니다.");
+  }
+  // Host-side transfer allowance for ASCII VOLT,CURR pairs; not a measurement-period claim.
+  const estimatedTraceBytes = plan.points.length * 32 + 2;
+  const traceTransferMs = Math.ceil(estimatedTraceBytes * bitsPerCharacter * 1000 / baudRate);
+  return {
+    queryTimeoutMs, completionTimeoutMs,
+    traceTimeoutMs: Math.max(queryTimeoutMs, Math.ceil(traceTransferMs * 1.5) + 5000),
+    estimatedTraceBytes, traceTransferMs,
+  };
+}
+
 export function validateFinitePlan(plan, safety) {
   const points = plan.points ?? [];
   const maxVoltage = asFiniteNumber(safety.maxVoltageV, "최대 전압");
@@ -152,6 +171,12 @@ export function buildLegacy2400SweepCommands(plan) {
     ":SOUR:VOLT:MODE LIST",
     ":SOUR:SWE:RANG FIX",
     ":SOUR:SWE:CAB EARLY",
+    // Do not inherit an external trigger, extra arm repetitions, or trigger delay.
+    ":ARM:COUN 1",
+    ":ARM:SOUR IMM",
+    ":TRIG:SOUR IMM",
+    ":TRIG:DEL 0",
+    ":TRIG:CLE",
     `:TRIG:COUN ${points.length}`,
     ":SOUR:CLE:AUTO ON",
     ":SOUR:CLE:AUTO:MODE TCOunt",

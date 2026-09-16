@@ -18,7 +18,7 @@
           <span class="brand-mark" aria-hidden="true">K</span>
           <div>
             <strong>Keithley 2400</strong>
-            <span>RRAM Console <span class="version-label">v0.3.3</span></span>
+            <span>RRAM Console <span class="version-label">v0.3.4</span></span>
           </div>
         </div>
 
@@ -192,6 +192,7 @@
                   <label>NPLC<input id="forming-nplc" type="number" value="1" min="0.01" max="10" step="0.01" /></label>
                 </div>
                 <div class="inline-status" id="forming-estimate">계획을 계산 중입니다.</div>
+                <p data-acquisition-status role="status">대기 · 장비 내부 sweep은 완료 후 데이터를 일괄 표시합니다.</p>
                 <p class="measurement-target" data-measurement-target>Die 미기록 · 소자 미선택</p>
                 <div class="button-row">
                   <button class="button primary" id="forming-preview" type="button">명령 · 점 목록 미리보기</button>
@@ -208,7 +209,7 @@
 
           <section class="tab-panel" id="tab-sweep" data-panel="sweep">
             <div class="page-heading">
-              <div><h1>Sweep / Read</h1><p>기본 상태 확인: 0 → +1 → −1 → 0 V, 20 mV step, 20 ms delay, 2회 반복, compliance 1 mA.</p></div>
+              <div><h1>Sweep / Read</h1><p>기본 상태 확인: 0 → +1 → −1 → 0 V = 1 cycle, 20 mV step, 20 ms delay, compliance 1 mA.</p></div>
               <span class="evidence-tag">기본값 · 사용자 조정 가능</span>
             </div>
             <div id="sweep-device-host" class="device-selector-host"></div>
@@ -222,12 +223,13 @@
                   <label>끝 (V)<input id="sweep-end" type="number" value="0" step="0.01" /></label>
                   <label>간격 (mV)<input id="sweep-step-mv" type="number" value="20" min="1" step="1" /></label>
                   <label>점 대기 / source delay (ms)<input id="sweep-dwell" type="number" value="20" min="0" step="1" /></label>
-                  <label>반복 횟수<input id="sweep-repeats" type="number" value="2" min="1" max="10" step="1" /></label>
+                  <label>Cycle 수<input id="sweep-repeats" type="number" value="1" min="1" max="10" step="1" /></label>
                   <label>Current compliance (mA)<input id="sweep-compliance" type="number" value="1" min="0.001" step="0.001" /></label>
                   <label>Current range<input id="sweep-range" type="number" value="1" min="0.001" step="0.001" /><span class="unit">mA, auto 가능</span></label>
                   <label>NPLC<input id="sweep-nplc" type="number" value="1" min="0.01" max="10" step="0.01" /></label>
                 </div>
                 <div class="inline-status" id="sweep-estimate">계획을 계산 중입니다.</div>
+                <p data-acquisition-status role="status">대기 · 장비 내부 sweep은 완료 후 데이터를 일괄 표시합니다.</p>
                 <p class="measurement-target" data-measurement-target>Die 미기록 · 소자 미선택</p>
                 <div class="button-row">
                   <button class="button primary" id="sweep-preview" type="button">명령 · 점 목록 미리보기</button>
@@ -325,6 +327,6 @@
     </div>
 
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <script type="module" src="./app.js?v=7866f53e9ee2"></script>
+    <script type="module" src="./app.js?v=b0024a94e3e9"></script>
   </body>
 </html>

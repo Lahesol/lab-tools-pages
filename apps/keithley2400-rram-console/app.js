@@ -2,7 +2,7 @@ import {
   APP_VERSION,
   asFiniteNumber,
   buildInclusiveSegment,
-  buildLegacy2400SweepCommands,
+  buildRunTimeouts,
   buildProfilePoints,
   commandPreview,
   configureLegacy2400Sweep,
@@ -29,6 +29,7 @@ import {
 } from "./pad-map.js";
 import { RunStore, downloadText, runToCsv } from "./storage.js";
 import { Legacy2400SerialTransport } from "./serial.js";
+import { acquireBufferedSweep, acquisitionErrorMessage } from "./acquisition.js";
 
 const $ = (id) => document.getElementById(id);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -207,7 +208,7 @@ function describePlan(plan) {
   const duration = plan.duration ?? estimateDuration({
     pointCount: plan.points.length, sourceDelayMs: plan.sourceDelayMs, nplc: plan.nplc, lineFrequencyHz: safetySettings().lineFrequencyHz,
   });
-  return `${plan.points.length} 점 · V ${formatScpiNumber(Math.min(...plan.points))} → ${formatScpiNumber(Math.max(...plan.points))} · CC ${formatEngineering(plan.complianceA, "A")} · source delay 요청 ${plan.sourceDelayMs} ms · NPLC ${plan.nplc}. 점당 하한 ${duration.lowerBoundPerPointMs.toFixed(2)} ms, 전체 하한 ${formatDuration(duration.lowerBoundTotalMs)}. 실제 점 주기는 auto-range, 장비 firmware, 통신/trace 전송 시간을 포함하지 않습니다.`;
+  return `${plan.repeats} ${plan.kind === "sweep" ? "cycle" : "회"} · ${plan.points.length} 점 · V ${formatScpiNumber(Math.min(...plan.points))} → ${formatScpiNumber(Math.max(...plan.points))} · CC ${formatEngineering(plan.complianceA, "A")} · source delay 요청 ${plan.sourceDelayMs} ms · NPLC ${plan.nplc}. 점당 하한 ${duration.lowerBoundPerPointMs.toFixed(2)} ms, 전체 하한 ${formatDuration(duration.lowerBoundTotalMs)}. 실제 점 주기는 auto-range, 장비 firmware, 통신/trace 전송 시간을 포함하지 않습니다.`;
 }
 
 function updatePlanPreview(kind) {
@@ -433,9 +434,11 @@ async function executeRun(kind) {
   if (!state.connected || !state.transport?.connected) throw new Error("포트 연결과 식별을 먼저 완료하세요.");
   const plan = formPlan(kind);
   const metadata = currentMetadata();
+  const safety = metadata.maxLimits;
+  const timeouts = buildRunTimeouts(plan, safety, state.transport.config ?? metadata.communication);
   const run = {
     id: makeRunId(), startedAt: nowIso(), endedAt: null, kind, synthetic: false, endReason: "진행 중",
-    metadata, plan, rawEvents: [], rawRows: [], derivedRows: [], deviceComplianceTripped: false, storageState: "ok",
+    metadata, plan, timeouts, acquisitionMode: "buffered", rawEvents: [], rawRows: [], derivedRows: [], deviceComplianceTripped: false, storageState: "ok",
   };
   const assertRunActive = () => {
     if (run.stopRequested || state.activeRun?.id !== run.id) {
@@ -446,26 +449,34 @@ async function executeRun(kind) {
   };
   state.activeRun = run;
   setRunLocked(true);
+  const showPhase = (message) => $$("[data-acquisition-status]").forEach((element) => { element.textContent = message; });
+  showPhase("설정 중 · 측정값은 아직 수신되지 않았습니다.");
+  let phaseTimer = null;
   try {
     await persistOrReport(() => state.store.put(run), "run 시작 메타데이터");
     await onRawEvent({ direction: "SYSTEM", text: `RUN START: ${kind}; start button clicked; Die ${metadata.dieId}; device ${metadata.deviceSelection?.key ?? "unassigned"}.` });
-    const groups = buildLegacy2400SweepCommands(plan);
-    const safety = safetySettings();
     const configurationCheck = await configureLegacy2400Sweep(state.transport, plan, {
       timeoutMs: safety.queryTimeoutMs, assertActive: assertRunActive,
     });
     await persistOrReport(() => state.store.update(run.id, (stored) => ({ ...stored, configurationCheck })), "설정 검증 결과");
     await onRawEvent({ direction: "SYSTEM", text: `CONFIGURE VERIFIED: ${configurationCheck.actualPoints} list points, all configuration error checks zero; compliance fixed through this finite run.` });
     assertRunActive();
-    await state.transport.writeCommand(groups.initiate[0], safety.queryTimeoutMs);
-    updateOutputUi("on", "SOURCE-MEASURE 진행 / 전면 확인");
-    const totalQueryTimeout = Math.min(120000, Math.max(safety.queryTimeoutMs, plan.duration.lowerBoundTotalMs + 10000));
-    const opc = await state.transport.query("*OPC?", totalQueryTimeout);
-    if (opc.trim() !== "1") await onRawEvent({ direction: "SYSTEM", text: `WARN: unexpected *OPC? response: ${opc}`, severity: "warn" });
-    const traceResponse = await state.transport.query(":TRAC:DATA?", totalQueryTimeout);
-    const trippedResponse = await state.transport.query(":SENS:CURR:PROT:TRIP?", safety.queryTimeoutMs);
-    const outputResponse = await state.transport.query(":OUTP?", safety.queryTimeoutMs);
+    const { opc, traceResponse, trippedResponse, outputResponse } = await acquireBufferedSweep(state.transport, timeouts, {
+      assertActive: assertRunActive,
+      onPhase: async ({ phase, command, timeoutMs }) => {
+        clearInterval(phaseTimer);
+        run.phase = phase;
+        const phaseStarted = Date.now();
+        const label = phase === "measurement" ? "장비 측정 완료 대기 · 종료 후 그래프 표시" : phase === "transfer" ? "측정 종료 · 데이터 수신 중" : phase === "initiate" ? "측정 시작" : "장비 상태 확인";
+        const refresh = () => showPhase(`${label} · ${((Date.now() - phaseStarted) / 1000).toFixed(0)} s 경과 / 대기 한도 ${timeoutMs / 1000} s · ${command}`);
+        refresh();
+        phaseTimer = setInterval(refresh, 1000);
+        if (phase === "measurement") updateOutputUi("on", "SOURCE-MEASURE 진행 / 전면 확인");
+        await onRawEvent({ direction: "SYSTEM", text: `ACQUISITION ${phase}: ${command}; timeout ${timeoutMs} ms; buffered mode, no live samples.` });
+      },
+    });
     const errors = await drainErrors(safety.queryTimeoutMs);
+    assertRunActive();
     const parsed = parseTraceResponse(traceResponse);
     const rules = kind === "sweep" || kind === "read" ? analysisRules(plan.complianceA) : {
       complianceA: plan.complianceA, lrsMaxOhm: Number.POSITIVE_INFINITY, hrsMinOhm: Number.POSITIVE_INFINITY, minimumCurrentA: 1e-9, switchDecades: 1, readVoltageV: 0.1,
@@ -482,6 +493,8 @@ async function executeRun(kind) {
       deviceComplianceTripped, stopAttempt: stopResult,
     };
     await persistOrReport(() => state.store.update(run.id, (stored) => ({ ...stored, ...finish })), "run 결과");
+    clearInterval(phaseTimer);
+    showPhase(`완료 · ${parsed.rows.length} / ${plan.points.length} 점 수신 · 이력 탭에서 그래프를 확인하세요.`);
     selectNewRunInHistory(await state.store.get(run.id));
     await renderHistory();
     renderSelectedRun();
@@ -489,7 +502,11 @@ async function executeRun(kind) {
   } catch (error) {
     const stopResult = await state.transport.safeStop().catch((stopError) => ({ attempted: [], errors: [stopError.message] }));
     updateOutputUi(stopResult.errors?.length ? "on" : "off", stopResult.errors?.length ? "OUTPUT 상태 미확인" : "OUTPUT OFF 명령 전송");
-    const failure = { endedAt: nowIso(), endReason: `오류: ${error.name}: ${error.message}`, error: { name: error.name, message: error.message }, stopAttempt: stopResult };
+    clearInterval(phaseTimer);
+    const detail = acquisitionErrorMessage(error);
+    showPhase(`중단 · ${detail}`);
+    $("status-error").textContent = detail;
+    const failure = { endedAt: nowIso(), endReason: `오류: ${error.name}: ${error.message}`, error: { name: error.name, message: error.message, command: error.command, timeoutMs: error.timeoutMs, phase: error.phase ?? run.phase, response: error.response }, stopAttempt: stopResult };
     if (error.configurationCheck) {
       failure.configurationCheck = error.configurationCheck;
       $("status-error").textContent = error.message;
@@ -500,8 +517,9 @@ async function executeRun(kind) {
       await renderHistory();
       renderSelectedRun();
     } catch { /* storage failure already remains visible */ }
-    showToast(`실행 실패: ${error.message}. 장비 전면 OUTPUT 상태를 즉시 확인하세요.`, "error");
+    showToast(`실행 실패: ${detail}. 장비 전면 OUTPUT 상태를 즉시 확인하세요.`, "error");
   } finally {
+    clearInterval(phaseTimer);
     state.activeRun = null;
     setRunLocked(false);
   }
