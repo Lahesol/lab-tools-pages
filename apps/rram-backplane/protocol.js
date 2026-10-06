@@ -1,5 +1,5 @@
 // v83 wire contract. Raw codes remain unchanged; conversions are derived only.
-export const REVISION = 'v83-web1';
+export const REVISION = 'v84-web1';
 export const SCALE = 3.6 / 16384;
 export const DIVIDERS = [2,1,1,1,2,1,2,1];
 export const NAMES = ['TE_I','BE_I','V_CC+','V_CC−','V_FB','V_IS','V_CMD','V_MID'];
@@ -30,6 +30,10 @@ export function sweepRequest(dut,endpoint,step,dwell,plus,minus) {
   return {dut,endpoint_mV:endpoint,step_mV:step,dwell_us:us,cc_uA:endpoint>0?plus:minus,n,expected_points:2*n+1,start_mV:endpoint>0?20:-20,excluded_inner_band_mV:20};
 }
 export const commandFor=r=>`SWP,${r.dut},${Number(r.endpoint_mV>0)},${Math.abs(r.endpoint_mV)},${r.step_mV},${r.dwell_us}`;
+// Capture transmission is separate from MCU measurement time. Default ATT
+// payload is 20 bytes; allow bounded 75 ms connection intervals per fragment.
+// No extra measurements, automatic retries, or relaxed capture checks.
+export function sweepTimeoutMs(r,kind){const measurement=r.expected_points*(r.dwell_us+40000)/1000,scRecords=Math.ceil((304+104*r.expected_points)/12),bleTransfer=(r.expected_points*6+scRecords*2+16)*75;return measurement+60000+(kind==='ble'?bleTransfer:0);}
 export class BleAssembler {
   buffer=null;
   feed(data) {
@@ -47,33 +51,33 @@ export class SweepPreview {
   feed(line){
     const p=line.split(','),r=this.request;
     if(p[1]==='H'){
-      check(p.length===6&&this.token===null&&[82,83].includes(integer(p[2])),'SP header/version/duplicate');
+      check(p.length===6&&this.token===null&&[82,83,84].includes(integer(p[2])),'SP header/version/duplicate');
       const [token,dut,total]=p.slice(3).map(integer);check(token>0&&token<=0xffffffff&&dut===r.dut&&total===r.expected_points,'SP 요청 불일치');this.token=token;this.firmware=integer(p[2]);return;
     }
     check(this.token!==null&&!this.complete,'SP 순서');
     if(p[1]==='D'){
-      check(p.length===(this.firmware===83?13:10),'SP 필드 수');const [token,index,code,applied,frames,...sums]=p.slice(2).map(integer);
+      check(p.length===(this.firmware>=83?13:10),'SP 필드 수');const [token,index,code,applied,frames,...sums]=p.slice(2).map(integer);
       check(token===this.token&&index===this.records.length&&index<r.expected_points,'SP index/token 누락/중복');
       check(code>=0&&code<=4095&&applied>=0&&applied<=0xffffffff&&frames===3&&sums.every(v=>v>=-32768*3&&v<=32767*3),'SP 범위');
       check(!this.records.length||applied>=this.records.at(-1).applied_us,'SP 시간 순서');
       const target=Math.min(20+(index<=r.n?index:2*r.n-index)*r.step_mV,Math.abs(r.endpoint_mV))*Math.sign(r.endpoint_mV);
       const [cmd,mid,vis,fb,te,be]=sums,current=(vis-mid)*SCALE/3/.08;
       this.records.push({index,code,applied_us:applied,frames,sums});
-      this.points.push({index,target_mV:target,vcmd_minus_vmid_V:(2*cmd-mid)*SCALE/3,current_mA:current,settled_frames:3,compliance:Math.abs(current)>=.9*r.cc_uA/1000,...(this.firmware===83?{te_be_sense_V:(2*fb-mid)*SCALE/3,force_V:(2*te-be)*SCALE/3}:{})});return;
+      this.points.push({index,target_mV:target,vcmd_minus_vmid_V:(2*cmd-mid)*SCALE/3,current_mA:current,settled_frames:3,compliance:Math.abs(current)>=.9*r.cc_uA/1000,...(this.firmware>=83?{te_be_sense_V:(2*fb-mid)*SCALE/3,force_V:(2*te-be)*SCALE/3}:{})});return;
     }
     check(p[1]==='E'&&p.length===5,'SP end 형식');const [token,count,status]=p.slice(2).map(integer);check(token===this.token&&count===this.records.length&&STATUS[status]!==undefined,'SP end 불일치');this.complete=true;this.status=status;
   }
   verify(d){
     check(this.complete&&d.complete,'Preview/final capture 불완전');check(d.meta.firmware===this.firmware&&d.meta.status===this.status,'SP/SC status/version');
     const expected=this.status===0?d.points.length:Math.max(0,d.points.length-1);check([expected,d.points.length].includes(this.records.length),'SP/SC 점 수');
-    this.records.forEach((rec,i)=>{const p=d.points[i],fs=p.frames.filter(f=>f.phase==='settled');check(fs.length===3&&rec.index===p.index&&rec.code===p.code&&rec.applied_us===p.applied_us,'SP/SC point identity');[6,7,5,...(this.firmware===83?[4,0,1]:[])].forEach((ch,j)=>check(rec.sums[j]===fs.reduce((s,f)=>s+f.raw_codes[ch],0),'SP/SC raw 합계 불일치'));});
+    this.records.forEach((rec,i)=>{const p=d.points[i],fs=p.frames.filter(f=>f.phase==='settled');check(fs.length===3&&rec.index===p.index&&rec.code===p.code&&rec.applied_us===p.applied_us,'SP/SC point identity');[6,7,5,...(this.firmware>=83?[4,0,1]:[])].forEach((ch,j)=>check(rec.sums[j]===fs.reduce((s,f)=>s+f.raw_codes[ch],0),'SP/SC raw 합계 불일치'));});
     return {verified:true,token:this.token,points:this.records.length,status:this.status,method:'exact integer ADC sums/code/timestamp vs CRC-verified SC raw'};
   }
 }
 export class SweepDecoder {
   constructor(request){this.request={...request};this.payload=new Uint8Array();this.started=false;this.complete=false;this.firmware=null;this.meta={};this.points=[];}
   feed(line){const p=line.split(',');
-    if(p[1]==='H'){check(p.length===3&&[81,82,83].includes(integer(p[2]))&&!this.started,'SC header');this.started=true;this.firmware=integer(p[2]);return;}
+    if(p[1]==='H'){check(p.length===3&&[81,82,83,84].includes(integer(p[2]))&&!this.started,'SC header');this.started=true;this.firmware=integer(p[2]);return;}
     check(this.started&&!this.complete,'SC 순서');
     if(p[1]==='D'){check(p.length===4&&integer(p[2])===this.payload.length,'SC offset 누락/중복');const b=b64decode(p[3]);check(b.length>=1&&b.length<=12&&b.length+this.payload.length<=42008,'SC 길이');const next=new Uint8Array(b.length+this.payload.length);next.set(this.payload);next.set(b,this.payload.length);this.payload=next;return;}
     check(p[1]==='E'&&p.length===4&&/^[0-9a-fA-F]{8}$/.test(p[3]),'SC end 형식');check(integer(p[2])===this.payload.length&&parseInt(p[3],16)===crc32(this.payload),'SC 길이/CRC 불일치');this.decode();this.complete=true;
