@@ -56,6 +56,14 @@
         "accent":  "#5b6f42"
     },
     {
+        "name":  "RRAM Backplane v83 Console",
+        "description":  "Web Serial and Web Bluetooth console for protected RRAM routing, live sweeps, raw-first recording, and Secure DFU.",
+        "url":  "apps/rram-backplane/",
+        "group":  "Memory",
+        "status":  "Ready",
+        "accent":  "#8a4f3d"
+    },
+    {
         "name":  "KETI Lab Console",
         "description":  "Web Serial ADC acquisition, filtering, plotting, recording, and helper-based flashing console for Arduino Nano 33 BLE Rev2.",
         "url":  "apps/keti-platform/",
