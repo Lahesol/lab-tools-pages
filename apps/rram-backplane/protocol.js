@@ -1,5 +1,5 @@
 // v83 wire contract. Raw codes remain unchanged; conversions are derived only.
-export const REVISION = 'v84-web1';
+export const REVISION = 'v85-web1';
 export const SCALE = 3.6 / 16384;
 export const DIVIDERS = [2,1,1,1,2,1,2,1];
 export const NAMES = ['TE_I','BE_I','V_CC+','V_CC−','V_FB','V_IS','V_CMD','V_MID'];
@@ -51,7 +51,7 @@ export class SweepPreview {
   feed(line){
     const p=line.split(','),r=this.request;
     if(p[1]==='H'){
-      check(p.length===6&&this.token===null&&[82,83,84].includes(integer(p[2])),'SP header/version/duplicate');
+      check(p.length===6&&this.token===null&&[82,83,84,85].includes(integer(p[2])),'SP header/version/duplicate');
       const [token,dut,total]=p.slice(3).map(integer);check(token>0&&token<=0xffffffff&&dut===r.dut&&total===r.expected_points,'SP 요청 불일치');this.token=token;this.firmware=integer(p[2]);return;
     }
     check(this.token!==null&&!this.complete,'SP 순서');
@@ -77,7 +77,7 @@ export class SweepPreview {
 export class SweepDecoder {
   constructor(request){this.request={...request};this.payload=new Uint8Array();this.started=false;this.complete=false;this.firmware=null;this.meta={};this.points=[];}
   feed(line){const p=line.split(',');
-    if(p[1]==='H'){check(p.length===3&&[81,82,83,84].includes(integer(p[2]))&&!this.started,'SC header');this.started=true;this.firmware=integer(p[2]);return;}
+    if(p[1]==='H'){check(p.length===3&&[81,82,83,84,85].includes(integer(p[2]))&&!this.started,'SC header');this.started=true;this.firmware=integer(p[2]);return;}
     check(this.started&&!this.complete,'SC 순서');
     if(p[1]==='D'){check(p.length===4&&integer(p[2])===this.payload.length,'SC offset 누락/중복');const b=b64decode(p[3]);check(b.length>=1&&b.length<=12&&b.length+this.payload.length<=42008,'SC 길이');const next=new Uint8Array(b.length+this.payload.length);next.set(this.payload);next.set(b,this.payload.length);this.payload=next;return;}
     check(p[1]==='E'&&p.length===4&&/^[0-9a-fA-F]{8}$/.test(p[3]),'SC end 형식');check(integer(p[2])===this.payload.length&&parseInt(p[3],16)===crc32(this.payload),'SC 길이/CRC 불일치');this.decode();this.complete=true;
@@ -102,6 +102,36 @@ export class SweepDecoder {
   }
 }
 export const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+export const INIT_STATUS=['미초기화','완료','S16/정지 상태 불일치','ADC/HF clock 오류','실효 Vref/SAFE 범위 밖','ADC 범위/안정성 실패','V_CMD−V_MID 수렴 실패','취소/연결 상태 변경','SAFE/방향 확인 실패','초기화 시간 초과'];
+export class ReferenceDecoder {
+  constructor(){this.started=false;this.complete=false;this.payload=new Uint8Array();this.meta={};this.frames=[];}
+  feed(line){const p=line.split(',');check(p[0]==='RI','RI prefix');
+    if(p[1]==='H'){check(p.length===3&&p[2]==='85'&&!this.started,'RI header');this.started=true;return;}
+    check(this.started&&!this.complete,'RI order');
+    if(p[1]==='D'){check(p.length===4&&integer(p[2])===this.payload.length,'RI offset');const b=b64decode(p[3]);check(b.length>=1&&b.length<=12&&this.payload.length+b.length<=1856,'RI length');const next=new Uint8Array(this.payload.length+b.length);next.set(this.payload);next.set(b,this.payload.length);this.payload=next;return;}
+    check(p.length===4&&p[1]==='E'&&/^[0-9a-fA-F]{8}$/.test(p[3])&&integer(p[2])===this.payload.length&&parseInt(p[3],16)===crc32(this.payload),'RI CRC/length');
+    this.decode();this.complete=true;
+  }
+  decode(){const b=this.payload;check(b.length>=64,'RI header size');const d=new DataView(b.buffer,b.byteOffset,b.byteLength),u16=o=>d.getUint16(o,true),u32=o=>d.getUint32(o,true);
+    const status=u16(6),count=u16(16),ref=u16(8),safe=u16(10),ready=u16(30)===1;
+    check(u32(0)===0x35385249&&u16(4)===85&&status<INIT_STATUS.length&&u16(18)===14&&u16(28)===81&&u16(30)<=1&&count<=64&&b.length===64+28*count&&u16(42)===8&&u16(44)===16&&u16(46)===40&&u32(52)===5000&&u32(56)===20000,'RI metadata');
+    this.frames=[];let end=0;for(let i=0;i<count;i++){const o=64+28*i,start=u32(o),finish=u32(o+4),code=u16(o+8),phase=d.getUint8(o+10),pupd=d.getUint8(o+11),raw=Array.from({length:8},(_,ch)=>d.getInt16(o+12+ch*2,true));check(start>=end&&finish>=start&&code<=4095&&phase<=7&&pupd<=1,'RI frame order/range');end=finish;this.frames.push({start_us:start,end_us:finish,code,phase,pupd,raw_codes:raw});}
+    check(ready===(status===1),'RI ready/status');
+    let final=null;
+    if(ready){check(ref>=4500&&ref<=5500&&safe>=900&&safe<=1250&&ref*safe>=1150*4096&&ref*safe<=1350*4096&&u16(40)===3&&count>=32&&u32(20)<=2000000,'RI completion');
+      const validRaw=f=>[6,7].every(i=>f.raw_codes[i]>=0&&f.raw_codes[i]<16364);
+      const stable=fs=>{const a=fs.map(f=>adcValues(f.raw_codes));return fs.every(validRaw)&&a.every(x=>x.volts[7]>=1.15&&x.volts[7]<=1.35)&&Math.max(...a.map(x=>x.volts[6]))-Math.min(...a.map(x=>x.volts[6]))<=.04&&Math.max(...a.map(x=>x.volts[7]))-Math.min(...a.map(x=>x.volts[7]))<=.02;};
+      const base=this.frames.slice(0,8);check(base.every(f=>f.phase===0&&f.code===u16(14))&&u16(14)>0&&stable(base),'RI baseline identity/stability');
+      const sumcmd=base.reduce((s,f)=>s+f.raw_codes[6],0),summid=base.reduce((s,f)=>s+f.raw_codes[7],0);
+      check(sumcmd===u32(32)&&summid===u32(36)&&Math.floor((sumcmd*1800+8*u16(14)/2)/(8*u16(14)))===ref,'RI reference evidence');
+      for(let w=0;w<3;w++){const fs=this.frames.slice(count-24+w*8,count-16+w*8),a=fs.map(f=>adcValues(f.raw_codes));check(fs.every(f=>f.code===safe&&f.pupd===0),'RI neutral/polarity evidence');
+        check(stable(fs)&&a.every(x=>Math.abs(x.volts[6]-x.volts[7])<=.02),'RI final frame voltage');
+        check(Math.abs(mean(a.map(x=>x.volts[6]-x.volts[7])))<=.005&&Math.max(...a.map(x=>x.volts[6]))-Math.min(...a.map(x=>x.volts[6]))<=.04&&Math.max(...a.map(x=>x.volts[7]))-Math.min(...a.map(x=>x.volts[7]))<=.02,'RI final window mean/stability');
+        if(w===2){check(fs.every(f=>f.phase===7),'RI final SAFE phase');final={vcmd_V:mean(a.map(x=>x.volts[6])),vmid_V:mean(a.map(x=>x.volts[7])),difference_mV:mean(a.map(x=>(x.volts[6]-x.volts[7])*1000))};}}
+    }
+    this.meta={firmware:85,status,status_text:INIT_STATUS[status],ready,vref_b_mV:ref,safe_code:safe,previous_vref_mV:u16(12),previous_safe_code:u16(14),frame_count:count,adc_bits:14,average_samples:16,acquisition_us:40,elapsed_us:u32(20),epoch:u32(48),verified_windows:u16(40),crc32:crc32(b).toString(16).padStart(8,'0'),final,reference_is_estimated:true,raw_unchanged:true};
+  }
+}
 export function electricalPoints(d){check(d.complete,'CRC-verified raw required');return d.points.flatMap(p=>{const v=p.frames.filter(f=>f.phase==='settled').map(f=>adcValues(f.raw_codes));if(!v.length)return [];const current=mean(v.map(x=>x.current_mA));return [{index:p.index,target_mV:p.target_mV,vcmd_minus_vmid_V:mean(v.map(x=>x.volts[6]-x.volts[7])),te_be_sense_V:mean(v.map(x=>x.feedback_V)),force_V:mean(v.map(x=>x.force_V)),current_mA:current,settled_frames:v.length,compliance:Math.abs(current)>=.9*d.meta.cc_uA/1000,fit_eligible:v.length===3&&!v.some(x=>x.near_rail)}];});}
 export function branchFit(points,n,branch,maxAbs=.3){
   const limit=Number(maxAbs);check(Number.isFinite(limit)&&limit>=.02&&limit<=3.5,'선형 근사 범위 |TE–BE| 0.02–3.5 V');

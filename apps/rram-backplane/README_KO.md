@@ -1,12 +1,14 @@
-# RRAM Backplane Web GUI · v84-web1
+# RRAM Backplane Web GUI · v85-web1 후보
 
-최신 BLE 전달 규약과 기본 v84 서명 ZIP은 [BLE_v84_KO.md](BLE_v84_KO.md)를
-참고하세요. BLE 구동에는 VER84가 필요하며, VER83은 USB 구동과 기존 이력
-조회에만 호환됩니다. 아래 v83-web2 검증 항목은 당시의 기록입니다.
+전원 기준 초기화 동작·검증 경계는 [REFERENCE_v85_KO.md](REFERENCE_v85_KO.md)를
+참고하세요. 현재 웹 구동은 VER85 / 초기화 원본 CRC / HW·epoch 일치가 필요합니다.
+기존 VER83/84 연결은 조회·SAFE·DFU만 허용합니다. 이전 버전 웹 ZIP은 보존했습니다.
+아래 v83/v84 실측 기록은 당시의 증거이며 **v85 실측 증거가 아닙니다**.
+BLE 전달 규약은 [BLE_v84_KO.md](BLE_v84_KO.md)의 CR/LF 재조립을 그대로 유지합니다.
 
 현재 native `calibration/v83` 간소화 GUI의 기능을 옮긴 정적 웹 앱입니다.
 기존 `web_gui` Vision 시뮬레이터와 native GUI/실측 원본은 변경하지 않았습니다.
-BLE 명령 수신만 보완한 새 펌웨어는 `calibration/v84`에 별도로 준비하고 업로드했습니다.
+새 펌웨어는 `calibration/v85`에 별도 빌드·서명했습니다. **v85 업로드·브라우저 렌더·실기 검증·배포는 하지 않았습니다.**
 
 ## 제공 기능
 
@@ -16,11 +18,12 @@ BLE 명령 수신만 보완한 새 펌웨어는 `calibration/v84`에 별도로 �
 - VCMD 상대 mV / DAC-B 절대 mV 입력. 실제 연결 DUT 확인 뒤 적용.
 - CC+ 0.2–3 mA, CC− 0.2–12 mA 각각 저장. 설정 저장은 다음 연결/VCMD/sweep부터 적용.
 - +1 V, +3 V, −1 V 왕복 sweep: step 1–500 mV, dwell 1–1000 ms, 401점/180초 제한.
-- sweep 중 SP84 실시간 plot 3개: command I–V, TE–BE potential 응답, sense I–V + 진행/복귀 선형 저항 근사.
+- 전원 시작 시 S16에서 V_CMD·V_MID 기반 초기화. 실효 VrefB 추정/SAFE code/상태/epoch/CRC 표시, S16 재초기화와 원본 ZIP 저장.
+- sweep 중 SP85 실시간 plot 3개: command I–V, TE–BE potential 응답, sense I–V + 진행/복귀 선형 저항 근사.
 - X축 tick 0.2 V. plot 갱신 때 스크롤 위치를 변경하지 않음.
 - GPIO 별도 탭: 현재 IN과 CPU OUT 래치, ADG884 PU/PD 표시. 임의 GPIO 쓰기는 없음.
-- Firmware: application-only signed ZIP 선택/기본 v84 ZIP, USB/BLE bootloader 선택, object별 CRC·EXECUTE 확인 진행률.
-- 기록: 자동 raw 저장, CRC 확인된 기록 불러오기, ZIP export, SC81–84 기록 가져오기, 근사 재분석 별도 저장.
+- Firmware: application-only signed ZIP 선택/기본 v85 후보 ZIP, USB/BLE bootloader 선택, object별 CRC·EXECUTE 확인 진행률.
+- 기록: sweep 및 초기화 원본 자동 raw 저장, ZIP export, SC81–85 sweep 기록 가져오기, 근사 재분석 별도 저장. 초기화 ZIP은 별도 보관용이며 sweep 가져오기에 사용하지 않습니다.
 
 이 앱은 **현재 v83 간소화 GUI**를 이식합니다. 과거 testing GUI의 모든 burst/SET·RESET·READ pulse/agent folder-watch 기능을 추가한 것은 아닙니다.
 버튼/탭은 일반 DOM 컨트롤이므로 브라우저 agent가 같은 승인된 UI 경로를 사용할 수 있습니다. 임의 serial-command 실행 API는 노출하지 않습니다.
@@ -39,14 +42,14 @@ API 참고: [Chrome Web Serial](https://developer.chrome.com/docs/capabilities/s
 
 1. IndexedDB raw journal을 먼저 초기화합니다. 실패하면 구동을 활성화하지 않습니다. 페이지 시작만으로 연결/출력 명령을 보내지 않습니다.
 2. 사용자가 USB 또는 BLE 보드를 고릅니다. USB 115200, DTR/RTS asserted; BLE NUS UUID `6e400001…` 알림/수신을 사용합니다. 한 경로만 소유합니다.
-3. `ADC_RATE,0 → VER → HW → ADCINFO → LIMITSTAT → STAT → MUXSTAT → GPIO`를 응답별로 직렬 처리합니다. USB VER83/84, BLE VER84 및 ADC14/mean16/acquisition40/HW oversampling OFF, divider mask81, VrefB/SAFE 허용 범위를 확인한 뒤 구동 버튼을 엽니다.
+3. `ADC_RATE,0 → VER → HW → ADCINFO → LIMITSTAT → STAT → MUXSTAT → GPIO → INITSTAT → INIT85_LAST`를 응답별로 직렬 처리합니다. INIT85_LAST는 마지막 부팅 기록을 읽을 뿐 DAC를 변경하거나 재초기화하지 않습니다. VER85, ADC14/mean16/acquisition40/HW oversampling OFF, divider mask81, 초기화 원본 CRC/전압/SAFE code 및 HW·epoch 일치를 확인한 뒤 구동 버튼을 엽니다. 미초기화 상태에서는 INIT85_LAST를 생략하고 구동을 차단합니다.
 4. `DUT 연결`: 실제 STAT/MUXSTAT을 다시 읽고 같은 DUT면 VCMD/CC를 유지합니다. 다른 DUT면 `ADC_RATE,0 → LIMITS → CTRL,<DUT>,<기존방향 또는 PD>,0 → STAT/MUXSTAT/GPIO → ADC_RATE 복원`. MCU의 S16 parking·neutral·보호 경로를 사용합니다.
 5. `VCMD 적용`: 실제 연결 DUT를 재조회하며 dropdown의 다른 선택에 라우팅하지 않습니다. `CTRL,<실제DUT>,<부호>,<절대mV>` 한 번 요청. MCU가 DAC ramp·PU/PD·CC와 아날로그 보호를 처리합니다.
 6. `CC 설정 저장`: `LIMITS,<plus_uA>,<minus_uA>`. CC0를 영점검사용으로 넣지 않습니다. 아날로그 compliance는 MCU/웹 응답시간에 의존하지 않습니다.
 7. Sweep: 입력/fit 범위를 먼저 검증하고 run metadata 생성. `ADC_RATE,0 → LIMITS → SWP,<DUT>,<부호>,<endpoint_mV>,<step_mV>,<dwell_us>`. host가 전압점마다 타이밍 명령을 보내지 않습니다.
 8. 측정 범위는 **signed 20 mV → endpoint → signed 20 mV**. −20~+20 mV 내부 구간은 측정하지 않습니다. 시작/복귀는 S16 neutral로, DUT에 연결된 0 V 표본과 구분합니다.
-9. 수신 bytes/base64 및 line을 IndexedDB에 먼저 commit한 후 해석합니다. SP83/84의 원시 6채널 정수 합으로 잠정 곡선을 그립니다. CRC 확인 전 문구를 유지합니다. 페이지 갱신 때문에 새로운 ADC scan을 추가하지 않습니다.
-10. MCU가 S16 parking/neutral/compliance-held 복귀 후 SC83/84 원시 capture를 전송합니다. 웹은 offset·CRC·메타데이터·timestamp·DAC/polarity·settled frame 수를 검사하고 SP 원시합과 SC raw를 정수 단위로 대조합니다. BLE raw 전송 시간은 MCU dwell과 별도이며 화면 완료가 늦을 수 있습니다.
+9. 수신 bytes/base64 및 line을 IndexedDB에 먼저 commit한 후 해석합니다. SP85의 원시 6채널 정수 합으로 잠정 곡선을 그립니다. CRC 확인 전 문구를 유지합니다. 페이지 갱신 때문에 새로운 ADC scan을 추가하지 않습니다.
+10. MCU가 S16 parking/neutral/compliance-held 복귀 후 SC85 원시 capture를 전송합니다. 웹은 offset·CRC·메타데이터·timestamp·DAC/polarity·settled frame 수를 검사하고 SP 원시합과 SC raw를 정수 단위로 대조합니다. BLE raw 전송 시간은 MCU dwell과 별도이며 화면 완료가 늦을 수 있습니다.
 11. `STAT/MUXSTAT/GPIO`를 새로 읽어 SAFE code/S16 확인 후 ADC monitor만 복원합니다. partial/guard-stop/CRC/SAFE 미확인을 구분하여 저장합니다. CC점은 plot에 남으며 정상 compliance 도달 자체를 host가 새 중단 조건으로 추가하지 않습니다. 펌웨어 보호는 그대로입니다.
 12. 사용자 SAFE는 대기 명령을 취소하고 저장 실패와 무관하게 `SAFE`를 우선 요청합니다. **`OK,SAFE` 완료 응답을 기다린 뒤** STAT/MUXSTAT/GPIO를 조회합니다. SAFE barrier 중 다음 명령을 보내 발생하는 RX_PAUSED를 방지합니다. 오류/timeout/연결 종료 때 자동 sweep 재시도는 없습니다. readback 없이 SAFE 완료라고 표시하지 않습니다.
 13. 장비의 ERR/해석 오류는 구동을 차단하지만 수신 루프는 유지하여 이후 SAFE 응답을 받을 수 있게 합니다. 연결 해제는 SAFE readback을 시도한 뒤, 실패해도 포트를 닫고 **SAFE 미확인**을 명시합니다. 탭을 강제로 닫거나 USB를 뽑으면 웹은 async SAFE 전달을 보장할 수 없습니다. 먼저 SAFE/연결 해제를 사용하세요. 실제 회로 보호는 펌웨어/아날로그 회로에 남아 있습니다.
@@ -54,7 +57,7 @@ API 참고: [Chrome Web Serial](https://developer.chrome.com/docs/capabilities/s
 ## 전압·전류 / 저항
 
 ADC14: 3.6/16384 V/code. AIN0/4/6의 20 kΩ/20 kΩ 분압 ×2는 **표시/분석에만** 적용합니다.
-VrefB는 VDD 고정. `HW` 응답의 실제 ref/neutral code를 사용하며 2048/2.5 V를 가정하지 않습니다.
+VrefB는 VDD 고정. `HW` 응답의 **ADC 기반 실효 기준 추정/neutral code**를 사용하며 2048/2.5 V를 가정하지 않습니다. ADC/divider/DAC 오차를 포함하므로 DMM으로 교정한 USB/VDD 전압이라고 해석하지 않습니다.
 I[mA] = (V_IS−V_MID)/0.08, INA gain20 × R26 4.0 Ω 기준의 교정 전 추정입니다.
 TE–BE sense = V_FB−V_MID: 사용자 보고에 따라 수정된 unity-gain sense IA 전제입니다.
 TE_I−BE_I는 FORCE(MUX/배선 전압강하 포함)이며 DUT pad 전압으로 재명명하지 않습니다.
@@ -75,14 +78,14 @@ R²<0.9는 비선형 참고 근사로 표시합니다. 회귀 ±는 1σ이며 AD
 
 Browser 데이터 삭제, disk full, 전원 차단 등은 저장 기록 손실의 원인이 될 수 있으므로 ZIP을 별도 보관하세요. IndexedDB는 native 로그 폴더를 자동으로 읽지 않습니다.
 기록 탭에서 native **raw_capture.bin + metadata.json + result.json** 세 파일(또는 해당 파일을 묶은 ZIP)을 선택하세요.
-저장된 CRC와 실제 raw가 일치하는 SC81/82/83/84 기록을 재해석합니다. SC wire/preview JSONL이 ZIP에 있으면 함께 보존합니다. 가져오기는 새 실측이 아닙니다.
+저장된 CRC와 실제 raw가 일치하는 SC81–85 기록을 재해석합니다. SC wire/preview JSONL이 ZIP에 있으면 함께 보존합니다. 가져오기는 새 실측이 아닙니다.
 미완료/CRC 미확인 결과도 ZIP으로 보관되지만 검증된 값으로 가져오지는 않습니다.
 근사 갱신은 화면 분석만 변경하고 별도 analysis 레코드/파일을 추가합니다. 이전 raw/result는 덮어쓰지 않습니다.
 
 ## DFU
 
-기본 패키지는 signed v84 application-only ZIP입니다.
-SHA256 `510f61b374a82f462ac1bb05c57c11af6bd73eede2d21299490860227b0e3523`.
+기본 패키지는 signed v85 application-only **후보** ZIP입니다.
+SHA256 `3ee9f008f6c48d434755159ca279edbf90ea74ba2f83c8d89d75bb592f907034`.
 private key, nrfutil.exe, bootloader/SoftDevice를 포함하지 않습니다. v83 보드에 이미 설치된 RRAM-key bootloader를 사용합니다.
 DFU 진입은 SAFE readback 후 앱 transport에서 `DFU`를 요청합니다. 이어 사용자가 **USB bootloader 1915:521f** 또는 **BLE DfuTarg/FE59**를 따로 선택합니다.
 브라우저에서 nrfutil을 실행하는 것이 아니라 Nordic Secure DFU object protocol을 JS로 전송합니다.
@@ -93,7 +96,14 @@ DFU 취소/중단 후 bootloader에 남아 있을 수 있습니다. 같은 대�
 Nordic protocol 참고: [공식 pc-nrfutil source](https://github.com/NordicSemiconductor/pc-nrfutil/blob/master/nordicsemi/dfu/dfu_transport_serial.py).
 **브라우저 DFU는 실물 보드에서 아직 검증하지 않았습니다. 기존 native DFU는 계속 보존했습니다.**
 
-## v84-web1 실제 BLE 검증 (2026-10-06)
+## v85-web1 검증 경계 (2026-10-08)
+
+- 펌웨어 build exit0, SDK baseline 복원, application-only ZIP의 binary hash/서명/boot validation/설치된 bootloader 공개키 일치 확인.
+- production 초기화 C 코드의 SYNTHETIC 가상 peripheral 시험 및 웹 decoder/controller 회귀 시험 통과. 합성 전원·ADC 입력은 실제 측정이 아닙니다.
+- 로컬 서버를 열지 않았습니다. 정적 구조·코드/기존 기록 replay만 검증했으며 실제 브라우저 렌더·IndexedDB/USB/BLE end-to-end·업로드·4.7 V/5 V 비교 실측은 미수행입니다.
+- 현재 native Python GUI는 이번에 v85 초기화 규약으로 이식하지 않았습니다. v85 후보 검증에는 이 웹 소스 또는 새 규약을 검증한 별도 도구가 필요합니다.
+
+## v84-web1 실제 BLE 검증 (2026-10-06 · 이전 버전 기록)
 
 - 펌웨어 build/signature 검증 후 기존 USB bootloader에 v84를 업로드했습니다. nrfutil exit0, 재연결 VER84/HW84/ADC14/S16 확인은 별도 deployment 기록으로 보존했습니다. 웹 DFU 버튼을 통한 업로드가 아닙니다.
 - 실제 Chrome Web Bluetooth에서 RRAM-Backplane을 선택하고 8채널 ADC 자동 갱신, D7 연결, −100 mV 수동 적용, CC+·CC− 1 mA 설정, GPIO 조회, SAFE 및 연결 해제를 확인했습니다.
@@ -122,15 +132,15 @@ Nordic protocol 참고: [공식 pc-nrfutil source](https://github.com/NordicSemi
 - GitHub Pages 배포/포털 등록/commit/push/펌웨어 수정/DFU 업로드는 하지 않았습니다. 상세 원본은 프로젝트의 `calibration/web_qa`에만 보존되며 배포에 포함하지 않습니다.
 
 오프라인 재검증: 이 폴더에서 `node --test tests/*.test.js`, `node scripts/check-static.js`.
-`scripts/validate_hardware.py`는 별도 실제 USB 진단 도구입니다. Python 3.11/pyserial이 필요하며 native/web GUI의 포트를 먼저 해제해야 합니다. 기본은 조회/ADC/SAFE이고 `--control`은 지정 DUT의 0/+100/−100 mV, `--sweep`은 +1 V/1 mA를 실제 인가하므로 의도 없이 실행하지 마세요. 원시 bytes는 base64로 먼저 fsync한 후 해석하며 metadata/result/manifest를 `calibration/web_qa/<run>`에 저장합니다. 오류 시 자동 구동 재시도 없이 SAFE 확인 후 포트를 닫습니다. 이 도구는 브라우저 연결 검증을 대신하지 않습니다.
+`scripts/validate_hardware.py`는 **이전 v83/v84용** 실제 USB 진단 도구이며 v85를 거부합니다. 이번에 실행하거나 v85용으로 이식하지 않았습니다. `--control/--sweep`은 실제 전압을 인가하므로 의도 없이 실행하지 마세요. 이 도구는 브라우저 연결 검증을 대신하지 않습니다.
 로컬의 기존 v83 raw가 없으면 archive replay 시험은 skip되며 실제 데이터는 배포에 포함하지 않습니다.
 
 ## 배포 / 백업 준비
 
 원본: 이 `rram_web_gui` 폴더. 진입점 `index.html`.
-배포 대상: index.html, styles.css, 루트 JS modules 8개, firmware signed ZIP, README_KO.md.
-배포 제외: design/, tests/, scripts/, package.json, source_manifest.json, CHANGELOG.md, 이전 v83 firmware ZIP, 로컬 raw/logs/cache/node_modules.
+배포 대상: index.html, styles.css, 루트 JS modules, v85 firmware signed ZIP, README_KO.md, REFERENCE_v85_KO.md, BLE_v84_KO.md.
+배포 제외: design/, tests/, scripts/, package.json, source_manifest.json, CHANGELOG.md, 이전 v83/v84 firmware ZIP, 로컬 raw/logs/cache/node_modules/certs.
 server-ops 채팅에서 원본 경로를 등록한 뒤 해당 프로젝트의 `./scripts/publish-github-pages.ps1`을 수행할 수 있습니다. 이 프로젝트는 배포 스크립트나 포털을 수정하지 않습니다.
 Git 백업 후보: source, tests/check scripts, README/CHANGELOG/design notes, signed firmware + source manifest. 실측 raw/IndexedDB export/개인키/연결 metadata는 제외.
-Commit 후보: `fix(rram): reassemble BLE commands and qualify v84 browser sweeps`.
+Commit 후보: `feat(rram): initialize DAC-B reference and SAFE bias while parked`.
 현재 프로젝트 폴더는 Git repository가 아니므로 commit/push하지 않았습니다.
