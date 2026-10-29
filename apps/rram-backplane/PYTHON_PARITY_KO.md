@@ -1,5 +1,8 @@
 # Python / Web GUI 비교 · v85-web2 · 2026-10-29
 
+이 문서는 v85-web2 동기화 시점의 비교입니다. 현재 v86-web1의 추가 단일 Pulse와
+중첩 sweep는 [PULSE86_KO.md](PULSE86_KO.md)를 참고하세요. Python 원본은 변경하지 않았습니다.
+
 ## 기준과 범위
 
 Python: `calibration/v83/START_GUI.cmd` → `tools/rram_simple_gui.py`,

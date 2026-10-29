@@ -1,5 +1,5 @@
 // v83 wire contract. Raw codes remain unchanged; conversions are derived only.
-export const REVISION = 'v85-web2';
+export const REVISION = 'v86-web1';
 export const SCALE = 3.6 / 16384;
 export const DIVIDERS = [2,1,1,1,2,1,2,1];
 export const NAMES = ['TE_I','BE_I','V_CC+','V_CC−','V_FB','V_IS','V_CMD','V_MID'];
