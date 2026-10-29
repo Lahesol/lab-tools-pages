@@ -1,5 +1,29 @@
 # Deployment Preparation
 
+## Transfer-Curve Entry (0.1.2)
+
+Additional static payload: `transfer.html`, `transfer.js`, `transfer.css`.
+These files use the existing `styles.css`. Entry: `web_gui/transfer.html`.
+The original `index.html` now links to the new entry.
+
+GitHub Pages supports saved-curve JSON viewing and plot PNG/JSON export here.
+Live PWR USB/VISA + Keithley RS-232 + optional 6COLOR BLE acquisition requires
+the local Python bridge and its same-origin page. No bridge/server is started
+automatically, and no CORS bridge is exposed to a public Pages origin.
+
+Local-only files: `transfer_control.py`, `transfer_curve_server.py`,
+`requirements-transfer.txt`, `requirements-transfer-dev.txt`, and all `scripts/**`
+setup, offline verification and manual launch files. Laptop preparation is source-only;
+it does not launch a server or publish Pages. See `docs/TRANSFER_CURVE_SETUP_KO.md`.
+Exclude `.venv-transfer/**`, `measurements/**`, `outputs/**`, `tests/**`,
+`backups/**`, `__pycache__/**`, and all runtime logs from Pages.
+Source backup may include tests, docs and launch scripts, but excludes raw
+measurement files, environments, private equipment details, and credentials.
+
+Publish/portal changes remain owned by `server-ops`; this task prepares only
+the source payload. Follow-up command in the server-ops workspace:
+`./scripts/publish-github-pages.ps1`.
+
 ## Deployable Static Files
 
 For GitHub Pages or another static host, the deployable frontend is:

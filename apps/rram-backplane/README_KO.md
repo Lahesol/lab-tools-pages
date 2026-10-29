@@ -1,4 +1,48 @@
-# RRAM Backplane Web GUI · v85-web1 후보
+# RRAM Backplane Web GUI · v85-web2
+
+## Python GUI 동기화 · 2026-10-29
+
+비교 기준은 현재 프로젝트의 마지막 Python 실행 진입점
+`calibration/v83/START_GUI.cmd` → `tools/rram_simple_gui.py`
+(`v83-potential-fit1`)입니다. v84/v85에는 별도 최신 Python GUI 진입점이 없습니다.
+구형 대형 testing GUI가 아니라 최종 **간소화 Python GUI**와 비교했습니다.
+
+- 기존 공통 기능: ADC 8값, DUT 선택/연결과 VCMD 적용 분리, CC+·CC−,
+  ±1/+3 V 왕복, 세 plot, 진행·복귀 저항 근사, GPIO, 저장 기록 읽기.
+- 새로 동기화: 측정점별 목표/감지/FORCE/전류/R/CC 표, 원시 ADC CSV,
+  점별 파생 CSV, 최근 저장 sweep 읽기, 고정 DIR/DIRRAW 읽기 전용 진단.
+- 점별 R·전류 표준편차·검출 하한은 Python `derived_points`와 같은 식입니다.
+  SP 미리보기에는 세 개의 개별 전류가 없으므로 CRC 확인 전에는 R/표준편차를
+  확정하지 않습니다. CC점은 표/CSV/plot에 남습니다.
+- mV·µA·µs의 정확한 0.5 반올림도 Python의 ties-to-even 규칙에 맞췄습니다.
+  MCU DAC-code 계산의 기존 half-up 규칙은 바꾸지 않았습니다.
+- 웹의 VER85 + INIT85_LAST CRC/epoch 초기화 검사는 유지합니다.
+  Python v83의 옛 버전 게이트로 되돌리거나 펌웨어 보호를 완화하지 않습니다.
+
+전체 비교, 저장·오류·종료 흐름과 의도적인 차이는
+[PYTHON_PARITY_KO.md](PYTHON_PARITY_KO.md)를 참고하세요.
+`npm test`에 Python-v83 직접 비교 및 실제 저장 원본 재해석 시험이 포함됩니다.
+이번 동기화에서는 펌웨어/서명 ZIP/Python 원본을 수정하지 않으며 장비를 구동하지 않습니다.
+아래 v83/v84/v85-web1의 당시 검증 기록은 각 시점의 기록입니다.
+
+### v85-web2 브라우저 검증 · 2026-10-29
+
+사용자 승인 후 임시 127.0.0.1 정적 서버 + 격리된 Chrome 155/Playwright에서
+1440×1000 및 390×844 화면을 검사했습니다. Browser plugin not available로
+bundled Playwright를 사용했습니다. 12개 브라우저 검증 항목을 통과했습니다.
+
+- 8 ADC 카드/30 DUT 선택, 탭·키보드 이동, 미연결 구동 잠금.
+- DUT/VCMD 편집만으로 연결/구동되지 않음. 기본 서명 ZIP 파싱만 확인(업로드 없음).
+- 기존 D11 실측 파일 가져오기: 99개 표의 목표/sense/FORCE/I/R이 native 결과와 일치,
+  세 plot의 진행·복귀 표시, 회귀 재계산과 표 스크롤 유지.
+- 점별 CSV 99행, ZIP raw binary 원본 SHA256 일치, ZIP 내부 모든 manifest hash 일치.
+- 새로고침 후 기록 복원, 최근 기록 읽기, 변조한 메모리 복사본의 CRC 오류 거부.
+- 좁은 화면 페이지 가로 넘침 없음(표는 내부 가로 스크롤), ZIP 재가져오기 성공.
+- 앱 console 오류/경고 0, 외부 요청 0, USB/BLE API 호출 0. 실제 API는 QA에서 차단했고,
+  임시 서버/브라우저를 종료했습니다. 원본 측정 3파일의 hash는 그대로입니다.
+
+보관 자료의 표시·재분석 검증이며 **새 실측이 아닙니다**. 장비 연결/ADC 실시간 수신,
+CV/CC/sweep 구동, 초기화/DFU 전송은 이번 브라우저 검사 범위가 아닙니다.
 
 전원 기준 초기화 동작·검증 경계는 [REFERENCE_v85_KO.md](REFERENCE_v85_KO.md)를
 참고하세요. 현재 웹 구동은 VER85 / 초기화 원본 CRC / HW·epoch 일치가 필요합니다.
@@ -8,7 +52,10 @@ BLE 전달 규약은 [BLE_v84_KO.md](BLE_v84_KO.md)의 CR/LF 재조립을 그대
 
 현재 native `calibration/v83` 간소화 GUI의 기능을 옮긴 정적 웹 앱입니다.
 기존 `web_gui` Vision 시뮬레이터와 native GUI/실측 원본은 변경하지 않았습니다.
-새 펌웨어는 `calibration/v85`에 별도 빌드·서명했습니다. **v85 업로드·브라우저 렌더·실기 검증·배포는 하지 않았습니다.**
+v85-web1 당시 펌웨어는 `calibration/v85`에 별도 빌드·서명했습니다.
+이후 v85의 USB 업로드/부팅 및 D7 저전압 Python-serial 검증은
+`calibration/v85/QA_v85_UPLOAD_20261008_KO.md`에 기록됐습니다.
+이는 v85 웹 전체 기능의 브라우저/장비 E2E 검증을 뜻하지 않습니다.
 
 ## 제공 기능
 
@@ -22,10 +69,13 @@ BLE 전달 규약은 [BLE_v84_KO.md](BLE_v84_KO.md)의 CR/LF 재조립을 그대
 - sweep 중 SP85 실시간 plot 3개: command I–V, TE–BE potential 응답, sense I–V + 진행/복귀 선형 저항 근사.
 - X축 tick 0.2 V. plot 갱신 때 스크롤 위치를 변경하지 않음.
 - GPIO 별도 탭: 현재 IN과 CPU OUT 래치, ADG884 PU/PD 표시. 임의 GPIO 쓰기는 없음.
+- GPIO 탭의 방향 진단: DIR 4페이지 + DIRRAW 20페이지 조회, 원시 응답/ZIP 보관.
+- Sweep 측정점 표와 파생 CSV, 세션 수신 ADC 원시코드·환산값 CSV.
 - Firmware: application-only signed ZIP 선택/기본 v85 후보 ZIP, USB/BLE bootloader 선택, object별 CRC·EXECUTE 확인 진행률.
 - 기록: sweep 및 초기화 원본 자동 raw 저장, ZIP export, SC81–85 sweep 기록 가져오기, 근사 재분석 별도 저장. 초기화 ZIP은 별도 보관용이며 sweep 가져오기에 사용하지 않습니다.
 
-이 앱은 **현재 v83 간소화 GUI**를 이식합니다. 과거 testing GUI의 모든 burst/SET·RESET·READ pulse/agent folder-watch 기능을 추가한 것은 아닙니다.
+이 앱은 **최종 v83 간소화 GUI**를 이식합니다. 과거 testing GUI의 모든 burst/SET·RESET·READ pulse 기능을 추가한 것은 아닙니다. 최종 간소화 Python GUI에도 SET·RESET·READ pulse 버튼은 없습니다.
+Python의 OS 폴더 감시 agent queue를 브라우저에 이식하지 않습니다. 같은 제어 버튼을 브라우저 agent가 사용하며 임의 serial 명령 실행 API는 없습니다.
 버튼/탭은 일반 DOM 컨트롤이므로 브라우저 agent가 같은 승인된 UI 경로를 사용할 수 있습니다. 임의 serial-command 실행 API는 노출하지 않습니다.
 
 ## 실행 조건
@@ -74,7 +124,11 @@ R²<0.9는 비선형 참고 근사로 표시합니다. 회귀 ±는 1σ이며 AD
 자동 저장 폴더 지정은 사용자의 디렉터리 선택 권한이 필요합니다. 해당 권한이 있으면 **측정 종료 시** 아래 파일을 저장합니다. 측정 도중 원시값은 먼저 IndexedDB에 보존됩니다.
 
 - metadata.json / raw_wire.jsonl / raw_capture.bin / raw_point_frames.csv
-- electrical_points.json / linear_fit.json / result.json / manifest.json (SHA256)
+- derived_points.csv / electrical_points.json / linear_fit.json / result.json / manifest.json (SHA256)
+
+`수신 ADC CSV 저장`은 현재 웹 세션의 수신 A12/A14 line을 읽기만 하여
+UTC/transport/bit/원시8코드/분압 환산8전압/전류/sense/FORCE를 별도 열로 내보냅니다.
+새 ADC 요청이나 보간/평활화/원본 덮어쓰기는 하지 않습니다. ADC 원본은 먼저 IndexedDB에 자동 보존되며 CSV 다운로드 자체가 자동인 것은 아닙니다.
 
 Browser 데이터 삭제, disk full, 전원 차단 등은 저장 기록 손실의 원인이 될 수 있으므로 ZIP을 별도 보관하세요. IndexedDB는 native 로그 폴더를 자동으로 읽지 않습니다.
 기록 탭에서 native **raw_capture.bin + metadata.json + result.json** 세 파일(또는 해당 파일을 묶은 ZIP)을 선택하세요.
@@ -138,9 +192,9 @@ Nordic protocol 참고: [공식 pc-nrfutil source](https://github.com/NordicSemi
 ## 배포 / 백업 준비
 
 원본: 이 `rram_web_gui` 폴더. 진입점 `index.html`.
-배포 대상: index.html, styles.css, 루트 JS modules, v85 firmware signed ZIP, README_KO.md, REFERENCE_v85_KO.md, BLE_v84_KO.md.
+배포 대상: index.html, styles.css, 루트 JS modules(records.js 포함), v85 firmware signed ZIP, README_KO.md, PYTHON_PARITY_KO.md, REFERENCE_v85_KO.md, BLE_v84_KO.md.
 배포 제외: design/, tests/, scripts/, package.json, source_manifest.json, CHANGELOG.md, 이전 v83/v84 firmware ZIP, 로컬 raw/logs/cache/node_modules/certs.
 server-ops 채팅에서 원본 경로를 등록한 뒤 해당 프로젝트의 `./scripts/publish-github-pages.ps1`을 수행할 수 있습니다. 이 프로젝트는 배포 스크립트나 포털을 수정하지 않습니다.
 Git 백업 후보: source, tests/check scripts, README/CHANGELOG/design notes, signed firmware + source manifest. 실측 raw/IndexedDB export/개인키/연결 metadata는 제외.
-Commit 후보: `feat(rram): initialize DAC-B reference and SAFE bias while parked`.
+Commit 후보: `feat(rram-web): sync Python v83 tables, exports and read-only diagnostics`.
 현재 프로젝트 폴더는 Git repository가 아니므로 commit/push하지 않았습니다.

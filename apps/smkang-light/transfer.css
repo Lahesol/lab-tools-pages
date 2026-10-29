@@ -1,0 +1,86 @@
+.transfer-shell { max-width: 1640px; margin: 0 auto; background: #fff; min-height: 100vh; }
+.transfer-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 28px; border-bottom: 1px solid var(--border); }
+.transfer-header h1 { margin: 0 0 5px; font-size: 21px; letter-spacing: 0; }
+.transfer-header p { margin: 0; color: var(--muted); font-size: 12px; }
+.transfer-header nav { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; }
+.transfer-header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+.wiring-strip { display: flex; flex-wrap: wrap; gap: 10px 28px; background: #edf4f3; padding: 12px 28px; font-size: 12px; border-bottom: 1px solid #c3d8d4; }
+.wiring-strip strong { margin-right: 8px; }
+.transfer-status { margin: 0; min-height: 36px; padding: 8px 28px; font-size: 12px; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); }
+.transfer-status[data-error="true"] { background: #fff1ee; color: var(--danger); }
+.instrument-band { display: grid; grid-template-columns: 1fr 1.35fr 1fr; border-bottom: 1px solid var(--border); padding: 18px 28px; gap: 26px; }
+.instrument-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.instrument-title h2 { font-size: 14px; margin: 0; }
+.instrument-title span { font-size: 11px; color: var(--muted); max-width: 50%; overflow-wrap: anywhere; }
+.transfer-shell label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; min-width: 0; }
+.transfer-shell input:not([type="checkbox"]), .transfer-shell select, .transfer-shell textarea { width: 100%; min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: #fff; color: var(--text); }
+.transfer-shell input:disabled, .transfer-shell select:disabled { background: #f0f2f3; }
+.transfer-shell textarea { font: inherit; }
+.transfer-shell .form-grid { gap: 10px; margin-bottom: 10px; }
+.instrument .button-row { margin-top: 10px; gap: 6px; }
+.transfer-shell button { font-size: 12px; border-radius: 4px; padding: 0 10px; min-height: 34px; }
+.measurement-layout { display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); }
+.settings-rail { padding: 22px 24px; border-right: 1px solid var(--border); background: #fafcfc; }
+.settings-rail fieldset { border: 0; border-bottom: 1px solid var(--border); margin: 0 0 20px; padding: 0 0 18px; min-width: 0; }
+.settings-rail legend { font-size: 14px; font-weight: 700; padding: 0 0 14px; }
+.settings-rail fieldset > label, .settings-rail details > label { margin-bottom: 10px; }
+.settings-rail output { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.settings-rail details { padding: 0 0 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.settings-rail summary { cursor: pointer; font-size: 13px; margin-bottom: 12px; }
+.transfer-shell .check-label { display: flex; align-items: center; gap: 7px; white-space: normal; }
+.check-label input { margin: 0; flex: 0 0 15px; width: 15px; height: 15px; accent-color: var(--accent); }
+.run-actions { display: flex; gap: 8px; margin-top: 14px; }
+.run-actions button { flex: 1; font-weight: 700; min-height: 40px; }
+.results-area { padding: 22px 26px; min-width: 0; }
+.run-progress { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; min-height: 24px; font-size: 12px; }
+.run-progress strong { min-width: 70px; }
+.run-progress progress { flex: 1; min-width: 40px; height: 6px; accent-color: var(--accent); }
+.plot-toolbar { display: flex; gap: 14px; flex-wrap: wrap; align-items: end; padding-bottom: 10px; }
+.plot-toolbar label { min-width: 105px; }
+.plot-toolbar .check-label { min-height: 34px; }
+.plot-wrap { height: 430px; width: 100%; min-width: 0; background: #fff; }
+#curvePlot { display: block; width: 100%; height: 100%; }
+.cursor-info { display: block; min-height: 28px; font-size: 11px; color: var(--muted); padding: 5px 0; overflow-wrap: anywhere; }
+.curve-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; min-height: 28px; font-size: 11px; }
+.curve-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.curve-legend i { display: inline-block; width: 18px; height: 3px; }
+.reading-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.reading-strip div { min-width: 0; }
+.reading-strip small { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; }
+.reading-strip strong { display: block; font-size: 16px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.export-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 16px 0; }
+.points-wrap { max-height: 235px; overflow: auto; border-top: 1px solid var(--border); }
+.points-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.points-table th { position: sticky; top: 0; background: #f0f5f5; padding: 10px 8px; white-space: nowrap; }
+.points-table td { padding: 8px; border-bottom: 1px solid #e6edef; white-space: nowrap; }
+.points-table tr:last-child { color: var(--accent); }
+.event-details { padding-top: 18px; font-size: 12px; }
+.event-details summary { cursor: pointer; }
+.event-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.7 Consolas, monospace; max-height: 240px; overflow-y: auto; }
+.transfer-shell footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 14px 28px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+@media (max-width: 1080px) {
+  .instrument-band { grid-template-columns: 1fr 1fr; }
+  .instrument:last-of-type { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: center; }
+  .instrument:last-of-type .instrument-title { margin-bottom: 0; }
+  .measurement-layout { grid-template-columns: 300px minmax(0, 1fr); }
+  .results-area { padding: 20px 16px; }
+  .reading-strip { gap: 10px; }
+  .reading-strip strong { font-size: 14px; }
+}
+@media (max-width: 760px) {
+  .transfer-header { align-items: flex-start; flex-direction: column; padding: 16px; }
+  .transfer-header h1 { font-size: 18px; }
+  .wiring-strip, .transfer-status { padding-left: 16px; padding-right: 16px; }
+  .instrument-band { display: block; padding: 16px; }
+  .instrument { margin-bottom: 20px; }
+  .instrument:last-of-type { display: block; margin-bottom: 0; }
+  .instrument:last-of-type .instrument-title { margin-bottom: 12px; }
+  .measurement-layout { display: flex; flex-direction: column; }
+  .settings-rail { border-right: 0; border-bottom: 1px solid var(--border); padding: 20px 16px; }
+  .settings-rail fieldset .form-grid { grid-template-columns: 1fr 1fr; }
+  .plot-wrap { height: 340px; }
+  .reading-strip { grid-template-columns: 1fr 1fr; }
+  .plot-toolbar label { flex: 1; }
+  .transfer-shell footer { padding: 14px 16px; }
+}

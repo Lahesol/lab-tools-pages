@@ -1,0 +1,125 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SMKang Light · Transfer Curve</title>
+  <link rel="stylesheet" href="styles.css?v=01f03908e360" />
+  <link rel="stylesheet" href="transfer.css" />
+</head>
+<body>
+<main class="transfer-shell">
+  <header class="transfer-header">
+    <div><h1>SMKang Light · Transfer Curve</h1><p>PWR401ML / Keithley 2400 / 6COLOR</p></div>
+    <nav><a href="index.html">DAC·ADC 제어</a><span id="bridgeStatus" class="badge">계측 브리지 미연결</span></nav>
+  </header>
+  <div class="wiring-strip" aria-label="측정 배선">
+    <span><strong>VDS</strong> Keithley HI → D · LO → S</span>
+    <span><strong>VGS</strong> PWR + → S · − → G</span>
+    <span id="mappingInfo">VGS = −VPWR</span>
+  </div>
+  <p id="actionStatus" class="transfer-status" role="status" aria-live="polite">계측 브리지 미연결</p>
+  <section class="instrument-band" aria-label="장비 연결">
+    <div class="instrument">
+      <div class="instrument-title"><h2>Gate · PWR401ML</h2><span id="gateStatus">미연결</span></div>
+      <label>USB VISA 리소스<input id="gateResource" list="visaResources" placeholder="USB0::…::INSTR" /></label>
+      <div class="button-row"><button id="discover" type="button">장비 목록</button><button id="connectGate" type="button">연결</button><button id="disconnectGate" type="button">해제</button></div>
+    </div>
+    <div class="instrument">
+      <div class="instrument-title"><h2>Drain · Keithley 2400</h2><span id="smuStatus">미연결</span></div>
+      <div class="form-grid two-col">
+        <label>RS-232 포트<select id="smuPort"><option value="">포트 선택</option></select></label>
+        <label>Baud<select id="smuBaud"><option>9600</option><option>300</option><option>600</option><option>1200</option><option>2400</option><option>4800</option><option>19200</option><option>38400</option><option>57600</option></select></label>
+        <label>흐름 제어<select id="smuFlow"><option value="none">None</option><option value="xonxoff">XON/XOFF</option></select></label>
+        <label>수신 EOL<select id="smuRxEol"><option value="crlf">CRLF</option><option value="cr">CR</option><option value="lf">LF</option><option value="lfcr">LFCR</option></select></label>
+      </div>
+      <div class="button-row"><button id="connectSmu" type="button">연결</button><button id="disconnectSmu" type="button">해제</button></div>
+    </div>
+    <div class="instrument">
+      <div class="instrument-title"><h2>Light · 6COLOR</h2><span id="ledStatus">선택 사항</span></div>
+      <label>BLE 장치<select id="ledDevice"><option value="">6COLOR 선택</option></select></label>
+      <div class="button-row"><button id="scanLed" type="button">검색</button><button id="connectLed" type="button">연결</button><button id="disconnectLed" type="button">해제</button></div>
+    </div>
+    <datalist id="visaResources"></datalist>
+  </section>
+  <section class="measurement-layout">
+    <form id="sweepForm" class="settings-rail">
+      <fieldset><legend>VGS 스윕</legend>
+        <div class="form-grid two-col">
+          <label>시작 (V)<input id="startV" type="number" min="-50" max="10" step="0.1" value="-50" required /></label>
+          <label>종료 (V)<input id="stopV" type="number" min="-50" max="10" step="0.1" value="0" required /></label>
+          <label>간격 (V)<input id="stepV" type="number" min="0.001" max="60" step="0.1" value="1" required /></label>
+          <label>반복<input id="cycles" type="number" min="1" max="20" value="1" required /></label>
+        </div>
+        <label>방향<select id="direction"><option value="round_trip">왕복</option><option value="forward">시작 → 종료</option><option value="reverse">종료 → 시작</option></select></label>
+        <div class="form-grid two-col">
+          <label>안정화 (ms)<input id="settleMs" type="number" min="0" max="60000" value="300" required /></label>
+          <label>측정 횟수 / 점<input id="readings" type="number" min="1" max="1000" value="4" required /></label>
+        </div>
+        <div class="button-row"><button id="preview" type="button">범위 확인</button><output id="previewInfo">−50~0 V · 102점</output></div>
+      </fieldset>
+      <fieldset><legend>Keithley 측정</legend>
+        <div class="form-grid two-col">
+          <label>VDS (V)<input id="vdsV" type="number" min="-10" max="0" step="0.1" value="-10" required /></label>
+          <label>전류 제한 (µA)<input id="complianceUa" type="number" min="0.001" max="10000" step="1" value="10" required /></label>
+          <label>NPLC<select id="nplc"><option value="0.01">0.01</option><option value="0.1">0.1</option><option value="1" selected>1</option><option value="5">5</option><option value="10">10</option></select></label>
+          <label>전류 범위<select id="currentRange"><option value="0">Auto</option><option value="0.000001">1 µA</option><option value="0.00001">10 µA</option><option value="0.0001">100 µA</option><option value="0.001">1 mA</option><option value="0.01">10 mA</option></select></label>
+          <label>측정 간격 (ms)<input id="readIntervalMs" type="number" min="0" max="60000" value="0" /></label>
+          <label>단자<select id="terminal"><option value="FRON">Front</option><option value="REAR">Rear</option></select></label>
+        </div>
+      </fieldset>
+      <fieldset><legend>광 조건</legend>
+        <label>측정 조건<select id="lightMode"><option value="dark">LED OFF</option><option value="continuous">스윕 중 연속광</option><option value="reset_before_cycle">매 반복 전 광 리셋</option></select></label>
+        <div class="form-grid two-col">
+          <label>채널<select id="ledChannel"><option value="R">Red · R</option><option value="G">Green · G</option><option value="B" selected>Blue · B</option><option value="IR">IR</option><option value="UV">UV</option><option value="DR">Deep Red · DR</option></select></label>
+          <label>광원 구동 코드<input id="ledCode" type="number" min="1" max="1000" value="400" /></label>
+        </div>
+        <div id="resetSettings" class="form-grid two-col" hidden>
+          <label>리셋 시간 (ms)<input id="resetMs" type="number" min="1" max="60000" value="1000" /></label>
+          <label>리셋 VGS (V)<input id="resetVgs" type="number" min="-50" max="10" step="0.1" value="0" /></label>
+          <label>광 OFF 후 대기 (ms)<input id="resetDarkMs" type="number" min="0" max="60000" value="500" /></label>
+        </div>
+      </fieldset>
+      <details><summary>배선·전압 환산</summary>
+        <label>PWR 극성<select id="gatePolarity"><option value="-1">+ → source / − → gate</option><option value="1">+ → gate / − → source</option></select></label>
+        <div class="form-grid two-col">
+          <label>외부 VGS 오프셋 (V)<input id="gateOffset" type="number" step="0.1" value="0" /></label>
+          <label>게이트 전류 제한 (mA)<input id="gateLimitMa" type="number" min="1" max="10" value="1" /></label>
+          <label>게이트 허용 오차 (V)<input id="gateTolerance" type="number" min="0.001" max="2" step="0.01" value="0.2" /></label>
+          <label>VDS 허용 오차 (V)<input id="vdsTolerance" type="number" min="0.001" max="2" step="0.01" value="0.2" /></label>
+        </div>
+      </details>
+      <details><summary>실험 기록</summary>
+        <label>소자 ID<input id="deviceId" maxlength="100" /></label>
+        <label>측정자<input id="operator" maxlength="100" /></label>
+        <label>조건 메모<textarea id="notes" rows="2" maxlength="2000"></textarea></label>
+      </details>
+      <label class="check-label"><input id="wiringConfirmed" type="checkbox" />배선과 극성·오프셋 확인</label>
+      <div class="run-actions"><button id="startRun" type="submit" class="primary">측정 시작</button><button id="stopRun" type="button" class="danger-outline">중지 · 출력 OFF</button></div>
+    </form>
+    <div class="results-area">
+      <div class="run-progress"><strong id="runState">대기</strong><span id="progressText">0 / 0</span><progress id="progress" max="1" value="0"></progress></div>
+      <div class="plot-toolbar">
+        <label>X축<select id="xAxis"><option value="vgs_set_v">VGS 설정 (V)</option><option value="vgs_inferred_v">VGS 환산 readback (V)</option><option value="time_s">시간 (s)</option></select></label>
+        <label>Y축<select id="yAxis"><option value="linear">전류 · Linear</option><option value="log">|전류| · Log</option></select></label>
+        <label>측정점<select id="statistic"><option value="current_mean_a">평균</option><option value="current_median_a">중앙값</option></select></label>
+        <label class="check-label"><input id="errorBars" type="checkbox" checked />표준편차</label>
+      </div>
+      <div class="plot-wrap"><canvas id="curvePlot" aria-label="VGS와 drain 전류의 측정 곡선" role="img"></canvas></div>
+      <output id="cursorInfo" class="cursor-info">측정 데이터 없음</output>
+      <div id="legend" class="curve-legend"></div>
+      <div class="reading-strip"><div><small>VGS 설정</small><strong id="lastVgs">—</strong></div><div><small>Drain 전류</small><strong id="lastCurrent">—</strong></div><div><small>VDS readback</small><strong id="lastVds">—</strong></div><div><small>측정 횟수</small><strong id="lastCount">—</strong></div></div>
+      <div class="export-toolbar">
+        <button id="exportCsv" type="button">측정점 CSV</button><button id="exportRaw" type="button">개별 측정 CSV</button><button id="exportEvents" type="button">원본 통신 기록</button><button id="exportMetadata" type="button">메타데이터</button>
+        <button id="exportJson" type="button">곡선 JSON</button><button id="exportPlot" type="button">Plot PNG</button><button id="importJson" type="button">곡선 열기</button>
+        <button id="liveView" type="button" hidden>실시간 보기</button><input id="jsonFile" type="file" accept=".json" hidden />
+      </div>
+      <div class="points-wrap"><table class="points-table"><thead><tr><th>점</th><th>반복·방향</th><th>VGS (V)</th><th>전류 (A)</th><th>표준편차 (A)</th><th>VDS (V)</th></tr></thead><tbody id="pointsTable"></tbody></table></div>
+      <details class="event-details"><summary>통신 기록</summary><pre id="eventLog"></pre></details>
+    </div>
+  </section>
+  <footer><span id="runId">실험 기록 없음</span><span>smkang-transfer-0.1.2</span></footer>
+</main>
+<script src="transfer.js"></script>
+</body>
+</html>

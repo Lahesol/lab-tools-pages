@@ -1,11 +1,11 @@
-import {REVISION,STATUS,check,integer,decodeAdc,limits,targetMV,sweepRequest,commandFor,SweepDecoder,SweepPreview,ReferenceDecoder,electricalPoints,fitSweep,confirmedDut,safeReadback,b64encode,sweepTimeoutMs} from './protocol.js';
+import {REVISION,STATUS,check,integer,decodeAdc,limits,targetMV,sweepRequest,commandFor,SweepDecoder,SweepPreview,ReferenceDecoder,electricalPoints,derivedPoints,fitSweep,confirmedDut,safeReadback,b64encode,sweepTimeoutMs} from './protocol.js';
 import {BoardTransport} from './transport.js';
 export const newId=label=>new Date().toISOString().replace(/[:.]/g,'-')+'_'+label+'_'+crypto.randomUUID().slice(0,8);
 export class Controller {
   constructor(journal,changed,log){Object.assign(this,{journal,changed,log,firmware:null,adcInfo:null,profile:null,state:null,mux:null,gpio:null,raw:null,readback:false,busy:false,loggingFailed:false,epoch:0,waiter:null,capture:null,session:null});this.seq=0;this.monitorUs=250000;
     this.transport=new BoardTransport((source,bytes)=>this.record({kind:'bytes',direction:'rx',source,base64:b64encode(bytes)}),line=>this.line(line),e=>this.fault(e));}
   async initSession(kind){this.session=newId(kind);this.seq=0;this.readback=false;this.firmware=null;this.adcInfo=null;this.profile=null;this.state=null;this.mux=null;this.gpio=null;this.raw=null;this.pendingAdc=null;this.limitReadback=null;this.driveReadback=null;this.initStatus=null;this.referenceReport=null;this.refCapture=null;this.lastReference=null;this.loggingFailed=false;this.expectedDisconnect=false;await this.journal.run({id:this.session,kind:'session',gui_revision:REVISION,started_at_utc:new Date().toISOString(),transport:kind});}
-  async record(data){try{const at_utc=new Date().toISOString(),record={run_id:this.session,seq:this.seq++,at_utc,...data};await this.journal.append(record);for(const c of [this.capture,this.refCapture])if(c)await this.journal.append({...record,run_id:c.id,seq:c.seq++});return record;}catch(e){this.loggingFailed=true;throw new Error('raw 자동 저장 실패: '+e.message);}}
+  async record(data){try{const at_utc=new Date().toISOString(),record={run_id:this.session,seq:this.seq++,at_utc,...data};await this.journal.append(record);for(const c of [this.capture,this.refCapture,this.diagnosticCapture])if(c)await this.journal.append({...record,run_id:c.id,seq:c.seq++});return record;}catch(e){this.loggingFailed=true;throw new Error('raw 자동 저장 실패: '+e.message);}}
   async connectUsb(port){await this.initSession('usb');await this.transport.connectUsb(port);await this.handshake();}
   async connectBle(device){await this.initSession('ble');await this.transport.connectBle(device);await this.handshake();}
   referenceMatches(){const r=this.referenceReport,i=this.initStatus,p=this.profile;return Boolean(r?.ready&&i?.length===5&&i[0]===1&&p&&r.safe_code===p.safe_code&&r.vref_b_mV===p.vref_b_mV&&i[1]===r.vref_b_mV&&i[2]===r.safe_code&&i[3]===r.frame_count&&i[4]===r.epoch);}
@@ -40,11 +40,25 @@ export class Controller {
     else if(p[0]==='I'){check(p.length===7&&integer(p[1])===85,'INITSTAT 형식');this.initStatus=p.slice(2).map(integer);}
     else if(p[0]==='RI'&&this.refCapture){this.refCapture.decoder.feed(line);}
     else if(p[0]==='SP'&&this.capture){this.capture.preview.feed(line);this.capture.points=this.capture.preview.points;this.changed('진행 중 · CRC 검증 전');}
-    else if(p[0]==='SC'&&this.capture){const c=this.capture;c.decoder.feed(line);if(c.decoder.complete){c.verification=c.preview.verify(c.decoder);c.points=electricalPoints(c.decoder);c.fit=fitSweep(c.points,c.request,c.fitLimit);c.crc_verified=true;this.changed('raw CRC / preview 합계 확인 · SAFE readback 대기');}}
+    else if(p[0]==='SC'&&this.capture){const c=this.capture;c.decoder.feed(line);if(c.decoder.complete){c.verification=c.preview.verify(c.decoder);c.points=electricalPoints(c.decoder);c.point_rows=derivedPoints(c.decoder);c.fit=fitSweep(c.points,c.request,c.fitLimit);c.crc_verified=true;this.changed('raw CRC / preview 합계 확인 · SAFE readback 대기');}}
+    else if(['DR','DX'].includes(p[0])&&this.diagnosticCapture)this.diagnosticCapture.lines.push(line);
     if(/^ERR(?:,|$)/.test(line))throw new Error(line+(/^\d+$/.test(p.at(-1))&&STATUS[Number(p.at(-1))]!==undefined?' · '+STATUS[Number(p.at(-1))]:''));
     this.changed();if(this.waiter&&line.startsWith(this.waiter.prefix)){const w=this.waiter;this.waiter=null;clearTimeout(w.timer);w.resolve(line);}
   }
   async refresh(){await this.operation('GPIO / route 조회',token=>this.sequence([['STAT','S,'],['MUXSTAT','M,'],['GPIO','G,']],token));}
+  async readDirection(){
+    check(!this.busy&&this.transport.kind&&!this.loggingFailed&&[83,84,85].includes(this.firmware),'보드 연결·VER 확인 및 현재 작업 종료가 필요합니다.');
+    const c={id:newId('direction_readonly'),kind:'diagnostic',seq:0,gui_revision:REVISION,started_at_utc:new Date().toISOString(),transport:this.transport.kind,lines:[],outcome:'running',read_only:true};
+    this.diagnosticCapture=c;
+    const snapshot=()=>{const {seq,...data}=c;return structuredClone(data);};
+    try{await this.journal.run(snapshot());await this.operation('PU/PD 방향 읽기 전용 진단',async token=>{
+      for(let page=0;page<4;page++)await this.request(`DIR,${page}`,`DR,${page},`,15000,token);
+      for(let bank=0;bank<2;bank++)for(let page=0;page<10;page++)await this.request(`DIRRAW,${bank},${page}`,page===0?`DX,H,${bank},`:page===9?`DX,M,${bank},`:`DX,D,${bank},${page},`,15000,token);
+      check(c.lines.length===24,'방향 진단 레코드 누락');c.outcome='complete';this.changed('방향 진단 24개 응답 저장 · 새 전환/ADC 측정 아님');
+    });}catch(e){c.outcome='error';c.error=e.message;throw e;}
+    finally{c.finished_at_utc=new Date().toISOString();this.lastDiagnostic=snapshot();this.diagnosticCapture=null;await this.journal.run(this.lastDiagnostic);this.changed();}
+    return this.lastDiagnostic;
+  }
   async adc(){await this.operation('ADC 1회',token=>this.request('ADC','A14,',8000,token));}
   async monitor(us){check(us===0||(us>=50000&&us<=5000000),'ADC 갱신 50–5000 ms');await this.operation('ADC 갱신 설정',token=>this.request(`ADC_RATE,${us}`,'OK,ADC_RATE,',8000,token));this.monitorUs=us;}
   async applyLimits(plus,minus){this.guard();const [a,b]=limits(plus,minus);await this.operation('CC 설정 저장',token=>this.request(`LIMITS,${a},${b}`,'L,',8000,token));this.changed('CC 저장 · 다음 DUT 연결 / VCMD / sweep부터 적용');}
@@ -59,7 +73,7 @@ export class Controller {
     finally{c.finished_at_utc=new Date().toISOString();this.lastCapture=this.snapshot(c);this.capture=null;await this.journal.run(this.lastCapture);this.changed();}
     return this.lastCapture;
   }
-  snapshot(c){return {id:c.id,kind:c.kind,request:c.request,started_at_utc:c.started_at_utc,finished_at_utc:c.finished_at_utc,gui_revision:c.gui_revision,firmware:c.firmware,hardware_profile:c.hardware_profile,transport:c.transport,fit_limit_V:c.fitLimit,raw_capture:c.decoder.payload.slice(),metadata:{...c.decoder.meta},points:structuredClone(c.points),linear_fit:c.fit,preview_verification:c.verification,crc_verified:c.crc_verified,safe_readback_confirmed:c.safe_readback_confirmed,outcome:c.outcome||'running',error:c.error};}
+  snapshot(c){return {id:c.id,kind:c.kind,request:c.request,started_at_utc:c.started_at_utc,finished_at_utc:c.finished_at_utc,gui_revision:c.gui_revision,firmware:c.firmware,hardware_profile:c.hardware_profile,transport:c.transport,fit_limit_V:c.fitLimit,raw_capture:c.decoder.payload.slice(),metadata:{...c.decoder.meta},points:structuredClone(c.points),point_rows:c.point_rows?structuredClone(c.point_rows):undefined,linear_fit:c.fit,preview_verification:c.verification,crc_verified:c.crc_verified,safe_readback_confirmed:c.safe_readback_confirmed,outcome:c.outcome||'running',error:c.error};}
   async safe(){check(this.transport.kind,'보드 연결 필요');this.epoch++;this.rejectWaiter(new Error('사용자 SAFE'));if(this.capture){this.capture.error='사용자 SAFE';this.capture.outcome='error';}this.busy=true;const token=this.epoch;
     try{await this.request('SAFE','OK,SAFE',15000,token);this.log('SAFE 완료 응답 확인');await this.sequence([['STAT','S,'],['MUXSTAT','M,'],['GPIO','G,']],token);check(safeReadback(this.state,this.mux,this.profile),'SAFE readback 미확인');if(!this.loggingFailed)await this.request(`ADC_RATE,${this.monitorUs}`,'OK,ADC_RATE,',8000,token);this.changed('SAFE / S16 parking 확인');}finally{if(token===this.epoch){this.busy=false;this.changed();}}}
   async fault(e){if(this.expectedDisconnect){this.readback=false;this.rejectWaiter(e);this.changed('DFU 진입 후 애플리케이션 연결 종료 · bootloader 별도 선택');return;}this.log('중단: '+e.message);this.epoch++;this.rejectWaiter(e);this.readback=false;this.busy=false;if(this.capture){this.capture.error=e.message;this.capture.outcome='error';}if(this.transport.kind){try{await this.transport.send('SAFE');this.log('SAFE 요청 전송 · readback 미확인');}catch{this.log('연결 오류: SAFE 전달 여부 미확인');}}this.changed('중단: '+e.message);}

@@ -1,5 +1,22 @@
 # SMKang Light Web GUI
 
+## PWR401ML / Keithley 2400 Transfer Curves
+
+The new `transfer.html` entry controls PWR401ML gate voltage via USB/VISA and
+Keithley 2400 drain voltage/current via RS-232. The default experiment is
+VDS = -10 V and VGS = -50..0 V with PWR positive -> source, negative -> gate.
+Six-color LED control uses the existing NUS protocol from `nRF52_AD5940`.
+Version 0.1.2 uses CR-terminated 2400 commands, panel-matched RX terminators,
+supported baud/flow choices, synchronized OFF recovery and status-bit rejection.
+It avoids the separate voltage-sense range write that raises +823 with source readback enabled.
+
+See `../docs/TRANSFER_CURVE_SETUP_KO.md` for wiring, initialization, timing,
+data fields, shutdown, and launch instructions. Live instrument control needs
+the explicitly launched local Python bridge `transfer_curve_server.py`.
+On GitHub Pages, this entry is a saved-curve JSON viewer; it does not attempt
+direct browser access to USB/VISA or Keithley RS-232. The original DAC/ADC
+Web Serial entry remains `index.html`.
+
 This web GUI controls the `Neuro -KHKim_multipurpose` firmware through UART.
 It supports two transports: browser Web Serial for GitHub Pages/static hosting,
 and the local Python backend for localhost experiments.

@@ -1,5 +1,5 @@
 // v83 wire contract. Raw codes remain unchanged; conversions are derived only.
-export const REVISION = 'v85-web1';
+export const REVISION = 'v85-web2';
 export const SCALE = 3.6 / 16384;
 export const DIVIDERS = [2,1,1,1,2,1,2,1];
 export const NAMES = ['TE_I','BE_I','V_CC+','V_CC−','V_FB','V_IS','V_CMD','V_MID'];
@@ -20,10 +20,13 @@ export function adcValues(raw, bits=14) {
   return {volts,current_mA:(volts[5]-volts[7])/.08,feedback_V:volts[4]-volts[7],force_V:volts[0]-volts[1],cc_plus_mA:(volts[2]-volts[7])/.08,cc_minus_mA:(volts[7]-volts[3])/.08,near_rail:raw.some(x=>x<0||x>=4091*(2**(bits-12)))};
 }
 export function decodeAdc(line) { const [prefix,s]=line.split(',');check(['A12','A14'].includes(prefix),'ADC header');const b=b64decode(s);check(b.length===16,'ADC 길이');const d=new DataView(b.buffer);return {bits:Number(prefix.slice(1)),raw:Array.from({length:8},(_,i)=>d.getInt16(i*2,true))}; }
-export function limits(plus,minus) { const a=[Number(plus),Number(minus)];check(a.every(Number.isFinite)&&a[0]>=.2&&a[0]<=3&&a[1]>=.2&&a[1]<=12,'CC+ 0.2–3 mA / CC− 0.2–12 mA');return a.map(x=>Math.round(x*1000)); }
-export function targetMV(value,absolute,profile) { let n=Number(value);check(Number.isFinite(n),'VCMD 숫자 확인');if(absolute)n-=profile.safe_code*profile.vref_b_mV/4096;n=Math.round(n);check(n>=-1000&&n<=3000,'VCMD SAFE 기준 −1000..+3000 mV');return n; }
+// Python round(): nearest integer, exact ties to even (also for negative mV).
+// MCU DAC-code half-up rounding is a different rule and is NOT changed here.
+export function roundEven(x){const lo=Math.floor(x),fraction=x-lo;return fraction===.5?(lo%2===0?lo:lo+1):Math.round(x);}
+export function limits(plus,minus) { const a=[Number(plus),Number(minus)];check(a.every(Number.isFinite)&&a[0]>=.2&&a[0]<=3&&a[1]>=.2&&a[1]<=12,'CC+ 0.2–3 mA / CC− 0.2–12 mA');return a.map(x=>roundEven(x*1000)); }
+export function targetMV(value,absolute,profile) { let n=Number(value);check(Number.isFinite(n)&&String(value).trim()!=='','VCMD 숫자 확인');if(absolute)n-=profile.safe_code*profile.vref_b_mV/4096;n=roundEven(n);check(n>=-1000&&n<=3000,'VCMD SAFE 기준 −1000..+3000 mV');return n; }
 export function sweepRequest(dut,endpoint,step,dwell,plus,minus) {
-  dut=integer(dut);endpoint=integer(endpoint);step=integer(step);const us=Math.round(Number(dwell)*1000);
+  dut=integer(dut);endpoint=integer(endpoint);step=integer(step);const us=roundEven(Number(dwell)*1000);
   check(dut>=1&&dut<=30&&[1000,3000,-1000].includes(endpoint),'DUT / sweep 범위');
   check(step>=1&&step<=500&&Number.isFinite(us)&&us>=1000&&us<=1000000,'step 1–500 mV, 대기 1–1000 ms');
   const n=Math.ceil((Math.abs(endpoint)-20)/step);check(n<=200,'401점 제한: step을 늘리세요.');check((2*n+1)*(us+40000)<=180000000,'MCU 실행시간 180초 제한');
@@ -133,6 +136,17 @@ export class ReferenceDecoder {
   }
 }
 export function electricalPoints(d){check(d.complete,'CRC-verified raw required');return d.points.flatMap(p=>{const v=p.frames.filter(f=>f.phase==='settled').map(f=>adcValues(f.raw_codes));if(!v.length)return [];const current=mean(v.map(x=>x.current_mA));return [{index:p.index,target_mV:p.target_mV,vcmd_minus_vmid_V:mean(v.map(x=>x.volts[6]-x.volts[7])),te_be_sense_V:mean(v.map(x=>x.feedback_V)),force_V:mean(v.map(x=>x.force_V)),current_mA:current,settled_frames:v.length,compliance:Math.abs(current)>=.9*d.meta.cc_uA/1000,fit_eligible:v.length===3&&!v.some(x=>x.near_rail)}];});}
+// Exact native v83 derived_points policy. Raw frames are never changed; guard
+// frames are preserved in raw export and excluded only from settled summaries.
+export function derivedPoints(d){check(d.complete,'CRC-verified raw required');return d.points.flatMap(p=>{
+  const values=p.frames.filter(f=>f.phase==='settled').map(f=>adcValues(f.raw_codes,d.meta.adc_bits));if(!values.length)return [];
+  const currents=values.map(v=>v.current_mA),current=mean(currents),voltage=mean(values.map(v=>v.feedback_V));
+  const sd=Math.sqrt(mean(currents.map(i=>(i-current)**2))),floor=Math.max(.02197265625,3*sd);
+  return [{index:p.index,target_mV:p.target_mV,dac_code:p.code,pupd:p.pupd,applied_us:p.applied_us,voltage_V:voltage,
+    force_V:mean(values.map(v=>v.force_V)),current_mA:current,current_sd_mA:sd,settled_frames:values.length,
+    resistance_ohms:Math.abs(current)>floor?Math.abs(voltage/current*1000):null,
+    compliance:Math.abs(current)>=.9*d.meta.cc_uA/1000,below_current_floor:Math.abs(current)<=floor}];
+});}
 export function branchFit(points,n,branch,maxAbs=.3){
   const limit=Number(maxAbs);check(Number.isFinite(limit)&&limit>=.02&&limit<=3.5,'선형 근사 범위 |TE–BE| 0.02–3.5 V');
   const candidates=points.filter(p=>branch==='outward'?p.index<=n:p.index>=n),selected=candidates.filter(p=>p.fit_eligible!==false&&!p.compliance&&Number.isFinite(p.te_be_sense_V)&&Number.isFinite(p.current_mA)&&Math.abs(p.te_be_sense_V)<=limit);
