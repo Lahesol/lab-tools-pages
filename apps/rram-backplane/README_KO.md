@@ -1,4 +1,14 @@
-# RRAM Backplane Web GUI · v87-web1
+# RRAM Backplane Web GUI · v88-web1
+
+## v88 · 50 µs DAC pulse / MUX 유지 · 2026-10-29
+
+- SAFE→목표 전압→정확한 SAFE 복귀, 100 ms+ADC8회 확인까지 DUT 연결을 유지합니다.
+- 정상 pulse edge에서 주소/WR/EN/CC/ADG884를 바꾸지 않고 이후 S16으로 복귀합니다.
+- 최소예약폭50 µs. SPI1 MHz neutral preload 유지, 독립 late250 ms all-OFF watchdog 추가.
+- v88에서만 새 pulse를 전송하며 v86/87 archive 읽기는 보존합니다.
+- **현재 보드는 v87이며 이번 v88 후보는 업로드/실물 파형 검증 전입니다.**
+- 전체 흐름과 raw schema는 [PULSE88_KO.md](PULSE88_KO.md).
+- 아래 v87/v86 항목은 해당 버전의 과거 기록입니다.
 
 ## v87 수정 · DAC-output pulse · 2026-10-29
 
@@ -96,7 +106,7 @@ v85-web1 당시 펌웨어는 `calibration/v85`에 별도 빌드·서명했습니
 - GPIO 별도 탭: 현재 IN과 CPU OUT 래치, ADG884 PU/PD 표시. 임의 GPIO 쓰기는 없음.
 - GPIO 탭의 방향 진단: DIR 4페이지 + DIRRAW 20페이지 조회, 원시 응답/ZIP 보관.
 - Sweep 측정점 표와 파생 CSV, 세션 수신 ADC 원시코드·환산값 CSV.
-- Firmware: application-only signed ZIP 선택/기본 v87 DAC Pulse 후보 ZIP, USB/BLE bootloader 선택, object별 CRC·EXECUTE 확인 진행률.
+- Firmware: application-only signed ZIP 선택/기본 v88 DAC Hold 50 µs 후보 ZIP, USB/BLE bootloader 선택, object별 CRC·EXECUTE 확인 진행률.
 - 기록: sweep 및 초기화 원본 자동 raw 저장, ZIP export, SC81–85 sweep 기록 가져오기, 근사 재분석 별도 저장. 초기화 ZIP은 별도 보관용이며 sweep 가져오기에 사용하지 않습니다.
 
 이 앱은 **최종 v83 간소화 GUI**를 기반으로 합니다. v86에는 단일 Pulse를 추가했으나 과거 testing GUI의 모든 burst/자동 SET–READ 시퀀스를 이식한 것은 아닙니다. 최종 간소화 Python GUI는 그대로이며 단일 Pulse를 이식하지 않았습니다.
@@ -163,8 +173,8 @@ Browser 데이터 삭제, disk full, 전원 차단 등은 저장 기록 손실�
 
 ## DFU
 
-기본 패키지는 signed v87 DAC Pulse application-only **후보** ZIP입니다.
-SHA256 `fbe90d1f4fd96473866733bbe2f62c78246232ef5de8a1cc6444d6092e6a037a`.
+기본 패키지는 signed v88 DAC Hold 50 µs application-only **후보** ZIP입니다.
+SHA256 `deb110881f391122820a91b92089403d918f473d9a02f5b5af547e74f9d4c5e5`.
 private key, nrfutil.exe, bootloader/SoftDevice를 포함하지 않습니다. v83 보드에 이미 설치된 RRAM-key bootloader를 사용합니다.
 DFU 진입은 SAFE readback 후 앱 transport에서 `DFU`를 요청합니다. 이어 사용자가 **USB bootloader 1915:521f** 또는 **BLE DfuTarg/FE59**를 따로 선택합니다.
 브라우저에서 nrfutil을 실행하는 것이 아니라 Nordic Secure DFU object protocol을 JS로 전송합니다.
@@ -217,7 +227,7 @@ Nordic protocol 참고: [공식 pc-nrfutil source](https://github.com/NordicSemi
 ## 배포 / 백업 준비
 
 원본: 이 `rram_web_gui` 폴더. 진입점 `index.html`.
-배포 대상: index.html, styles.css, 루트 JS modules(records.js 포함), v87 firmware signed ZIP, README_KO.md, PULSE87_KO.md, PYTHON_PARITY_KO.md, REFERENCE_v85_KO.md, BLE_v84_KO.md.
+배포 대상: index.html, styles.css, 루트 JS modules(records.js 포함), v88 firmware signed ZIP, README_KO.md, PULSE88_KO.md, PYTHON_PARITY_KO.md, REFERENCE_v85_KO.md, BLE_v84_KO.md.
 배포 제외: design/, tests/, scripts/, package.json, source_manifest.json, CHANGELOG.md, 이전 v83/v84 firmware ZIP, 로컬 raw/logs/cache/node_modules/certs.
 server-ops 채팅에서 원본 경로를 등록한 뒤 해당 프로젝트의 `./scripts/publish-github-pages.ps1`을 수행할 수 있습니다. 이 프로젝트는 배포 스크립트나 포털을 수정하지 않습니다.
 Git 백업 후보: source, tests/check scripts, README/CHANGELOG/design notes, signed firmware + source manifest. 실측 raw/IndexedDB export/개인키/연결 metadata는 제외.
