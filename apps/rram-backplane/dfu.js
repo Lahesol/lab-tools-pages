@@ -4,7 +4,7 @@ import {SerialChannel} from './transport.js';
 import {readZip,sha256} from './archive.js';
 export const DFU_SERVICE='0000fe59-0000-1000-8000-00805f9b34fb';
 const CP='8ec90001-f315-4f60-9fb8-838830daea50',PKT='8ec90002-f315-4f60-9fb8-838830daea50';
-export const DEFAULT_HASH='deb110881f391122820a91b92089403d918f473d9a02f5b5af547e74f9d4c5e5';
+export const DEFAULT_HASH='547948625c79011008b240d8ad43ddca4e02bc97616ca02269e436395e2bd538';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 export const u32=n=>Uint8Array.of(n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255);
 const values=(b,count)=>{check(b.length===4*count,'DFU response 길이');const d=new DataView(b.buffer,b.byteOffset,b.byteLength);return Array.from({length:count},(_,i)=>d.getUint32(i*4,true));};

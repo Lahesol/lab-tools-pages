@@ -1,5 +1,5 @@
 // v83 wire contract. Raw codes remain unchanged; conversions are derived only.
-export const REVISION = 'v88-web1';
+export const REVISION = 'v89-web2';
 export const SCALE = 3.6 / 16384;
 export const DIVIDERS = [2,1,1,1,2,1,2,1];
 export const NAMES = ['TE_I','BE_I','V_CC+','V_CC−','V_FB','V_IS','V_CMD','V_MID'];
@@ -160,4 +160,4 @@ export function branchFit(points,n,branch,maxAbs=.3){
 }
 export function fitSweep(points,r,limit=.3){return {schema:'rram-linear-resistance-v1',max_abs_V:Number(limit),origin_forced:false,raw_unchanged:true,CC_points_excluded:true,outward:branchFit(points,r.n,'outward',limit),return_path:branchFit(points,r.n,'return',limit)};}
 export function confirmedDut(state,mux){if(!state||!mux||mux.length!==6||mux[5]!==1)return null;const dut=mux[4],en=dut<=15?[0,1]:[1,0];return dut>=1&&dut<=30&&state[0]===dut&&mux[0]===en[0]&&mux[1]===en[1]&&mux[2]===en[0]&&mux[3]===en[1]?dut:null;}
-export function safeReadback(state,mux,profile){return Boolean(profile&&state&&mux&&state[0]===0&&state[1]===0&&state[2]===profile.safe_code&&mux[2]===0&&mux[3]===1&&mux[5]===0);}
+export function safeReadback(state,mux,profile){return Boolean(profile&&state&&mux&&state[0]===0&&state[1]===0&&state[3]===0&&state[2]===profile.safe_code&&mux[2]===0&&mux[3]===1&&mux[5]===0);}
